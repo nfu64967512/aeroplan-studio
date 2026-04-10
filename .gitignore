@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Backup files
+*.bak
+
+# Logs
+data/logs/*.log
+
+# Environment
+.env
+venv/
+.venv/
+
+# Claude
+.claude/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Data files
+polygon_corners.json
+
+# Legacy duplicate folder
+uav_path_planner/
+
+# SITL runtime files (logs, binaries, executables)
+sitl/plane/logs/
+sitl/plane/eeprom.bin
+sitl/plane/i*/logs/
+sitl/plane/i*/eeprom.bin
+sitl/+/
+sitl/*.exe
+sitl/*.dll
+sitl/plane/terrain/
+
+# Local web assets (downloaded by setup)
+assets/cesium/
+assets/leaflet/

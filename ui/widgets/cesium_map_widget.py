@@ -38,7 +38,7 @@ _CESIUM_HTML = r"""<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
 <meta charset="utf-8">
-<title>3D UAV Path Planner</title>
+<title>AeroPlan Studio — 3D View</title>
 <script src="__CESIUM_JS__"></script>
 <link href="__CESIUM_CSS__" rel="stylesheet">
 <style>

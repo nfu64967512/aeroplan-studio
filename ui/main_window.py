@@ -2833,42 +2833,85 @@ class MainWindow(QMainWindow):
     def on_show_help(self):
         """顯示說明"""
         help_text = """
-        <h2>無人機路徑規劃工具</h2>
-        <h3>基本操作：</h3>
+        <h2>AeroPlan Studio — 使用說明</h2>
+        <p><i>Collaborative UAV Mission Planning Suite</i></p>
+
+        <h3>① 定義作業區域</h3>
         <ul>
-            <li><b>新增邊界點：</b> 在地圖上點擊</li>
-            <li><b>移動邊界點：</b> 拖動地圖上的標記</li>
-            <li><b>預覽路徑：</b> 點擊"預覽"按鈕</li>
-            <li><b>匯出航點：</b> 點擊"匯出"按鈕</li>
+            <li><b>新增邊界點：</b>在 2D 地圖上左鍵點擊（至少 3 點）</li>
+            <li><b>移動邊界點：</b>直接拖曳地圖標記</li>
+            <li><b>多邊形編輯器：</b>Ctrl+M 開啟，可精確輸入經緯度</li>
+            <li><b>螺旋/同心圓中心：</b>右側面板「地圖拖曳定義圓形」於地圖上拖曳</li>
         </ul>
-        <h3>快捷鍵：</h3>
+
+        <h3>② 規劃路徑</h3>
         <ul>
-            <li>Ctrl+N: 新建任務</li>
-            <li>Ctrl+O: 開啟任務</li>
-            <li>Ctrl+S: 儲存任務</li>
-            <li>Ctrl+E: 匯出航點</li>
-            <li>Ctrl+R: 清除全部</li>
+            <li><b>選擇載具：</b>右側面板選 多旋翼 / 固定翼 / VTOL 與型號</li>
+            <li><b>選擇演算法：</b>Grid / Spiral / Circular / A* / RRT / RRT* / Dijkstra / DWA</li>
+            <li><b>調整參數：</b>高度、速度、間距、重疊率、掃描角度…</li>
+            <li><b>預覽：</b>按 Enter 或「預覽」按鈕</li>
+            <li><b>2D ↔ 3D：</b>地圖頂端 🗺 2D 衛星 / 🌐 3D Cesium 切換</li>
+        </ul>
+
+        <h3>③ DCCPP 多機協同（固定翼/多旋翼）</h3>
+        <ul>
+            <li>切到 <b>DCCPP</b> 分頁，設定 UAV 數量、FOV、重疊率、轉彎半徑</li>
+            <li>可載入 DEM 地形（GeoTIFF / .npy）→ 啟用 GDA 高度平滑</li>
+            <li>按「DCCPP 最佳化」執行 GreedyAllocator → IDP → Dubins → AltitudePlanner</li>
+            <li>3D 地圖會以分色顯示每架 UAV 的完整三維航線</li>
+        </ul>
+
+        <h3>④ SITL 模擬（單機 / 多機）</h3>
+        <ul>
+            <li>切到 <b>🛰 SITL</b> 分頁</li>
+            <li><b>單機：</b>選 PLANE / COPTER → 🚀 啟動 → 自動 tcp:5760 連線</li>
+            <li><b>多機：</b>先做完 DCCPP，再按 🚀 啟動，會依每台 UAV 起飛點生成 N 個獨立 SITL（各自 console、SYSID、無漂移）</li>
+            <li><b>上傳任務：</b>按 uav_id 將每台對應路徑分發到對應 SITL</li>
+            <li><b>📂 參數檔：</b>批次匯入外部 .param 設定</li>
+            <li>HUD 即時顯示 模式 / ARMED / 姿態 / 速度 / 電量 / GPS / FC log</li>
+        </ul>
+
+        <h3>⑤ 匯出</h3>
+        <ul>
+            <li>Ctrl+E 匯出 QGC WPL 110 (.waypoints)，可直接給 Mission Planner / QGC</li>
+            <li>群飛模式可逐機匯出獨立任務檔</li>
+        </ul>
+
+        <h3>快捷鍵</h3>
+        <ul>
+            <li><b>Enter / Space</b>：生成路徑</li>
+            <li><b>Esc</b>：清除路徑</li>
+            <li><b>Delete / Backspace</b>：刪除最後一個角點</li>
+            <li><b>Ctrl+N / O / S</b>：新建 / 開啟 / 儲存任務</li>
+            <li><b>Ctrl+E</b>：匯出航點</li>
+            <li><b>Ctrl+R</b>：清除全部</li>
+            <li><b>Ctrl+M</b>：多邊形編輯器</li>
         </ul>
         """
-        
-        QMessageBox.information(self, "使用說明", help_text)
-    
+
+        QMessageBox.information(self, "AeroPlan Studio 使用說明", help_text)
+
     def on_about(self):
         """關於"""
         about_text = """
-        <h2>無人機網格航線規劃工具 V2.0</h2>
-        <p><b>基於 PyQt6 的專業級路徑規劃系統</b></p>
-        <p>支援功能：</p>
+        <h2>AeroPlan Studio</h2>
+        <p><b>Collaborative UAV Mission Planning Suite</b></p>
+        <p>版本 2.5.0 · PyQt6 · MIT License</p>
+        <p>面向多機協同作業的專業級無人機任務規劃平台，整合：</p>
         <ul>
-            <li>Survey Grid 測繪任務</li>
-            <li>多機群飛協調</li>
-            <li>智能避撞系統</li>
-            <li>MAVLink 航點匯出</li>
+            <li>2D Folium / 3D Cesium 雙模式地圖（離線可用）</li>
+            <li>Grid / Spiral / Circular 覆蓋路徑與 A* / RRT / DWA 規劃</li>
+            <li>DCCPP 多機協同最佳化（GreedyAllocator + IDP + Dubins + GDA）</li>
+            <li>固定翼三階段任務（起飛 → 螺旋/同心圓 → 五邊進場降落）</li>
+            <li>ArduPilot SITL 多機模擬整合 + Mission Planner 風格 HUD</li>
+            <li>QGC WPL 110 / MAVLink 任務匯出</li>
+            <li>DEM 真實 3D 地形顯示（CustomHeightmapTerrainProvider）</li>
         </ul>
-        <p>© 2026 UAV Path Planner Team</p>
+        <p>舊名：UAV Path Planner / DWA_path_planner</p>
+        <p>© 2026 AeroPlan Studio</p>
         """
-        
-        QMessageBox.about(self, "關於", about_text)
+
+        QMessageBox.about(self, "關於 AeroPlan Studio", about_text)
     
     # ==========================================
     # 輔助函數

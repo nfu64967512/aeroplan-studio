@@ -139,7 +139,6 @@ class MainWindow(QMainWindow):
         self.home_point: Optional[Tuple[float, float]] = None  # (lat, lon)
         self.picking_home_point: bool = False
 
-        self._swarm_mission: Optional['SwarmMission'] = None  # 當前群飛任務
         self._dccpp_result = None  # 當前 DCCPP 最佳化結果
 
         # 即時路徑生成設定
@@ -321,11 +320,10 @@ class MainWindow(QMainWindow):
         self.parameter_panel.nfz_poly_finish_requested.connect(self.on_nfz_poly_finish)
         self.map_widget.nfz_polygon_drawn.connect(self.on_nfz_polygon_drawn)
         self.map_widget.nfz_circle_drawn.connect(self.on_nfz_circle_drawn)
-        self.parameter_panel.swarm_coverage_requested.connect(self._on_swarm_coverage_requested)
-        self.parameter_panel.comparison_requested.connect(self._on_comparison_requested)
-        self.parameter_panel.swarm_export_requested.connect(self._on_swarm_export_requested)
         self.parameter_panel.dccpp_coverage_requested.connect(self._on_dccpp_coverage_requested)
         self.parameter_panel.dccpp_export_requested.connect(self._on_dccpp_export_requested)
+        self.parameter_panel.vtol_export_requested.connect(self._on_vtol_export_requested)
+        self.parameter_panel.delete_last_corner_requested.connect(self.on_delete_last_corner)
         self.parameter_panel.dem_loaded.connect(self._on_dem_loaded)
 
         # 將參數面板包進 QScrollArea，解決高解析度以外螢幕時內容被截斷的問題
@@ -367,6 +365,9 @@ class MainWindow(QMainWindow):
         self.sitl_hud.cmd_params_batch.connect(
             lambda items: self._sitl_broadcast('set_params', items)
         )
+        self.sitl_hud.cmd_vtol_transition.connect(
+            lambda state: self._sitl_broadcast('vtol_transition', state)
+        )
 
         # 加到參數面板的 QTabWidget 作為第 4 個分頁
         sitl_scroll = QScrollArea()
@@ -388,7 +389,31 @@ class MainWindow(QMainWindow):
         self.mission_panel.preview_requested.connect(self.on_preview_paths)
         self.mission_panel.export_requested.connect(self.on_export_waypoints)
         self.mission_panel.clear_requested.connect(self.on_clear_all)
-        
+
+        # ── 戰術模組信號連接 ──────────────────────────────────────────
+        self.parameter_panel.elevation_slicer_changed.connect(self._on_elev_slicer_changed)
+        self.parameter_panel.elevation_slicer_cleared.connect(self._on_elev_slicer_cleared)
+        self.parameter_panel.sar_heatmap_init_requested.connect(self._on_sar_heatmap_init)
+        self.parameter_panel.sar_heatmap_reset_requested.connect(self._on_sar_heatmap_reset)
+        self.parameter_panel.sar_heatmap_clear_requested.connect(self._on_sar_heatmap_clear)
+        self.parameter_panel.fov_cone_toggle_requested.connect(self._on_fov_cone_toggle)
+        self.parameter_panel.radar_sim_requested.connect(self._on_radar_sim)
+        self.parameter_panel.radar_clear_requested.connect(self._on_radar_clear)
+        self.parameter_panel.rcs_toggle_requested.connect(self._on_rcs_toggle)
+
+        # 戰術模組內部狀態
+        self._fov_cone_enabled = False   # FOV 光錐是否啟用
+        self._rcs_enabled = False        # RCS 渲染是否啟用
+
+        # ── 蜂群打擊模組信號連接 ──────────────────────────────────────
+        self.parameter_panel.strike_mark_targets_requested.connect(self._on_strike_mark_targets)
+        self.parameter_panel.strike_execute_requested.connect(self._on_strike_execute)
+        self.parameter_panel.strike_clear_requested.connect(self._on_strike_clear)
+
+        # 蜂群打擊內部狀態
+        self._strike_marking_mode = False
+        self._strike_targets: list = []  # [(lat, lon), ...]
+
         return panel_widget
     
     def create_toolbar(self):
@@ -537,15 +562,28 @@ class MainWindow(QMainWindow):
         action = help_menu.addAction("關於")
         action.triggered.connect(self.on_about)
     
+    def _on_enter_key(self):
+        """Enter 鍵依當前分頁決定行為：
+        - 基本演算法 (tab 0)：生成路徑
+        - DCCPP (tab 2)：觸發 DCCPP 最佳化
+        - 其他分頁（SITL 等）：不做任何動作（僅用於數字輸入）
+        """
+        tab_index = self.parameter_panel._tabs.currentIndex()
+        if tab_index == 0:
+            self.on_preview_paths()
+        elif tab_index == 2:
+            self.parameter_panel._on_dccpp_btn_clicked()
+        # 其他分頁不執行任何動作
+
     def setup_shortcuts(self):
         """設置快捷鍵"""
-        # Enter 鍵 - 生成路徑
+        # Enter 鍵 - 依當前分頁決定行為
         enter_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Return), self)
-        enter_shortcut.activated.connect(self.on_preview_paths)
+        enter_shortcut.activated.connect(self._on_enter_key)
 
         # 也支援小鍵盤的 Enter
         enter_shortcut2 = QShortcut(QKeySequence(Qt.Key.Key_Enter), self)
-        enter_shortcut2.activated.connect(self.on_preview_paths)
+        enter_shortcut2.activated.connect(self._on_enter_key)
 
         # Space 鍵 - 也可以生成路徑（備選）
         space_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Space), self)
@@ -563,7 +601,7 @@ class MainWindow(QMainWindow):
         backspace_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Backspace), self)
         backspace_shortcut.activated.connect(self.on_delete_last_corner)
 
-        logger.info("快捷鍵設置完成: Enter=生成路徑, Delete=刪除角點, Esc=清除路徑")
+        logger.info("快捷鍵設置完成: Enter=依分頁動作, Delete=刪除角點, Esc=清除路徑")
 
     def _update_transit_paths(self, planner, sub_paths):
         """計算並顯示轉場路徑（若啟用高度錯層）"""
@@ -794,8 +832,35 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"即時生成: {len(path)} 個航點, {total_distance:.0f}m", 2000)
             logger.info(f"即時路徑生成: {len(path)} 個航點")
 
+            # ── 自動同步到 Mission Planner ──────────────────────────
+            self._sync_to_mission_planner(path)
+
         except Exception as e:
             logger.error(f"即時路徑生成失敗: {e}")
+
+    def _sync_to_mission_planner(self, path):
+        """將航點寫入同步檔，供 Mission Planner 的 FileSystemWatcher 偵測"""
+        import os
+        SYNC_DIR  = r"C:\Users\joy46\Documents\mp_sync"
+        SYNC_FILE = os.path.join(SYNC_DIR, "aeroplan_sync.waypoints")
+        try:
+            os.makedirs(SYNC_DIR, exist_ok=True)
+            alt = self.flight_params.get('altitude', 50)
+            lines = ["QGC WPL 110"]
+            # Home point
+            lines.append("0\t1\t0\t16\t0\t0\t0\t0\t0\t0\t0\t1")
+            for i, wp in enumerate(path, start=1):
+                lat = wp[0] if len(wp) > 0 else 0
+                lon = wp[1] if len(wp) > 1 else 0
+                a   = wp[2] if len(wp) > 2 else alt
+                lines.append(
+                    f"{i}\t0\t3\t16\t0\t0\t0\t0\t{lat:.8f}\t{lon:.8f}\t{a:.2f}\t1"
+                )
+            with open(SYNC_FILE, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines))
+            logger.info(f"[MP Sync] 已同步 {len(path)} 個航點到 {SYNC_FILE}")
+        except Exception as e:
+            logger.warning(f"[MP Sync] 同步失敗: {e}")
 
     def load_stylesheet(self):
         """載入樣式表"""
@@ -1345,6 +1410,7 @@ class MainWindow(QMainWindow):
             downwind_offset_m=fp.get('fw_downwind_offset', 200.0),
             pattern_leg_length_m=fp.get('fw_pattern_leg', 300.0),
             final_approach_dist_m=fp.get('fw_final_dist', 400.0),
+            landing_rollout_m=fp.get('fw_landing_rollout', 0.0),
             scan_spacing_m=fp.get('spacing', 50.0),
             use_autoland=bool(fp.get('fw_autoland', False)),
         )
@@ -2931,158 +2997,6 @@ class MainWindow(QMainWindow):
         if self.corners:
             self.statusBar().showMessage(f"邊界點: {len(self.corners)} 個", 2000)
     
-    def _on_swarm_coverage_requested(self, params: dict):
-        """
-        處理協同覆蓋請求
-
-        流程：
-        1. 驗證邊界點 >= 3
-        2. 依掃描模式分派：
-           - grid  → SwarmCoordinator（分區平行條帶）
-           - spiral/circular → 生成完整路徑後按無人機數分段
-        3. 將路徑傳給 map_widget 顯示（JS 注入，不重載頁面）
-        4. 更新狀態列
-        """
-        from PyQt6.QtWidgets import QMessageBox
-        try:
-            if len(self.corners) < 3:
-                QMessageBox.warning(
-                    self, "邊界點不足",
-                    "請先在地圖上設定至少 3 個邊界點，再生成協同覆蓋路徑。"
-                )
-                return
-
-            scan_pattern = params.get('scan_pattern', 'grid')
-            num_drones   = int(params.get('num_drones', 3))
-            spacing_m    = float(params.get('coverage_width_m', 100.0))
-            overlap_rate = float(params.get('overlap_rate', 0.1))
-            auto_scan    = bool(params.get('auto_scan_angle', True))
-            altitude     = float(params.get('altitude', 50.0))
-            speed        = float(params.get('speed', 10.0))
-
-            # ── 清除舊路徑（JS 方式，不重載頁面），避免與新協同覆蓋路徑重疊 ──
-            self.map_widget.clear_all_display_layers_js()
-
-            if scan_pattern == 'grid':
-                # ── 網格模式：SwarmCoordinator 分區平行條帶 ──────────────
-                import math
-                centroid_lat = sum(c[0] for c in self.corners) / len(self.corners)
-                centroid_lon = sum(c[1] for c in self.corners) / len(self.corners)
-                areas = [{'area_id': 1, 'polygon': list(self.corners), 'priority': 1.0}]
-                drones = []
-                for i in range(num_drones):
-                    ang = math.radians(i * 360.0 / num_drones)
-                    drones.append({
-                        'drone_id': i + 1,
-                        'name': f'UAV-{i + 1}',
-                        'position': (centroid_lat + 0.001 * math.cos(ang),
-                                     centroid_lon + 0.001 * math.sin(ang)),
-                        'speed': speed,
-                    })
-                coordinator = SwarmCoordinator()
-                swarm = coordinator.create_optimized_swarm_coverage(
-                    areas=areas, drones=drones,
-                    coverage_width_m=spacing_m,
-                    overlap_rate=overlap_rate,
-                    auto_scan_angle=auto_scan,
-                )
-                self._swarm_mission = swarm
-                self._dccpp_result = None
-                self.map_widget.display_swarm_coverage(
-                    swarm_mission=swarm,
-                    coverage_paths=getattr(swarm, 'coverage_paths', None),
-                )
-                total_wps  = swarm.stats.get('total_waypoints', 0)
-                total_dist = swarm.stats.get('total_distance', 0.0)
-                est_time   = swarm.stats.get('estimated_time', 0.0)
-
-            else:
-                # ── 螺旋 / 同心圓模式：完整路徑分段給各無人機 ───────────
-                planner = CoveragePlanner()
-                pattern_enum = (ScanPattern.SPIRAL if scan_pattern == 'spiral'
-                                else ScanPattern.CIRCULAR)
-                cov_params = CoverageParameters(
-                    spacing=spacing_m, angle=0, pattern=pattern_enum
-                )
-                full_path = planner.plan_coverage(list(self.corners), cov_params)
-                if not full_path or len(full_path) < 2:
-                    raise ValueError("無法從目前邊界點生成覆蓋路徑，請確認邊界區域足夠大。")
-
-                # 依無人機數分段（每架至少 2 個航點）
-                n_pts = len(full_path)
-                seg_size = max(2, n_pts // num_drones)
-                drones_data = []
-                import math as _math
-
-                def _haversine(a, b):
-                    dlat = (b[0] - a[0]) * 111320
-                    dlon = (b[1] - a[1]) * 111320 * _math.cos(_math.radians(a[0]))
-                    return _math.hypot(dlat, dlon)
-
-                total_dist = sum(
-                    _haversine(full_path[i], full_path[i + 1])
-                    for i in range(len(full_path) - 1)
-                )
-
-                for i in range(num_drones):
-                    start_idx = i * seg_size
-                    end_idx   = (i + 1) * seg_size if i < num_drones - 1 else n_pts
-                    if start_idx >= n_pts:
-                        break
-                    seg = full_path[start_idx:end_idx]
-                    if len(seg) < 2:
-                        continue
-                    # 轉移段：此段末點 → 下段首點
-                    xfer = []
-                    if end_idx < n_pts:
-                        xfer = [[seg[-1], full_path[end_idx]]]
-                    drones_data.append({
-                        'drone_id': i + 1,
-                        'start_position': seg[0],
-                        'operation_paths': [seg],
-                        'transfer_paths':  xfer,
-                    })
-
-                swarm_data = {
-                    'drones': drones_data,
-                    'areas':  [{'area_id': 1, 'polygon': list(self.corners)}],
-                    'stats':  {
-                        'total_drones':    len(drones_data),
-                        'total_waypoints': n_pts,
-                        'total_distance':  total_dist,
-                        'estimated_time':  total_dist / max(speed, 0.1),
-                    },
-                }
-                self._swarm_mission = None
-                self._dccpp_result = None
-                self.map_widget.display_swarm_raw(swarm_data)
-                total_wps  = n_pts
-                est_time   = total_dist / max(speed, 0.1)
-
-            self.statusBar().showMessage(
-                f"Baseline 生成完成 | {num_drones} 台無人機 | "
-                f"共 {total_wps} 航點 | 總距離 {total_dist:.0f}m | "
-                f"預估 {est_time / 60:.1f}min",
-                8000
-            )
-            logger.info(f"Baseline 生成完成: {num_drones} 台無人機 ({scan_pattern})")
-
-            # 儲存 baseline metrics 供 DCCPP 比較
-            self._baseline_metrics = {
-                'algorithm': 'Baseline (平均分區)',
-                'num_drones': num_drones,
-                'scan_pattern': scan_pattern,
-                'total_waypoints': total_wps,
-                'total_distance': total_dist,
-                'estimated_time': est_time,
-                'makespan': est_time,
-            }
-
-        except Exception as e:
-            logger.error(f"生成群飛覆蓋失敗: {e}", exc_info=True)
-            from PyQt6.QtWidgets import QMessageBox
-            QMessageBox.warning(self, "生成失敗", f"協同覆蓋路徑生成失敗：\n{e}")
-
     def _on_dccpp_coverage_requested(self, params: dict):
         """
         處理 DCCPP 最佳化覆蓋請求
@@ -3121,19 +3035,36 @@ class MainWindow(QMainWindow):
             # ── 組裝區域 ──
             areas = [{'area_id': 1, 'polygon': list(self.corners), 'priority': 1.0}]
 
-            # ── 組裝無人機（環形初始部署）──
+            # ── 組裝無人機 ──
             centroid_lat = sum(c[0] for c in self.corners) / len(self.corners)
             centroid_lon = sum(c[1] for c in self.corners) / len(self.corners)
+            # 優先使用使用者設定的起飛點，否則用多邊形質心
+            if self.home_point is not None:
+                base_lat, base_lon = self.home_point
+            else:
+                base_lat, base_lon = centroid_lat, centroid_lon
+            user_takeoff_hdg = float(params.get('takeoff_bearing', 0.0))
+            takeoff_spacing_m = float(params.get('takeoff_spacing', 50.0))
             drones = []
             for i in range(num_drones):
-                ang = math.radians(i * 360.0 / num_drones)
+                # 多機時沿跑道方向（垂直方向）排列，間距由使用者設定
+                if num_drones > 1:
+                    # 沿跑道的垂直方向（左右排列），以起飛點為中心對稱展開
+                    perp_bearing_rad = math.radians((user_takeoff_hdg + 90.0) % 360.0)
+                    offset_m = (i - (num_drones - 1) / 2.0) * takeoff_spacing_m
+                    dN = offset_m * math.cos(perp_bearing_rad)
+                    dE = offset_m * math.sin(perp_bearing_rad)
+                    cos_lat = max(math.cos(math.radians(base_lat)), 1e-6)
+                    pos = (base_lat + dN / 111320.0,
+                           base_lon + dE / (111320.0 * cos_lat))
+                else:
+                    pos = (base_lat, base_lon)
                 drones.append({
                     'drone_id': i + 1,
                     'name': f'UAV-{i + 1}',
-                    'position': (centroid_lat + 0.001 * math.cos(ang),
-                                 centroid_lon + 0.001 * math.sin(ang)),
+                    'position': pos,
                     'speed': speed,
-                    'heading': 0.0,
+                    'heading': user_takeoff_hdg,
                     'turn_radius': turn_radius,
                     'vehicle_type': vehicle_type,
                     'fov_width': fov_width_m,
@@ -3148,6 +3079,11 @@ class MainWindow(QMainWindow):
 
             # ── 呼叫 DCCPP 求解器 ──
             coordinator = SwarmCoordinator()
+            user_runway_length = float(params.get('runway_length', 500.0))
+            user_landing_hdg = float(params.get('landing_bearing', 180.0))
+            # 降落滑行距離：將觸地點沿進場反方向提前此距離，
+            # 確保 DCCPP 規劃的降落點不會和起飛點重疊
+            user_landing_rollout = float(params.get('landing_rollout', 0.0))
             dccpp_result = coordinator.plan_coverage_dccpp(
                 areas=areas,
                 drones=drones,
@@ -3160,7 +3096,19 @@ class MainWindow(QMainWindow):
                 mounting_angle_deg=mounting_angle,
                 dem_path=dem_path,
                 coordination_mode=coord_mode,
+                runway_bearing_deg=user_takeoff_hdg,
+                runway_length_m=user_runway_length,
+                landing_bearing_deg=user_landing_hdg,
+                landing_rollout_m=user_landing_rollout,
             )
+
+            # 儲存 DCCPP 參數供匯出時使用
+            self.flight_params.update({
+                'vehicle_type': vehicle_type,
+                'altitude': altitude,
+                'speed': speed,
+                'turn_radius': turn_radius,
+            })
 
             # ── 將 DCCPP 結果轉為 display_swarm_raw 格式 ──
             results = dccpp_result.get('results', {})
@@ -3180,6 +3128,7 @@ class MainWindow(QMainWindow):
                     for apath in assembled_paths.values()
                 )
             )
+            # VTOL 不需要跑道式起降，垂直起降由匯出器處理
             if (auto_landing and assembled_paths and not _already_has_to_ld
                     and vehicle_type == 'fixed_wing' and turn_radius > 0):
                 from core.trajectory.dccpp_path_assembler import DCCPPPathAssembler as _Asm
@@ -3189,31 +3138,49 @@ class MainWindow(QMainWindow):
                 )
                 # 使用起飛點或多邊形質心作為 Home
                 home = self.home_point if self.home_point else (centroid_lat, centroid_lon)
-                # 計算起飛方向：Home → 第一個作業航點
+                # 使用使用者設定的跑道參數
+                user_takeoff_hdg = float(params.get('takeoff_bearing', 0.0))
+                user_landing_hdg = float(params.get('landing_bearing', 180.0))
+                user_pattern_alt = float(params.get('pattern_alt', 80.0))
+                user_landing_rollout = float(params.get('landing_rollout', 0.0))
                 for uav_id, apath in assembled_paths.items():
                     if not apath.waypoints:
                         continue
-                    first_op = apath.waypoints[0]
-                    takeoff_hdg = math.degrees(math.atan2(
-                        (first_op.lon - home[1]) * math.cos(math.radians(home[0])),
-                        first_op.lat - home[0]
-                    )) % 360.0
                     _asm.prepend_takeoff(
                         apath, home[0], home[1],
-                        takeoff_bearing_deg=takeoff_hdg,
+                        takeoff_bearing_deg=user_takeoff_hdg,
                         climb_alt_m=min(30.0, altitude * 0.3),
                     )
-                    # 降落方向：最後作業航點 → Home
-                    last_op = apath.waypoints[-1]
-                    landing_hdg = math.degrees(math.atan2(
-                        (home[1] - last_op.lon) * math.cos(math.radians(last_op.lat)),
-                        home[0] - last_op.lat
-                    )) % 360.0
                     _asm.append_landing(
                         apath, home[0], home[1],
-                        landing_bearing_deg=landing_hdg,
-                        pattern_alt_m=min(80.0, altitude * 0.8),
+                        landing_bearing_deg=user_landing_hdg,
+                        pattern_alt_m=user_pattern_alt,
+                        landing_rollout_m=user_landing_rollout,
                     )
+
+            # ── 避撞偵測與解衝突 ──
+            _collision_enabled = bool(params.get('collision_avoidance', False))
+            _collision_conflicts = []
+            _collision_actions = []
+            if _collision_enabled and assembled_paths and len(assembled_paths) >= 2:
+                try:
+                    from core.dccpp.collision_avoidance import CollisionAvoidance
+                    _ca = CollisionAvoidance(
+                        min_separation_m=float(params.get('min_separation_m', 100.0)),
+                        alt_offset_m=float(params.get('alt_offset_m', 30.0)),
+                        time_step_s=1.0,
+                        cruise_speed_mps=speed,
+                        strategy=params.get('avoid_strategy', 'altitude'),
+                    )
+                    _collision_conflicts, _collision_actions = _ca.run(assembled_paths)
+                    if _collision_conflicts:
+                        self.statusBar().showMessage(
+                            f"避撞偵測: {len(_collision_conflicts)} 個衝突, "
+                            f"已執行 {len(_collision_actions)} 個避撞動作",
+                            5000,
+                        )
+                except Exception as _ca_err:
+                    logger.warning(f"避撞模組失敗: {_ca_err}", exc_info=True)
 
             drones_data = []
             total_wps = 0
@@ -3333,6 +3300,17 @@ class MainWindow(QMainWindow):
                     for j in range(len(path) - 1):
                         total_dist += _haversine(path[j], path[j + 1])
 
+            # 衝突標記
+            conflict_markers = []
+            if _collision_conflicts:
+                for cf in _collision_conflicts:
+                    conflict_markers.append({
+                        'lat': cf.pos_a[0], 'lon': cf.pos_a[1],
+                        'min_dist': cf.min_dist_m,
+                        'duration': cf.duration_s,
+                        'uav_a': cf.uav_a, 'uav_b': cf.uav_b,
+                    })
+
             swarm_data = {
                 'drones': drones_data,
                 'areas': [{'area_id': 1, 'polygon': list(self.corners)}],
@@ -3341,13 +3319,31 @@ class MainWindow(QMainWindow):
                     'total_waypoints': total_wps,
                     'total_distance': total_dist,
                     'estimated_time': total_makespan,
+                    'conflicts': len(_collision_conflicts),
+                    'avoidance_actions': len(_collision_actions),
                 },
+                'conflicts': conflict_markers,
             }
-            self._swarm_mission = None
             self._dccpp_result = dccpp_result
             self.map_widget.display_swarm_raw(swarm_data)
 
-            vtype_label = "固定翼" if vehicle_type == 'fixed_wing' else "多旋翼"
+            vtype_label = {"fixed_wing": "固定翼", "vtol": "VTOL (4+1)", "multirotor": "多旋翼"}.get(vehicle_type, "多旋翼")
+
+            # ── 更新任務統計面板 ──
+            try:
+                _area_m2 = CoveragePlanner().calculate_coverage_area(list(self.corners))
+            except Exception:
+                _area_m2 = 0.0
+            self.waypoint_label.setText(f"航點: {total_wps}")
+            self.distance_label.setText(f"距離: {total_dist:.0f}m")
+            self.mission_panel.update_mission_stats({
+                'waypoint_count': total_wps,
+                'total_distance': total_dist,
+                'estimated_time': total_makespan,
+                'area': _area_m2,
+                'regions': len(drones_data),
+            })
+
             self.statusBar().showMessage(
                 f"DCCPP 最佳化完成 | {vtype_label} × {len(drones_data)} 台 | "
                 f"共 {total_wps} 航點 | 總距離 {total_dist:.0f}m | "
@@ -3374,162 +3370,6 @@ class MainWindow(QMainWindow):
             logger.error(f"DCCPP 最佳化失敗: {e}", exc_info=True)
             from PyQt6.QtWidgets import QMessageBox
             QMessageBox.warning(self, "DCCPP 失敗", f"DCCPP 最佳化路徑規劃失敗：\n{e}")
-
-    def _on_comparison_requested(self):
-        """顯示 Baseline vs DCCPP 比較對話框"""
-        from PyQt6.QtWidgets import QMessageBox, QDialog, QVBoxLayout, QTextEdit, QPushButton, QHBoxLayout
-        baseline = getattr(self, '_baseline_metrics', None)
-        dccpp = getattr(self, '_dccpp_metrics', None)
-        if not baseline and not dccpp:
-            QMessageBox.information(
-                self, '比較',
-                '尚未產生任何結果。\n\n請先：\n'
-                '1. 在「Baseline 對照組」分頁生成 baseline 路徑\n'
-                '2. 在「DCCPP」分頁執行 DCCPP 最佳化\n'
-                '完成後再點此按鈕查看比較'
-            )
-            return
-        if not baseline:
-            QMessageBox.information(self, '比較', '尚無 Baseline 結果，請先到「Baseline 對照組」分頁生成。')
-            return
-        if not dccpp:
-            QMessageBox.information(self, '比較', '尚無 DCCPP 結果，請先到「DCCPP」分頁執行最佳化。')
-            return
-
-        def pct(new, old):
-            if old <= 1e-6:
-                return 0.0
-            return (old - new) / old * 100.0
-
-        d_dist = pct(dccpp['total_distance'], baseline['total_distance'])
-        d_make = pct(dccpp['makespan'], baseline['makespan'])
-        d_wps  = pct(dccpp['total_waypoints'], baseline['total_waypoints'])
-
-        def fmt_pct(v):
-            sign = '↓' if v > 0 else ('↑' if v < 0 else '–')
-            color = '#2e7d32' if v > 0 else ('#c62828' if v < 0 else '#666')
-            return f'<span style="color:{color};font-weight:bold;">{sign} {abs(v):.1f}%</span>'
-
-        html = f"""
-        <h2 style="color:#00897B;">Baseline vs DCCPP 比較</h2>
-        <table border="1" cellpadding="8" cellspacing="0" style="border-collapse:collapse;width:100%;">
-          <tr style="background:#37474f;color:white;">
-            <th>指標</th><th>Baseline (平均分區)</th><th>DCCPP (最佳化)</th><th>改善</th>
-          </tr>
-          <tr>
-            <td><b>無人機數</b></td>
-            <td align="center">{baseline['num_drones']}</td>
-            <td align="center">{dccpp['num_drones']}</td>
-            <td align="center">–</td>
-          </tr>
-          <tr style="background:#f5f5f5;">
-            <td><b>總航點數</b></td>
-            <td align="right">{baseline['total_waypoints']}</td>
-            <td align="right">{dccpp['total_waypoints']}</td>
-            <td align="center">{fmt_pct(d_wps)}</td>
-          </tr>
-          <tr>
-            <td><b>總距離 (m)</b></td>
-            <td align="right">{baseline['total_distance']:.1f}</td>
-            <td align="right">{dccpp['total_distance']:.1f}</td>
-            <td align="center">{fmt_pct(d_dist)}</td>
-          </tr>
-          <tr style="background:#f5f5f5;">
-            <td><b>Makespan (s)</b></td>
-            <td align="right">{baseline['makespan']:.1f}</td>
-            <td align="right">{dccpp['makespan']:.1f}</td>
-            <td align="center">{fmt_pct(d_make)}</td>
-          </tr>
-          <tr>
-            <td><b>Makespan (min)</b></td>
-            <td align="right">{baseline['makespan']/60:.2f}</td>
-            <td align="right">{dccpp['makespan']/60:.2f}</td>
-            <td align="center">{fmt_pct(d_make)}</td>
-          </tr>
-        </table>
-        <p style="color:#666;font-size:11px;margin-top:8px;">
-          ↓ = DCCPP 比 Baseline 更小 / 更快（改善）<br>
-          ↑ = DCCPP 比 Baseline 更大 / 更慢（劣化）
-        </p>
-        """
-
-        dlg = QDialog(self)
-        dlg.setWindowTitle('Baseline vs DCCPP 比較')
-        dlg.resize(640, 480)
-        v = QVBoxLayout(dlg)
-        te = QTextEdit()
-        te.setReadOnly(True)
-        te.setHtml(html)
-        v.addWidget(te)
-        btn_row = QHBoxLayout()
-        copy_btn = QPushButton('複製為文字')
-        def _copy_text():
-            from PyQt6.QtWidgets import QApplication
-            text = (
-                f"Baseline vs DCCPP\n"
-                f"指標,Baseline,DCCPP,改善%\n"
-                f"無人機數,{baseline['num_drones']},{dccpp['num_drones']},-\n"
-                f"總航點數,{baseline['total_waypoints']},{dccpp['total_waypoints']},{d_wps:.1f}\n"
-                f"總距離(m),{baseline['total_distance']:.1f},{dccpp['total_distance']:.1f},{d_dist:.1f}\n"
-                f"Makespan(s),{baseline['makespan']:.1f},{dccpp['makespan']:.1f},{d_make:.1f}\n"
-            )
-            QApplication.clipboard().setText(text)
-            self.statusBar().showMessage('已複製比較結果至剪貼簿', 3000)
-        copy_btn.clicked.connect(_copy_text)
-        close_btn = QPushButton('關閉')
-        close_btn.clicked.connect(dlg.accept)
-        btn_row.addWidget(copy_btn)
-        btn_row.addStretch()
-        btn_row.addWidget(close_btn)
-        v.addLayout(btn_row)
-        dlg.exec()
-
-    def _on_swarm_export_requested(self):
-        """
-        處理群飛匯出請求
-
-        流程：
-        1. 確認有有效的群飛任務或 DCCPP 結果
-        2. 開啟目錄選擇對話框
-        3. 為每架無人機匯出獨立的 .waypoints 檔案
-        4. 匯出群飛簡報 .txt
-        5. 狀態列顯示匯出結果
-        """
-        from PyQt6.QtWidgets import QFileDialog, QMessageBox
-        try:
-            # 優先使用 SwarmMission，其次使用 DCCPP 結果
-            if self._swarm_mission is not None:
-                self._export_swarm_mission_files()
-            elif getattr(self, '_dccpp_result', None) is not None:
-                self._export_dccpp_waypoints()
-            else:
-                QMessageBox.warning(
-                    self, "無群飛任務",
-                    "請先生成協同覆蓋路徑或 DCCPP 最佳化路徑，再匯出任務。"
-                )
-
-        except Exception as e:
-            logger.error(f"匯出群飛任務失敗: {e}", exc_info=True)
-            QMessageBox.warning(self, "匯出失敗", f"群飛任務匯出失敗：\n{e}")
-
-    def _export_swarm_mission_files(self):
-        """匯出 SwarmMission 格式的群飛任務"""
-        from PyQt6.QtWidgets import QFileDialog, QMessageBox
-
-        export_dir = QFileDialog.getExistingDirectory(
-            self, "選擇群飛任務匯出目錄", ""
-        )
-        if not export_dir:
-            return
-
-        coordinator = SwarmCoordinator()
-        coordinator.current_swarm = self._swarm_mission
-        exported = coordinator.export_swarm_missions(self._swarm_mission, export_dir)
-
-        msg = f"群飛任務匯出完成！\n目錄：{export_dir}\n已匯出：{exported}"
-        QMessageBox.information(self, "匯出成功", msg)
-        self.statusBar().showMessage(f"群飛任務匯出至 {export_dir}", 5000)
-        logger.info(f"群飛任務匯出完成: {export_dir}")
 
     def _on_dem_loaded(self, dem_path: str):
         """使用者選取 DEM → 載入並在 3D 地圖上疊加 heatmap"""
@@ -3583,7 +3423,10 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, 'DEM', f'錯誤: {e}')
 
     def _on_dccpp_export_requested(self):
-        """處理 DCCPP 匯出按鈕請求"""
+        """處理 DCCPP 匯出按鈕請求
+
+        若 DCCPP 載具類型為 VTOL，自動轉派到 VTOL 匯出流程。
+        """
         from PyQt6.QtWidgets import QMessageBox
         if getattr(self, '_dccpp_result', None) is None:
             QMessageBox.warning(
@@ -3591,11 +3434,91 @@ class MainWindow(QMainWindow):
                 "請先執行 DCCPP 最佳化規劃，再匯出任務。"
             )
             return
+
+        # 偵測 DCCPP 載具類型：若為 VTOL 則轉派
+        vehicle_type = self.flight_params.get('vehicle_type', '')
+        if vehicle_type == 'vtol':
+            transition_alt = 40.0
+            try:
+                transition_alt = self.parameter_panel.vtol_transition_alt_spin.value()
+            except Exception:
+                pass
+            self._on_vtol_export_requested({'transition_alt': transition_alt})
+            return
+
         try:
             self._export_dccpp_waypoints()
         except Exception as e:
             logger.error(f"匯出 DCCPP 任務失敗: {e}", exc_info=True)
             QMessageBox.warning(self, "匯出失敗", f"DCCPP 任務匯出失敗：\n{e}")
+
+    def _on_vtol_export_requested(self, params: dict):
+        """處理 VTOL 匯出按鈕請求"""
+        from PyQt6.QtWidgets import QMessageBox, QFileDialog
+        if getattr(self, '_dccpp_result', None) is None:
+            QMessageBox.warning(
+                self, "無 DCCPP 結果",
+                "請先執行 DCCPP 最佳化規劃，再匯出 VTOL 任務。"
+            )
+            return
+
+        assembled_paths = self._dccpp_result.get('assembled_paths', {})
+        if not assembled_paths:
+            QMessageBox.warning(self, "無可匯出路徑", "DCCPP 結果中沒有組裝路徑資料。")
+            return
+
+        export_dir = QFileDialog.getExistingDirectory(
+            self, "選擇 VTOL 任務匯出目錄", ""
+        )
+        if not export_dir:
+            return
+
+        try:
+            from mission.vtol_mission_exporter import VTOLMissionExporter
+
+            altitude = self.flight_params.get('altitude', 100.0)
+            speed = self.flight_params.get('speed', 15.0)
+            turn_radius = self.flight_params.get('turn_radius', 50.0)
+            transition_alt = params.get('transition_alt', 40.0)
+
+            exporter = VTOLMissionExporter(
+                transition_alt_m=transition_alt,
+                cruise_speed_ms=speed,
+                turn_radius_m=turn_radius,
+            )
+
+            # 匯出航點檔案
+            exported_files = exporter.export_all(
+                assembled_paths=assembled_paths,
+                export_dir=export_dir,
+                altitude=altitude,
+                speed=speed,
+            )
+
+            # 在 Cesium 3D 圖台繪製 VTOL 軌跡視覺化
+            try:
+                cesium = self._get_cesium_widget()
+                if cesium:
+                    vtol_data = exporter.to_cesium_data(assembled_paths, altitude)
+                    cesium.draw_vtol_swarm_paths(vtol_data)
+            except Exception as ve:
+                logger.warning(f'[VTOL] 3D 視覺化失敗: {ve}')
+
+            QMessageBox.information(
+                self, "VTOL 匯出成功",
+                f"VTOL (4+1 混飛模式) 任務匯出完成！\n"
+                f"目錄：{export_dir}\n"
+                f"轉換高度：{transition_alt}m\n\n"
+                + "\n".join(exported_files)
+            )
+            self.statusBar().showMessage(
+                f"已匯出 {len(exported_files)} 個 VTOL 任務檔案至 {export_dir}", 5000
+            )
+            logger.info(f"VTOL 匯出完成: {len(exported_files)} 個檔案")
+
+        except Exception as e:
+            logger.error(f"匯出 VTOL 任務失敗: {e}", exc_info=True)
+            QMessageBox.warning(self, "匯出失敗", f"VTOL 任務匯出失敗：\n{e}")
 
     def _export_dccpp_waypoints(self):
         """
@@ -3773,10 +3696,16 @@ class MainWindow(QMainWindow):
     # ─────────────────────────────────────────────────────────────────
     # SITL / MAVLink 即時遙測
     # ─────────────────────────────────────────────────────────────────
-    def on_sitl_connect(self, conn_str: str, sysid_label: int = 1):
-        """啟動 SITL 背景接收執行緒（單一連線）"""
+    def on_sitl_connect(self, conn_str: str, sysid_label: int = 1,
+                        vehicle_hint: str = ''):
+        """啟動 SITL 背景接收執行緒（單一連線）
+
+        vehicle_hint: 由 UI 傳入的載具類型（'VTOL'/'PLANE'/'COPTER'）
+                      用於區分 QuadPlane VTOL 與純固定翼（兩者 MAV_TYPE 相同）
+        """
         from mission.sitl_link import SITLLink
-        link = SITLLink(conn_str, sysid_label=sysid_label, parent=self)
+        link = SITLLink(conn_str, sysid_label=sysid_label,
+                        vehicle_hint=vehicle_hint, parent=self)
         link.connected.connect(self.sitl_hud.on_connected)
         link.disconnected.connect(self._on_sitl_disconnected)
         link.telemetry.connect(self._on_sitl_telemetry)
@@ -3811,11 +3740,21 @@ class MainWindow(QMainWindow):
         # 所有 sysid 都送進 HUD（多機卡片）
         self.sitl_hud.on_telemetry(frame)
         if frame.is_valid_gps() and hasattr(self.map_widget, 'update_uav_position'):
+            _pitch = getattr(frame, 'pitch', 0.0)
+            _roll = getattr(frame, 'roll', 0.0)
             self.map_widget.update_uav_position(
                 frame.lat, frame.lon, frame.alt_rel,
                 frame.heading, frame.ground_speed,
                 sysid=frame.sysid, mode=frame.mode, armed=frame.armed,
-                vehicle_type=getattr(frame, 'vehicle_type', '')
+                vehicle_type=getattr(frame, 'vehicle_type', ''),
+                pitch_deg=_pitch,
+                roll_deg=_roll,
+            )
+            # 同步更新戰術模組（FOV 光錐、熱力圖、RCS）
+            self._update_tactical_on_uav_move(
+                frame.lat, frame.lon, frame.alt_rel,
+                frame.heading, _pitch, _roll,
+                sysid=frame.sysid,
             )
 
     def _sitl_broadcast(self, cmd: str, arg=None):
@@ -3874,20 +3813,57 @@ class MainWindow(QMainWindow):
             per_link_wps: dict = {}
 
             if not wps and getattr(self, '_dccpp_result', None):
-                # DCCPP：輸出完整 DO_CHANGE_SPEED / NAV_TAKEOFF / NAV_WAYPOINT / NAV_LAND
-                # 指令序列，讓 SITL AUTO 模式完整起飛→任務→降落。
+                # DCCPP：輸出完整任務指令序列，讓 SITL AUTO 模式完整起飛→任務→降落。
                 # 每個 tuple: (lat, lon, alt, cmd, p1, p2, p3, p4)
+                #
+                # ── MAVLink 任務指令對照 ──
+                # CMD_WP   = 16  (MAV_CMD_NAV_WAYPOINT)       → 普通航點
+                # CMD_TO   = 22  (MAV_CMD_NAV_TAKEOFF)        → 固定翼跑道起飛
+                # CMD_LAND = 21  (MAV_CMD_NAV_LAND / RTL)     → 固定翼降落
+                # CMD_SPD  = 178 (MAV_CMD_DO_CHANGE_SPEED)    → 設定巡航速度
+                # ── VTOL QuadPlane 專用 ──
+                # CMD_VTOL_TO   = 84   (MAV_CMD_NAV_VTOL_TAKEOFF)    → 垂直起飛
+                # CMD_VTOL_LAND = 85   (MAV_CMD_NAV_VTOL_LAND)       → 垂直降落
+                # CMD_VTOL_TRANS= 3000 (MAV_CMD_DO_VTOL_TRANSITION)  → 飛行模式轉換
+                #   param1=3 → MC（多旋翼）  param1=4 → FW（固定翼）
                 CMD_WP, CMD_TO, CMD_LAND, CMD_SPD = 16, 22, 21, 178
+                CMD_VTOL_TO, CMD_VTOL_LAND, CMD_VTOL_TRANS = 84, 85, 3000
                 params = self.parameter_panel.get_parameters()
                 turn_radius = float(params.get('turn_radius', 50.0))
                 cruise_speed = float(params.get('speed', 15.0))
+
+                # 判斷是否為 VTOL 載具 → 使用垂直起降指令
+                is_vtol = self.flight_params.get('vehicle_type', '') == 'vtol'
+
+                # VTOL 轉換高度：多旋翼垂直爬升到此高度後，再轉換為固定翼巡航
+                # 預設 100m；優先讀取 UI 參數面板的設定值
+                vtol_transition_alt = 100.0
+                if is_vtol:
+                    try:
+                        vtol_transition_alt = float(
+                            self.parameter_panel.vtol_transition_alt_spin.value()
+                        )
+                    except Exception:
+                        pass
+                    logger.info(
+                        f'[SITL] VTOL 轉換高度: {vtol_transition_alt}m '
+                        f'(多旋翼垂直爬升 → 轉換 FW → 巡航)'
+                    )
 
                 ap = self._dccpp_result.get('assembled_paths') or {}
                 # 依 uav_id 排序 → 對應 SITL instance 0/1/2...
                 sorted_paths = sorted(ap.items(), key=lambda kv: kv[0])
 
                 def _build_wps_for_path(first_path):
-                    """把一個 BuiltPath 轉成 (lat,lon,alt,cmd,p1,p2,p3,p4) 列表"""
+                    """把一個 BuiltPath 轉成 (lat,lon,alt,cmd,p1,p2,p3,p4) 列表。
+
+                    VTOL 模式任務序列（ArduPilot QuadPlane）：
+                      DO_CHANGE_SPEED → NAV_VTOL_TAKEOFF → DO_VTOL_TRANSITION(FW)
+                      → NAV_WAYPOINT × N → DO_VTOL_TRANSITION(MC) → NAV_VTOL_LAND
+
+                    固定翼模式任務序列：
+                      DO_CHANGE_SPEED → NAV_TAKEOFF → NAV_WAYPOINT × N → NAV_LAND
+                    """
                     wps_local = []
                     wp_list = getattr(first_path, 'waypoints', None) or []
                     if not wp_list:
@@ -3901,17 +3877,40 @@ class MainWindow(QMainWindow):
                         if _nm == 'TAKEOFF':
                             has_takeoff_seg = True
 
+                    # 1) 設定巡航速度
                     wps_local.append((0.0, 0.0, 0.0, CMD_SPD,
                                       0.0, cruise_speed, -1.0, 0.0))
 
+                    # 2) 起飛指令
                     takeoff_emitted = False
                     if not has_takeoff_seg and wp_list:
                         _w0 = wp_list[0]
                         _alt0 = float(getattr(_w0, 'alt', default_alt) or default_alt)
                         if _alt0 < 20.0:
                             _alt0 = max(default_alt, 50.0)
-                        wps_local.append((float(_w0.lat), float(_w0.lon), _alt0,
-                                          CMD_TO, 10.0, 0.0, 0.0, 0.0))
+                        if is_vtol:
+                            # ── VTOL QuadPlane 起飛序列 ──────────────────
+                            # 階段 1: NAV_VTOL_TAKEOFF (cmd=84)
+                            #   多旋翼模式垂直爬升到「轉換高度」
+                            #   alt = vtol_transition_alt（例如 100m）
+                            #   到達此高度後飛控會自動懸停等待下一指令
+                            wps_local.append((float(_w0.lat), float(_w0.lon),
+                                              vtol_transition_alt,
+                                              CMD_VTOL_TO, 0.0, 0.0, 0.0, 0.0))
+                            # 階段 2: DO_VTOL_TRANSITION → 固定翼 (FW)
+                            #   param1=4 → MAV_VTOL_STATE_FW
+                            #   在轉換高度懸停狀態下啟動後推馬達，
+                            #   前進加速到失速速度以上後，四軸馬達關閉
+                            wps_local.append((0.0, 0.0, 0.0, CMD_VTOL_TRANS,
+                                              4.0, 0.0, 0.0, 0.0))
+                            # 階段 3: 第一個 NAV_WAYPOINT 會帶飛機爬升到任務高度
+                            #   例如任務高度 200m → 固定翼以爬升姿態飛向第一航點
+                            #   （這一步由後面的 for 迴圈自動產生）
+                        else:
+                            # 固定翼: NAV_TAKEOFF (cmd=22) → 跑道/手拋起飛
+                            # param1 = pitch_angle (最低仰角 10°)
+                            wps_local.append((float(_w0.lat), float(_w0.lon), _alt0,
+                                              CMD_TO, 10.0, 0.0, 0.0, 0.0))
                         takeoff_emitted = True
 
                     for idx, wp in enumerate(wp_list):
@@ -3930,16 +3929,39 @@ class MainWindow(QMainWindow):
                             if idx == 0:
                                 continue
                             if not takeoff_emitted:
-                                wps_local.append((lat, lon, alt, CMD_TO,
-                                                  10.0, 0.0, 0.0, 0.0))
+                                if is_vtol:
+                                    # VTOL: 垂直起飛到轉換高度 → 轉 FW
+                                    wps_local.append((lat, lon, vtol_transition_alt,
+                                                      CMD_VTOL_TO, 0.0, 0.0, 0.0, 0.0))
+                                    wps_local.append((0.0, 0.0, 0.0, CMD_VTOL_TRANS,
+                                                      4.0, 0.0, 0.0, 0.0))
+                                else:
+                                    wps_local.append((lat, lon, alt, CMD_TO,
+                                                      10.0, 0.0, 0.0, 0.0))
                                 takeoff_emitted = True
                             else:
                                 wps_local.append((lat, lon, alt, CMD_WP,
                                                   0.0, turn_radius, 0.0, 0.0))
                         elif seg_name == 'LANDING':
                             if idx == last_landing_idx:
-                                wps_local.append((lat, lon, 0.0, CMD_LAND,
-                                                  0.0, 0.0, 0.0, hdg))
+                                if is_vtol:
+                                    # ── VTOL QuadPlane 降落序列 ──────────────
+                                    # 階段 1: 先飛到降落點上空，高度=轉換高度
+                                    #   確保在安全高度進行 FW→MC 轉換
+                                    wps_local.append((lat, lon, vtol_transition_alt,
+                                                      CMD_WP, 0.0, 0.0, 0.0, 0.0))
+                                    # 階段 2: DO_VTOL_TRANSITION → 多旋翼 (MC)
+                                    #   param1=3 → MAV_VTOL_STATE_MC
+                                    #   後推馬達關閉，四軸馬達啟動接管
+                                    wps_local.append((0.0, 0.0, 0.0, CMD_VTOL_TRANS,
+                                                      3.0, 0.0, 0.0, 0.0))
+                                    # 階段 3: NAV_VTOL_LAND (cmd=85)
+                                    #   四軸馬達垂直降落到地面
+                                    wps_local.append((lat, lon, 0.0, CMD_VTOL_LAND,
+                                                      0.0, 0.0, 0.0, hdg))
+                                else:
+                                    wps_local.append((lat, lon, 0.0, CMD_LAND,
+                                                      0.0, 0.0, 0.0, hdg))
                             else:
                                 wps_local.append((lat, lon, alt, CMD_WP,
                                                   0.0, turn_radius, 0.0, 0.0))
@@ -4021,7 +4043,8 @@ class MainWindow(QMainWindow):
                         for w in wp_list
                     )
                     inferred = 'PLANE' if has_takeoff else 'COPTER'
-                    if inferred != vehicle.upper():
+                    # VTOL 由使用者明確選擇，不被 DCCPP 推斷覆寫
+                    if vehicle.upper() != 'VTOL' and inferred != vehicle.upper():
                         logger.warning(
                             f'[SITL] 依 DCCPP 結果自動切換載具：{vehicle} → {inferred}'
                         )
@@ -4114,7 +4137,8 @@ class MainWindow(QMainWindow):
             QApplication.processEvents()
             import time as _t; _t.sleep(0.5)
             for instance, conn in results:
-                self.on_sitl_connect(conn, sysid_label=instance + 1)
+                self.on_sitl_connect(conn, sysid_label=instance + 1,
+                                     vehicle_hint=vehicle)
         except Exception as e:
             logger.error(f'[SITL] 啟動失敗: {e}', exc_info=True)
             QMessageBox.critical(self, 'SITL 啟動失敗', str(e))
@@ -4128,6 +4152,260 @@ class MainWindow(QMainWindow):
             self._sitl_launcher.stop()
         self.sitl_hud.on_sitl_stopped()
         logger.info('[SITL] 內建 SITL 已停止')
+
+    # ══════════════════════════════════════════════════════════════════
+    #  戰術模組事件處理
+    # ══════════════════════════════════════════════════════════════════
+
+    def _on_elev_slicer_changed(self, min_alt: float, max_alt: float):
+        """高程切片參數變更 → 呼叫 3D 地圖更新"""
+        self.map_widget.update_elevation_slicer(min_alt, max_alt)
+        self.statusBar().showMessage(
+            f'[FSDM] 高程切片啟用: {min_alt:.0f}m ~ {max_alt:.0f}m', 5000
+        )
+
+    def _on_elev_slicer_cleared(self):
+        """清除高程切片"""
+        self.map_widget.clear_elevation_slicer()
+        self.statusBar().showMessage('[FSDM] 高程切片已清除', 3000)
+
+    def _on_sar_heatmap_init(self, params: dict):
+        """初始化搜救機率熱力圖（使用目前邊界區域）"""
+        corners = self.map_widget.corners
+        if len(corners) < 3:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "無邊界區域",
+                                "請先在地圖上定義至少 3 個邊界點作為搜索區域")
+            return
+
+        # 計算邊界矩形
+        lats = [c[0] for c in corners]
+        lons = [c[1] for c in corners]
+        lat_min, lat_max = min(lats), max(lats)
+        lon_min, lon_max = min(lons), max(lons)
+
+        grid_size = params.get('grid_size', 20)
+        sweep_w = params.get('sweep_width', 50.0)
+        quality = params.get('quality', 0.8)
+
+        self.map_widget.init_sar_heatmap(
+            lat_min, lat_max, lon_min, lon_max,
+            rows=grid_size, cols=grid_size,
+            sweep_width=sweep_w, quality=quality,
+        )
+        self.statusBar().showMessage(
+            f'[SAR] 熱力圖初始化: {grid_size}×{grid_size} 網格', 5000
+        )
+
+    def _on_sar_heatmap_reset(self):
+        """重置搜救熱力圖"""
+        self.map_widget.reset_sar_heatmap()
+        self.statusBar().showMessage('[SAR] 熱力圖已重置', 3000)
+
+    def _on_sar_heatmap_clear(self):
+        """清除搜救熱力圖"""
+        self.map_widget.clear_sar_heatmap()
+        self.map_widget.clear_fov_cone()
+        self.statusBar().showMessage('[SAR] 熱力圖已清除', 3000)
+
+    def _on_fov_cone_toggle(self, enabled: bool):
+        """FOV 光錐開關"""
+        self._fov_cone_enabled = enabled
+        if not enabled:
+            self.map_widget.clear_fov_cone()
+        self.statusBar().showMessage(
+            f'[SAR] FOV 光錐 {"啟用" if enabled else "關閉"}', 3000
+        )
+
+    def _on_radar_sim(self, params: dict):
+        """模擬雷達威脅掃描：建立穹頂 + 播放脈衝動畫"""
+        lat = params.get('lat', 23.70)
+        lon = params.get('lon', 120.42)
+        radius = params.get('radius', 5000.0)
+        name = params.get('name', 'Radar')
+
+        self.map_widget.add_radar_dome(lat, lon, 0.0, radius, name)
+        # 飛向雷達位置
+        self.map_widget.fly_to_position(lat, lon, 0.0, radius * 2.5)
+        # 播放掃描脈衝動畫（需要延遲以等待穹頂建立完成）
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(500, lambda: self.map_widget.animate_radar_scan(0, 3000))
+
+        self.statusBar().showMessage(
+            f'[Radar] 威脅穹頂已建立: {name} R={radius/1000:.1f}km', 5000
+        )
+
+    def _on_radar_clear(self):
+        """清除所有雷達穹頂"""
+        self.map_widget.clear_radar_domes()
+        # 同時關閉 RCS 渲染
+        self._rcs_enabled = False
+        self.map_widget.clear_rcs_sensitivity(1)
+        self.statusBar().showMessage('[Radar] 所有雷達穹頂已清除', 3000)
+
+    def _on_rcs_toggle(self, enabled: bool):
+        """RCS 渲染開關"""
+        self._rcs_enabled = enabled
+        if not enabled:
+            self.map_widget.clear_rcs_sensitivity(1)
+        self.statusBar().showMessage(
+            f'[RCS] 敏感度渲染 {"啟用" if enabled else "關閉"}', 3000
+        )
+
+    def _update_tactical_on_uav_move(self, lat: float, lon: float, alt: float,
+                                      heading_deg: float, pitch_deg: float,
+                                      roll_deg: float, sysid: int = 1):
+        """SITL UAV 位置更新時，同步更新戰術模組視覺化
+
+        此方法應在 UAV 位置更新後呼叫，以驅動：
+        1. FOV 光錐位置同步
+        2. SAR 熱力圖掃描更新
+        3. RCS 敏感度動態計算
+        """
+        if self._fov_cone_enabled:
+            fov_r = self.parameter_panel.get_fov_radius()
+            self.map_widget.update_fov_cone(
+                lat, lon, alt, fov_r,
+                heading_deg, pitch_deg, roll_deg,
+            )
+            # 同時更新熱力圖（光錐掃過的區域）
+            self.map_widget.update_heatmap(lat, lon, fov_r)
+
+        if self._rcs_enabled:
+            self.map_widget.update_rcs_sensitivity(
+                lat, lon, alt, heading_deg, sysid,
+            )
+
+    # ─────────────────────────────────────────────────────────────────
+    # 蜂群打擊模組 (Swarm Strike) 處理
+    # ─────────────────────────────────────────────────────────────────
+    def _on_strike_mark_targets(self):
+        """切換打擊目標標記模式"""
+        self._strike_marking_mode = not self._strike_marking_mode
+
+        # 取得 3D 地圖 widget（通過 DualMapWidget）
+        cesium = self._get_cesium_widget()
+        if cesium:
+            cesium.strike_set_marking_mode(self._strike_marking_mode)
+
+        self.parameter_panel.set_strike_marking_mode(self._strike_marking_mode)
+
+        if self._strike_marking_mode:
+            # 啟動標記模式：連接地圖點擊信號
+            self.map_widget.strike_target_added.connect(self._on_strike_target_clicked)
+            self.statusBar().showMessage(
+                '🎯 打擊目標標記模式：左鍵點擊 3D 地圖新增地面目標', 0
+            )
+        else:
+            # 關閉標記模式
+            try:
+                self.map_widget.strike_target_added.disconnect(self._on_strike_target_clicked)
+            except TypeError:
+                pass
+            self.statusBar().showMessage(
+                f'已結束目標標記，共 {len(self._strike_targets)} 個目標', 3000
+            )
+
+    def _on_strike_target_clicked(self, lat: float, lon: float):
+        """地圖點擊 → 新增打擊目標"""
+        idx = len(self._strike_targets) + 1
+        self._strike_targets.append((lat, lon))
+
+        cesium = self._get_cesium_widget()
+        if cesium:
+            cesium.strike_add_target(lat, lon, idx)
+
+        self.parameter_panel.update_strike_target_count(len(self._strike_targets))
+        self.statusBar().showMessage(
+            f'🎯 TGT-{idx} 已標記: ({lat:.6f}, {lon:.6f})', 3000
+        )
+        logger.info(f'[Strike] 新增打擊目標 TGT-{idx}: ({lat:.6f}, {lon:.6f})')
+
+    def _on_strike_execute(self, params: dict):
+        """執行蜂群打擊（自動模式：N 個目標 → N 架 UCAV，高度與路線完全錯開）"""
+        import json
+        from core.strike.terminal_strike_planner import (
+            TerminalStrikePlanner, StrikeTarget,
+        )
+
+        if not self._strike_targets:
+            QMessageBox.warning(self, '蜂群打擊', '請先標記至少一個打擊目標')
+            return
+
+        # 關閉標記模式
+        if self._strike_marking_mode:
+            self._on_strike_mark_targets()
+
+        cruise_alt = params.get('cruise_alt', 500.0)
+        cruise_speed = params.get('cruise_speed', 60.0)
+        max_dive = params.get('max_dive_angle', 45.0)
+        dive_dist = params.get('dive_initiation_dist', 800.0)
+        alt_step = params.get('altitude_step', 30.0)
+        anim_speed = params.get('anim_speed', 3.0)
+
+        # 建立目標列表
+        targets = []
+        for i, (lat, lon) in enumerate(self._strike_targets):
+            targets.append(StrikeTarget(target_id=i + 1, lat=lat, lon=lon))
+
+        # 建立規劃器（含高度錯層參數）
+        planner = TerminalStrikePlanner(
+            max_dive_angle_deg=max_dive,
+            dive_initiation_dist_m=dive_dist,
+            cruise_alt_m=cruise_alt,
+            cruise_speed_mps=cruise_speed,
+            altitude_step_m=alt_step,
+        )
+
+        # 自動模式：N 目標 → 自動生成 N 架 UCAV
+        # 每架 UCAV 的巡航高度自動錯層（+i*alt_step）
+        # 進場方位角自動分散（360°/N），航線完全不交叉
+        trajectories = planner.plan_auto(targets, spawn_dist_m=1500.0)
+
+        if not trajectories:
+            QMessageBox.warning(self, '蜂群打擊', '軌跡規劃失敗：無有效分配')
+            return
+
+        # 轉換為 Cesium JSON 並送往前端
+        cesium_data = planner.trajectories_to_cesium_data(trajectories, targets)
+        data_json = json.dumps(cesium_data)
+
+        cesium = self._get_cesium_widget()
+        if cesium:
+            cesium.strike_execute_animation(data_json, anim_speed)
+
+        # 顯示結果摘要
+        summary_lines = [
+            f'蜂群打擊規劃完成：{len(trajectories)} 架 UCAV → {len(targets)} 個目標'
+            f'（高度錯層 {alt_step:.0f}m）'
+        ]
+        for tr in trajectories:
+            summary_lines.append(
+                f'  {tr.uav_name} → {tr.target_name}: '
+                f'{tr.total_distance_m:.0f}m, alt={tr.cruise_alt_m:.0f}m, '
+                f'dive@WP{tr.dive_start_index}'
+            )
+        self.statusBar().showMessage(summary_lines[0], 5000)
+        logger.info('\n'.join(summary_lines))
+
+    def _on_strike_clear(self):
+        """清除打擊視覺化"""
+        self._strike_targets.clear()
+        self._strike_marking_mode = False
+
+        cesium = self._get_cesium_widget()
+        if cesium:
+            cesium.strike_clear_all()
+
+        self.parameter_panel.update_strike_target_count(0)
+        self.parameter_panel.set_strike_marking_mode(False)
+        self.statusBar().showMessage('已清除打擊視覺化', 3000)
+
+    def _get_cesium_widget(self):
+        """取得 CesiumMapWidget 實例（通過 DualMapWidget）"""
+        if hasattr(self.map_widget, 'map_3d'):
+            return self.map_widget.map_3d
+        return None
 
     def closeEvent(self, event):
         """視窗關閉事件"""

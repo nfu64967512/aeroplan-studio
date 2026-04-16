@@ -188,6 +188,11 @@ class MapWidget(QWidget):
         if self._view_state:
             center = (self._view_state['lat'], self._view_state['lon'])
             zoom   = int(self._view_state['zoom'])
+        elif self.corners:
+            # 有角點時以角點中心為初始視角（fitBounds 會再覆寫）
+            center = (sum(c[0] for c in self.corners) / len(self.corners),
+                      sum(c[1] for c in self.corners) / len(self.corners))
+            zoom   = 16
         else:
             center = (settings.map.default_lat, settings.map.default_lon)
             zoom   = 20
@@ -458,10 +463,14 @@ class MapWidget(QWidget):
             legend_html = self._build_swarm_legend(self._swarm_data)
             m.get_root().html.add_child(folium.Element(legend_html))
 
-        if self.corners:
+        # 收集所有可見內容的座標，用於 fitBounds
+        all_pts = list(self.corners)
+        for p in self.paths:
+            all_pts.extend(p)
+        if all_pts:
             m.fit_bounds(
-                [[min(c[0] for c in self.corners), min(c[1] for c in self.corners)],
-                 [max(c[0] for c in self.corners), max(c[1] for c in self.corners)]],
+                [[min(c[0] for c in all_pts), min(c[1] for c in all_pts)],
+                 [max(c[0] for c in all_pts), max(c[1] for c in all_pts)]],
                 padding=[50, 50],
             )
         elif self._circle_center is not None:
@@ -1270,7 +1279,7 @@ body > div {{ width:100% !important; height:100% !important; }}
     def update_uav_position(self, lat: float, lon: float, alt: float = 0.0,
                              heading_deg: float = 0.0, speed_ms: float = 0.0,
                              sysid: int = 1, mode: str = '', armed: bool = False,
-                             vehicle_type: str = ''):
+                             vehicle_type: str = '', **kwargs):
         """在 2D 地圖上更新 UAV 標記（依機型顯示不同 SVG 圖示）"""
         try:
             import json as _json
@@ -1690,6 +1699,40 @@ body > div {{ width:100% !important; height:100% !important; }}
     window._swarmLayers.push(_ar);
 """)
 
+        # ── 衝突區標記（紅色脈衝圓圈 + 警告 tooltip）──
+        conflict_markers = self._swarm_data.get('conflicts', [])
+        for cm in conflict_markers:
+            lat, lon = cm['lat'], cm['lon']
+            min_d = cm.get('min_dist', 0)
+            dur = cm.get('duration', 0)
+            ua, ub = cm.get('uav_a', '?'), cm.get('uav_b', '?')
+            js_parts.append(f"""
+    var _cf=L.circleMarker([{lat},{lon}],{{
+        radius:14,color:'#FF1744',weight:3,fillColor:'#FF1744',
+        fillOpacity:0.25,className:'conflict-pulse'
+    }});
+    _cf.bindTooltip('⚠ 衝突: UAV {ua} ↔ UAV {ub}<br>'
+        +'最小距離: {min_d:.0f}m<br>持續: {dur:.1f}s',
+        {{permanent:false}});
+    _cf.addTo(map);
+    window._swarmLayers.push(_cf);
+""")
+        if conflict_markers:
+            # 注入脈衝動畫 CSS
+            js_parts.append("""
+    if(!document.getElementById('conflict-pulse-css')){
+        var _sty=document.createElement('style');
+        _sty.id='conflict-pulse-css';
+        _sty.textContent=`
+            .conflict-pulse{animation:pulse-ring 1.5s ease-out infinite;}
+            @keyframes pulse-ring{
+                0%{opacity:1;transform:scale(1);}
+                100%{opacity:0;transform:scale(2.5);}
+            }`;
+        document.head.appendChild(_sty);
+    }
+""")
+
         # 圖例 HTML
         legend_html = self._build_swarm_legend(self._swarm_data)
         legend_js = _json.dumps(legend_html)
@@ -1698,6 +1741,26 @@ body > div {{ width:100% !important; height:100% !important; }}
     _leg.id='swarm-legend';
     _leg.innerHTML={legend_js};
     document.body.appendChild(_leg);
+""")
+
+        # ── 自動 fitBounds 到所有路徑範圍 ──
+        all_coords = []
+        for drone_info in drones:
+            for key in ('takeoff_paths', 'entry_paths', 'operation_paths',
+                        'transfer_paths', 'landing_paths'):
+                for seg in drone_info.get(key, []):
+                    for p in seg:
+                        all_coords.append((p[0], p[1]))
+        for area_info in areas:
+            for p in area_info.get('polygon', []):
+                all_coords.append((p[0], p[1]))
+        if all_coords:
+            min_lat = min(c[0] for c in all_coords)
+            max_lat = max(c[0] for c in all_coords)
+            min_lon = min(c[1] for c in all_coords)
+            max_lon = max(c[1] for c in all_coords)
+            js_parts.append(f"""
+    map.fitBounds([[{min_lat},{min_lon}],[{max_lat},{max_lon}]],{{padding:[50,50]}});
 """)
 
         js_parts.append("})();")
@@ -1739,6 +1802,23 @@ body > div {{ width:100% !important; height:100% !important; }}
                 f'margin-top:6px;padding-top:6px;font-size:11px;opacity:.8;">'
                 f'總距離: {stats["total_distance"]:.0f} m<br>'
                 f'預估時間: {stats.get("estimated_time", 0) / 60:.1f} min'
+                f'</div>'
+            )
+        # 避撞資訊
+        n_conflicts = stats.get('conflicts', 0)
+        n_actions = stats.get('avoidance_actions', 0)
+        if n_conflicts > 0:
+            stat_lines += (
+                f'<div style="border-top:1px solid rgba(255,80,80,.5);'
+                f'margin-top:6px;padding-top:6px;font-size:11px;color:#FF8A80;">'
+                f'⚠ 衝突: {n_conflicts} 處<br>'
+                f'避撞動作: {n_actions} 個'
+                f'</div>'
+            )
+        elif stats.get('total_distance'):
+            stat_lines += (
+                f'<div style="font-size:11px;color:#69F0AE;margin-top:4px;">'
+                f'✅ 無衝突'
                 f'</div>'
             )
 

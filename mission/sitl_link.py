@@ -83,7 +83,8 @@ _GPS_FIX_NAMES = {0: 'NO_GPS', 1: 'NO_FIX', 2: '2D', 3: '3D', 4: 'DGPS', 5: 'RTK
 
 
 def _decode_mode(vehicle_type: str, custom_mode: int) -> str:
-    if 'PLANE' in vehicle_type:
+    if 'PLANE' in vehicle_type or 'VTOL' in vehicle_type:
+        # QuadPlane (VTOL) 基於 ArduPlane，共用固定翼模式表（含 Q* 模式）
         return _PLANE_MODES.get(custom_mode, f'MODE_{custom_mode}')
     if 'COPTER' in vehicle_type or 'ROTOR' in vehicle_type:
         return _COPTER_MODES.get(custom_mode, f'MODE_{custom_mode}')
@@ -124,7 +125,8 @@ class SITLLink(QThread):
     error          = pyqtSignal(str)
 
     def __init__(self, conn_str: str = 'udpin:0.0.0.0:14550',
-                 sysid_label: int = 1, parent=None):
+                 sysid_label: int = 1, vehicle_hint: str = '',
+                 parent=None):
         super().__init__(parent)
         self.conn_str = conn_str
         self._stop = False
@@ -132,6 +134,11 @@ class SITLLink(QThread):
         self._frame = TelemetryFrame(sysid=sysid_label)
         self._cmd_queue: 'queue.Queue' = queue.Queue()  # 主執行緒下指令給接收執行緒
         self._mav_lock = threading.Lock()
+        # vehicle_hint: 由 UI 啟動時傳入的載具類型（'VTOL'/'PLANE'/'COPTER'）
+        # 用途：ArduPlane QuadPlane 的 MAV_TYPE 仍回報 FIXED_WING (1)，
+        #       無法從 heartbeat 區分純固定翼與 VTOL，因此必須從外部傳入。
+        self._vehicle_hint = vehicle_hint.upper()
+        self._q_enable_confirmed = False  # Q_ENABLE=1 已確認 → 此連線為 QuadPlane VTOL
 
     # ── 公開控制 ──────────────────────────────────────────────────────
     def stop(self):
@@ -165,6 +172,19 @@ class SITLLink(QThread):
         self._cmd_queue.put(('set_params', list(items)))
     def get_param(self, name: str):
         self._cmd_queue.put(('get_param', name))
+
+    # ── VTOL (QuadPlane) 專用指令 ─────────────────────────────────
+    def vtol_transition(self, state: int):
+        """VTOL 飛行模式轉換。state: 3=多旋翼(MC), 4=固定翼(FW)"""
+        self._cmd_queue.put(('vtol_transition', state))
+
+    def set_mode_qhover(self):
+        """切換至 QHOVER（QuadPlane 多旋翼懸停模式，custom_mode=18）"""
+        self._cmd_queue.put(('set_mode', 'QHOVER'))
+
+    def set_mode_qloiter(self):
+        """切換至 QLOITER（QuadPlane 多旋翼定點模式，custom_mode=19）"""
+        self._cmd_queue.put(('set_mode', 'QLOITER'))
 
     # ── 執行緒主迴圈 ──────────────────────────────────────────────────
     def run(self):
@@ -201,6 +221,13 @@ class SITLLink(QThread):
         self._frame.vehicle_type = _decode_vehicle_type(hb.type)
         logger.info(f'[SITL] 已連線，飛行器類型: {self._frame.vehicle_type}')
         self.connected.emit(self.conn_str)
+
+        # ── VTOL QuadPlane 驗證 ─────────────────────────────────────
+        # 若飛行器類型為 VTOL 相關，主動讀取 Q_ENABLE 參數並驗證
+        # ArduPilot QuadPlane 架構：ArduPlane 韌體 + Q_ENABLE=1
+        # 透過 PARAM_REQUEST_READ 讀取 → 等待 PARAM_VALUE 回應
+        if 'VTOL' in self._frame.vehicle_type or 'PLANE' in self._frame.vehicle_type:
+            self._verify_vtol_q_enable()
 
         # 要求高頻串流（與 Mission Planner 一致：4 Hz 位置/姿態）
         try:
@@ -253,6 +280,85 @@ class SITLLink(QThread):
 
         self.disconnected.emit('使用者中斷' if self._stop else '連線中斷')
         logger.info('[SITL] 執行緒結束')
+
+    # ── VTOL Q_ENABLE 驗證 ──────────────────────────────────────────
+    def _verify_vtol_q_enable(self):
+        """連線後驗證飛控是否啟用 QuadPlane (Q_ENABLE=1)。
+
+        驗證流程：
+          1. 發送 PARAM_REQUEST_READ 請求 Q_ENABLE 參數
+          2. 等待 PARAM_VALUE 回應（最多 5 秒）
+          3. 檢查 param_value 是否為 1
+             ✓ Q_ENABLE=1 → VTOL QuadPlane 物理模型啟動成功
+             ✗ Q_ENABLE=0 或未回應 → ArduPlane 以純固定翼模式運行
+
+        ArduPilot 參數說明：
+          Q_ENABLE (QuadPlane Enable):
+            0 = 純固定翼模式（標準 ArduPlane）
+            1 = QuadPlane 模式（啟用垂直起降馬達 + Q* 飛行模式）
+        """
+        try:
+            # 發送 PARAM_REQUEST_READ: 讀取 Q_ENABLE
+            param_name = b'Q_ENABLE\x00\x00\x00\x00\x00\x00\x00\x00'[:16]
+            self._mav.mav.param_request_read_send(
+                self._mav.target_system, self._mav.target_component,
+                param_name, -1  # param_index=-1 → 依名稱查詢
+            )
+            logger.info('[SITL] 已發送 Q_ENABLE 參數讀取請求')
+
+            # 等待 PARAM_VALUE 回應（最多 5 秒）
+            start_time = time.time()
+            while time.time() - start_time < 5.0:
+                msg = self._mav.recv_match(
+                    type='PARAM_VALUE', blocking=True, timeout=1.0
+                )
+                if msg is None:
+                    continue
+
+                # 解析參數名稱（去除 null padding）
+                pname = msg.param_id
+                if isinstance(pname, bytes):
+                    pname = pname.decode('utf-8', 'ignore')
+                pname = pname.strip('\x00').strip()
+
+                if pname == 'Q_ENABLE':
+                    q_val = msg.param_value
+                    if q_val == 1.0:
+                        # ✓ QuadPlane 啟用成功 → 標記此連線為 VTOL
+                        self._q_enable_confirmed = True
+                        logger.info(
+                            f'[SITL] Q_ENABLE={q_val:g} → '
+                            f'VTOL QuadPlane 物理模型已確認啟用'
+                        )
+                        self.status_text.emit(
+                            6,
+                            '[System] VTOL QuadPlane 物理模型啟動成功！'
+                            '（ArduPlane 核心 + Q_ENABLE=1）'
+                        )
+                    else:
+                        # ✗ Q_ENABLE ≠ 1 → 純固定翼
+                        logger.warning(
+                            f'[SITL] Q_ENABLE={q_val:g} → '
+                            f'QuadPlane 未啟用，當前為純固定翼模式'
+                        )
+                        self.status_text.emit(
+                            4,
+                            f'[System] Q_ENABLE={q_val:g}，'
+                            f'QuadPlane 未啟用 — 以純固定翼模式運行'
+                        )
+                    return
+
+            # 超時：未收到 Q_ENABLE 回應
+            logger.warning('[SITL] Q_ENABLE 參數讀取逾時（5 秒）')
+            self.status_text.emit(
+                5, '[System] Q_ENABLE 參數讀取逾時 — 無法確認 VTOL 狀態'
+            )
+
+        except Exception as e:
+            logger.error(f'[SITL] Q_ENABLE 驗證失敗: {e}', exc_info=True)
+            self.status_text.emit(
+                4, f'[System] Q_ENABLE 驗證失敗: {e}'
+            )
 
     # ── 訊息分派 ──────────────────────────────────────────────────────
     def _handle_message(self, msg):
@@ -356,6 +462,8 @@ class SITLLink(QThread):
                         time.sleep(0.05)
                 elif cmd == 'get_param':
                     self._send_param_request(arg)
+                elif cmd == 'vtol_transition':
+                    self._send_vtol_transition(int(arg))
                 logger.info(f'[SITL] 已發送命令: {cmd} {arg if cmd != "upload_mission" else f"{len(arg)} 點"}')
         except Exception as e:
             logger.error(f'[SITL] 命令 {cmd} 失敗: {e}', exc_info=True)
@@ -420,7 +528,19 @@ class SITLLink(QThread):
         )
 
     def _send_auto_start(self):
-        """一鍵起飛：關 ARMING_CHECK → AUTO → ARM → MISSION_START"""
+        """一鍵起飛：關 ARMING_CHECK → (VTOL: QLOITER→ARM→AUTO) / (固定翼: AUTO→ARM) → MISSION_START
+
+        ArduPilot QuadPlane AUTO 起飛流程：
+          1. 先切 QLOITER（啟動四軸馬達控制迴路）
+          2. ARM（四軸馬達就緒）
+          3. 切 AUTO（執行任務，第一個 NAV_VTOL_TAKEOFF 會讓飛機垂直升空）
+          4. MISSION_START
+
+        固定翼 AUTO 起飛流程：
+          1. 切 AUTO
+          2. ARM
+          3. MISSION_START（NAV_TAKEOFF 觸發跑道起飛）
+        """
         from pymavlink import mavutil
         # 1. 關閉 prearm
         try:
@@ -432,19 +552,47 @@ class SITLLink(QThread):
             time.sleep(0.3)
         except Exception:
             pass
-        # 2. 設 AUTO
+
         mapping = self._mav.mode_mapping() or {}
-        if 'AUTO' in mapping:
-            self._mav.set_mode(mapping['AUTO'])
-            time.sleep(0.3)
-        # 3. ARM (force)
-        self._mav.mav.command_long_send(
-            self._mav.target_system, self._mav.target_component,
-            mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
-            0, 1, 21196, 0, 0, 0, 0, 0
-        )
-        time.sleep(0.5)
-        # 4. 觸發任務
+        # QuadPlane 回報 MAV_TYPE=1 (FIXED_WING)，無法從 heartbeat 區分
+        # 優先用 UI 傳入的 vehicle_hint，其次用 Q_ENABLE 驗證結果
+        is_vtol = (self._vehicle_hint == 'VTOL') or self._q_enable_confirmed
+        logger.info(f'[SITL] auto_start: is_vtol={is_vtol} '
+                    f'(hint={self._vehicle_hint}, q_enable={self._q_enable_confirmed})')
+
+        if is_vtol:
+            # ── VTOL QuadPlane 起飛序列 ──
+            # 先進 QLOITER 讓四軸馬達控制器啟動，否則直接 AUTO 可能四軸馬達不轉
+            if 'QLOITER' in mapping:
+                self._mav.set_mode(mapping['QLOITER'])
+                self.status_text.emit(6, '[VTOL] 切換 QLOITER → 四軸馬達就緒')
+                time.sleep(0.5)
+            # ARM
+            self._mav.mav.command_long_send(
+                self._mav.target_system, self._mav.target_component,
+                mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
+                0, 1, 21196, 0, 0, 0, 0, 0
+            )
+            time.sleep(0.5)
+            # 切 AUTO → 執行任務（NAV_VTOL_TAKEOFF 開始垂直起飛）
+            if 'AUTO' in mapping:
+                self._mav.set_mode(mapping['AUTO'])
+                self.status_text.emit(6, '[VTOL] 切換 AUTO → 執行 VTOL 任務')
+                time.sleep(0.3)
+        else:
+            # ── 固定翼起飛序列 ──
+            if 'AUTO' in mapping:
+                self._mav.set_mode(mapping['AUTO'])
+                time.sleep(0.3)
+            # ARM (force)
+            self._mav.mav.command_long_send(
+                self._mav.target_system, self._mav.target_component,
+                mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM,
+                0, 1, 21196, 0, 0, 0, 0, 0
+            )
+            time.sleep(0.5)
+
+        # 觸發任務
         self._mav.mav.command_long_send(
             self._mav.target_system, self._mav.target_component,
             mavutil.mavlink.MAV_CMD_MISSION_START,
@@ -474,6 +622,23 @@ class SITLLink(QThread):
             self._mav.target_system, self._mav.target_component,
             pid, -1,
         )
+
+    def _send_vtol_transition(self, state: int):
+        """MAV_CMD_DO_VTOL_TRANSITION (3000)：VTOL 飛行模式轉換。
+
+        state: 3 = MAV_VTOL_STATE_MC（多旋翼模式）
+               4 = MAV_VTOL_STATE_FW（固定翼模式）
+        """
+        from pymavlink import mavutil
+        self._mav.mav.command_long_send(
+            self._mav.target_system, self._mav.target_component,
+            3000,        # MAV_CMD_DO_VTOL_TRANSITION
+            0,           # confirmation
+            float(state),  # param1: 目標狀態
+            0, 0, 0, 0, 0, 0
+        )
+        state_name = {3: '多旋翼 (MC)', 4: '固定翼 (FW)'}.get(state, f'state={state}')
+        self.status_text.emit(6, f'VTOL 轉換 → {state_name}')
 
     def _send_mission(self, waypoints):
         """上傳任務航點到飛控（MISSION_COUNT + MISSION_ITEM_INT 序列）。
@@ -529,7 +694,8 @@ class SITLLink(QThread):
                 return
             lat, lon, alt, cmd, p1, p2, p3, p4 = items[req.seq]
             # DO_* 指令 (非 NAV) 使用 MISSION frame；NAV 指令用 relative alt
-            if cmd in (178, 179, 177, 20, 115):  # DO_CHANGE_SPEED/SET_HOME/JUMP/RTL/CONDITION_YAW
+            # 3000 = DO_VTOL_TRANSITION 也屬於 DO 類指令
+            if cmd in (178, 179, 177, 20, 115, 3000):  # DO_CHANGE_SPEED/SET_HOME/JUMP/RTL/CONDITION_YAW/DO_VTOL_TRANSITION
                 frame = mavutil.mavlink.MAV_FRAME_MISSION
             else:
                 frame = mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT

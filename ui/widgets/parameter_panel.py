@@ -40,12 +40,27 @@ class ParameterPanel(QWidget):
     nfz_draw_polygon_requested = pyqtSignal()  # 在地圖繪製 NFZ 多邊形
     nfz_draw_circle_requested  = pyqtSignal()  # 在地圖拖曳定義 NFZ 圓形
     nfz_poly_finish_requested  = pyqtSignal()  # 完成 NFZ 多邊形繪製
-    swarm_coverage_requested = pyqtSignal(dict)   # 發送群飛參數 (baseline)
-    comparison_requested = pyqtSignal()           # 請求顯示 Baseline vs DCCPP 比較
-    swarm_export_requested = pyqtSignal()          # 請求匯出群飛任務
     dccpp_coverage_requested = pyqtSignal(dict)    # 發送 DCCPP 最佳化參數
     dccpp_export_requested = pyqtSignal()             # 請求匯出 DCCPP 任務
+    vtol_export_requested = pyqtSignal(dict)           # 請求匯出 VTOL 任務 (含 transition_alt 等參數)
+    delete_last_corner_requested = pyqtSignal()       # 請求刪除最後一個邊界點
     dem_loaded = pyqtSignal(str)                       # DEM 檔案已選取，附路徑
+
+    # ── 戰術模組信號 ──────────────────────────────────────────────────
+    elevation_slicer_changed = pyqtSignal(float, float)  # (minAlt, maxAlt)
+    elevation_slicer_cleared = pyqtSignal()               # 清除高程切片
+    sar_heatmap_init_requested = pyqtSignal(dict)         # 初始化搜救熱力圖
+    sar_heatmap_reset_requested = pyqtSignal()            # 重置熱力圖
+    sar_heatmap_clear_requested = pyqtSignal()            # 清除熱力圖
+    fov_cone_toggle_requested = pyqtSignal(bool)          # 開關 FOV 光錐
+    radar_sim_requested = pyqtSignal(dict)                # 模擬雷達威脅掃描
+    radar_clear_requested = pyqtSignal()                  # 清除雷達穹頂
+    rcs_toggle_requested = pyqtSignal(bool)               # 開關 RCS 渲染
+
+    # ── 蜂群打擊模組信號 ──────────────────────────────────────────────
+    strike_mark_targets_requested = pyqtSignal()          # 開始標記打擊目標
+    strike_execute_requested = pyqtSignal(dict)           # 執行蜂群打擊 (params dict)
+    strike_clear_requested = pyqtSignal()                 # 清除打擊視覺化
 
     def __init__(self, parent=None):
         """初始化參數面板"""
@@ -96,6 +111,7 @@ class ParameterPanel(QWidget):
             'home_point_lat': 0.0,
             'home_point_lon': 0.0,
             # ── AutoLand ─────────────────────────────────────────────────
+            'fw_landing_rollout': 0.0,    # 觸地後滑行+煞車距離（公尺）
             'fw_autoland': False,          # True = 跳過五邊，直接 NAV_LAND
         }
         # 動態間隔 spinbox 列表（隨 n_regions 重建）
@@ -156,22 +172,7 @@ class ParameterPanel(QWidget):
         basic_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self._tabs.addTab(basic_scroll, "基本演算法")
 
-        # ── Tab 2: 協同覆蓋 ───────────────────────────────────────────
-        swarm_tab_content = QWidget()
-        swarm_tab_layout = QVBoxLayout(swarm_tab_content)
-        swarm_tab_layout.setSpacing(10)
-        swarm_tab_layout.setContentsMargins(4, 4, 4, 4)
-        swarm_group = self.create_swarm_coverage_panel()
-        swarm_tab_layout.addWidget(swarm_group)
-        swarm_tab_layout.addStretch()
-
-        swarm_scroll = QScrollArea()
-        swarm_scroll.setWidgetResizable(True)
-        swarm_scroll.setWidget(swarm_tab_content)
-        swarm_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self._tabs.addTab(swarm_scroll, "Baseline 對照組")
-
-        # ── Tab 3: DCCPP ──────────────────────────────────────────────
+        # ── Tab 2: DCCPP ──────────────────────────────────────────────
         dccpp_tab_content = QWidget()
         dccpp_tab_layout = QVBoxLayout(dccpp_tab_content)
         dccpp_tab_layout.setSpacing(10)
@@ -185,6 +186,48 @@ class ParameterPanel(QWidget):
         dccpp_scroll.setWidget(dccpp_tab_content)
         dccpp_scroll.setFrameShape(QFrame.Shape.NoFrame)
         self._tabs.addTab(dccpp_scroll, "DCCPP")
+
+        # ── Tab 4: 戰術模組 ──────────────────────────────────────────
+        tactical_tab_content = QWidget()
+        tactical_layout = QVBoxLayout(tactical_tab_content)
+        tactical_layout.setSpacing(10)
+        tactical_layout.setContentsMargins(4, 4, 4, 4)
+
+        # 模組一：FSDM 高程切片
+        elev_group = self._create_elevation_slicer_panel()
+        tactical_layout.addWidget(elev_group)
+
+        # 模組二：FOV 光錐 + SAR 搜救熱力圖
+        sar_group = self._create_sar_heatmap_panel()
+        tactical_layout.addWidget(sar_group)
+
+        # 模組三：雷達威脅穹頂 + RCS
+        radar_group = self._create_radar_rcs_panel()
+        tactical_layout.addWidget(radar_group)
+
+        tactical_layout.addStretch()
+
+        tactical_scroll = QScrollArea()
+        tactical_scroll.setWidgetResizable(True)
+        tactical_scroll.setWidget(tactical_tab_content)
+        tactical_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._tabs.addTab(tactical_scroll, "戰術模組")
+
+        # ── Tab 5: 蜂群打擊 ──────────────────────────────────────────
+        strike_tab_content = QWidget()
+        strike_layout = QVBoxLayout(strike_tab_content)
+        strike_layout.setSpacing(10)
+        strike_layout.setContentsMargins(4, 4, 4, 4)
+
+        strike_group = self._create_strike_command_panel()
+        strike_layout.addWidget(strike_group)
+        strike_layout.addStretch()
+
+        strike_scroll = QScrollArea()
+        strike_scroll.setWidgetResizable(True)
+        strike_scroll.setWidget(strike_tab_content)
+        strike_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._tabs.addTab(strike_scroll, "蜂群打擊")
     
     def create_corner_management(self):
         """創建邊界點管理群組"""
@@ -612,6 +655,8 @@ class ParameterPanel(QWidget):
             self.fw_pattern_leg_spin.setValue(defaults['fw_pattern_leg'])
         if hasattr(self, 'fw_final_dist_spin') and 'fw_final_dist' in defaults:
             self.fw_final_dist_spin.setValue(defaults['fw_final_dist'])
+        if hasattr(self, 'fw_landing_rollout_spin') and 'fw_landing_rollout' in defaults:
+            self.fw_landing_rollout_spin.setValue(defaults['fw_landing_rollout'])
 
         # 套用後立即更新轉彎半徑檢測
         self._update_turn_radius_check()
@@ -874,19 +919,25 @@ class ParameterPanel(QWidget):
 
     def set_home_point_display(self, lat: float, lon: float):
         """更新起飛點座標顯示"""
+        txt = f"起飛點：{lat:.6f}, {lon:.6f}"
+        style = "color: #4CAF50; font-size: 11px; font-weight: bold;"
         if hasattr(self, 'home_point_label'):
-            self.home_point_label.setText(f"起飛點：{lat:.6f}, {lon:.6f}")
-            self.home_point_label.setStyleSheet(
-                "color: #4CAF50; font-size: 11px; font-weight: bold;"
-            )
+            self.home_point_label.setText(txt)
+            self.home_point_label.setStyleSheet(style)
+        if hasattr(self, 'dccpp_home_label'):
+            self.dccpp_home_label.setText(txt)
+            self.dccpp_home_label.setStyleSheet(style)
 
     def clear_home_point_display(self):
         """清除起飛點顯示（由 main_window 呼叫，純 UI 更新）"""
+        txt = "起飛點：尚未設定（預設使用掃描區中心）"
+        style = "color: #888; font-size: 11px; font-style: italic;"
         if hasattr(self, 'home_point_label'):
-            self.home_point_label.setText("起飛點：尚未設定（預設使用掃描區中心）")
-            self.home_point_label.setStyleSheet(
-                "color: #888; font-size: 11px; font-style: italic;"
-            )
+            self.home_point_label.setText(txt)
+            self.home_point_label.setStyleSheet(style)
+        if hasattr(self, 'dccpp_home_label'):
+            self.dccpp_home_label.setText(txt)
+            self.dccpp_home_label.setStyleSheet(style)
 
     def create_flight_parameters(self):
         """創建飛行參數群組"""
@@ -1290,6 +1341,24 @@ class ParameterPanel(QWidget):
         )
         land_layout.addRow("最終進場距:", self.fw_final_dist_spin)
 
+        # 降落滑行距離（觸地後煞車滾停）
+        self.fw_landing_rollout_spin = QDoubleSpinBox()
+        self.fw_landing_rollout_spin.setRange(0.0, 9999.0)
+        self.fw_landing_rollout_spin.setValue(self.parameters.get('fw_landing_rollout', 0.0))
+        self.fw_landing_rollout_spin.setSuffix(" m")
+        self.fw_landing_rollout_spin.setDecimals(0)
+        self.fw_landing_rollout_spin.setSingleStep(10.0)
+        self.fw_landing_rollout_spin.setToolTip(
+            "觸地後滑行＋煞車所需距離（公尺）\n"
+            "觸地點會提前此距離，確保飛機減速停止時\n"
+            "不超過跑道末端（Home 點）\n"
+            "設 0 = 不偏移，觸地點在 Home"
+        )
+        self.fw_landing_rollout_spin.valueChanged.connect(
+            lambda v: self.update_parameter('fw_landing_rollout', v)
+        )
+        land_layout.addRow("降落滑行距:", self.fw_landing_rollout_spin)
+
         # ── AutoLand 開關 ──────────────────────────────────────
         # 分隔線
         sep = QFrame()
@@ -1665,118 +1734,6 @@ class ParameterPanel(QWidget):
 
         logger.info("參數已設置")
     
-    def create_swarm_coverage_panel(self) -> QGroupBox:
-        """建立 Baseline 對照組設定群組（用於與 DCCPP 比較）"""
-        group = QGroupBox("=== Baseline 對照組（DCCPP 比較基準）===")
-        group.setObjectName("swarmCoverageGroup")
-        group.setStyleSheet(
-            "QGroupBox#swarmCoverageGroup { font-weight: bold; color: #7B1FA2; }"
-        )
-        layout = QVBoxLayout(group)
-        layout.setSpacing(6)
-
-        form = QFormLayout()
-        form.setSpacing(4)
-
-        # 掃描模式
-        self.swarm_pattern_combo = QComboBox()
-        self.swarm_pattern_combo.addItem("網格掃描 (Grid)", "grid")
-        self.swarm_pattern_combo.addItem("螺旋掃描 (Spiral)", "spiral")
-        self.swarm_pattern_combo.addItem("同心圓掃描 (Circular)", "circular")
-        self.swarm_pattern_combo.setToolTip("各無人機採用的掃描路徑模式")
-        self.swarm_pattern_combo.currentIndexChanged.connect(self._on_swarm_pattern_changed)
-        form.addRow("掃描模式:", self.swarm_pattern_combo)
-
-        # 無人機數量
-        self.swarm_num_drones_spin = QSpinBox()
-        self.swarm_num_drones_spin.setRange(2, 8)
-        self.swarm_num_drones_spin.setValue(3)
-        self.swarm_num_drones_spin.setToolTip("參與協同覆蓋的無人機數量（2–8 台）")
-        form.addRow("無人機數量:", self.swarm_num_drones_spin)
-
-        # FOV 覆蓋寬度（網格模式條帶寬度 / 螺旋∙圓形模式環間距）
-        self.swarm_coverage_width_spin = QDoubleSpinBox()
-        self.swarm_coverage_width_spin.setRange(1.0, 5000.0)
-        self.swarm_coverage_width_spin.setDecimals(1)
-        self.swarm_coverage_width_spin.setValue(100.0)
-        self.swarm_coverage_width_spin.setSuffix(" m")
-        self.swarm_coverage_width_spin.setToolTip("網格：條帶寬度；螺旋/圓形：環間距")
-        self.swarm_coverage_width_label = QLabel("FOV 覆蓋寬度:")
-        form.addRow(self.swarm_coverage_width_label, self.swarm_coverage_width_spin)
-
-        # 重疊率（網格模式用）
-        self.swarm_overlap_spin = QDoubleSpinBox()
-        self.swarm_overlap_spin.setRange(0.0, 0.5)
-        self.swarm_overlap_spin.setDecimals(2)
-        self.swarm_overlap_spin.setSingleStep(0.05)
-        self.swarm_overlap_spin.setValue(0.1)
-        self.swarm_overlap_spin.setToolTip("相鄰掃描條帶的重疊率（0.0–0.5，僅網格模式）")
-        self.swarm_overlap_row_label = QLabel("重疊率:")
-        form.addRow(self.swarm_overlap_row_label, self.swarm_overlap_spin)
-
-        layout.addLayout(form)
-
-        # 自動掃描方向（僅網格模式）
-        self.swarm_auto_scan_check = QCheckBox("自動掃描方向（依多邊形最佳角度）")
-        self.swarm_auto_scan_check.setChecked(True)
-        layout.addWidget(self.swarm_auto_scan_check)
-
-        # 生成按鈕
-        gen_btn = QPushButton("▶ 生成 Baseline 路徑")
-        gen_btn.setStyleSheet(
-            "background-color: #7B1FA2; color: white; font-weight: bold; padding: 6px;"
-        )
-        gen_btn.setToolTip("用相同邊界與參數生成 baseline（平均分區）路徑，作為 DCCPP 對照組")
-        gen_btn.clicked.connect(self._on_swarm_coverage_btn_clicked)
-        layout.addWidget(gen_btn)
-
-        # 比較按鈕
-        cmp_btn = QPushButton("📊 比較 Baseline vs DCCPP")
-        cmp_btn.setStyleSheet(
-            "background-color: #00897B; color: white; font-weight: bold; padding: 6px;"
-        )
-        cmp_btn.setToolTip("顯示 baseline 與 DCCPP 的指標對照（總距離 / makespan / 改善率）")
-        cmp_btn.clicked.connect(self.comparison_requested.emit)
-        layout.addWidget(cmp_btn)
-
-        # 匯出按鈕
-        export_btn = QPushButton("匯出群飛任務")
-        export_btn.setStyleSheet(
-            "background-color: #4A148C; color: white; padding: 6px;"
-        )
-        export_btn.setToolTip("將各無人機任務分別匯出為 .waypoints 檔案")
-        export_btn.clicked.connect(self.swarm_export_requested.emit)
-        layout.addWidget(export_btn)
-
-        return group
-
-    def _on_swarm_pattern_changed(self):
-        """掃描模式切換時，顯示/隱藏相關控件"""
-        pattern = self.swarm_pattern_combo.currentData()
-        is_grid = (pattern == 'grid')
-        self.swarm_overlap_spin.setEnabled(is_grid)
-        self.swarm_overlap_row_label.setEnabled(is_grid)
-        self.swarm_auto_scan_check.setVisible(is_grid)
-        label = "FOV 覆蓋寬度:" if is_grid else "環間距 (m):"
-        self.swarm_coverage_width_label.setText(label)
-
-    def get_swarm_params(self) -> dict:
-        """取得協同覆蓋參數"""
-        return {
-            'scan_pattern': self.swarm_pattern_combo.currentData(),
-            'num_drones': self.swarm_num_drones_spin.value(),
-            'coverage_width_m': self.swarm_coverage_width_spin.value(),
-            'overlap_rate': self.swarm_overlap_spin.value(),
-            'auto_scan_angle': self.swarm_auto_scan_check.isChecked(),
-            'altitude': self.parameters.get('altitude', 50.0),
-            'speed': self.parameters.get('speed', 10.0),
-        }
-
-    def _on_swarm_coverage_btn_clicked(self):
-        """點擊「生成協同覆蓋路徑」按鈕"""
-        params = self.get_swarm_params()
-        self.swarm_coverage_requested.emit(params)
-
     # ══════════════════════════════════════════════════════════════════
     #  DCCPP 最佳化規劃面板（論文 MDTSP + IDP + GDA）
     # ══════════════════════════════════════════════════════════════════
@@ -1810,9 +1767,11 @@ class ParameterPanel(QWidget):
         self.dccpp_vehicle_combo = QComboBox()
         self.dccpp_vehicle_combo.addItem("多旋翼 (Multirotor)", "multirotor")
         self.dccpp_vehicle_combo.addItem("固定翼 (Fixed-Wing)", "fixed_wing")
+        self.dccpp_vehicle_combo.addItem("VTOL (4+1 QuadPlane)", "vtol")
         self.dccpp_vehicle_combo.setToolTip(
             "多旋翼：自由轉向（turn_radius=0）\n"
-            "固定翼：Dubins 曲線約束（turn_radius>0）"
+            "固定翼：Dubins 曲線約束（turn_radius>0）\n"
+            "VTOL：垂直起降 + 固定翼巡航（QuadPlane 混飛）"
         )
         self.dccpp_vehicle_combo.currentIndexChanged.connect(
             self._on_dccpp_vehicle_changed
@@ -1901,7 +1860,139 @@ class ParameterPanel(QWidget):
             "  • 五邊降落段（Dubins 出場 + 下滑落地）\n"
             "關閉時 DCCPP 結果只包含純作業 + 轉移段"
         )
+        self.dccpp_auto_landing_check.stateChanged.connect(
+            self._on_dccpp_auto_landing_changed
+        )
         layout.addWidget(self.dccpp_auto_landing_check)
+
+        # ── 跑道 / 起降設定（固定翼專用）──────────────────
+        self.dccpp_runway_group = QGroupBox("跑道 / 起降設定")
+        self.dccpp_runway_group.setStyleSheet(
+            "QGroupBox { font-weight: bold; color: #FF6D00; }"
+        )
+        rwy_layout = QVBoxLayout(self.dccpp_runway_group)
+        rwy_layout.setSpacing(4)
+
+        # 起飛點顯示
+        self.dccpp_home_label = QLabel("起飛點：尚未設定（預設使用掃描區中心）")
+        self.dccpp_home_label.setStyleSheet(
+            "color: #888; font-size: 11px; font-style: italic;"
+        )
+        self.dccpp_home_label.setWordWrap(True)
+        rwy_layout.addWidget(self.dccpp_home_label)
+
+        home_btn_row = QHBoxLayout()
+        dccpp_pick_home_btn = QPushButton("📍 從地圖點選起飛點")
+        dccpp_pick_home_btn.setStyleSheet(
+            "background-color: #455A64; color: white; padding: 5px; border-radius: 3px;"
+        )
+        dccpp_pick_home_btn.clicked.connect(self.pick_home_point_requested.emit)
+        home_btn_row.addWidget(dccpp_pick_home_btn)
+
+        dccpp_clear_home_btn = QPushButton("✖ 清除")
+        dccpp_clear_home_btn.setStyleSheet(
+            "background-color: #78909C; color: white; padding: 5px; border-radius: 3px;"
+        )
+        dccpp_clear_home_btn.clicked.connect(self.clear_home_point_requested.emit)
+        dccpp_clear_home_btn.setFixedWidth(60)
+        home_btn_row.addWidget(dccpp_clear_home_btn)
+        rwy_layout.addLayout(home_btn_row)
+
+        rwy_form = QFormLayout()
+        rwy_form.setSpacing(4)
+
+        # 起飛方向（跑道方向）
+        dccpp_takeoff_row = QHBoxLayout()
+        self.dccpp_takeoff_bearing_spin = QDoubleSpinBox()
+        self.dccpp_takeoff_bearing_spin.setRange(0.0, 359.9)
+        self.dccpp_takeoff_bearing_spin.setValue(0.0)
+        self.dccpp_takeoff_bearing_spin.setSuffix("°")
+        self.dccpp_takeoff_bearing_spin.setDecimals(1)
+        self.dccpp_takeoff_bearing_spin.setToolTip(
+            "跑道起飛方向（度，0=北，90=東，180=南，270=西）\n"
+            "桃園機場 05L/23R 跑道方向約 050°/230°"
+        )
+        self.dccpp_takeoff_compass_label = QLabel("北")
+        self.dccpp_takeoff_compass_label.setStyleSheet("color: #2196F3; font-size: 10px; min-width: 30px;")
+        self.dccpp_takeoff_bearing_spin.valueChanged.connect(
+            lambda v: self.dccpp_takeoff_compass_label.setText(self._bearing_to_compass(v))
+        )
+        dccpp_takeoff_row.addWidget(self.dccpp_takeoff_bearing_spin)
+        dccpp_takeoff_row.addWidget(self.dccpp_takeoff_compass_label)
+        rwy_form.addRow("起飛方向:", dccpp_takeoff_row)
+
+        # 跑道長度
+        self.dccpp_runway_length_spin = QDoubleSpinBox()
+        self.dccpp_runway_length_spin.setRange(20.0, 4000.0)
+        self.dccpp_runway_length_spin.setValue(50.0)
+        self.dccpp_runway_length_spin.setSuffix(" m")
+        self.dccpp_runway_length_spin.setDecimals(0)
+        self.dccpp_runway_length_spin.setToolTip(
+            "起飛滑跑距離（公尺）\n"
+            "桃園機場跑道長 3660m，測試時視需要設定"
+        )
+        rwy_form.addRow("跑道長度:", self.dccpp_runway_length_spin)
+
+        # 降落進場方向
+        dccpp_landing_row = QHBoxLayout()
+        self.dccpp_landing_bearing_spin = QDoubleSpinBox()
+        self.dccpp_landing_bearing_spin.setRange(0.0, 359.9)
+        self.dccpp_landing_bearing_spin.setValue(180.0)
+        self.dccpp_landing_bearing_spin.setSuffix("°")
+        self.dccpp_landing_bearing_spin.setDecimals(1)
+        self.dccpp_landing_bearing_spin.setToolTip(
+            "降落進場方向（度）\n"
+            "通常與起飛方向相反或逆風方向"
+        )
+        self.dccpp_landing_compass_label = QLabel("南")
+        self.dccpp_landing_compass_label.setStyleSheet("color: #2196F3; font-size: 10px; min-width: 30px;")
+        self.dccpp_landing_bearing_spin.valueChanged.connect(
+            lambda v: self.dccpp_landing_compass_label.setText(self._bearing_to_compass(v))
+        )
+        dccpp_landing_row.addWidget(self.dccpp_landing_bearing_spin)
+        dccpp_landing_row.addWidget(self.dccpp_landing_compass_label)
+        rwy_form.addRow("進場方向:", dccpp_landing_row)
+
+        # 五邊飛行高度
+        self.dccpp_pattern_alt_spin = QDoubleSpinBox()
+        self.dccpp_pattern_alt_spin.setRange(30.0, 500.0)
+        self.dccpp_pattern_alt_spin.setValue(80.0)
+        self.dccpp_pattern_alt_spin.setSuffix(" m")
+        self.dccpp_pattern_alt_spin.setDecimals(0)
+        self.dccpp_pattern_alt_spin.setToolTip("五邊進場飛行高度 AGL")
+        rwy_form.addRow("五邊高度:", self.dccpp_pattern_alt_spin)
+
+        # 降落滑行距離（觸地後煞車滾停）
+        self.dccpp_landing_rollout_spin = QDoubleSpinBox()
+        self.dccpp_landing_rollout_spin.setRange(0.0, 9999.0)
+        self.dccpp_landing_rollout_spin.setValue(0.0)
+        self.dccpp_landing_rollout_spin.setSuffix(" m")
+        self.dccpp_landing_rollout_spin.setDecimals(0)
+        self.dccpp_landing_rollout_spin.setSingleStep(10.0)
+        self.dccpp_landing_rollout_spin.setToolTip(
+            "觸地後滑行＋煞車所需距離（公尺）\n"
+            "觸地點會提前此距離，確保飛機減速停止時\n"
+            "不超過跑道末端（Home 點）\n"
+            "設 0 = 不偏移，觸地點在 Home"
+        )
+        rwy_form.addRow("降落滑行距:", self.dccpp_landing_rollout_spin)
+
+        # 起飛點間距（多機時沿跑道方向排列的間距）
+        self.dccpp_takeoff_spacing_spin = QDoubleSpinBox()
+        self.dccpp_takeoff_spacing_spin.setRange(5.0, 500.0)
+        self.dccpp_takeoff_spacing_spin.setValue(50.0)
+        self.dccpp_takeoff_spacing_spin.setSuffix(" m")
+        self.dccpp_takeoff_spacing_spin.setDecimals(0)
+        self.dccpp_takeoff_spacing_spin.setToolTip(
+            "多機起飛時，各 UAV 起飛點沿跑道方向的間距（公尺）\n"
+            "避免多架 UAV 起飛點重疊在一起"
+        )
+        rwy_form.addRow("起飛點間距:", self.dccpp_takeoff_spacing_spin)
+
+        rwy_layout.addLayout(rwy_form)
+        layout.addWidget(self.dccpp_runway_group)
+        # 初始狀態：多旋翼時隱藏跑道設定
+        self.dccpp_runway_group.setVisible(False)
 
         # ── 進階設定（論文深度整合）──────────────────────
         adv_form = QFormLayout()
@@ -1948,7 +2039,65 @@ class ParameterPanel(QWidget):
 
         layout.addLayout(adv_form)
 
-        # 生成按鈕
+        # ── 避撞設定 ──────────────────────────────────────
+        collision_group = QGroupBox("避撞模擬")
+        collision_group.setStyleSheet(
+            "QGroupBox { font-weight: bold; border: 1px solid #555; "
+            "border-radius: 4px; margin-top: 8px; padding-top: 16px; }"
+            "QGroupBox::title { subcontrol-origin: margin; left: 8px; }"
+        )
+        collision_layout = QFormLayout()
+        collision_layout.setSpacing(4)
+
+        self.dccpp_collision_check = QCheckBox("啟用多機避撞偵測")
+        self.dccpp_collision_check.setChecked(False)
+        self.dccpp_collision_check.setToolTip(
+            "路徑規劃後模擬所有 UAV 同時飛行，\n"
+            "偵測距離過近的衝突並自動解衝突"
+        )
+        collision_layout.addRow(self.dccpp_collision_check)
+
+        self.dccpp_min_separation_spin = QDoubleSpinBox()
+        self.dccpp_min_separation_spin.setRange(10.0, 1000.0)
+        self.dccpp_min_separation_spin.setValue(100.0)
+        self.dccpp_min_separation_spin.setSuffix(" m")
+        self.dccpp_min_separation_spin.setDecimals(0)
+        self.dccpp_min_separation_spin.setToolTip("兩機最小安全距離（公尺）")
+        collision_layout.addRow("最小安全距離:", self.dccpp_min_separation_spin)
+
+        self.dccpp_alt_offset_spin = QDoubleSpinBox()
+        self.dccpp_alt_offset_spin.setRange(10.0, 200.0)
+        self.dccpp_alt_offset_spin.setValue(30.0)
+        self.dccpp_alt_offset_spin.setSuffix(" m")
+        self.dccpp_alt_offset_spin.setDecimals(0)
+        self.dccpp_alt_offset_spin.setToolTip(
+            "衝突時其中一架 UAV 的高度偏移量\n"
+            "例如 30m = 衝突區段升高 30m 通過"
+        )
+        collision_layout.addRow("高度錯開量:", self.dccpp_alt_offset_spin)
+
+        self.dccpp_avoid_strategy_combo = QComboBox()
+        self.dccpp_avoid_strategy_combo.addItem("高度錯開", "altitude")
+        self.dccpp_avoid_strategy_combo.addItem("時間延遲（盤旋等待）", "temporal")
+        self.dccpp_avoid_strategy_combo.setToolTip(
+            "高度錯開：衝突區段升高/降低通過\n"
+            "時間延遲：插入盤旋等待航點，錯開通過時間"
+        )
+        collision_layout.addRow("避撞策略:", self.dccpp_avoid_strategy_combo)
+
+        collision_group.setLayout(collision_layout)
+        layout.addWidget(collision_group)
+
+        # 刪除上一點按鈕
+        del_corner_btn = QPushButton("⌫ 刪除上一個邊界點")
+        del_corner_btn.setStyleSheet(
+            "background-color: #E53935; color: white; "
+            "padding: 6px; font-size: 11px; border-radius: 3px;"
+        )
+        del_corner_btn.setToolTip("刪除最後一個邊界點（等同 Delete 鍵）")
+        del_corner_btn.clicked.connect(self.delete_last_corner_requested.emit)
+        layout.addWidget(del_corner_btn)
+
         gen_btn = QPushButton("DCCPP 最佳化規劃")
         gen_btn.setStyleSheet(
             "background-color: #00695C; color: white; "
@@ -1963,8 +2112,51 @@ class ParameterPanel(QWidget):
         gen_btn.clicked.connect(self._on_dccpp_btn_clicked)
         layout.addWidget(gen_btn)
 
+        # ── 任務匯出模式 ──────────────────────────────────────
+        from PyQt6.QtWidgets import QFormLayout as _FL2
+        export_group = QGroupBox("任務匯出")
+        export_group.setStyleSheet(
+            "QGroupBox{font-weight:bold;border:1px solid #455a64;"
+            "border-radius:4px;margin-top:6px;padding-top:14px;}"
+            "QGroupBox::title{color:#90caf9;}"
+        )
+        export_form = _FL2()
+        export_form.setContentsMargins(6, 4, 6, 4)
+        export_form.setSpacing(4)
+
+        # 匯出模式下拉
+        self.dccpp_export_mode_combo = QComboBox()
+        self.dccpp_export_mode_combo.addItem("常規多旋翼", "copter")
+        self.dccpp_export_mode_combo.addItem("常規固定翼", "plane")
+        self.dccpp_export_mode_combo.addItem("4+1 VTOL 混飛模式", "vtol")
+        self.dccpp_export_mode_combo.setToolTip(
+            "常規多旋翼/固定翼：使用原有匯出邏輯\n"
+            "4+1 VTOL 混飛模式：VTOL_TAKEOFF → FW 巡航 → MC → VTOL_LAND"
+        )
+        self.dccpp_export_mode_combo.currentIndexChanged.connect(
+            self._on_dccpp_export_mode_changed
+        )
+        export_form.addRow("匯出模式:", self.dccpp_export_mode_combo)
+
+        # VTOL 轉換安全高度
+        self.vtol_transition_alt_spin = QSpinBox()
+        self.vtol_transition_alt_spin.setRange(10, 500)
+        self.vtol_transition_alt_spin.setValue(100)
+        self.vtol_transition_alt_spin.setSuffix(" m")
+        self.vtol_transition_alt_spin.setToolTip(
+            "VTOL 垂直起飛爬升到此高度後觸發固定翼轉換；\n"
+            "降落前在此高度轉回多旋翼模式再垂直降落"
+        )
+        self.vtol_transition_alt_label = QLabel("VTOL 轉換高度:")
+        self.vtol_transition_alt_label.setVisible(False)
+        self.vtol_transition_alt_spin.setVisible(False)
+        export_form.addRow(self.vtol_transition_alt_label, self.vtol_transition_alt_spin)
+
+        export_group.setLayout(export_form)
+        layout.addWidget(export_group)
+
         # 匯出按鈕
-        export_btn = QPushButton("匯出 DCCPP 任務")
+        export_btn = QPushButton("匯出群飛任務")
         export_btn.setStyleSheet(
             "background-color: #4A148C; color: white; "
             "font-weight: bold; padding: 8px; font-size: 12px;"
@@ -1973,16 +2165,54 @@ class ParameterPanel(QWidget):
             "將 DCCPP 最佳化結果匯出為每架 UAV 獨立的 .waypoints 檔案\n"
             "格式：QGC WPL 110（Mission Planner 相容）"
         )
-        export_btn.clicked.connect(self.dccpp_export_requested.emit)
+        export_btn.clicked.connect(self._on_dccpp_export_clicked)
         layout.addWidget(export_btn)
 
         return group
 
     def _on_dccpp_vehicle_changed(self):
-        """DCCPP 載具類型切換時，顯示/隱藏轉彎半徑"""
+        """DCCPP 載具類型切換時，顯示/隱藏轉彎半徑與跑道設定"""
+        vtype = self.dccpp_vehicle_combo.currentData()
+        is_fixed = vtype == 'fixed_wing'
+        is_vtol = vtype == 'vtol'
+        # VTOL 巡航段也是固定翼，需要轉彎半徑
+        needs_turn = is_fixed or is_vtol
+        self.dccpp_turn_radius_label.setVisible(needs_turn)
+        self.dccpp_turn_radius_spin.setVisible(needs_turn)
+        # 自動起降：固定翼需要跑道，VTOL 垂直起降不需要
+        self.dccpp_auto_landing_check.setVisible(is_fixed)
+        # 跑道設定：僅固定翼 + 啟用自動起降時才顯示
+        show_rwy = is_fixed and self.dccpp_auto_landing_check.isChecked()
+        self.dccpp_runway_group.setVisible(show_rwy)
+        # VTOL 選中時自動切換匯出模式為 VTOL
+        if is_vtol and hasattr(self, 'dccpp_export_mode_combo'):
+            idx = self.dccpp_export_mode_combo.findData('vtol')
+            if idx >= 0:
+                self.dccpp_export_mode_combo.setCurrentIndex(idx)
+
+    def _on_dccpp_auto_landing_changed(self):
+        """DCCPP 自動起降開關切換時，顯示/隱藏跑道設定"""
         is_fixed = self.dccpp_vehicle_combo.currentData() == 'fixed_wing'
-        self.dccpp_turn_radius_label.setVisible(is_fixed)
-        self.dccpp_turn_radius_spin.setVisible(is_fixed)
+        show_rwy = is_fixed and self.dccpp_auto_landing_check.isChecked()
+        self.dccpp_runway_group.setVisible(show_rwy)
+
+    def _on_dccpp_export_mode_changed(self):
+        """匯出模式切換：VTOL 模式時顯示轉換高度"""
+        is_vtol = self.dccpp_export_mode_combo.currentData() == 'vtol'
+        self.vtol_transition_alt_label.setVisible(is_vtol)
+        self.vtol_transition_alt_spin.setVisible(is_vtol)
+
+    def _on_dccpp_export_clicked(self):
+        """匯出按鈕：根據模式分派到對應的匯出流程"""
+        mode = self.dccpp_export_mode_combo.currentData()
+        if mode == 'vtol':
+            params = {
+                'transition_alt': self.vtol_transition_alt_spin.value(),
+            }
+            self.vtol_export_requested.emit(params)
+        else:
+            # 常規多旋翼 / 固定翼 → 原有匯出邏輯
+            self.dccpp_export_requested.emit()
 
     def _on_dccpp_load_dem(self):
         """選擇 DEM 地形檔案"""
@@ -2012,7 +2242,7 @@ class ParameterPanel(QWidget):
             'speed': self.dccpp_speed_spin.value(),
             'turn_radius': (
                 self.dccpp_turn_radius_spin.value()
-                if vehicle_type == 'fixed_wing' else 0.0
+                if vehicle_type in ('fixed_wing', 'vtol') else 0.0
             ),
             'auto_scan_angle': self.dccpp_auto_scan_check.isChecked(),
             'enable_altitude': self.dccpp_altitude_check.isChecked(),
@@ -2020,12 +2250,554 @@ class ParameterPanel(QWidget):
             'mounting_angle_deg': self.dccpp_mounting_angle_spin.value(),
             'coordination_mode': self.dccpp_coord_combo.currentData(),
             'dem_path': self._dccpp_dem_path,
+            # 跑道 / 起降參數
+            'takeoff_bearing': self.dccpp_takeoff_bearing_spin.value(),
+            'runway_length': self.dccpp_runway_length_spin.value(),
+            'landing_bearing': self.dccpp_landing_bearing_spin.value(),
+            'pattern_alt': self.dccpp_pattern_alt_spin.value(),
+            'landing_rollout': self.dccpp_landing_rollout_spin.value(),
+            'takeoff_spacing': self.dccpp_takeoff_spacing_spin.value(),
+            # 避撞參數
+            'collision_avoidance': self.dccpp_collision_check.isChecked(),
+            'min_separation_m': self.dccpp_min_separation_spin.value(),
+            'alt_offset_m': self.dccpp_alt_offset_spin.value(),
+            'avoid_strategy': self.dccpp_avoid_strategy_combo.currentData(),
         }
 
     def _on_dccpp_btn_clicked(self):
         """點擊「DCCPP 最佳化規劃」按鈕"""
         params = self.get_dccpp_params()
         self.dccpp_coverage_requested.emit(params)
+
+    # ══════════════════════════════════════════════════════════════════
+    #  戰術模組 UI 面板
+    # ══════════════════════════════════════════════════════════════════
+
+    def _create_elevation_slicer_panel(self):
+        """模組一：FSDM 高程切片分析面板"""
+        group = QGroupBox("FSDM 高程切片分析")
+        group.setStyleSheet(
+            "QGroupBox{font-weight:bold;color:#4CAF50;border:1px solid #388E3C;"
+            "border-radius:4px;margin-top:8px;padding-top:14px;}"
+            "QGroupBox::title{subcontrol-position:top left;padding:2px 8px;}"
+        )
+        layout = QFormLayout(group)
+
+        # 最低安全高度滑桿
+        self._elev_min_slider = QSlider(Qt.Orientation.Horizontal)
+        self._elev_min_slider.setRange(0, 5000)
+        self._elev_min_slider.setValue(500)
+        self._elev_min_slider.setTickInterval(100)
+        self._elev_min_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self._elev_min_label = QLabel("500 m")
+        self._elev_min_label.setMinimumWidth(50)
+        min_row = QHBoxLayout()
+        min_row.addWidget(self._elev_min_slider, 1)
+        min_row.addWidget(self._elev_min_label)
+        layout.addRow("最低安全高度:", min_row)
+
+        # 最高突防高度滑桿
+        self._elev_max_slider = QSlider(Qt.Orientation.Horizontal)
+        self._elev_max_slider.setRange(0, 5000)
+        self._elev_max_slider.setValue(1500)
+        self._elev_max_slider.setTickInterval(100)
+        self._elev_max_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self._elev_max_label = QLabel("1500 m")
+        self._elev_max_label.setMinimumWidth(50)
+        max_row = QHBoxLayout()
+        max_row.addWidget(self._elev_max_slider, 1)
+        max_row.addWidget(self._elev_max_label)
+        layout.addRow("最高突防高度:", max_row)
+
+        # 滑桿值更新
+        self._elev_min_slider.valueChanged.connect(
+            lambda v: self._elev_min_label.setText(f"{v} m")
+        )
+        self._elev_max_slider.valueChanged.connect(
+            lambda v: self._elev_max_label.setText(f"{v} m")
+        )
+
+        # 啟用按鈕
+        btn_row = QHBoxLayout()
+        apply_btn = QPushButton("啟用切片分析")
+        apply_btn.setStyleSheet(
+            "background-color:#2E7D32;color:white;font-weight:bold;"
+            "padding:6px;border-radius:3px;"
+        )
+        apply_btn.setToolTip(
+            "將地形依設定的高度區間分色渲染\n"
+            "綠色 = 盲區走廊（安全飛行區間）\n"
+            "暗色 = 障礙地形（超出安全範圍）"
+        )
+        apply_btn.clicked.connect(self._on_elev_slicer_apply)
+        btn_row.addWidget(apply_btn)
+
+        clear_btn = QPushButton("清除切片")
+        clear_btn.setStyleSheet(
+            "background-color:#455A64;color:white;padding:6px;border-radius:3px;"
+        )
+        clear_btn.clicked.connect(self.elevation_slicer_cleared.emit)
+        btn_row.addWidget(clear_btn)
+        layout.addRow(btn_row)
+
+        return group
+
+    def _on_elev_slicer_apply(self):
+        """高程切片：取得滑桿值並發送信號"""
+        min_alt = float(self._elev_min_slider.value())
+        max_alt = float(self._elev_max_slider.value())
+        if min_alt >= max_alt:
+            logger.warning("[FSDM] 最低高度必須小於最高高度")
+            return
+        self.elevation_slicer_changed.emit(min_alt, max_alt)
+
+    def _create_sar_heatmap_panel(self):
+        """模組二：FOV 光錐 + SAR 搜救機率熱力圖面板"""
+        group = QGroupBox("SAR 搜救機率熱力圖")
+        group.setStyleSheet(
+            "QGroupBox{font-weight:bold;color:#FF9800;border:1px solid #F57C00;"
+            "border-radius:4px;margin-top:8px;padding-top:14px;}"
+            "QGroupBox::title{subcontrol-position:top left;padding:2px 8px;}"
+        )
+        layout = QFormLayout(group)
+
+        # FOV 光錐開關
+        self._fov_cone_check = QCheckBox("啟用 FOV 光錐")
+        self._fov_cone_check.setToolTip(
+            "在 UAV 下方投射視野光錐\n"
+            "光錐姿態與 UAV Pitch/Roll/Yaw 同步"
+        )
+        self._fov_cone_check.stateChanged.connect(
+            lambda s: self.fov_cone_toggle_requested.emit(s == Qt.CheckState.Checked.value)
+        )
+        layout.addRow(self._fov_cone_check)
+
+        # FOV 半徑
+        self._fov_radius_spin = QDoubleSpinBox()
+        self._fov_radius_spin.setRange(5.0, 500.0)
+        self._fov_radius_spin.setValue(50.0)
+        self._fov_radius_spin.setSuffix(" m")
+        self._fov_radius_spin.setDecimals(0)
+        self._fov_radius_spin.setToolTip("光錐地面投影半徑（公尺）")
+        layout.addRow("FOV 半徑:", self._fov_radius_spin)
+
+        # 掃描有效寬度 W（用於機率計算）
+        self._sweep_width_spin = QDoubleSpinBox()
+        self._sweep_width_spin.setRange(1.0, 500.0)
+        self._sweep_width_spin.setValue(50.0)
+        self._sweep_width_spin.setSuffix(" m")
+        self._sweep_width_spin.setDecimals(0)
+        self._sweep_width_spin.setToolTip(
+            "掃描有效寬度 W（公尺）\n"
+            "影響探測機率：P = 1 - exp(-W × q)"
+        )
+        layout.addRow("掃描寬度 W:", self._sweep_width_spin)
+
+        # 探測品質 q
+        self._detect_quality_spin = QDoubleSpinBox()
+        self._detect_quality_spin.setRange(0.01, 1.0)
+        self._detect_quality_spin.setValue(0.8)
+        self._detect_quality_spin.setSingleStep(0.05)
+        self._detect_quality_spin.setDecimals(2)
+        self._detect_quality_spin.setToolTip(
+            "探測品質 q (0~1)\n"
+            "影響單次探測機率：P = 1 - exp(-W × q)"
+        )
+        layout.addRow("探測品質 q:", self._detect_quality_spin)
+
+        # 網格解析度
+        self._heatmap_grid_spin = QSpinBox()
+        self._heatmap_grid_spin.setRange(5, 100)
+        self._heatmap_grid_spin.setValue(20)
+        self._heatmap_grid_spin.setToolTip("網格行列數（越大越精細，但消耗越多）")
+        layout.addRow("網格解析度:", self._heatmap_grid_spin)
+
+        # 初始化 / 重置 / 清除按鈕列
+        btn_row = QHBoxLayout()
+
+        init_btn = QPushButton("初始化熱力圖")
+        init_btn.setStyleSheet(
+            "background-color:#E65100;color:white;font-weight:bold;"
+            "padding:6px;border-radius:3px;"
+        )
+        init_btn.setToolTip(
+            "在目前邊界區域內建立搜救機率網格\n"
+            "紅色 = 高殘餘機率（未搜索）\n"
+            "藍色 = 已充分搜索"
+        )
+        init_btn.clicked.connect(self._on_sar_heatmap_init)
+        btn_row.addWidget(init_btn)
+
+        reset_btn = QPushButton("重置")
+        reset_btn.setStyleSheet(
+            "background-color:#F57C00;color:white;padding:6px;border-radius:3px;"
+        )
+        reset_btn.setToolTip("保留網格但重設所有 COS 為 0")
+        reset_btn.clicked.connect(self.sar_heatmap_reset_requested.emit)
+        btn_row.addWidget(reset_btn)
+
+        clear_btn = QPushButton("清除")
+        clear_btn.setStyleSheet(
+            "background-color:#455A64;color:white;padding:6px;border-radius:3px;"
+        )
+        clear_btn.clicked.connect(self.sar_heatmap_clear_requested.emit)
+        btn_row.addWidget(clear_btn)
+
+        layout.addRow(btn_row)
+
+        return group
+
+    def _on_sar_heatmap_init(self):
+        """SAR 熱力圖初始化：發送參數"""
+        params = {
+            'fov_radius': self._fov_radius_spin.value(),
+            'sweep_width': self._sweep_width_spin.value(),
+            'quality': self._detect_quality_spin.value(),
+            'grid_size': self._heatmap_grid_spin.value(),
+        }
+        self.sar_heatmap_init_requested.emit(params)
+
+    def _create_radar_rcs_panel(self):
+        """模組三：雷達威脅穹頂 + RCS 敏感度面板"""
+        group = QGroupBox("雷達威脅穹頂 / RCS 敏感度")
+        group.setStyleSheet(
+            "QGroupBox{font-weight:bold;color:#F44336;border:1px solid #D32F2F;"
+            "border-radius:4px;margin-top:8px;padding-top:14px;}"
+            "QGroupBox::title{subcontrol-position:top left;padding:2px 8px;}"
+        )
+        layout = QFormLayout(group)
+
+        # 雷達緯度
+        self._radar_lat_spin = QDoubleSpinBox()
+        self._radar_lat_spin.setRange(-90.0, 90.0)
+        self._radar_lat_spin.setValue(23.70)
+        self._radar_lat_spin.setDecimals(6)
+        self._radar_lat_spin.setToolTip("敵方防空雷達位置（緯度）")
+        layout.addRow("雷達緯度:", self._radar_lat_spin)
+
+        # 雷達經度
+        self._radar_lon_spin = QDoubleSpinBox()
+        self._radar_lon_spin.setRange(-180.0, 180.0)
+        self._radar_lon_spin.setValue(120.42)
+        self._radar_lon_spin.setDecimals(6)
+        self._radar_lon_spin.setToolTip("敵方防空雷達位置（經度）")
+        layout.addRow("雷達經度:", self._radar_lon_spin)
+
+        # 雷達探測半徑
+        self._radar_radius_spin = QDoubleSpinBox()
+        self._radar_radius_spin.setRange(100.0, 100000.0)
+        self._radar_radius_spin.setValue(5000.0)
+        self._radar_radius_spin.setSuffix(" m")
+        self._radar_radius_spin.setDecimals(0)
+        self._radar_radius_spin.setSingleStep(500.0)
+        self._radar_radius_spin.setToolTip("雷達探測半徑（公尺）")
+        layout.addRow("探測半徑:", self._radar_radius_spin)
+
+        # 雷達名稱
+        from PyQt6.QtWidgets import QLineEdit
+        self._radar_name_edit = QLineEdit("SAM-1")
+        self._radar_name_edit.setToolTip("雷達識別名稱")
+        self._radar_name_edit.setMaxLength(20)
+        layout.addRow("雷達名稱:", self._radar_name_edit)
+
+        # RCS 即時渲染開關
+        self._rcs_check = QCheckBox("啟用 RCS 敏感度渲染")
+        self._rcs_check.setToolTip(
+            "即時計算 UAV 相對雷達的 RCS 威脅等級\n"
+            "紅色 = 高被偵測風險\n"
+            "藍色 = 安全距離/角度"
+        )
+        self._rcs_check.stateChanged.connect(
+            lambda s: self.rcs_toggle_requested.emit(s == Qt.CheckState.Checked.value)
+        )
+        layout.addRow(self._rcs_check)
+
+        # 按鈕列
+        btn_row = QHBoxLayout()
+
+        sim_btn = QPushButton("模擬雷達威脅掃描")
+        sim_btn.setStyleSheet(
+            "background-color:#C62828;color:white;font-weight:bold;"
+            "padding:6px;border-radius:3px;"
+        )
+        sim_btn.setToolTip(
+            "在地圖上建立雷達威脅穹頂\n"
+            "並啟動脈衝掃描動畫"
+        )
+        sim_btn.clicked.connect(self._on_radar_sim)
+        btn_row.addWidget(sim_btn)
+
+        clear_btn = QPushButton("清除雷達")
+        clear_btn.setStyleSheet(
+            "background-color:#455A64;color:white;padding:6px;border-radius:3px;"
+        )
+        clear_btn.clicked.connect(self.radar_clear_requested.emit)
+        btn_row.addWidget(clear_btn)
+
+        layout.addRow(btn_row)
+
+        return group
+
+    def _on_radar_sim(self):
+        """模擬雷達威脅掃描按鈕"""
+        params = {
+            'lat': self._radar_lat_spin.value(),
+            'lon': self._radar_lon_spin.value(),
+            'radius': self._radar_radius_spin.value(),
+            'name': self._radar_name_edit.text().strip() or 'Radar',
+        }
+        self.radar_sim_requested.emit(params)
+
+    def get_fov_radius(self) -> float:
+        """取得目前 FOV 半徑設定值"""
+        return self._fov_radius_spin.value()
+
+    def is_fov_cone_enabled(self) -> bool:
+        """FOV 光錐是否啟用"""
+        return self._fov_cone_check.isChecked()
+
+    def is_rcs_enabled(self) -> bool:
+        """RCS 渲染是否啟用"""
+        return self._rcs_check.isChecked()
+
+    # ─────────────────────────────────────────────────────────────────
+    # 蜂群打擊控制面板
+    # ─────────────────────────────────────────────────────────────────
+    def _create_strike_command_panel(self) -> QGroupBox:
+        """蜂群分佈式協同打擊與末端俯衝 (Swarm Distributed Strike & Terminal Dive)"""
+        group = QGroupBox("UCAV 蜂群協同打擊")
+        group.setStyleSheet(
+            "QGroupBox{font-weight:bold;color:#F44336;border:1px solid #D32F2F;"
+            "border-radius:4px;margin-top:8px;padding-top:14px;}"
+            "QGroupBox::title{subcontrol-position:top left;padding:2px 8px;}"
+        )
+        layout = QVBoxLayout(group)
+        layout.setSpacing(8)
+
+        # ── 說明 ─────────────────────────────────────────────────────
+        desc = QLabel(
+            "多架固定翼巡飛彈 (Loitering Munitions) 在巡航高度集結後，"
+            "依匈牙利演算法分配地面目標，四散飛行並在末端執行大角度俯衝攻擊。"
+        )
+        desc.setWordWrap(True)
+        desc.setStyleSheet("color:#BDBDBD; font-size:10px; padding:4px;")
+        layout.addWidget(desc)
+
+        # ── 標記目標按鈕 ─────────────────────────────────────────────
+        self._strike_mark_btn = QPushButton("🎯 標記多重打擊目標 (Mark Targets)")
+        self._strike_mark_btn.setStyleSheet(
+            "QPushButton{background-color:#1565C0;color:white;font-weight:bold;"
+            "padding:8px;border-radius:4px;font-size:12px;}"
+            "QPushButton:hover{background-color:#1976D2;}"
+            "QPushButton:checked{background-color:#E65100;}"
+        )
+        self._strike_mark_btn.setCheckable(True)
+        self._strike_mark_btn.setToolTip(
+            "啟用後在 3D 地圖上左鍵點擊新增敵方地面目標\n"
+            "再次點擊結束標記模式"
+        )
+        self._strike_mark_btn.clicked.connect(
+            lambda checked: self.strike_mark_targets_requested.emit()
+        )
+        layout.addWidget(self._strike_mark_btn)
+
+        # ── 目標計數 + 自動生成提示 ─────────────────────────────────
+        self._strike_target_count = QLabel("已標記目標: 0 個")
+        self._strike_target_count.setStyleSheet(
+            "color:#FF5252; font-weight:bold; font-size:11px; padding:2px 4px;"
+        )
+        layout.addWidget(self._strike_target_count)
+
+        auto_hint = QLabel(
+            "N 個目標 = 自動生成 N 架 UCAV\n"
+            "每架 UCAV 從不同方位角進場、不同高度巡航\n"
+            "航線完全錯開，不會交叉"
+        )
+        auto_hint.setWordWrap(True)
+        auto_hint.setStyleSheet(
+            "background-color:rgba(33,150,243,0.08); color:#64B5F6;"
+            "padding:6px; border-radius:4px; font-size:10px;"
+        )
+        layout.addWidget(auto_hint)
+
+        # ── 分隔線 ──────────────────────────────────────────────────
+        sep1 = QFrame()
+        sep1.setFrameShape(QFrame.Shape.HLine)
+        sep1.setStyleSheet("color:#424242;")
+        layout.addWidget(sep1)
+
+        # ── 參數區域 ─────────────────────────────────────────────────
+        param_form = QFormLayout()
+        param_form.setSpacing(6)
+
+        # 巡航高度（基準）
+        self._strike_cruise_alt = QDoubleSpinBox()
+        self._strike_cruise_alt.setRange(50.0, 5000.0)
+        self._strike_cruise_alt.setValue(500.0)
+        self._strike_cruise_alt.setSuffix(" m")
+        self._strike_cruise_alt.setDecimals(0)
+        self._strike_cruise_alt.setToolTip(
+            "第 1 架 UCAV 的基準巡航高度\n"
+            "後續各機依「高度錯層」遞增"
+        )
+        param_form.addRow("基準巡航高度:", self._strike_cruise_alt)
+
+        # 巡航速度
+        self._strike_cruise_speed = QDoubleSpinBox()
+        self._strike_cruise_speed.setRange(10.0, 300.0)
+        self._strike_cruise_speed.setValue(60.0)
+        self._strike_cruise_speed.setSuffix(" m/s")
+        self._strike_cruise_speed.setDecimals(1)
+        self._strike_cruise_speed.setToolTip("UCAV 巡航速度")
+        param_form.addRow("巡航速度:", self._strike_cruise_speed)
+
+        # 高度錯層間距
+        self._strike_alt_step = QDoubleSpinBox()
+        self._strike_alt_step.setRange(0.0, 200.0)
+        self._strike_alt_step.setValue(30.0)
+        self._strike_alt_step.setSuffix(" m")
+        self._strike_alt_step.setDecimals(0)
+        self._strike_alt_step.setToolTip(
+            "各 UCAV 巡航高度的遞增間距\n"
+            "第 i 架 UCAV 高度 = 基準高度 + i × 錯層間距\n"
+            "例：500, 530, 560, 590 m ..."
+        )
+        self._strike_alt_step.setStyleSheet(
+            "QDoubleSpinBox{font-weight:bold;color:#42A5F5;}"
+        )
+        param_form.addRow("高度錯層間距:", self._strike_alt_step)
+
+        # 高度預覽標籤
+        self._strike_alt_preview = QLabel("")
+        self._strike_alt_preview.setStyleSheet(
+            "color:#81D4FA; font-size:10px; padding:2px 4px;"
+        )
+        self._strike_alt_preview.setWordWrap(True)
+        param_form.addRow("", self._strike_alt_preview)
+
+        # 高度預覽自動更新
+        self._strike_cruise_alt.valueChanged.connect(self._update_strike_alt_preview)
+        self._strike_alt_step.valueChanged.connect(self._update_strike_alt_preview)
+
+        # 最大俯衝角
+        self._strike_max_dive_angle = QDoubleSpinBox()
+        self._strike_max_dive_angle.setRange(10.0, 89.0)
+        self._strike_max_dive_angle.setValue(45.0)
+        self._strike_max_dive_angle.setSuffix(" °")
+        self._strike_max_dive_angle.setDecimals(1)
+        self._strike_max_dive_angle.setToolTip(
+            "固定翼末端俯衝時的物理極限角度\n"
+            "角度越大，俯衝越陡峭（最大 89°）"
+        )
+        self._strike_max_dive_angle.setStyleSheet(
+            "QDoubleSpinBox{font-weight:bold;color:#FF6D00;}"
+        )
+        param_form.addRow("最大俯衝角 (θ_max):", self._strike_max_dive_angle)
+
+        # 俯衝起始距離
+        self._strike_dive_dist = QDoubleSpinBox()
+        self._strike_dive_dist.setRange(100.0, 5000.0)
+        self._strike_dive_dist.setValue(800.0)
+        self._strike_dive_dist.setSuffix(" m")
+        self._strike_dive_dist.setDecimals(0)
+        self._strike_dive_dist.setToolTip(
+            "距離目標多遠時開始從巡航高度轉為俯衝姿態\n"
+            "若此距離不足以滿足最大俯衝角，系統會自動後推"
+        )
+        self._strike_dive_dist.setStyleSheet(
+            "QDoubleSpinBox{font-weight:bold;color:#FF6D00;}"
+        )
+        param_form.addRow("俯衝起始距離:", self._strike_dive_dist)
+
+        # 動畫速度
+        self._strike_anim_speed = QDoubleSpinBox()
+        self._strike_anim_speed.setRange(0.5, 20.0)
+        self._strike_anim_speed.setValue(3.0)
+        self._strike_anim_speed.setSuffix(" x")
+        self._strike_anim_speed.setDecimals(1)
+        self._strike_anim_speed.setToolTip("動畫播放速度倍率")
+        param_form.addRow("動畫速度:", self._strike_anim_speed)
+
+        layout.addLayout(param_form)
+
+        # ── 分隔線 ──────────────────────────────────────────────────
+        sep2 = QFrame()
+        sep2.setFrameShape(QFrame.Shape.HLine)
+        sep2.setStyleSheet("color:#424242;")
+        layout.addWidget(sep2)
+
+        # ── 執行蜂群打擊按鈕 ─────────────────────────────────────────
+        self._strike_execute_btn = QPushButton("EXECUTE SWARM STRIKE")
+        self._strike_execute_btn.setStyleSheet(
+            "QPushButton{"
+            "  background-color:#D32F2F;color:white;font-weight:bold;"
+            "  font-size:14px;padding:12px;border-radius:6px;"
+            "  border:2px solid #B71C1C;"
+            "  letter-spacing:2px;"
+            "}"
+            "QPushButton:hover{background-color:#F44336;border-color:#D32F2F;}"
+            "QPushButton:pressed{background-color:#B71C1C;}"
+            "QPushButton:disabled{background-color:#616161;border-color:#424242;color:#9E9E9E;}"
+        )
+        self._strike_execute_btn.setToolTip(
+            "觸發後台演算法進行 UAV-目標分配\n"
+            "並在 3D 地圖上播放俯衝攻擊動畫"
+        )
+        self._strike_execute_btn.clicked.connect(self._on_strike_execute)
+        layout.addWidget(self._strike_execute_btn)
+
+        # ── 清除按鈕 ─────────────────────────────────────────────────
+        clear_btn = QPushButton("清除打擊視覺化")
+        clear_btn.setStyleSheet(
+            "QPushButton{background-color:#455A64;color:white;padding:6px;"
+            "border-radius:3px;}"
+            "QPushButton:hover{background-color:#546E7A;}"
+        )
+        clear_btn.clicked.connect(self.strike_clear_requested.emit)
+        layout.addWidget(clear_btn)
+
+        return group
+
+    def _on_strike_execute(self):
+        """蜂群打擊執行按鈕"""
+        params = {
+            'cruise_alt': self._strike_cruise_alt.value(),
+            'cruise_speed': self._strike_cruise_speed.value(),
+            'altitude_step': self._strike_alt_step.value(),
+            'max_dive_angle': self._strike_max_dive_angle.value(),
+            'dive_initiation_dist': self._strike_dive_dist.value(),
+            'anim_speed': self._strike_anim_speed.value(),
+        }
+        self.strike_execute_requested.emit(params)
+        logger.info(f'[Strike] 執行蜂群打擊: {params}')
+
+    def update_strike_target_count(self, count: int):
+        """更新打擊目標計數顯示"""
+        self._strike_target_count.setText(
+            f"已標記目標: {count} 個 → 自動生成 {count} 架 UCAV"
+            if count > 0 else "已標記目標: 0 個"
+        )
+        self._strike_execute_btn.setEnabled(count > 0)
+        self._strike_target_n = count
+        self._update_strike_alt_preview()
+
+    def _update_strike_alt_preview(self):
+        """更新高度錯層預覽"""
+        n = getattr(self, '_strike_target_n', 0)
+        if n <= 0:
+            self._strike_alt_preview.setText("")
+            return
+        base = self._strike_cruise_alt.value()
+        step = self._strike_alt_step.value()
+        alts = [f'{base + i * step:.0f}' for i in range(min(n, 8))]
+        suffix = ' ...' if n > 8 else ''
+        self._strike_alt_preview.setText(
+            f'各機高度: {", ".join(alts)}{suffix} m'
+        )
+
+    def set_strike_marking_mode(self, active: bool):
+        """設定標記模式按鈕狀態"""
+        self._strike_mark_btn.setChecked(active)
 
     def reset_to_default(self):
         """重置為預設參數"""

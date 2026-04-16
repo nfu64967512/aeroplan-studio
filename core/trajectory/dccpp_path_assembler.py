@@ -642,6 +642,7 @@ class DCCPPPathAssembler:
         downwind_offset_m: float = 200.0,
         pattern_leg_length_m: float = 300.0,
         final_approach_dist_m: float = 400.0,
+        landing_rollout_m: float = 0.0,
     ) -> List[AssembledWaypoint]:
         """
         生成五邊進場降落路徑航點（右手飛行模式）。
@@ -651,6 +652,8 @@ class DCCPPPathAssembler:
           [1] 下風轉基邊
           [2..N-1] 基邊 → 最終進場下降
           [N] 觸地點（NAV_LAND）
+
+        landing_rollout_m: 觸地後滑行煞車距離，觸地點會提前此距離。
 
         返回含 SegmentLabel.LANDING 的航點序列。
         """
@@ -662,8 +665,15 @@ class DCCPPPathAssembler:
         # 右偏方向（右手模式）
         right_hdg = (approach_hdg + 90.0) % 360.0
 
-        # 觸地點
-        td_lat, td_lon = landing_lat, landing_lon
+        # 觸地點：若有滑行距離則提前
+        rollout = landing_rollout_m or 0.0
+        if rollout > 0:
+            td_lat, td_lon = self._offset_latlon(
+                landing_lat, landing_lon, rollout,
+                (approach_hdg + 180.0) % 360.0  # 進場反方向 = 提前
+            )
+        else:
+            td_lat, td_lon = landing_lat, landing_lon
 
         # 最終進場起點 (FAF)
         faf_lat, faf_lon = self._offset_latlon(

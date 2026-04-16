@@ -41,6 +41,11 @@ class MAVCommand(IntEnum):
     DO_MOUNT_CONTROL = 205     # 雲台控制
     DO_SET_CAM_TRIGG_DIST = 206 # 設定相機觸發距離
 
+    # VTOL (QuadPlane) 專用命令
+    NAV_VTOL_TAKEOFF = 84       # VTOL 垂直起飛
+    NAV_VTOL_LAND = 85          # VTOL 垂直降落
+    DO_VTOL_TRANSITION = 3000   # VTOL 飛行模式轉換 (param1: 3=MC, 4=FW)
+
 
 class CoordinateFrame(IntEnum):
     """座標系枚舉"""
@@ -309,12 +314,14 @@ class WaypointSequence:
         返回:
             導航航點列表
         """
-        return [wp for wp in self.waypoints 
+        return [wp for wp in self.waypoints
                if wp.command in (MAVCommand.NAV_WAYPOINT,
                                MAVCommand.NAV_TAKEOFF,
                                MAVCommand.NAV_LAND,
                                MAVCommand.NAV_LOITER_TIME,
-                               MAVCommand.NAV_RETURN_TO_LAUNCH)]
+                               MAVCommand.NAV_RETURN_TO_LAUNCH,
+                               MAVCommand.NAV_VTOL_TAKEOFF,
+                               MAVCommand.NAV_VTOL_LAND)]
     
     def calculate_total_distance(self) -> float:
         """
@@ -614,3 +621,109 @@ def create_condition_yaw_command(heading: float, yaw_speed: float,
         param1=heading,
         param2=yaw_speed
     )
+
+
+# ==========================================
+# VTOL (QuadPlane) 航點工廠函數
+# ==========================================
+def create_vtol_takeoff_waypoint(lat: float, lon: float, alt: float,
+                                 seq: int = 1) -> Waypoint:
+    """創建 VTOL 垂直起飛航點 (MAV_CMD_NAV_VTOL_TAKEOFF = 84)
+
+    參數:
+        lat, lon: 座標
+        alt: 起飛後目標高度（公尺）
+        seq: 序列號
+    """
+    return Waypoint(
+        seq=seq,
+        command=MAVCommand.NAV_VTOL_TAKEOFF,
+        lat=lat,
+        lon=lon,
+        alt=alt,
+    )
+
+
+def create_vtol_land_waypoint(lat: float, lon: float, alt: float = 0.0,
+                               seq: int = 0) -> Waypoint:
+    """創建 VTOL 垂直降落航點 (MAV_CMD_NAV_VTOL_LAND = 85)
+
+    參數:
+        lat, lon: 降落座標
+        alt: 降落高度（通常 0）
+        seq: 序列號
+    """
+    return Waypoint(
+        seq=seq,
+        command=MAVCommand.NAV_VTOL_LAND,
+        lat=lat,
+        lon=lon,
+        alt=alt,
+    )
+
+
+def create_vtol_transition_command(state: int, seq: int) -> Waypoint:
+    """創建 VTOL 轉換命令 (MAV_CMD_DO_VTOL_TRANSITION = 3000)
+
+    參數:
+        state: 3 = MAV_VTOL_STATE_MC（多旋翼）, 4 = MAV_VTOL_STATE_FW（固定翼）
+        seq: 序列號
+    """
+    return Waypoint(
+        seq=seq,
+        command=MAVCommand.DO_VTOL_TRANSITION,
+        param1=float(state),
+        frame=CoordinateFrame.MISSION,
+    )
+
+
+def export_vtol_mission(
+    home_lat: float, home_lon: float,
+    waypoints_lla: List[Tuple[float, float, float]],
+    takeoff_alt: float = 30.0,
+    land_lat: Optional[float] = None,
+    land_lon: Optional[float] = None,
+) -> WaypointSequence:
+    """產生完整 VTOL (QuadPlane) 任務航點序列。
+
+    流程：VTOL_TAKEOFF → 轉換 FW → 巡航航點 → 轉換 MC → VTOL_LAND
+
+    參數:
+        home_lat, home_lon: 起飛點座標
+        waypoints_lla: 巡航航點 [(lat, lon, alt), ...]
+        takeoff_alt: 起飛目標高度（公尺）
+        land_lat, land_lon: 降落座標（預設 = 起飛點）
+
+    回傳:
+        WaypointSequence — 可直接上傳飛控
+    """
+    seq = 0
+    wps: List[Waypoint] = []
+
+    # 0. Home
+    wps.append(create_home_waypoint(home_lat, home_lon, 0.0))
+    seq += 1
+
+    # 1. VTOL 垂直起飛
+    wps.append(create_vtol_takeoff_waypoint(home_lat, home_lon, takeoff_alt, seq=seq))
+    seq += 1
+
+    # 2. 轉換為固定翼巡航（DO_VTOL_TRANSITION → FW, state=4）
+    wps.append(create_vtol_transition_command(state=4, seq=seq))
+    seq += 1
+
+    # 3. 巡航航點
+    for lat, lon, alt in waypoints_lla:
+        wps.append(create_navigation_waypoint(lat, lon, alt, seq=seq))
+        seq += 1
+
+    # 4. 轉換回多旋翼（DO_VTOL_TRANSITION → MC, state=3）
+    wps.append(create_vtol_transition_command(state=3, seq=seq))
+    seq += 1
+
+    # 5. VTOL 垂直降落
+    _land_lat = land_lat if land_lat is not None else home_lat
+    _land_lon = land_lon if land_lon is not None else home_lon
+    wps.append(create_vtol_land_waypoint(_land_lat, _land_lon, 0.0, seq=seq))
+
+    return WaypointSequence(wps)

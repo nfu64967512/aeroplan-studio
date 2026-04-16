@@ -238,6 +238,7 @@ class SITLHud(QWidget):
     cmd_param_set  = pyqtSignal(str, float, str)   # name, value, ptype
     cmd_param_get  = pyqtSignal(str)
     cmd_params_batch = pyqtSignal(list)            # [(name,value,ptype), ...]
+    cmd_vtol_transition = pyqtSignal(int)          # VTOL 轉換: 3=MC, 4=FW
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -298,7 +299,7 @@ class SITLHud(QWidget):
         lrow.addWidget(self._lbl('內建 SITL:', '#ffb74d', bold=True))
 
         self.vehicle_combo = QComboBox()
-        self.vehicle_combo.addItems(['PLANE (固定翼)', 'COPTER (多旋翼)'])
+        self.vehicle_combo.addItems(['PLANE (固定翼)', 'COPTER (多旋翼)', 'VTOL (垂直起降)'])
         self.vehicle_combo.setStyleSheet(
             'QComboBox{background:#0d1117;color:#cfd8dc;border:1px solid #37475f;'
             'border-radius:4px;padding:3px 6px;font-size:11px;}'
@@ -459,6 +460,29 @@ class SITLHud(QWidget):
             b.clicked.connect(lambda _, m=mode: self.cmd_set_mode.emit(m))
             mode_row2.addWidget(b)
         cmd_outer.addLayout(mode_row2)
+
+        # VTOL QuadPlane 模式列
+        vtol_row = QHBoxLayout()
+        vtol_row.setSpacing(4)
+        # QuadPlane 飛行模式按鈕
+        for mode in ['QHOVER', 'QLOITER', 'QLAND', 'QRTL']:
+            b = self._cmd_btn(mode, '#37474f')
+            b.clicked.connect(lambda _, m=mode: self.cmd_set_mode.emit(m))
+            vtol_row.addWidget(b)
+        cmd_outer.addLayout(vtol_row)
+
+        # VTOL 轉換按鈕列
+        trans_row = QHBoxLayout()
+        trans_row.setSpacing(4)
+        self.btn_vtol_mc = self._cmd_btn('轉換為多旋翼 (MC Mode)', '#00695C')
+        self.btn_vtol_mc.setToolTip('MAV_CMD_DO_VTOL_TRANSITION → state=3 (MC)')
+        self.btn_vtol_mc.clicked.connect(lambda: self.cmd_vtol_transition.emit(3))
+        self.btn_vtol_fw = self._cmd_btn('轉換為固定翼 (FW Mode)', '#1565C0')
+        self.btn_vtol_fw.setToolTip('MAV_CMD_DO_VTOL_TRANSITION → state=4 (FW)')
+        self.btn_vtol_fw.clicked.connect(lambda: self.cmd_vtol_transition.emit(4))
+        trans_row.addWidget(self.btn_vtol_mc)
+        trans_row.addWidget(self.btn_vtol_fw)
+        cmd_outer.addLayout(trans_row)
 
         # 上傳任務
         self.btn_upload = self._cmd_btn('📤 上傳當前任務到 SITL', '#6A1B9A')
@@ -660,7 +684,12 @@ class SITLHud(QWidget):
     def _on_launch_clicked(self):
         if not self._sitl_running:
             txt = self.vehicle_combo.currentText()
-            vehicle = 'PLANE' if 'PLANE' in txt else 'COPTER'
+            if 'VTOL' in txt:
+                vehicle = 'VTOL'
+            elif 'PLANE' in txt:
+                vehicle = 'PLANE'
+            else:
+                vehicle = 'COPTER'
             count = self.count_spin.value()
             self.launch_sitl_requested.emit(vehicle, count)
         else:
@@ -670,7 +699,17 @@ class SITLHud(QWidget):
         self._sitl_running = True
         self.btn_launch.setText('⏹ 停止')
         self.btn_launch.setStyleSheet(self._btn_style('#c62828'))
-        self.lbl_status.setText(f'🚀 SITL {vehicle} 已啟動 → {conn_str}')
+        # VTOL 特殊提示：顯示使用 ArduPlane 核心 + QuadPlane 物理模型
+        # vehicle 可能是 'VTOL' 或 'VTOL x2' 等格式
+        if 'VTOL' in vehicle.upper():
+            self.lbl_status.setStyleSheet('color:#FFD700;font-size:10px;padding:3px;')
+            self.lbl_status.setText(
+                f'🚀 VTOL SITL 已啟動 → {conn_str}\n'
+                f'    使用 ArduPlane 核心模擬 VTOL QuadPlane\n'
+                f'    (ArduPlane.exe --model quadplane)'
+            )
+        else:
+            self.lbl_status.setText(f'🚀 SITL {vehicle} 已啟動 → {conn_str}')
         # 自動填入連線字串
         self.preset_combo.setEditText(conn_str)
 

@@ -1033,6 +1033,10 @@ class SwarmCoordinator:
         mounting_angle_deg: float = 0.0,
         dem_path: str = "",
         coordination_mode: str = "uncoordinated",
+        runway_bearing_deg: float | None = None,
+        runway_length_m: float | None = None,
+        landing_bearing_deg: float | None = None,
+        landing_rollout_m: float = 0.0,
     ) -> Dict[str, Any]:
         """
         使用論文 DCCPP 完整演算法進行多區域多 UAV 覆蓋路徑規劃。
@@ -1285,29 +1289,38 @@ class SwarmCoordinator:
                         # 為固定翼自動補上 TAKEOFF / LANDING，
                         # 讓 ArduPlane AUTO 能完整執行（NAV_TAKEOFF→任務→NAV_LAND）
                         if u.turn_radius > 0 and built.waypoints:
-                            first_wp = built.waypoints[0]
-                            takeoff_bearing = math.degrees(math.atan2(
-                                (first_wp.lon - u.position[1]) *
-                                math.cos(math.radians(u.position[0])),
-                                first_wp.lat - u.position[0],
-                            )) % 360.0
+                            # 使用使用者設定的跑道方向；未設定時才自動計算
+                            if runway_bearing_deg is not None:
+                                takeoff_bearing = float(runway_bearing_deg)
+                            else:
+                                first_wp = built.waypoints[0]
+                                takeoff_bearing = math.degrees(math.atan2(
+                                    (first_wp.lon - u.position[1]) *
+                                    math.cos(math.radians(u.position[0])),
+                                    first_wp.lat - u.position[0],
+                                )) % 360.0
                             builder.prepend_takeoff(
                                 built,
                                 home_lat=u.position[0],
                                 home_lon=u.position[1],
                                 runway_bearing_compass_deg=takeoff_bearing,
+                                climb_distance_m=runway_length_m,
                             )
-                            last_wp = built.waypoints[-1]
-                            landing_bearing = math.degrees(math.atan2(
-                                (u.position[1] - last_wp.lon) *
-                                math.cos(math.radians(last_wp.lat)),
-                                u.position[0] - last_wp.lat,
-                            )) % 360.0
+                            if landing_bearing_deg is not None:
+                                _landing_bearing = float(landing_bearing_deg)
+                            else:
+                                last_wp = built.waypoints[-1]
+                                _landing_bearing = math.degrees(math.atan2(
+                                    (u.position[1] - last_wp.lon) *
+                                    math.cos(math.radians(last_wp.lat)),
+                                    u.position[0] - last_wp.lat,
+                                )) % 360.0
                             builder.append_landing(
                                 built,
                                 home_lat=u.position[0],
                                 home_lon=u.position[1],
-                                runway_bearing_compass_deg=landing_bearing,
+                                runway_bearing_compass_deg=_landing_bearing,
+                                landing_rollout_m=float(landing_rollout_m or 0.0),
                             )
                         all_assembled[uid] = built
 

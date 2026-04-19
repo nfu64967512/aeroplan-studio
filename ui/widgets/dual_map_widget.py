@@ -40,6 +40,7 @@ class DualMapWidget(QWidget):
     circle_defined    = pyqtSignal(float, float, float)
     nfz_polygon_drawn = pyqtSignal(list)
     nfz_circle_drawn  = pyqtSignal(float, float, float)
+    strike_target_added = pyqtSignal(float, float)  # 打擊目標標記
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -146,6 +147,7 @@ class DualMapWidget(QWidget):
         self.map_3d.circle_defined.connect(self.circle_defined)
         self.map_3d.nfz_polygon_drawn.connect(self.nfz_polygon_drawn)
         self.map_3d.nfz_circle_drawn.connect(self.nfz_circle_drawn)
+        self.map_3d.strike_target_added.connect(self.strike_target_added)
 
     # ─────────────────────────────────────────────────────────────────
     # 模式切換
@@ -328,14 +330,16 @@ class DualMapWidget(QWidget):
     def update_uav_position(self, lat: float, lon: float, alt: float,
                              heading_deg: float = 0.0, speed_ms: float = 0.0,
                              sysid: int = 1, mode: str = '', armed: bool = False,
-                             vehicle_type: str = ''):
+                             vehicle_type: str = '',
+                             pitch_deg: float = 0.0, roll_deg: float = 0.0):
         """
-        SITL / MAVLink 即時 UAV 位置更新（多機支援）。
+        SITL / MAVLink 即時 UAV 位置更新（多機支援，含姿態同步）。
         只更新 3D 地圖內部狀態，不強制切換模式（否則使用者切到 2D 會一直被踢回 3D）。
         """
         self.map_3d.update_uav_position(lat, lon, alt, heading_deg, speed_ms,
                                          sysid=sysid, mode=mode, armed=armed,
-                                         vehicle_type=vehicle_type)
+                                         vehicle_type=vehicle_type,
+                                         pitch_deg=pitch_deg, roll_deg=roll_deg)
         if hasattr(self.map_2d, 'update_uav_position'):
             self.map_2d.update_uav_position(lat, lon, alt, heading_deg, speed_ms,
                                              sysid=sysid, mode=mode, armed=armed,
@@ -347,3 +351,51 @@ class DualMapWidget(QWidget):
     def fly_to_position(self, lat, lon, alt=0.0, range_m=600.0):
         if self._mode == _MODE_3D:
             self.map_3d.fly_to_position(lat, lon, alt, range_m)
+
+    # ─────────────────────────────────────────────────────────────────
+    # 戰術模組代理（只作用於 3D Cesium 地圖）
+    # ─────────────────────────────────────────────────────────────────
+    def update_elevation_slicer(self, min_alt: float, max_alt: float):
+        self.map_3d.update_elevation_slicer(min_alt, max_alt)
+
+    def clear_elevation_slicer(self):
+        self.map_3d.clear_elevation_slicer()
+
+    def update_fov_cone(self, lat, lon, alt, fov_radius=50.0,
+                        heading_deg=0.0, pitch_deg=0.0, roll_deg=0.0):
+        self.map_3d.update_fov_cone(lat, lon, alt, fov_radius,
+                                     heading_deg, pitch_deg, roll_deg)
+
+    def clear_fov_cone(self):
+        self.map_3d.clear_fov_cone()
+
+    def init_sar_heatmap(self, lat_min, lat_max, lon_min, lon_max,
+                         rows=20, cols=20, sweep_width=50.0, quality=0.8):
+        self.map_3d.init_sar_heatmap(lat_min, lat_max, lon_min, lon_max,
+                                      rows, cols, sweep_width, quality)
+
+    def update_heatmap(self, uav_lat, uav_lon, fov_radius=50.0):
+        self.map_3d.update_heatmap(uav_lat, uav_lon, fov_radius)
+
+    def clear_sar_heatmap(self):
+        self.map_3d.clear_sar_heatmap()
+
+    def reset_sar_heatmap(self):
+        self.map_3d.reset_sar_heatmap()
+
+    def add_radar_dome(self, lat, lon, alt=0.0, radius=5000.0, name=''):
+        self.map_3d.add_radar_dome(lat, lon, alt, radius, name)
+
+    def clear_radar_domes(self):
+        self.map_3d.clear_radar_domes()
+
+    def update_rcs_sensitivity(self, uav_lat, uav_lon, uav_alt,
+                               uav_heading=0.0, sysid=1):
+        self.map_3d.update_rcs_sensitivity(uav_lat, uav_lon, uav_alt,
+                                            uav_heading, sysid)
+
+    def clear_rcs_sensitivity(self, sysid=1):
+        self.map_3d.clear_rcs_sensitivity(sysid)
+
+    def animate_radar_scan(self, radar_idx=0, duration_ms=2000):
+        self.map_3d.animate_radar_scan(radar_idx, duration_ms)

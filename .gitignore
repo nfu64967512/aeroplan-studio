@@ -2,6 +2,9 @@
 __pycache__/
 *.py[cod]
 *.pyo
+
+# Cesium 暫存 HTML（CesiumMapWidget 啟動時自動產生）
+tmp*.html
 *.egg-info/
 dist/
 build/

@@ -187,7 +187,10 @@ class DCCPPPathBuilder:
 
             # ── 1. Entry / Transfer Dubins ──
             label = SegmentLabel.ENTRY if i == 0 else SegmentLabel.TRANSFER
-            wps_xy, dub_len = self._dubins_waypoints(prev_pose, entry_pose)
+            # Entry / Transfer 都簡化為僅終點，飛控透過 WP 觸發半徑自行轉彎
+            wps_xy, dub_len = self._dubins_waypoints(
+                prev_pose, entry_pose, simplify=True
+            )
             for (wx, wy, wh_math) in wps_xy:
                 lat, lon = self._xy_to_latlon(transformer, wx, wy)
                 path.waypoints.append(BuiltWaypoint(
@@ -219,11 +222,13 @@ class DCCPPPathBuilder:
     # Dubins waypoints
     # ────────────────────────────────────────────────────────
     def _dubins_waypoints(
-        self, start_pose, end_pose
+        self, start_pose, end_pose, simplify: bool = False,
     ) -> Tuple[List[Tuple[float, float, float]], float]:
         """呼叫真實 Dubins 並離散化。
-        轉彎段 (LEFT/RIGHT) 以 step_size 密集取樣維持曲線形狀；
-        直線段 (STRAIGHT) 僅保留終點，避免產生大量共線航點。
+
+        Args:
+            simplify: 若為 True，僅保留終點（不做弧段密集取樣），
+                      適用於 TRANSFER 段——飛控可透過 WP 觸發半徑自行轉彎。
         """
         from core.trajectory.dubins_trajectory import SegmentType, rad_to_deg, normalize_angle
         try:
@@ -231,6 +236,11 @@ class DCCPPPathBuilder:
             if not dpath.is_feasible:
                 logger.warning(f"Dubins infeasible: {dpath.warning}")
                 return self._fallback_line(start_pose, end_pose)
+
+            # 簡化模式：轉移段只保留終點，由飛控 WP 觸發半徑處理轉彎
+            if simplify:
+                end_hdg = normalize_angle(end_pose.heading_deg, 0.0)
+                return [(end_pose.x, end_pose.y, end_hdg)], float(dpath.total_length)
 
             wps: List[Tuple[float, float, float]] = []
             for seg in dpath.segments:
@@ -338,9 +348,14 @@ class DCCPPPathBuilder:
         runway_bearing_compass_deg: float,
         approach_distance_m: Optional[float] = None,
         approach_alt_m: Optional[float] = None,
+        landing_rollout_m: float = 0.0,
     ) -> None:
         """在 BuiltPath 最後追加 [APPROACH(alt=approach), TOUCHDOWN(alt=0)]
         兩個 LANDING 航點。匯出時最後一點變成 NAV_LAND。
+
+        landing_rollout_m: 觸地後滑行煞車距離（公尺）。
+            若 > 0，觸地點會沿進場反方向提前此距離，
+            確保飛機減速停止時不超過跑道末端（Home 點）。
         """
         if approach_distance_m is None:
             approach_distance_m = max(6.0 * self.R, 300.0)
@@ -358,17 +373,33 @@ class DCCPPPathBuilder:
             return (home_lat + dN / 111320.0,
                     home_lon + dE / (111320.0 * cos_lat))
 
+        # 觸地點：若有滑行距離則提前，確保煞車後不超過跑道末端
+        rollout = landing_rollout_m or 0.0
+        if rollout > 0:
+            td_lat, td_lon = _rev_offset(rollout)
+        else:
+            td_lat, td_lon = home_lat, home_lon
+
+        # 整條進場路徑改以「觸地點」為錨點，
+        # 確保下降階梯與最終進場點隨 rollout 一起平移。
+        # 否則只有 td 被往後推、五邊進場仍貼在 home 附近。
+        def _td_rev_offset(dist_m):
+            dN = dist_m * math.cos(rev_rad)
+            dE = dist_m * math.sin(rev_rad)
+            return (td_lat + dN / 111320.0,
+                    td_lon + dE / (111320.0 * cos_lat))
+
         # 階梯下降：從 cruise_alt 逐步降到 approach_alt（約 30m）再 TOUCHDOWN(0)
         n_steps = max(3, min(6, int(round(cruise_alt / 25.0))))
         landing_wps = []
-        # 下降點從最遠端開始（距 home 最遠 = approach_distance * n_steps/n_steps）
+        # 下降點從最遠端開始（距觸地點最遠 = approach_distance）
         # 每段距離 = approach_distance / n_steps
         # 高度從 cruise_alt 線性降到 approach_alt_m
         for i in range(n_steps):
             frac = i / n_steps  # 0 .. (n-1)/n
             # 距離從 approach_distance 線性遞減到 approach_distance/n_steps
             dist = approach_distance_m * (1.0 - frac * (1.0 - 1.0 / n_steps))
-            lat_i, lon_i = _rev_offset(dist)
+            lat_i, lon_i = _td_rev_offset(dist)
             alt_i = cruise_alt - (cruise_alt - approach_alt_m) * frac
             landing_wps.append(BuiltWaypoint(
                 lat=lat_i, lon=lon_i, alt=alt_i,
@@ -376,14 +407,14 @@ class DCCPPPathBuilder:
                 segment_type=SegmentLabel.LANDING,
             ))
         # 最終進場點 (approach_alt) + 觸地 (0)
-        appr_lat, appr_lon = _rev_offset(approach_distance_m / n_steps * 0.5)
+        appr_lat, appr_lon = _td_rev_offset(approach_distance_m / n_steps * 0.5)
         landing_wps.append(BuiltWaypoint(
             lat=appr_lat, lon=appr_lon, alt=approach_alt_m,
             heading_compass_deg=runway_bearing_compass_deg,
             segment_type=SegmentLabel.LANDING,
         ))
         landing_wps.append(BuiltWaypoint(
-            lat=home_lat, lon=home_lon, alt=0.0,
+            lat=td_lat, lon=td_lon, alt=0.0,
             heading_compass_deg=runway_bearing_compass_deg,
             segment_type=SegmentLabel.LANDING,
         ))

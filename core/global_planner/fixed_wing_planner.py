@@ -90,6 +90,14 @@ class FixedWingParameters:
     scan_spacing_m: float = 50.0         # 掃描間距
     circle_direction: int = 1            # 1=逆時針, -1=順時針
 
+    # ── 降落跑道 ──────────────────────────────────────────────
+    landing_rollout_m: float = 0.0
+    # 觸地後滑行+煞車所需距離（公尺）。
+    # 若 > 0，觸地點會沿進場方向反向偏移此距離，
+    # 確保飛機減速到停止時不超過跑道末端（Home 點）。
+    # 例：landing_rollout_m = 80 → 觸地點提前 80m，
+    #     飛機在 80m 內完成煞車，最終停在 Home 附近。
+
     # ── 降落模式 ──────────────────────────────────────────────
     use_autoland: bool = False
     # True  → 匯出時跳過五邊電路，直接插入 DO_LAND_START (189) + NAV_LAND (21)
@@ -343,8 +351,18 @@ class FixedWingPlanner:
         leg      = params.pattern_leg_length_m
         fin_dist = params.final_approach_dist_m
 
-        # 觸地點（跑道頭）
-        td_lat, td_lon = landing_lat, landing_lon
+        # 觸地點
+        # 若設定了 landing_rollout_m（滑行+煞車距離），
+        # 將觸地點沿進場方向反向偏移，使飛機有足夠滾停距離。
+        # 幾何：觸地點 = Home 點 - rollout × 進場方向
+        #        即觸地點位於 Home 點「前方」（飛機尚未到達 Home 就先觸地）
+        rollout = getattr(params, 'landing_rollout_m', 0.0) or 0.0
+        if rollout > 0:
+            # opp_hdg = 進場反方向，所以沿 opp_hdg 偏移 = 觸地點提前
+            td_lat, td_lon = _offset_latlon(landing_lat, landing_lon,
+                                            rollout, opp_hdg)
+        else:
+            td_lat, td_lon = landing_lat, landing_lon
 
         # 最終進場起點（Final Approach Fix）
         # 在觸地點「後方」（沿進場反方向）fin_dist 公尺

@@ -262,6 +262,17 @@ class DualMapWidget(QWidget):
         self.map_2d.clear_transit_paths()
         self.map_3d.clear_transit_paths()
 
+    def clear_paths(self):
+        """清除所有飛行路徑 (2D + 3D 同步)
+
+        主視窗的「清除路徑」按鈕與 Esc 快捷鍵會呼叫此方法。
+        若只代理到 2D 地圖，3D Cesium 會殘留路徑視覺，造成錯覺。
+        """
+        if hasattr(self.map_2d, 'clear_paths'):
+            self.map_2d.clear_paths()
+        if hasattr(self.map_3d, 'clear_paths'):
+            self.map_3d.clear_paths()
+
     # ── 邊界角點操作 ─────────────────────────────────────────────────
     def add_corner(self, lat, lon):
         self.map_2d.add_corner(lat, lon)

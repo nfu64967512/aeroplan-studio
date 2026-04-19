@@ -53,11 +53,17 @@ class StrikeUAV:
 
 @dataclass
 class StrikeWaypoint:
-    """打擊航線航點"""
+    """打擊航線航點
+
+    segment 標籤 (用於 Cesium 分色渲染)：
+        'takeoff' — 起飛爬升段（黃色實線）
+        'cruise'  — 巡航段（綠色實線；若 Dubins 則沿最小轉彎半徑）
+        'dive'    — 末端俯衝段（血紅色加粗）
+    """
     lat: float
     lon: float
     alt: float
-    segment: str = 'cruise'   # cruise | dive
+    segment: str = 'cruise'   # takeoff | cruise | dive
     time_sec: float = 0.0     # 任務時間（秒）
 
 
@@ -69,11 +75,16 @@ class StrikeTrajectory:
     target_id: int
     target_name: str
     waypoints: List[StrikeWaypoint] = field(default_factory=list)
+    takeoff_start_index: int = 0     # 起飛段起始索引（固定為 0）
+    cruise_start_index: int = -1     # 巡航段起始航點索引
     dive_start_index: int = -1       # 俯衝起始航點索引
     impact_index: int = -1           # 命中航點索引
     total_distance_m: float = 0.0
     total_time_sec: float = 0.0
     cruise_alt_m: float = 0.0        # 此 UAV 實際巡航高度（含錯層）
+    takeoff_lat: float = 0.0         # 起飛點緯度（地面）
+    takeoff_lon: float = 0.0         # 起飛點經度
+    actual_dive_angle_deg: float = 0.0  # 實際達成的俯衝角
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -225,16 +236,28 @@ class TerminalStrikePlanner:
                  cruise_speed_mps: float = 60.0,
                  altitude_step_m: float = 30.0,
                  cruise_step_m: float = 50.0,
-                 dive_step_m: float = 20.0):
+                 dive_step_m: float = 20.0,
+                 # ── 起飛段參數 (固定翼專屬) ──────────────────────
+                 takeoff_alt_m: float = 0.0,
+                 climb_angle_deg: float = 8.0,
+                 min_turn_radius_m: float = 150.0,
+                 takeoff_step_m: float = 25.0,
+                 use_dubins_cruise: bool = True):
         """
         參數:
-            max_dive_angle_deg:   最大俯衝角（度，正值表示向下角度）
+            max_dive_angle_deg:     最大俯衝角（度，正值表示向下角度）
             dive_initiation_dist_m: 俯衝起始距離（距目標水平距離，公尺）
-            cruise_alt_m:         基準巡航高度（公尺）
-            cruise_speed_mps:     巡航速度（公尺/秒）
-            altitude_step_m:      高度錯層間距（公尺），各機遞增此值
-            cruise_step_m:        巡航段航點間距（公尺）
-            dive_step_m:          俯衝段航點間距（公尺）
+            cruise_alt_m:           基準巡航高度（公尺）
+            cruise_speed_mps:       巡航速度（公尺/秒）
+            altitude_step_m:        高度錯層間距（公尺），各機遞增此值
+            cruise_step_m:          巡航段航點間距（公尺）
+            dive_step_m:            俯衝段航點間距（公尺）
+            takeoff_alt_m:          起飛點地面海拔（公尺）
+            climb_angle_deg:        爬升角 γ (固定翼約 6~10°)
+            min_turn_radius_m:      固定翼最小轉彎半徑 R_min（含 Dubins 轉彎）
+            takeoff_step_m:         起飛爬升段航點間距（公尺）
+            use_dubins_cruise:      True = 巡航段套用 Dubins 曲線；
+                                    False = 直線近似（較快但不符固定翼約束）
         """
         self.max_dive_angle_deg = abs(max_dive_angle_deg)
         self.dive_initiation_dist_m = dive_initiation_dist_m
@@ -243,6 +266,11 @@ class TerminalStrikePlanner:
         self.altitude_step_m = altitude_step_m
         self.cruise_step_m = cruise_step_m
         self.dive_step_m = dive_step_m
+        self.takeoff_alt_m = takeoff_alt_m
+        self.climb_angle_deg = climb_angle_deg
+        self.min_turn_radius_m = min_turn_radius_m
+        self.takeoff_step_m = takeoff_step_m
+        self.use_dubins_cruise = use_dubins_cruise
 
     # ─────────────────────────────────────────────────────────────────
     #  自動生成模式：N 個目標 → 自動生成 N 架 UAV（高度 + 路線完全錯開）
@@ -368,6 +396,81 @@ class TerminalStrikePlanner:
 
         return result
 
+    # ─────────────────────────────────────────────────────────────────
+    #  STOT 模式：同地發射 (Simultaneous launch, Time On Target)
+    # ─────────────────────────────────────────────────────────────────
+    def plan_stot(self,
+                  targets: List[StrikeTarget],
+                  launch_lat: float,
+                  launch_lon: float,
+                  launch_alt: float = 0.0,
+                  ) -> List[StrikeTrajectory]:
+        """
+        同地發射模式 — 所有 UCAV 共用同一起飛點。
+
+        策略：
+          - 所有 N 架 UCAV 的起飛經緯度皆為 (launch_lat, launch_lon)
+          - 各機巡航高度依 altitude_step_m 錯層（基準 + i × 錯層）
+          - 目標依「相對起飛點的方位角」排序，形成扇形分配
+            → 每架 UCAV 起飛後朝不同方位飛行，自然分散不交叉
+          - 起飛螺旋圓心在不同方向（bearing + 90°）+ 高度錯層
+            → 爬升階段也不會相撞
+
+        參數:
+            targets:     地面目標列表（至少 1 個）
+            launch_lat:  共用起飛點緯度
+            launch_lon:  共用起飛點經度
+            launch_alt:  起飛點地面海拔（m），預設 0
+
+        回傳:
+            List[StrikeTrajectory]（與 plan_auto 相同格式）
+        """
+        if not targets:
+            logger.warning('[StrikePlanner/STOT] 目標列表為空')
+            return []
+
+        n = len(targets)
+        logger.info(
+            f'[StrikePlanner/STOT] 同地發射：launch=({launch_lat:.6f}, {launch_lon:.6f}) '
+            f'→ {n} 個目標'
+        )
+
+        # 暫存原 takeoff_alt，STOT 改用 launch_alt
+        orig_takeoff_alt = self.takeoff_alt_m
+        self.takeoff_alt_m = launch_alt
+
+        try:
+            # 按「目標方位角」排序 → 穩定的扇形分配
+            indexed = sorted(
+                enumerate(targets),
+                key=lambda x: _bearing(launch_lat, launch_lon, x[1].lat, x[1].lon),
+            )
+
+            trajectories: List[StrikeTrajectory] = []
+            for slot, (orig_idx, tgt) in enumerate(indexed):
+                uav_alt = self.cruise_alt_m + slot * self.altitude_step_m
+                uav = StrikeUAV(
+                    uav_id=slot + 1,
+                    lat=launch_lat,
+                    lon=launch_lon,
+                    cruise_alt=uav_alt,
+                    speed_mps=self.cruise_speed_mps,
+                )
+                traj = self._plan_single_strike(uav, tgt)
+                trajectories.append(traj)
+
+                brg = _bearing(launch_lat, launch_lon, tgt.lat, tgt.lon)
+                logger.info(
+                    f'[StrikePlanner/STOT] {uav.name} → {tgt.name}: '
+                    f'alt={uav_alt:.0f}m, bearing={brg:.1f}°, '
+                    f'L={traj.total_distance_m:.0f}m, T={traj.total_time_sec:.1f}s'
+                )
+
+            return trajectories
+        finally:
+            # 還原原 takeoff_alt（不污染後續 DTOT 規劃）
+            self.takeoff_alt_m = orig_takeoff_alt
+
     def plan(self,
              uavs: List[StrikeUAV],
              targets: List[StrikeTarget],
@@ -419,86 +522,86 @@ class TerminalStrikePlanner:
 
     def _plan_single_strike(self, uav: StrikeUAV, target: StrikeTarget) -> StrikeTrajectory:
         """
-        規劃單架 UCAV 對單個目標的攻擊軌跡
+        規劃單架固定翼 UCAV 對單個目標的完整三段飛行路徑。
 
-        包含：
-          (a) 四散巡航段：從 UAV 位置飛往「俯衝起始點」（水平 Dubins 概念，此處用大圓直線近似）
-          (b) 末端俯衝段：從俯衝起始點急降至地面目標
+        三個分段（皆由此方法生成，一次性合併成單一 waypoint 序列）：
+          (a) 起飛段 takeoff — 從地面 (takeoff_alt_m) 螺旋爬升到巡航高度
+                              受 climb_angle_deg 與 min_turn_radius_m 約束
+          (b) 巡航段 cruise  — 從爬升出圈點飛向「俯衝起始點」
+                              use_dubins_cruise=True 時套用 Dubins 曲線
+                              （入場航向 = 指向目標；圓弧+直線確保曲率 ≤ 1/R_min）
+          (c) 俯衝段 dive    — 從俯衝起始點急降至地面目標
+                              受 max_dive_angle_deg 與 dive_initiation_dist_m 約束
 
-        俯衝角約束：
+        俯衝角保護邏輯（維持原設計）：
           θ = atan(Δalt / horizontal_dist)
-          若計算出的 θ > max_dive_angle，則自動將俯衝起始點後推，
-          使 horizontal_dist = Δalt / tan(max_dive_angle)
+          若計算出的 θ > max_dive_angle，自動將俯衝起始點後推，
+          使 horizontal_dist = Δalt / tan(max_dive_angle)。
         """
         cruise_alt = uav.cruise_alt if uav.cruise_alt > 0 else self.cruise_alt_m
         target_alt = target.alt
+        delta_alt  = max(cruise_alt - target_alt, cruise_alt)
 
-        # ── 計算俯衝幾何 ─────────────────────────────────────────────
-        # 從目標點方向反推俯衝起始點
-        brg_uav_to_tgt = _bearing(uav.lat, uav.lon, target.lat, target.lon)
-        total_ground_dist = _haversine(uav.lat, uav.lon, target.lat, target.lon)
-
-        # 高度差
-        delta_alt = cruise_alt - target_alt
-        if delta_alt <= 0:
-            delta_alt = cruise_alt  # 至少用巡航高度
-
-        # 計算最小俯衝水平距離（受最大俯衝角限制）
-        max_angle_rad = math.radians(self.max_dive_angle_deg)
-        min_dive_horiz = delta_alt / math.tan(max_angle_rad) if max_angle_rad > 0.01 else delta_alt
-
-        # 實際俯衝起始距離：取使用者設定值與物理限制的較大值
+        # ───────────────────────────────────────────────────────────
+        #  Step 1 — 俯衝幾何（先算出俯衝起始點作為巡航段終點）
+        # ───────────────────────────────────────────────────────────
+        max_angle_rad  = math.radians(self.max_dive_angle_deg)
+        min_dive_horiz = (delta_alt / math.tan(max_angle_rad)
+                         if max_angle_rad > 0.01 else delta_alt)
+        # 實際俯衝水平距離：取使用者設定與物理限制中較大者
         actual_dive_dist = max(self.dive_initiation_dist_m, min_dive_horiz)
 
-        # 若 UAV 到目標的總距離不足以容納俯衝段，則調整
-        if actual_dive_dist > total_ground_dist:
-            # UAV 太近，直接從 UAV 位置開始俯衝
-            actual_dive_dist = total_ground_dist
-
-        # 實際俯衝角（度）
+        # 俯衝起始點：從目標反推 (指向 UAV 方向後退 actual_dive_dist)
+        brg_tgt_to_uav = _bearing(target.lat, target.lon, uav.lat, uav.lon)
+        dive_start_lat, dive_start_lon = _destination(
+            target.lat, target.lon, brg_tgt_to_uav, actual_dive_dist,
+        )
+        # 實際俯衝角
         actual_dive_angle_deg = math.degrees(math.atan2(delta_alt, actual_dive_dist))
 
-        # 俯衝起始點：從目標反推
-        dive_start_lat, dive_start_lon = _destination(
-            target.lat, target.lon,
-            (_bearing(target.lat, target.lon, uav.lat, uav.lon)),  # 目標→UAV 方向
-            actual_dive_dist
-        )
+        # 進場航向（UAV 在俯衝起始點時應指向目標）
+        approach_bearing = _bearing(dive_start_lat, dive_start_lon,
+                                    target.lat, target.lon)
 
-        # ── 生成巡航段航點 ───────────────────────────────────────────
+        # ───────────────────────────────────────────────────────────
+        #  Step 2 — 起飛段：螺旋爬升到巡航高度
+        # ───────────────────────────────────────────────────────────
         waypoints: List[StrikeWaypoint] = []
-        cruise_dist = _haversine(uav.lat, uav.lon, dive_start_lat, dive_start_lon)
+        takeoff_lat, takeoff_lon = uav.lat, uav.lon
+        climb_wps, climb_end_lat, climb_end_lon, climb_end_alt, climb_time = \
+            self._plan_takeoff_climb(
+                start_lat=takeoff_lat, start_lon=takeoff_lon,
+                start_alt=self.takeoff_alt_m,
+                target_alt=cruise_alt,
+                initial_bearing=approach_bearing,     # 螺旋出圈後大致朝目標
+                speed=uav.speed_mps,
+                time_offset=0.0,
+            )
+        waypoints.extend(climb_wps)
+        cruise_start_idx = len(waypoints)        # 巡航段起始索引
+        t_cur = climb_time
 
-        if cruise_dist > self.cruise_step_m:
-            n_cruise_steps = max(2, int(cruise_dist / self.cruise_step_m))
-            for i in range(n_cruise_steps + 1):
-                t = i / n_cruise_steps
-                lat_i = uav.lat + (dive_start_lat - uav.lat) * t
-                lon_i = uav.lon + (dive_start_lon - uav.lon) * t
-                wp = StrikeWaypoint(
-                    lat=lat_i, lon=lon_i, alt=cruise_alt,
-                    segment='cruise',
-                    time_sec=(cruise_dist * t) / max(uav.speed_mps, 1.0),
-                )
-                waypoints.append(wp)
-        else:
-            # 太近，只加起點
-            waypoints.append(StrikeWaypoint(
-                lat=uav.lat, lon=uav.lon, alt=cruise_alt,
-                segment='cruise', time_sec=0.0,
-            ))
+        # ───────────────────────────────────────────────────────────
+        #  Step 3 — 巡航段：Dubins 或直線
+        # ───────────────────────────────────────────────────────────
+        cruise_wps, cruise_dist, t_cur = self._plan_cruise_segment(
+            start_lat=climb_end_lat, start_lon=climb_end_lon,
+            start_bearing=approach_bearing,
+            end_lat=dive_start_lat, end_lon=dive_start_lon,
+            end_bearing=approach_bearing,
+            alt=cruise_alt,
+            speed=uav.speed_mps,
+            time_offset=t_cur,
+        )
+        waypoints.extend(cruise_wps)
+        dive_start_idx = len(waypoints) - 1       # 最後一個巡航點 = 俯衝起始
 
-        dive_start_idx = len(waypoints) - 1
-        cruise_time = (cruise_dist / max(uav.speed_mps, 1.0))
-
-        # ── 生成末端俯衝段航點 ───────────────────────────────────────
-        # 俯衝段：從 (dive_start_lat, dive_start_lon, cruise_alt) 到 (target.lat, target.lon, target_alt)
-        # 使用線性插值生成平滑下降軌跡
-        dive_3d_dist = math.sqrt(actual_dive_dist ** 2 + delta_alt ** 2)
+        # ───────────────────────────────────────────────────────────
+        #  Step 4 — 末端俯衝段
+        # ───────────────────────────────────────────────────────────
+        dive_3d_dist = math.hypot(actual_dive_dist, delta_alt)
         n_dive_steps = max(3, int(dive_3d_dist / self.dive_step_m))
-
-        # 俯衝速度假設為巡航速度的 1.3 倍（重力加速）
-        dive_speed = uav.speed_mps * 1.3
+        dive_speed = uav.speed_mps * 1.3          # 俯衝加速 30%
 
         for i in range(1, n_dive_steps + 1):
             t = i / n_dive_steps
@@ -507,37 +610,227 @@ class TerminalStrikePlanner:
                 target.lat, target.lon, target_alt,
                 t,
             )
-            wp = StrikeWaypoint(
+            waypoints.append(StrikeWaypoint(
                 lat=lat_i, lon=lon_i, alt=max(alt_i, target_alt),
                 segment='dive',
-                time_sec=cruise_time + (dive_3d_dist * t) / max(dive_speed, 1.0),
-            )
-            waypoints.append(wp)
-
+                time_sec=t_cur + (dive_3d_dist * t) / max(dive_speed, 1.0),
+            ))
         impact_idx = len(waypoints) - 1
-        total_dist = cruise_dist + dive_3d_dist
-        total_time = cruise_time + dive_3d_dist / max(dive_speed, 1.0)
+        total_time = t_cur + dive_3d_dist / max(dive_speed, 1.0)
+        total_dist = cruise_dist + dive_3d_dist   # 爬升路徑不計入「有效距離」
 
         traj = StrikeTrajectory(
-            uav_id=uav.uav_id,
-            uav_name=uav.name,
-            target_id=target.target_id,
-            target_name=target.name,
+            uav_id=uav.uav_id, uav_name=uav.name,
+            target_id=target.target_id, target_name=target.name,
             waypoints=waypoints,
+            takeoff_start_index=0,
+            cruise_start_index=cruise_start_idx,
             dive_start_index=dive_start_idx,
             impact_index=impact_idx,
             total_distance_m=total_dist,
             total_time_sec=total_time,
             cruise_alt_m=cruise_alt,
+            takeoff_lat=takeoff_lat,
+            takeoff_lon=takeoff_lon,
+            actual_dive_angle_deg=actual_dive_angle_deg,
         )
 
         logger.debug(
             f'[StrikePlanner] {uav.name}→{target.name}: '
-            f'cruise={cruise_dist:.0f}m, dive_horiz={actual_dive_dist:.0f}m, '
-            f'dive_angle={actual_dive_angle_deg:.1f}°, alt={cruise_alt:.0f}m, '
-            f'WPs={len(waypoints)}, diveStart@{dive_start_idx}'
+            f'takeoff_wps={cruise_start_idx}, '
+            f'cruise={cruise_dist:.0f}m, '
+            f'dive_horiz={actual_dive_dist:.0f}m, '
+            f'dive_angle={actual_dive_angle_deg:.1f}°, '
+            f'alt={cruise_alt:.0f}m, total_WPs={len(waypoints)}'
         )
         return traj
+
+    # ─────────────────────────────────────────────────────────────────
+    #  起飛螺旋爬升段
+    # ─────────────────────────────────────────────────────────────────
+    def _plan_takeoff_climb(self,
+                             start_lat: float, start_lon: float,
+                             start_alt: float, target_alt: float,
+                             initial_bearing: float,
+                             speed: float,
+                             time_offset: float,
+                             ) -> Tuple[List[StrikeWaypoint], float, float, float, float]:
+        """
+        固定翼螺旋式起飛爬升段生成器。
+
+        幾何設計
+        --------
+          ① 在起飛點右側距 R_min 處放置螺旋圓心；
+          ② 沿圓周以「爬升角 γ」等比上升，角速度 ω = V / R；
+          ③ 當總爬升高度 Δh 達成後即出圈，方向切換為 initial_bearing。
+
+        由於固定翼不能原地垂直爬升，這是最符合實際的起飛模式
+        （亦即「Racetrack 上升盤旋」）。
+
+        回傳:
+            (waypoints, end_lat, end_lon, end_alt, end_time_sec)
+        """
+        dh = max(target_alt - start_alt, 0.0)
+        if dh < 1e-3:
+            # 無需爬升 → 回傳單一佔位點
+            return (
+                [StrikeWaypoint(start_lat, start_lon, start_alt,
+                                segment='takeoff', time_sec=time_offset)],
+                start_lat, start_lon, start_alt, time_offset,
+            )
+
+        # 爬升率 = V * tan(γ)
+        climb_rate = speed * math.tan(math.radians(self.climb_angle_deg))
+        t_climb = dh / max(climb_rate, 0.5)
+
+        R = self.min_turn_radius_m
+        # 圓心放在「起飛航向右手側」R 處 (即 bearing + 90°)
+        c_lat, c_lon = _destination(
+            start_lat, start_lon,
+            (initial_bearing + 90.0) % 360.0, R,
+        )
+        # UAV 起點相對於圓心的方位角（從圓心看出去）
+        brg_c2s = _bearing(c_lat, c_lon, start_lat, start_lon)
+
+        # 採樣
+        n = max(int(t_climb * speed / self.takeoff_step_m), 8)
+        waypoints: List[StrikeWaypoint] = []
+        for k in range(n + 1):
+            t_norm = k / n
+            t = t_norm * t_climb
+            arc = (speed * t) / R                            # 走過的弧度
+            # 順時針旋轉 → 方位角遞減
+            theta = (brg_c2s - math.degrees(arc)) % 360.0
+            lat_k, lon_k = _destination(c_lat, c_lon, theta, R)
+            alt_k = start_alt + climb_rate * t
+            waypoints.append(StrikeWaypoint(
+                lat=lat_k, lon=lon_k, alt=min(alt_k, target_alt),
+                segment='takeoff',
+                time_sec=time_offset + t,
+            ))
+
+        last = waypoints[-1]
+        return waypoints, last.lat, last.lon, last.alt, time_offset + t_climb
+
+    # ─────────────────────────────────────────────────────────────────
+    #  巡航段 (Dubins 曲線 / 直線)
+    # ─────────────────────────────────────────────────────────────────
+    def _plan_cruise_segment(self,
+                              start_lat: float, start_lon: float,
+                              start_bearing: float,
+                              end_lat: float, end_lon: float,
+                              end_bearing: float,
+                              alt: float, speed: float,
+                              time_offset: float,
+                              ) -> Tuple[List[StrikeWaypoint], float, float]:
+        """
+        生成巡航段航點。
+
+        use_dubins_cruise=True 時委派給 DubinsTrajectoryGenerator
+        （水平最小轉彎半徑 = min_turn_radius_m），確保固定翼可追蹤；
+        否則退化為大圓直線等距採樣（較快但不符合物理約束）。
+
+        回傳:
+            (waypoints, horizontal_distance_m, end_time_sec)
+        """
+        # ── Dubins 模式 ──────────────────────────────────────────
+        if self.use_dubins_cruise:
+            try:
+                from core.trajectory.dubins_trajectory import (
+                    DubinsTrajectoryGenerator, Pose3D,
+                )
+                from core.base.fixed_wing_constraints import FixedWingConstraints
+
+                # 由目標 R_min 反解最大側傾角：φ = atan( V² / (g·R) )
+                v = max(speed, 5.0)
+                R = max(self.min_turn_radius_m, 10.0)
+                phi_rad = math.atan((v * v) / (9.81 * R))
+                phi_deg = max(5.0, min(80.0, math.degrees(phi_rad)))
+
+                constraints = FixedWingConstraints(
+                    cruise_airspeed_mps=v,
+                    max_bank_angle_deg=phi_deg,
+                    safety_factor=1.0,                          # 直接使用 R_min
+                    stall_speed_mps=max(v * 0.4, 1.0),
+                    max_speed_mps=max(v * 2.0, v + 1.0),
+                )
+                gen = DubinsTrajectoryGenerator(
+                    constraints=constraints,
+                    max_climb_angle_deg=self.climb_angle_deg + 5.0,
+                    max_descent_angle_deg=self.climb_angle_deg + 5.0,
+                )
+
+                # 以起點為 ENU 原點做本地平面計算
+                # 轉換：bearing (羅盤) → math angle (從東軸逆時針)
+                def _brg2math(b: float) -> float:
+                    return (90.0 - b) % 360.0
+
+                # 端點 ENU 座標
+                dist_geo = _haversine(start_lat, start_lon, end_lat, end_lon)
+                brg_line = _bearing(start_lat, start_lon, end_lat, end_lon)
+                # 末端 ENU：x=東, y=北
+                end_x = dist_geo * math.sin(math.radians(brg_line))
+                end_y = dist_geo * math.cos(math.radians(brg_line))
+
+                start_pose = Pose3D(0.0, 0.0, alt, _brg2math(start_bearing))
+                end_pose   = Pose3D(end_x, end_y, alt, _brg2math(end_bearing))
+
+                path = gen.calculate_path(start_pose, end_pose)
+                if path.is_feasible and path.segments:
+                    poses = gen.generate_waypoints(path, step_size=self.cruise_step_m)
+                    wps: List[StrikeWaypoint] = []
+                    cumul = 0.0
+                    prev_xy = (0.0, 0.0)
+                    for p in poses:
+                        # ENU → 大地座標（逐點近似）
+                        dx, dy = p.x, p.y
+                        bearing_geo = (90.0 - math.degrees(
+                            math.atan2(dy, dx))) % 360.0
+                        d = math.hypot(dx, dy)
+                        lat_i, lon_i = _destination(
+                            start_lat, start_lon, bearing_geo, d,
+                        )
+                        ds = math.hypot(dx - prev_xy[0], dy - prev_xy[1])
+                        cumul += ds
+                        prev_xy = (dx, dy)
+                        wps.append(StrikeWaypoint(
+                            lat=lat_i, lon=lon_i, alt=alt,
+                            segment='cruise',
+                            time_sec=time_offset + cumul / max(speed, 1.0),
+                        ))
+                    if wps:
+                        total = path.total_length
+                        return wps, total, time_offset + total / max(speed, 1.0)
+                logger.warning(
+                    f'[StrikePlanner] Dubins 巡航不可行 ({path.warning})，退化為直線'
+                )
+            except Exception as e:
+                logger.warning(f'[StrikePlanner] Dubins 巡航計算失敗 ({e})，退化為直線')
+
+        # ── 直線退化模式 ─────────────────────────────────────────
+        dist = _haversine(start_lat, start_lon, end_lat, end_lon)
+        wps: List[StrikeWaypoint] = []
+        if dist > self.cruise_step_m:
+            n = max(2, int(dist / self.cruise_step_m))
+            for i in range(n + 1):
+                t = i / n
+                lat_i = start_lat + (end_lat - start_lat) * t
+                lon_i = start_lon + (end_lon - start_lon) * t
+                wps.append(StrikeWaypoint(
+                    lat=lat_i, lon=lon_i, alt=alt, segment='cruise',
+                    time_sec=time_offset + (dist * t) / max(speed, 1.0),
+                ))
+        else:
+            wps.append(StrikeWaypoint(
+                lat=start_lat, lon=start_lon, alt=alt,
+                segment='cruise', time_sec=time_offset,
+            ))
+            wps.append(StrikeWaypoint(
+                lat=end_lat, lon=end_lon, alt=alt,
+                segment='cruise',
+                time_sec=time_offset + dist / max(speed, 1.0),
+            ))
+        return wps, dist, time_offset + dist / max(speed, 1.0)
 
     def trajectories_to_cesium_data(self, trajectories: List[StrikeTrajectory],
                                      targets: List[StrikeTarget]) -> dict:
@@ -576,10 +869,17 @@ class TerminalStrikePlanner:
                 'uav_name': tr.uav_name,
                 'target_id': tr.target_id,
                 'target_name': tr.target_name,
-                'dive_start_index': tr.dive_start_index,
-                'impact_index': tr.impact_index,
+                # 三段索引（供 Cesium 分色渲染）
+                'takeoff_start_index': tr.takeoff_start_index,
+                'cruise_start_index':  tr.cruise_start_index,
+                'dive_start_index':    tr.dive_start_index,
+                'impact_index':        tr.impact_index,
                 'total_time_sec': tr.total_time_sec,
+                'total_distance_m': tr.total_distance_m,
                 'cruise_alt_m': tr.cruise_alt_m,
+                'takeoff_lat': tr.takeoff_lat,
+                'takeoff_lon': tr.takeoff_lon,
+                'actual_dive_angle': tr.actual_dive_angle_deg,
                 'waypoints': wps,
             })
 
@@ -589,4 +889,6 @@ class TerminalStrikePlanner:
             'dive_initiation_dist': self.dive_initiation_dist_m,
             'max_dive_angle': self.max_dive_angle_deg,
             'altitude_step': self.altitude_step_m,
+            'min_turn_radius_m': self.min_turn_radius_m,
+            'climb_angle_deg': self.climb_angle_deg,
         }

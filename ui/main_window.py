@@ -29,6 +29,9 @@ from core.collision import CollisionChecker
 from mission.swarm_coordinator import SwarmCoordinator, SwarmMission, DroneInfo
 from mission.coverage_path import CoveragePath
 
+# 2026 重構：Swarm Strike 邏輯已抽出至 Controller Mixin (ui/controllers/)
+from ui.controllers import StrikeControllerMixin
+
 # 獲取配置和日誌實例
 settings = get_settings()
 logger = get_logger()
@@ -39,7 +42,7 @@ MAX_CORNERS = 100  # 最大邊界點數量
 _WP_LIMIT = 655   # Mission Planner 單次最大匯入航點數
 
 
-class MainWindow(QMainWindow):
+class MainWindow(QMainWindow, StrikeControllerMixin):
     """
     主視窗類
     
@@ -53,10 +56,10 @@ class MainWindow(QMainWindow):
     def __init__(self):
         """初始化主視窗"""
         super().__init__()
-        
+
         # 視窗基本設置（使用 settings 替代 Config）
         self.setWindowTitle(settings.ui.window_title)
-        self.setGeometry(100, 100, settings.ui.window_width, settings.ui.window_height)
+        self._apply_responsive_geometry()
         self.setMinimumSize(settings.ui.min_window_width, settings.ui.min_window_height)
         
         # 初始化核心組件
@@ -76,6 +79,68 @@ class MainWindow(QMainWindow):
         
         logger.info("主視窗初始化完成")
     
+    def _apply_responsive_geometry(self,
+                                    target_ratio: float = 0.85,
+                                    min_w: int = 1280,
+                                    min_h: int = 720):
+        """依螢幕尺寸動態決定主視窗大小，跨 1080p / 2K / 4K 不跑版。
+
+        規則：
+          - 取得主螢幕 availableGeometry (扣掉工作列)
+          - 預設佔 85% × 85% 空間
+          - 水平置中、垂直偏上 (讓標題列不會被遮住)
+          - 視 DPR 縮放：4K 上也會維持合理視覺比例
+          - 夾底：不小於 min_w × min_h (1280×720)
+
+        Parameters
+        ----------
+        target_ratio : float
+            視窗佔螢幕可用區域的比例 (0~1)
+        min_w, min_h : int
+            視窗最小像素尺寸 (logical px)
+        """
+        try:
+            from PyQt6.QtGui import QGuiApplication
+            screen = (self.screen() if hasattr(self, 'screen') and self.screen()
+                      else QGuiApplication.primaryScreen())
+            if screen is None:
+                # fallback: 使用 settings 固定值
+                self.setGeometry(100, 100,
+                                 settings.ui.window_width,
+                                 settings.ui.window_height)
+                return
+
+            avail = screen.availableGeometry()   # QRect (logical px，已扣工作列)
+            scr_w, scr_h = avail.width(), avail.height()
+
+            # 計算目標尺寸 (依比例 + 下限)
+            win_w = max(int(scr_w * target_ratio), min_w)
+            win_h = max(int(scr_h * target_ratio), min_h)
+            # 上限不能超過螢幕可用區 (4K 下會卡到 3400 左右)
+            win_w = min(win_w, scr_w)
+            win_h = min(win_h, scr_h)
+
+            # 居中對齊 (垂直偏上 8%)
+            x = avail.left() + (scr_w - win_w) // 2
+            y = avail.top() + max(0, (scr_h - win_h) // 3)
+
+            self.setGeometry(x, y, win_w, win_h)
+
+            # DPI 資訊記錄 (供除錯用)
+            try:
+                dpr = screen.devicePixelRatio()
+                logger.info(
+                    f'[Window] 螢幕 {scr_w}x{scr_h} (DPR={dpr:.1f}), '
+                    f'視窗尺寸 {win_w}x{win_h} @ ({x},{y})'
+                )
+            except Exception:
+                pass
+        except Exception as e:
+            logger.warning(f'[Window] 自適應尺寸失敗，使用 settings 預設: {e}')
+            self.setGeometry(100, 100,
+                             settings.ui.window_width,
+                             settings.ui.window_height)
+
     def init_variables(self):
         """初始化變數"""
         self.current_mission = None
@@ -157,25 +222,37 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
         
-        # 創建分割器（地圖 | 控制面板）
+        # 創建分割器（地圖 | 控制面板）— 可拖拉決定比例
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        
+        splitter.setHandleWidth(6)
+        splitter.setChildrenCollapsible(False)
+        splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #37474F; border: 1px solid #263238;
+            }
+            QSplitter::handle:horizontal { width: 6px; }
+            QSplitter::handle:hover      { background-color: #FFB74D; }
+            QSplitter::handle:pressed    { background-color: #FF9800; }
+        """)
+
         # 左側：地圖區域
         self.map_widget = self.create_map_widget()
         splitter.addWidget(self.map_widget)
-        
+
         # 右側：控制面板
         control_panel = self.create_control_panel()
         splitter.addWidget(control_panel)
         
-        # 依螢幕解析度自適應分割比例（地圖 60%，控制面板 40%）
-        screen = QApplication.primaryScreen()
-        screen_w = screen.availableGeometry().width() if screen else 1280
-        map_w   = int(screen_w * 0.60)
-        panel_w = int(screen_w * 0.40)
+        # 依「視窗寬度」自適應分割比例（地圖 60%，控制面板 40%）
+        # 使用視窗寬度而非螢幕寬度，避免 4K 上 splitter 超出視窗
+        win_w = self.width() or 1280
+        map_w   = int(win_w * 0.60)
+        panel_w = int(win_w * 0.40)
         splitter.setStretchFactor(0, 60)
         splitter.setStretchFactor(1, 40)
         splitter.setSizes([map_w, panel_w])
+        # 快取 splitter 以便 resizeEvent 時重新分配
+        self._main_splitter = splitter
         
         main_layout.addWidget(splitter)
         
@@ -190,6 +267,13 @@ class MainWindow(QMainWindow):
 
         # 設置快捷鍵
         self.setup_shortcuts()
+
+        # 建立 Undo/Redo Stack（Ctrl+Z / Ctrl+Y）
+        try:
+            from ui.undo_commands import setup_undo_stack
+            setup_undo_stack(self)
+        except Exception as e:
+            logger.warning(f'[Undo] 初始化失敗: {e}')
     
     def create_map_widget(self):
         """創建地圖組件（DualMapWidget：2D Folium + 3D Cesium 雙模式）"""
@@ -337,11 +421,33 @@ class MainWindow(QMainWindow):
         screen = QApplication.primaryScreen()
         min_panel_w = max(280, int((screen.availableGeometry().width() if screen else 1280) * 0.22))
         scroll.setMinimumWidth(min_panel_w)
-        panel_layout.addWidget(scroll, 1)   # stretch=1 讓 scroll 佔用所有剩餘高度
 
-        # 任務面板（固定在底部，不隨捲動）
+        # 任務面板
         self.mission_panel = MissionPanel(self)
-        panel_layout.addWidget(self.mission_panel, 0)
+
+        # 以 QSplitter 取代 VBox → 使用者可拖拉決定「參數面板 / 任務面板」比例
+        from PyQt6.QtWidgets import QSplitter, QSizePolicy
+        self._right_panel_splitter = QSplitter(Qt.Orientation.Vertical)
+        self._right_panel_splitter.setChildrenCollapsible(False)
+        self._right_panel_splitter.setHandleWidth(6)
+        self._right_panel_splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #37474F; border: 1px solid #263238;
+            }
+            QSplitter::handle:vertical { height: 6px; }
+            QSplitter::handle:hover    { background-color: #FFB74D; }
+            QSplitter::handle:pressed  { background-color: #FF9800; }
+        """)
+        scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.mission_panel.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
+        self._right_panel_splitter.addWidget(scroll)
+        self._right_panel_splitter.addWidget(self.mission_panel)
+        # 預設比例：參數面板 78% / 任務面板 22%
+        self._right_panel_splitter.setStretchFactor(0, 78)
+        self._right_panel_splitter.setStretchFactor(1, 22)
+        panel_layout.addWidget(self._right_panel_splitter, 1)
 
         # SITL HUD 分頁（Mission Planner 風格即時遙測）
         from ui.widgets.sitl_hud import SITLHud
@@ -407,12 +513,30 @@ class MainWindow(QMainWindow):
 
         # ── 蜂群打擊模組信號連接 ──────────────────────────────────────
         self.parameter_panel.strike_mark_targets_requested.connect(self._on_strike_mark_targets)
+        self.parameter_panel.strike_mark_base_requested.connect(self._on_strike_mark_base)
+        self.parameter_panel.strike_mode_changed.connect(self._on_strike_mode_changed)
         self.parameter_panel.strike_execute_requested.connect(self._on_strike_execute)
         self.parameter_panel.strike_clear_requested.connect(self._on_strike_clear)
+        self.parameter_panel.strike_export_requested.connect(self._on_strike_export)
+        self.parameter_panel.strike_dtot_export_requested.connect(self._on_strike_dtot_export)
+        self.parameter_panel.strike_owa_parm_requested.connect(self._on_strike_owa_parm)
+        self.parameter_panel.strike_sitl_upload_requested.connect(self._on_strike_sitl_upload)
+        self.parameter_panel.strike_recon_trigger_requested.connect(self._on_strike_recon_trigger)
+        self.parameter_panel.strike_vtol_toggle_changed.connect(self._on_strike_vtol_toggled)
 
         # 蜂群打擊內部狀態
         self._strike_marking_mode = False
-        self._strike_targets: list = []  # [(lat, lon), ...]
+        self._strike_base_marking_mode = False         # STOT 基地標記模式
+        self._strike_launch_base = None                # (lat, lon) 或 None (STOT 模式才用)
+        self._strike_targets: list = []                # [(lat, lon), ...]
+        # 快取最近一次規劃結果，供匯出使用
+        self._strike_result = None   # {'trajectories': [...], 'targets': [...], 'params': {...}, 'mode': 'DTOT'/'STOT', 'is_vtol': bool}
+        # VTOL 模式專屬快取
+        self._vtol_strike_planner = None   # VTOLSwarmStrikePlanner 實例
+        self._vtol_strike_plans = None     # VTOLPlan list
+        # ReconToStrikeManager 快取
+        self._recon_strike_manager = None
+        self._recon_strike_report = None
 
         return panel_widget
     
@@ -495,7 +619,20 @@ class MainWindow(QMainWindow):
         action = file_menu.addAction("儲存任務")
         action.setShortcut(QKeySequence("Ctrl+S"))
         action.triggered.connect(self.on_save_mission)
-        
+
+        file_menu.addSeparator()
+
+        # 專案檔 (.aeroplan) — 包含目標標記、邊界、STOT 基地等 UI 狀態
+        action = file_menu.addAction("儲存專案 (.aeroplan)")
+        action.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        action.setStatusTip("儲存當前所有 UI 狀態 (邊界 + 打擊目標 + 參數)")
+        action.triggered.connect(self.on_save_project)
+
+        action = file_menu.addAction("讀取專案 (.aeroplan)")
+        action.setShortcut(QKeySequence("Ctrl+Shift+O"))
+        action.setStatusTip("載入先前儲存的專案檔")
+        action.triggered.connect(self.on_load_project)
+
         file_menu.addSeparator()
         
         action = file_menu.addAction("匯出航點")
@@ -523,12 +660,24 @@ class MainWindow(QMainWindow):
         
         # === 檢視選單 ===
         view_menu = menubar.addMenu("檢視(&V)")
-        
+
         action = view_menu.addAction("重置視圖")
         action.triggered.connect(self.on_reset_view)
-        
+
         action = view_menu.addAction("顯示網格")
         action.triggered.connect(self.on_toggle_grid)
+
+        view_menu.addSeparator()
+
+        # 重置版面 (所有 Splitter 恢復預設比例)
+        action = view_menu.addAction("重置版面比例")
+        action.setShortcut(QKeySequence("Ctrl+Shift+R"))
+        action.setStatusTip("將所有可拖拉分隔線恢復為預設比例")
+        action.triggered.connect(self.on_reset_layout)
+
+        # 切換視窗自適應尺寸
+        action = view_menu.addAction("自適應視窗尺寸 (85%)")
+        action.triggered.connect(self._apply_responsive_geometry)
         
         # === 工具選單 ===
         tools_menu = menubar.addMenu("工具(&T)")
@@ -1011,6 +1160,30 @@ class MainWindow(QMainWindow):
                 f"（螺旋/同心圓模式請先點擊「地圖拖曳定義圓形」設定圓心）"
             )
             return
+
+        # ── Schema 驗證飛行參數 (2026 重構：fail-fast 防無效輸入)──
+        try:
+            from config.schemas import FlightParameters
+            fp = FlightParameters.from_dict({
+                'altitude':     self.flight_params.get('altitude', 50.0),
+                'speed':        self.flight_params.get('speed', 15.0),
+                'angle':        self.flight_params.get('angle', 0.0),
+                'spacing':      self.flight_params.get('spacing', 20.0),
+                'turn_radius':  self.flight_params.get('turn_radius', 50.0),
+                'vehicle_type': {
+                    '多旋翼': 'multirotor', '固定翼': 'fixed_wing', 'VTOL': 'vtol',
+                }.get(self.current_vehicle_type, 'multirotor'),
+            })
+            fp.validate()
+        except ValueError as e:
+            QMessageBox.warning(
+                self, '飛行參數錯誤',
+                f'預覽前參數驗證失敗，請修正設定:\n\n{e}'
+            )
+            logger.warning(f'[Preview] flight_params 驗證失敗: {e}')
+            return
+        except Exception as e:
+            logger.debug(f'[Preview] Schema 驗證異常 (忽略): {e}')
 
         try:
             # 獲取當前選擇的演算法
@@ -2723,6 +2896,49 @@ class MainWindow(QMainWindow):
                 logger.error(f"載入任務失敗: {e}")
                 QMessageBox.critical(self, "載入錯誤", f"載入任務時發生錯誤：\n{str(e)}")
     
+    # ═════════════════════════════════════════════════════════════════
+    #  專案檔 (.aeroplan) 保存 / 讀取
+    # ═════════════════════════════════════════════════════════════════
+    def on_save_project(self):
+        """儲存當前 UI 狀態為 .aeroplan 專案檔"""
+        from mission.project_io import (
+            build_project_from_main_window, save_project,
+        )
+        path, _ = QFileDialog.getSaveFileName(
+            self, '儲存 AeroPlan 專案', '', 'AeroPlan Project (*.aeroplan)'
+        )
+        if not path:
+            return
+        try:
+            proj = build_project_from_main_window(self)
+            save_project(proj, path)
+            self.statusBar().showMessage(f'專案已儲存: {path}', 4000)
+            logger.info(f'[Project] 儲存至 {path}')
+        except Exception as e:
+            logger.error(f'[Project] 儲存失敗: {e}', exc_info=True)
+            QMessageBox.critical(self, '儲存失敗', str(e))
+
+    def on_load_project(self):
+        """從 .aeroplan 檔案復原 UI 狀態"""
+        from mission.project_io import load_project, apply_project_to_main_window
+        path, _ = QFileDialog.getOpenFileName(
+            self, '讀取 AeroPlan 專案', '', 'AeroPlan Project (*.aeroplan)'
+        )
+        if not path:
+            return
+        try:
+            proj = load_project(path)
+            apply_project_to_main_window(proj, self)
+            self.statusBar().showMessage(
+                f'專案已載入: {path} '
+                f'(邊界 {len(proj.corners)} 點, 打擊目標 {len(proj.strike_targets)} 個)',
+                5000,
+            )
+            logger.info(f'[Project] 從 {path} 載入')
+        except Exception as e:
+            logger.error(f'[Project] 載入失敗: {e}', exc_info=True)
+            QMessageBox.critical(self, '載入失敗', str(e))
+
     def on_save_mission(self):
         """儲存任務"""
         if not self.current_mission:
@@ -4276,136 +4492,68 @@ class MainWindow(QMainWindow):
                 lat, lon, alt, heading_deg, sysid,
             )
 
-    # ─────────────────────────────────────────────────────────────────
-    # 蜂群打擊模組 (Swarm Strike) 處理
-    # ─────────────────────────────────────────────────────────────────
-    def _on_strike_mark_targets(self):
-        """切換打擊目標標記模式"""
-        self._strike_marking_mode = not self._strike_marking_mode
-
-        # 取得 3D 地圖 widget（通過 DualMapWidget）
-        cesium = self._get_cesium_widget()
-        if cesium:
-            cesium.strike_set_marking_mode(self._strike_marking_mode)
-
-        self.parameter_panel.set_strike_marking_mode(self._strike_marking_mode)
-
-        if self._strike_marking_mode:
-            # 啟動標記模式：連接地圖點擊信號
-            self.map_widget.strike_target_added.connect(self._on_strike_target_clicked)
-            self.statusBar().showMessage(
-                '🎯 打擊目標標記模式：左鍵點擊 3D 地圖新增地面目標', 0
-            )
-        else:
-            # 關閉標記模式
-            try:
-                self.map_widget.strike_target_added.disconnect(self._on_strike_target_clicked)
-            except TypeError:
-                pass
-            self.statusBar().showMessage(
-                f'已結束目標標記，共 {len(self._strike_targets)} 個目標', 3000
-            )
-
-    def _on_strike_target_clicked(self, lat: float, lon: float):
-        """地圖點擊 → 新增打擊目標"""
-        idx = len(self._strike_targets) + 1
-        self._strike_targets.append((lat, lon))
-
-        cesium = self._get_cesium_widget()
-        if cesium:
-            cesium.strike_add_target(lat, lon, idx)
-
-        self.parameter_panel.update_strike_target_count(len(self._strike_targets))
-        self.statusBar().showMessage(
-            f'🎯 TGT-{idx} 已標記: ({lat:.6f}, {lon:.6f})', 3000
-        )
-        logger.info(f'[Strike] 新增打擊目標 TGT-{idx}: ({lat:.6f}, {lon:.6f})')
-
-    def _on_strike_execute(self, params: dict):
-        """執行蜂群打擊（自動模式：N 個目標 → N 架 UCAV，高度與路線完全錯開）"""
-        import json
-        from core.strike.terminal_strike_planner import (
-            TerminalStrikePlanner, StrikeTarget,
-        )
-
-        if not self._strike_targets:
-            QMessageBox.warning(self, '蜂群打擊', '請先標記至少一個打擊目標')
-            return
-
-        # 關閉標記模式
-        if self._strike_marking_mode:
-            self._on_strike_mark_targets()
-
-        cruise_alt = params.get('cruise_alt', 500.0)
-        cruise_speed = params.get('cruise_speed', 60.0)
-        max_dive = params.get('max_dive_angle', 45.0)
-        dive_dist = params.get('dive_initiation_dist', 800.0)
-        alt_step = params.get('altitude_step', 30.0)
-        anim_speed = params.get('anim_speed', 3.0)
-
-        # 建立目標列表
-        targets = []
-        for i, (lat, lon) in enumerate(self._strike_targets):
-            targets.append(StrikeTarget(target_id=i + 1, lat=lat, lon=lon))
-
-        # 建立規劃器（含高度錯層參數）
-        planner = TerminalStrikePlanner(
-            max_dive_angle_deg=max_dive,
-            dive_initiation_dist_m=dive_dist,
-            cruise_alt_m=cruise_alt,
-            cruise_speed_mps=cruise_speed,
-            altitude_step_m=alt_step,
-        )
-
-        # 自動模式：N 目標 → 自動生成 N 架 UCAV
-        # 每架 UCAV 的巡航高度自動錯層（+i*alt_step）
-        # 進場方位角自動分散（360°/N），航線完全不交叉
-        trajectories = planner.plan_auto(targets, spawn_dist_m=1500.0)
-
-        if not trajectories:
-            QMessageBox.warning(self, '蜂群打擊', '軌跡規劃失敗：無有效分配')
-            return
-
-        # 轉換為 Cesium JSON 並送往前端
-        cesium_data = planner.trajectories_to_cesium_data(trajectories, targets)
-        data_json = json.dumps(cesium_data)
-
-        cesium = self._get_cesium_widget()
-        if cesium:
-            cesium.strike_execute_animation(data_json, anim_speed)
-
-        # 顯示結果摘要
-        summary_lines = [
-            f'蜂群打擊規劃完成：{len(trajectories)} 架 UCAV → {len(targets)} 個目標'
-            f'（高度錯層 {alt_step:.0f}m）'
-        ]
-        for tr in trajectories:
-            summary_lines.append(
-                f'  {tr.uav_name} → {tr.target_name}: '
-                f'{tr.total_distance_m:.0f}m, alt={tr.cruise_alt_m:.0f}m, '
-                f'dive@WP{tr.dive_start_index}'
-            )
-        self.statusBar().showMessage(summary_lines[0], 5000)
-        logger.info('\n'.join(summary_lines))
-
-    def _on_strike_clear(self):
-        """清除打擊視覺化"""
-        self._strike_targets.clear()
-        self._strike_marking_mode = False
-
-        cesium = self._get_cesium_widget()
-        if cesium:
-            cesium.strike_clear_all()
-
-        self.parameter_panel.update_strike_target_count(0)
-        self.parameter_panel.set_strike_marking_mode(False)
-        self.statusBar().showMessage('已清除打擊視覺化', 3000)
+    # ═════════════════════════════════════════════════════════════════
+    # Swarm Strike 處理 — 已抽出至 ui.controllers.StrikeControllerMixin
+    # (MainWindow 透過多重繼承自動獲得所有 _on_strike_* 方法)
+    # ═════════════════════════════════════════════════════════════════
 
     def _get_cesium_widget(self):
         """取得 CesiumMapWidget 實例（通過 DualMapWidget）"""
         if hasattr(self.map_widget, 'map_3d'):
             return self.map_widget.map_3d
         return None
+
+    def on_reset_layout(self):
+        """重置所有 Splitter 為預設比例 (Ctrl+Shift+R)
+
+        涵蓋三層：
+          1. 主水平 splitter (地圖 ⇄ 右側控制面板) → 60:40
+          2. 右側垂直 splitter (參數面板 ⇄ 任務面板) → 78:22
+          3. 各 tab 內的垂直 splitter (所有 GroupBox 平均分配)
+        """
+        try:
+            # (1) 主 splitter
+            if hasattr(self, '_main_splitter') and self._main_splitter:
+                w = self.width() or 1280
+                self._main_splitter.setSizes([int(w * 0.60), int(w * 0.40)])
+            # (2) 右側面板 splitter
+            if hasattr(self, '_right_panel_splitter') and self._right_panel_splitter:
+                h = self.height() or 720
+                self._right_panel_splitter.setSizes([int(h * 0.78), int(h * 0.22)])
+            # (3) ParameterPanel 內的所有 tab splitter
+            if hasattr(self, 'parameter_panel') and hasattr(
+                self.parameter_panel, 'reset_resizable_layout'
+            ):
+                self.parameter_panel.reset_resizable_layout()
+            self.statusBar().showMessage('已重置版面比例', 3000)
+            logger.info('[Layout] 版面比例已重置')
+        except Exception as e:
+            logger.warning(f'[Layout] 重置失敗: {e}')
+
+    def resizeEvent(self, event):
+        """視窗大小變更時，保持地圖/控制面板 60:40 比例。
+
+        這讓使用者在 1080p / 2K / 4K 之間拖拉視窗到不同螢幕時，
+        splitter 會自動重新分配，不會跑版。
+        """
+        super().resizeEvent(event)
+        splitter = getattr(self, '_main_splitter', None)
+        if splitter is None:
+            return
+        try:
+            w = event.size().width()
+            if w < 200:
+                return
+            # 讀當前使用者是否手動改過比例；若變動 <5% 則視為自動，重新調整
+            cur = splitter.sizes()
+            if len(cur) == 2 and sum(cur) > 0:
+                cur_ratio = cur[0] / sum(cur)
+                if abs(cur_ratio - 0.60) > 0.05:
+                    # 使用者自己拖過分隔線 → 尊重其設定，不覆寫
+                    return
+            splitter.setSizes([int(w * 0.60), int(w * 0.40)])
+        except Exception:
+            pass
 
     def closeEvent(self, event):
         """視窗關閉事件"""

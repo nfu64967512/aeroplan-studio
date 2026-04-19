@@ -2,7 +2,7 @@
 
 > 舊名：UAV Path Planner / DWA_path_planner
 
-**版本**: 2.5.0
+**版本**: 2.6.0
 **授權**: MIT
 **Python**: >= 3.10
 
@@ -14,15 +14,18 @@
 
 - **2D / 3D 雙模式地圖**: 頂部按鈕一鍵切換 — 2D Folium/Leaflet（衛星 + 邊界編輯）與 3D Cesium（含高度視覺化、地形吸附、SITL UAV 即時追蹤）；地圖視角會自動記住，重新生成路徑時不再跳回預設座標
 - **離線 / 線上自動切換**: `assets/cesium/` 與 `assets/leaflet/` 存在時自動使用本地資源，否則 fallback CDN，無網路也可正常開啟
-- **內建 SITL 模擬器整合**: 一鍵啟動專案內 `sitl/ArduPlane.exe` 或 `ArduCopter.exe`（從 Mission Planner 複製過來），自動建立 MAVLink 連線並把 UAV 即時位置投到 3D 地圖上
+- **內建 SITL 模擬器整合**: 一鍵啟動 `ArduPlane.exe` / `ArduCopter.exe` / `ArduPlane.exe -f quadplane`（VTOL），自動建立 MAVLink 連線並把 UAV 即時位置投到 3D 地圖上
+- **VTOL QuadPlane SITL**: 完整支援垂直起降固定翼 — 動態生成 `vtol_default.parm`（~120 參數，參考 Alti Transition 真機）、`NAV_VTOL_TAKEOFF` 指令、多旋翼起飛 → 固定翼巡航 → 多旋翼降落完整任務序列
 - **Mission Planner 風格 HUD**: 即時顯示飛行模式、武裝狀態、姿態（Roll/Pitch）、地速/空速、爬升率、航向、油門、電量、GPS Fix/衛星數
 - **多種規劃演算法**: Grid / Spiral / Circular / A* / RRT / RRT* / Dijkstra / DWA
-- **多飛行器支援**: 多旋翼（DJI Mavic 3、Phantom 4 Pro、Mini 3 Pro）、固定翼（衝浪者、Generic）、VTOL
-- **固定翼三階段任務**: 起飛路徑 → 螺旋/同心圓掃描（轉彎半徑強制合規）→ 五邊進場降落
+- **多飛行器支援**: 多旋翼（DJI Mavic 3、Phantom 4 Pro、Mini 3 Pro）、固定翼（衝浪者、Generic）、VTOL（QuadPlane）
+- **固定翼三階段任務**: 起飛路徑 → 螺旋/同心圓掃描（轉彎半徑強制合規）→ 五邊進場降落（含 landing rollout 錨點偏移，整條五邊隨觸地點一併平移）
 - **協同覆蓋任務（群飛）**: 多架無人機自動分工、加權成本智能分配、序列最佳化、按機分色視覺化
 - **DCCPP 深度整合**: 基於論文《Multiple fixed-wing UAVs collaborative coverage 3D path planning method for complex areas》（Defence Technology 47, 2025），整合 GreedyAllocator 多區域分配、IDP 路徑序列最佳化、Dubins 曲線連接、梯形 FOV 模型、DEM 地形雙線性插值、GDA 高度平滑、協調/非協調進入模式
+- **DCCPP 多機防撞**: `core/dccpp/collision_avoidance.py` — 多架 UAV 路徑時空衝突檢測與迴避
+- **🎯 蜂群末端打擊（Swarm Strike）**: N 目標 → 自動生成 N 架 UCAV，三段軌跡（起飛爬升 8° → Dubins 巡航 → 末端俯衝 θ_max）+ 高度錯層防撞；Cesium 視覺化含速度向量姿態、戰術色變、雷射鎖定、命中衝擊波；匯出每機獨立 QGC WPL 110 任務
 - **障礙物避讓**: 碰撞檢測與智能避障
-- **MAVLink 匯出**: QGC WPL 110 航點檔案匯出（Mission Planner / QGroundControl 相容）；群飛模式可逐機匯出獨立任務檔
+- **MAVLink 匯出**: QGC WPL 110 航點檔案匯出（Mission Planner / QGroundControl 相容）；群飛 / 蜂群打擊模式可逐機匯出獨立任務檔
 - **即時路徑預覽**: 參數調整後自動重新生成路徑
 - **座標系轉換**: WGS84 / UTM / 本地 ENU 座標互轉
 - **地圖拖曳定圓**: 直接在地圖上拖曳定義螺旋/同心圓中心與半徑
@@ -89,17 +92,20 @@ python main.py --no-ui
 - 3D 模式支援：拖曳旋轉視角、滾輪縮放、🎯 飛向路徑、地形吸附、2D / 3D / 哥倫布三種投影
 - 平移或縮放後的視角會被記住,下次重繪不會跳回預設位置
 
-#### SITL 模擬連線（Mission Planner 等價，支援多機）
+#### SITL 模擬連線（Mission Planner 等價，支援多機 + VTOL）
 
-1. 從 Mission Planner 安裝目錄 `sitl/` 複製 `ArduPlane.exe`、`ArduCopter.exe` 與 `default_params/` 至專案 `sitl/` 資料夾（已於 `sitl/default_params/plane.parm` 提供 SITL 友善預設）
+1. 從 Mission Planner 安裝目錄 `sitl/` 複製 `ArduPlane.exe`、`ArduCopter.exe` 與 `default_params/` 至專案 `sitl/` 資料夾（已於 `sitl/default_params/plane.parm`、`copter.parm`、`vtol_default.parm` 提供 SITL 友善預設）
 2. 右側面板切換到 **🛰 SITL** 分頁
-3. **單機**：選 `PLANE` 或 `COPTER` → 點 **🚀 啟動** → 自動以 `tcp:127.0.0.1:5760` 連線
+3. **單機**：選 `PLANE` / `COPTER` / `VTOL` → 點 **🚀 啟動** → 自動以 `tcp:127.0.0.1:5760` 連線
+   - VTOL 以 `ArduPlane.exe -f quadplane` 啟動並套用動態生成的 `vtol_default.parm`（~120 參數，含 Q_ENABLE、Q_FRAME_CLASS、Q_A_RAT_*、Q_VELZ_MAX、Q_ASSIST_* 等）
 4. **多機（DCCPP 模式）**：先在 **DCCPP** 分頁完成最佳化；再回到 SITL 分頁按 **🚀 啟動**，AeroPlan Studio 會：
    - 依 DCCPP 每台 UAV 的起飛點生成 N 個 SITL 實例（每個獨立 console 視窗）
    - 自動寫入 per-instance `identity.parm`（`SYSID_THISMAV`、`SIM_DRIFT_SPEED=0`、`SIM_RATE_HZ=400`）
    - 以 `tcp:127.0.0.1:5760 / 5770 / 5780 ...` 建立 N 條 MAVLink 連線
    - 每條連線 1 Hz 發送 GCS heartbeat 以避免 `FS_GCS → RTL`
 5. 按 **上傳任務** → 依 uav_id 將每台 DCCPP 路徑分發至對應 SITL 實例（不同飛機上傳不同航線）
+   - VTOL 路徑自動以 `NAV_VTOL_TAKEOFF (84)` 起飛指令取代 `NAV_TAKEOFF (22)`（使用 `vehicle_hint` 參數繞過 `MAV_TYPE=1` 模糊辨識）
+   - VTOL 任務序列：垂直起飛 → 固定翼過渡 → 巡航 / 掃描 → 多旋翼過渡 → 垂直降落
 6. HUD 多行 log（Mission Planner 風格）即時顯示模式 / ARMED / 姿態 / 速度 / 電量 / GPS / FC 訊息
 7. **📂 參數檔** 按鈕：可一鍵載入外部 `.param` 檔批次寫入 SITL
 
@@ -119,6 +125,17 @@ python main.py --no-ui
 4. 點擊「**生成協同覆蓋路徑**」— 地圖以分色顯示各機路徑，右下角顯示圖例與統計
 5. 點擊「**匯出群飛任務**」— 選擇目錄，自動為每架無人機產生獨立 `.waypoints` 檔案
 
+#### 🎯 蜂群末端打擊流程（Swarm Strike）
+
+1. 切換右側面板至 **🎯 蜂群打擊** 分頁
+2. 點擊 **標記目標** → 在 3D Cesium 地圖上點擊 N 個地面目標（自動編號 TGT-1 ~ TGT-N）
+3. 設定參數：巡航高度 / 巡航速度 / 最大俯衝角 θ_max（通常 30°~60°）/ 俯衝啟動距離 / 高度錯層間距
+4. 點擊 **EXECUTE SWARM STRIKE** → 系統會：
+   - 自動生成 N 架 UCAV（各機起飛點錯開，巡航高度依 `altitude_step_m` 錯層防撞）
+   - 每機規劃三段軌跡：**起飛爬升段**（8° 爬升至巡航高度，黃色）→ **Dubins 巡航段**（最小轉彎半徑合規，綠色）→ **末端俯衝段**（依 θ_max 急降至目標，血紅色加粗）
+   - 俯衝段渲染含：速度向量姿態、戰術顏色漸變、雷射目標鎖定、命中衝擊波
+5. 點擊 **💾 匯出打擊任務 (QGC WPL)** → 為每架 UCAV 產出獨立 `.waypoints`（含 `DO_SET_HOME` / `DO_CHANGE_SPEED` / `NAV_TAKEOFF` / 巡航 / 俯衝 `NAV_WAYPOINT`）+ `SWARM_STRIKE_briefing.txt` 任務簡報
+
 ## 路徑規劃演算法
 
 ### 覆蓋任務（區域掃描）
@@ -129,7 +146,8 @@ python main.py --no-ui
 | **Spiral** | 阿基米德螺線掃描（支援曲率係數、高度漸變） | 從外圍向中心搜索 |
 | **Circular** | 同心圓擴張掃描（自適應密度過渡弧） | 環繞目標、逐圈上升拍攝 |
 | **協同覆蓋（群飛）** | 多機分工並行掃描（FOV 分解 + 加權成本分配 + 序列最佳化） | 大面積快速掃測 |
-| **DCCPP 最佳化** | 論文級完整管線：GreedyAllocator → IDP 排序 → Dubins 曲線 → GDA 3D 高度平滑 | 多固定翼 UAV 複雜區域 3D 覆蓋 |
+| **DCCPP 最佳化** | 論文級完整管線：GreedyAllocator → IDP 排序 → Dubins 曲線 → GDA 3D 高度平滑 + 多機時空防撞 | 多固定翼 UAV 複雜區域 3D 覆蓋 |
+| **蜂群末端打擊** | 三段軌跡：起飛爬升 → Dubins 巡航 → 末端俯衝；N 目標自動分配 N 架 UCAV + 高度錯層防撞 | 協同對地目標精準打擊 |
 
 ### 點對點路徑
 
@@ -175,7 +193,10 @@ python main.py --no-ui
 
 | 載具 | 多旋翼巡航 | 固定翼巡航 | 飛行時間 |
 |------|-----------|-----------|---------|
-| Generic VTOL | 5 m/s | 20 m/s | 90 min（固定翼模式）|
+| Generic VTOL (QuadPlane) | 5 m/s | 20 m/s | 90 min（固定翼模式）|
+| Alti Transition (參考真機) | 5 m/s | 22 m/s | 120 min（固定翼模式）|
+
+> VTOL SITL 使用 `ArduPlane.exe -f quadplane` 啟動，預設參數檔 `sitl/default_params/vtol_default.parm` 內含 Q_ENABLE=1、Q_FRAME_CLASS、Q_FRAME_TYPE、Q_A_RAT_RLL/PIT/YAW_P、Q_VELZ_MAX、Q_ASSIST_SPEED / ALT 等 ~120 項多旋翼控制參數。
 
 ## 專案結構
 
@@ -215,6 +236,19 @@ aeroplan-studio/
 │   │   ├── avoidance.py             # 避障策略
 │   │   └── obstacle_manager.py      # 障礙物管理
 │   │
+│   ├── dccpp/                       # DCCPP 論文管線元件
+│   │   ├── uav_models.py            # UAV / Area / Task 資料結構
+│   │   ├── path_cost_calculator.py  # 加權成本函數
+│   │   ├── task_allocator.py        # GreedyAllocator（Algorithm 1）
+│   │   ├── idp_solver.py            # 改進動態規劃（Algorithm 2）
+│   │   ├── altitude_planner.py      # GDA 高度平滑（Algorithm 3）
+│   │   ├── area_processor.py        # 區域前處理
+│   │   ├── dccpp_path_builder.py    # 完整 DCCPP 管線組裝器
+│   │   └── collision_avoidance.py   # 多機時空衝突檢測 / 迴避
+│   │
+│   ├── strike/                      # 蜂群末端打擊規劃
+│   │   └── terminal_strike_planner.py  # 三段軌跡（起飛→Dubins 巡航→末端俯衝）+ 高度錯層
+│   │
 │   ├── local_planner/               # 局域規劃
 │   │   ├── dwa.py                   # 動態窗口法
 │   │   ├── apf.py                   # 人工勢場法
@@ -233,10 +267,11 @@ aeroplan-studio/
 │       └── fixed_wing.py            # 固定翼模型
 │
 ├── sitl/                            # SITL 模擬器（從 Mission Planner 複製，git 不追蹤）
-│   ├── ArduPlane.exe                # 固定翼 SITL binary
+│   ├── ArduPlane.exe                # 固定翼 / VTOL SITL binary（VTOL 以 -f quadplane 啟動）
 │   ├── ArduCopter.exe               # 多旋翼 SITL binary
-│   ├── default_params/              # 預設參數檔（plane.parm / copter.parm）
-│   └── plane/                       # SITL 工作目錄（eeprom + terrain）
+│   ├── default_params/              # 預設參數檔（plane.parm / copter.parm / vtol_default.parm）
+│   ├── plane/                       # 固定翼 SITL 工作目錄（eeprom + terrain）
+│   └── plane/i3/                    # VTOL SITL 工作目錄（QuadPlane 實例）
 │
 ├── assets/                          # Web 資源（離線使用，git 不追蹤）
 │   ├── cesium/Build/Cesium/         # Cesium 1.115 完整 build（~20MB）
@@ -250,7 +285,8 @@ aeroplan-studio/
 │   ├── survey_mission.py            # Survey 測繪任務
 │   ├── coverage_path.py             # 結構化覆蓋路徑（OperationSegment / CoveragePath）
 │   ├── mavlink_exporter.py          # MAVLink / QGC WPL 110 匯出（QGC / JSON / KML / GPX）
-│   └── swarm_coordinator.py         # 群飛協調（SwarmCoordinator / SwarmMission）
+│   ├── swarm_coordinator.py         # 群飛協調（SwarmCoordinator / SwarmMission）+ landing_rollout 傳遞
+│   └── vtol_mission_exporter.py     # VTOL 專用匯出（NAV_VTOL_TAKEOFF / 過渡序列 / 垂直降落）
 │
 ├── sensors/                         # 感測器模組
 │   ├── camera_model.py              # 相機模型（GSD / 覆蓋率計算）
@@ -356,6 +392,25 @@ aeroplan-studio/
 | `fw_final_dist` | 最終進場距離 (m) | 400.0 |
 | `fw_takeoff_bearing` | 起飛方向 (°，0=北) | 0.0 |
 | `fw_landing_bearing` | 降落進場方向 (°) | 180.0 |
+| `landing_rollout_m` | 著陸滾行距離 (m)，整條五邊錨定於觸地點偏移 | 0.0（範圍 0–9999）|
+
+### 蜂群末端打擊（Swarm Strike）參數
+
+| 參數 | 說明 | 預設值 |
+|------|------|--------|
+| `max_dive_angle_deg` | 最大俯衝角 θ_max (°) | 45.0 |
+| `dive_initiation_dist_m` | 俯衝啟動距離（距目標水平距離, m） | 800.0 |
+| `cruise_alt_m` | 基準巡航高度 (m) | 根據參數面板 |
+| `cruise_speed_mps` | 巡航空速 (m/s) | 60.0 |
+| `altitude_step_m` | 高度錯層間距 (m)，各機遞增此值防撞 | 30.0 |
+| `cruise_step_m` | 巡航段航點間距 (m) | 50.0 |
+| `dive_step_m` | 俯衝段航點間距 (m) | 20.0 |
+| `takeoff_alt_m` | 起飛點地面海拔 (m) | 0.0 |
+| `climb_angle_deg` | 起飛爬升角 γ (°) | 8.0 |
+| `min_turn_radius_m` | 固定翼最小轉彎半徑 R_min (m) | `V²/(g·tan30°)` 動態計算 |
+| `use_dubins_cruise` | 巡航段是否套用 Dubins 曲線 | True |
+
+**匯出 MAVLink 指令對應**：`DO_SET_HOME (179)` → `DO_CHANGE_SPEED (178)` → `NAV_TAKEOFF (22)` → 巡航 `NAV_WAYPOINT (16, param2=R_min)` → 俯衝 `NAV_WAYPOINT (16, param2=0.25·R_min)`
 
 ## 快捷鍵
 
@@ -387,6 +442,22 @@ aeroplan-studio/
 | 配置 | PyYAML |
 
 ## 版本紀錄
+
+### v2.6.0 (Apr 2026)
+- 🎯 **蜂群末端打擊規劃 (Swarm Strike)**：新增 `core/strike/terminal_strike_planner.py`，N 目標自動分配 N 架 UCAV
+  - 三段軌跡：起飛爬升段（8° 爬升，黃色）→ Dubins 巡航段（最小轉彎半徑合規，綠色）→ 末端俯衝段（θ_max 急降，血紅色）
+  - 多機高度錯層（`altitude_step_m` 遞增）防止空中相撞
+  - Cesium 靜態路徑渲染：速度向量姿態、戰術顏色漸變、雷射目標鎖定、命中衝擊波
+  - 蜂群打擊 QGC WPL 110 匯出：每機獨立 `.waypoints` + `SWARM_STRIKE_briefing.txt` 任務簡報
+- ✨ **VTOL QuadPlane SITL 支援**
+  - 動態生成 `sitl/default_params/vtol_default.parm`（~120 參數，參考 Alti Transition 真機）
+  - 修正 VTOL 無法起飛：改用 `NAV_VTOL_TAKEOFF (84)` 取代 `NAV_TAKEOFF (22)`
+  - 新增 `vehicle_hint` 參數繞過 `MAV_TYPE=1` 模糊辨識
+  - VTOL 任務序列：垂直起飛 → 固定翼過渡 → 巡航 / 掃描 → 多旋翼過渡 → 垂直降落
+  - 新增 `mission/vtol_mission_exporter.py` VTOL 專用匯出器
+- 🐛 **修正 DCCPP 降落點與起飛點重合**：將 `landing_rollout_m` 串接 `SwarmCoordinator → DCCPPPathBuilder`，整個五邊進場 pattern 錨定於觸地點，隨 rollout 偏移整體平移
+- ✨ **Landing rollout 範圍擴大**：500m → 9999m
+- ✨ **DCCPP 多機防撞模組**：新增 `core/dccpp/collision_avoidance.py`，時空衝突檢測與路徑迴避
 
 ### v2.5.0 (Apr 2026)
 - 🎉 **專案更名** `UAV Path Planner` → **AeroPlan Studio — Collaborative UAV Mission Planning Suite**

@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
     QLabel, QSlider, QSpinBox, QDoubleSpinBox,
     QComboBox, QCheckBox, QPushButton, QFormLayout, QFrame,
-    QFileDialog, QTabWidget, QScrollArea
+    QFileDialog, QTabWidget, QScrollArea, QSplitter, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
@@ -59,8 +59,16 @@ class ParameterPanel(QWidget):
 
     # ── 蜂群打擊模組信號 ──────────────────────────────────────────────
     strike_mark_targets_requested = pyqtSignal()          # 開始標記打擊目標
+    strike_mark_base_requested = pyqtSignal()             # STOT 模式：標記共用發射基地
+    strike_mode_changed = pyqtSignal(str)                 # 發射模式切換 ('DTOT' / 'STOT')
     strike_execute_requested = pyqtSignal(dict)           # 執行蜂群打擊 (params dict)
     strike_clear_requested = pyqtSignal()                 # 清除打擊視覺化
+    strike_export_requested = pyqtSignal()                # 匯出蜂群打擊 QGC WPL 航點
+    strike_dtot_export_requested = pyqtSignal(dict)       # DTOT/STOT 飽和攻擊協同匯出
+    strike_owa_parm_requested = pyqtSignal()              # 產生 OWA-UAV .parm 檔
+    strike_sitl_upload_requested = pyqtSignal(bool)       # 上傳蜂群打擊任務至 SITL (bool = 是否使用 DTOT 空速)
+    strike_recon_trigger_requested = pyqtSignal(dict)     # DCCPP → Strike 動態切換觸發
+    strike_vtol_toggle_changed = pyqtSignal(bool)         # VTOL 模式開關切換
 
     def __init__(self, parent=None):
         """初始化參數面板"""
@@ -132,103 +140,135 @@ class ParameterPanel(QWidget):
         self._tabs.setDocumentMode(True)
         root_layout.addWidget(self._tabs)
 
+        # 紀錄所有 splitter，供「重置版面」功能使用
+        self._splitters: list[QSplitter] = []
+
         # ── Tab 1: 基本演算法 ──────────────────────────────────────────
-        basic_tab_content = QWidget()
-        basic_layout = QVBoxLayout(basic_tab_content)
-        basic_layout.setSpacing(10)
-        basic_layout.setContentsMargins(4, 4, 4, 4)
-
         self.corner_group = self.create_corner_management()
-        basic_layout.addWidget(self.corner_group)
-
         algo_vehicle_group = self.create_algorithm_vehicle_selection()
-        basic_layout.addWidget(algo_vehicle_group)
-
         flight_group = self.create_flight_parameters()
-        basic_layout.addWidget(flight_group)
-
         self.fixed_wing_group = self.create_fixed_wing_panel()
-        basic_layout.addWidget(self.fixed_wing_group)
         self.fixed_wing_group.setVisible(False)
-
         survey_group = self.create_survey_parameters()
-        basic_layout.addWidget(survey_group)
-
         self.circle_center_group = self.create_circle_center_panel()
-        basic_layout.addWidget(self.circle_center_group)
         self.circle_center_group.setVisible(False)
-
         self.region_safety_group = self.create_region_safety_group()
-        basic_layout.addWidget(self.region_safety_group)
         self.region_safety_group.setVisible(False)
-
         advanced_group = self.create_advanced_parameters()
-        basic_layout.addWidget(advanced_group)
-        basic_layout.addStretch()
 
-        basic_scroll = QScrollArea()
-        basic_scroll.setWidgetResizable(True)
-        basic_scroll.setWidget(basic_tab_content)
-        basic_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        basic_scroll = self._make_resizable_tab([
+            self.corner_group, algo_vehicle_group, flight_group,
+            self.fixed_wing_group, survey_group, self.circle_center_group,
+            self.region_safety_group, advanced_group,
+        ])
         self._tabs.addTab(basic_scroll, "基本演算法")
 
         # ── Tab 2: DCCPP ──────────────────────────────────────────────
-        dccpp_tab_content = QWidget()
-        dccpp_tab_layout = QVBoxLayout(dccpp_tab_content)
-        dccpp_tab_layout.setSpacing(10)
-        dccpp_tab_layout.setContentsMargins(4, 4, 4, 4)
         dccpp_group = self.create_dccpp_panel()
-        dccpp_tab_layout.addWidget(dccpp_group)
-        dccpp_tab_layout.addStretch()
-
-        dccpp_scroll = QScrollArea()
-        dccpp_scroll.setWidgetResizable(True)
-        dccpp_scroll.setWidget(dccpp_tab_content)
-        dccpp_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        dccpp_scroll = self._make_resizable_tab([dccpp_group])
         self._tabs.addTab(dccpp_scroll, "DCCPP")
 
         # ── Tab 4: 戰術模組 ──────────────────────────────────────────
-        tactical_tab_content = QWidget()
-        tactical_layout = QVBoxLayout(tactical_tab_content)
-        tactical_layout.setSpacing(10)
-        tactical_layout.setContentsMargins(4, 4, 4, 4)
-
-        # 模組一：FSDM 高程切片
         elev_group = self._create_elevation_slicer_panel()
-        tactical_layout.addWidget(elev_group)
-
-        # 模組二：FOV 光錐 + SAR 搜救熱力圖
         sar_group = self._create_sar_heatmap_panel()
-        tactical_layout.addWidget(sar_group)
-
-        # 模組三：雷達威脅穹頂 + RCS
         radar_group = self._create_radar_rcs_panel()
-        tactical_layout.addWidget(radar_group)
-
-        tactical_layout.addStretch()
-
-        tactical_scroll = QScrollArea()
-        tactical_scroll.setWidgetResizable(True)
-        tactical_scroll.setWidget(tactical_tab_content)
-        tactical_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        tactical_scroll = self._make_resizable_tab(
+            [elev_group, sar_group, radar_group]
+        )
         self._tabs.addTab(tactical_scroll, "戰術模組")
 
         # ── Tab 5: 蜂群打擊 ──────────────────────────────────────────
-        strike_tab_content = QWidget()
-        strike_layout = QVBoxLayout(strike_tab_content)
-        strike_layout.setSpacing(10)
-        strike_layout.setContentsMargins(4, 4, 4, 4)
-
         strike_group = self._create_strike_command_panel()
-        strike_layout.addWidget(strike_group)
-        strike_layout.addStretch()
-
-        strike_scroll = QScrollArea()
-        strike_scroll.setWidgetResizable(True)
-        strike_scroll.setWidget(strike_tab_content)
-        strike_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        strike_scroll = self._make_resizable_tab([strike_group])
         self._tabs.addTab(strike_scroll, "蜂群打擊")
     
+    # ─────────────────────────────────────────────────────────────────
+    #  可拖拉佈局 helpers — 讓每個 GroupBox 可由 Splitter 手動決定大小
+    # ─────────────────────────────────────────────────────────────────
+    _SPLITTER_QSS = """
+        QSplitter::handle {
+            background-color: #37474F;
+            border: 1px solid #263238;
+        }
+        QSplitter::handle:horizontal {
+            width: 6px;
+        }
+        QSplitter::handle:vertical {
+            height: 6px;
+        }
+        QSplitter::handle:hover {
+            background-color: #FFB74D;
+        }
+        QSplitter::handle:pressed {
+            background-color: #FF9800;
+        }
+    """
+
+    def _make_resizable_tab(self, widgets: list) -> QScrollArea:
+        """將一組 QGroupBox widgets 包進 QSplitter(Vertical) → QScrollArea。
+
+        - 每個 GroupBox 之間有可拖拉的分隔線（~6px，hover 時變橘色）
+        - 隱藏狀態的 GroupBox 不會佔空間，切換顯示時自動分配空間
+        - QScrollArea 仍保留，內容超過視窗高度時可捲動
+        """
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.setStyleSheet(self._SPLITTER_QSS)
+        splitter.setChildrenCollapsible(False)    # 避免拖到 0 讓 widget 消失
+        splitter.setHandleWidth(6)
+
+        for w in widgets:
+            # 允許 widget 依需求收縮/擴張
+            w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            splitter.addWidget(w)
+            # 給每個 widget 一個合理的預設 stretch
+            splitter.setStretchFactor(splitter.count() - 1, 1)
+
+        # 記錄，供「重置版面」與 QSettings 持久化使用
+        self._splitters.append(splitter)
+
+        # 包進 QScrollArea：垂直超出時可捲動，水平自動
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(splitter)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        return scroll
+
+    def _make_vertical_splitter(self, widgets: list,
+                                 stretch: list = None) -> QSplitter:
+        """通用版本：把一組 widgets 放進 QSplitter(Vertical) 並回傳 splitter。
+
+        Parameters
+        ----------
+        widgets : list
+            要放入 splitter 的 widget 清單
+        stretch : list, optional
+            各 widget 的 stretch factor；預設為 1 (平均分配)
+        """
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.setStyleSheet(self._SPLITTER_QSS)
+        splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(6)
+
+        for i, w in enumerate(widgets):
+            w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            splitter.addWidget(w)
+            s = (stretch[i] if stretch and i < len(stretch) else 1)
+            splitter.setStretchFactor(i, s)
+
+        self._splitters.append(splitter)
+        return splitter
+
+    def reset_resizable_layout(self):
+        """重置所有 Splitter 的比例為平均分配（供工具列「重置版面」按鈕）"""
+        for sp in self._splitters:
+            n = sp.count()
+            if n == 0:
+                continue
+            total = max(sp.width() if sp.orientation() == Qt.Orientation.Horizontal
+                        else sp.height(), 100)
+            per = total // n
+            sp.setSizes([per] * n)
+
     def create_corner_management(self):
         """創建邊界點管理群組"""
         group = QGroupBox("邊界點管理")
@@ -2583,6 +2623,66 @@ class ParameterPanel(QWidget):
         desc.setStyleSheet("color:#BDBDBD; font-size:10px; padding:4px;")
         layout.addWidget(desc)
 
+        # ══════════════════════════════════════════════════════════════
+        #  發射位置 (Launch Position) — 與 STOT/DTOT 時間協同正交的概念
+        # ══════════════════════════════════════════════════════════════
+        mode_form = QFormLayout()
+        mode_form.setSpacing(4)
+        self._strike_launch_mode = QComboBox()
+        self._strike_launch_mode.addItems([
+            '異地發射 (各 UCAV 自動分散起飛點)',
+            '同地發射 (共用發射基地)',
+        ])
+        self._strike_launch_mode.setStyleSheet(
+            "QComboBox{font-weight:bold;color:#FFB74D;padding:4px;}"
+        )
+        self._strike_launch_mode.setToolTip(
+            "異地發射: 各 UCAV 從不同位置出發 → 圍剿目標\n"
+            "同地發射: 所有 UCAV 從同一基地起飛 → 扇形散開"
+        )
+        self._strike_launch_mode.currentIndexChanged.connect(
+            self._on_strike_launch_mode_changed
+        )
+        mode_form.addRow("發射位置:", self._strike_launch_mode)
+        layout.addLayout(mode_form)
+
+        # ── STOT 專用：共用發射基地（僅 STOT 模式顯示）─────────────
+        self._strike_base_group = QGroupBox("STOT 共用發射基地")
+        self._strike_base_group.setStyleSheet(
+            "QGroupBox{color:#4CAF50;border:1px dashed #4CAF50;"
+            "border-radius:3px;margin-top:6px;padding-top:12px;}"
+            "QGroupBox::title{subcontrol-position:top left;padding:0 6px;}"
+        )
+        base_layout = QVBoxLayout(self._strike_base_group)
+        base_layout.setSpacing(4)
+
+        self._strike_mark_base_btn = QPushButton("📍 從地圖標記共用發射基地")
+        self._strike_mark_base_btn.setCheckable(True)
+        self._strike_mark_base_btn.setStyleSheet(
+            "QPushButton{background-color:#2E7D32;color:white;font-weight:bold;"
+            "padding:6px;border-radius:3px;font-size:11px;}"
+            "QPushButton:hover{background-color:#388E3C;}"
+            "QPushButton:checked{background-color:#E65100;}"
+        )
+        self._strike_mark_base_btn.setToolTip(
+            "啟用後左鍵點擊 3D 地圖任一處設定共用起飛點；\n"
+            "所有 UCAV 將從該點同時起飛。"
+        )
+        self._strike_mark_base_btn.clicked.connect(
+            lambda: self.strike_mark_base_requested.emit()
+        )
+        base_layout.addWidget(self._strike_mark_base_btn)
+
+        self._strike_base_label = QLabel("未標記 — 必須先設定基地才能 EXECUTE")
+        self._strike_base_label.setStyleSheet(
+            "color:#FF5252;font-size:10px;padding:2px 4px;"
+        )
+        self._strike_base_label.setWordWrap(True)
+        base_layout.addWidget(self._strike_base_label)
+
+        layout.addWidget(self._strike_base_group)
+        self._strike_base_group.setVisible(False)  # 預設 DTOT 模式隱藏
+
         # ── 標記目標按鈕 ─────────────────────────────────────────────
         self._strike_mark_btn = QPushButton("🎯 標記多重打擊目標 (Mark Targets)")
         self._strike_mark_btn.setStyleSheet(
@@ -2746,6 +2846,390 @@ class ParameterPanel(QWidget):
         self._strike_execute_btn.clicked.connect(self._on_strike_execute)
         layout.addWidget(self._strike_execute_btn)
 
+        # ── 匯出打擊任務按鈕 (DCCPP 風格，產生每機獨立 QGC WPL) ──────
+        self._strike_export_btn = QPushButton("💾 匯出打擊任務 (QGC WPL)")
+        self._strike_export_btn.setStyleSheet(
+            "QPushButton{background-color:#1B5E20;color:white;padding:8px;"
+            "font-weight:bold;border-radius:4px;}"
+            "QPushButton:hover{background-color:#2E7D32;}"
+            "QPushButton:disabled{background-color:#555;color:#999;}"
+        )
+        self._strike_export_btn.setToolTip(
+            "將規劃完成的蜂群打擊路徑匯出為 QGC WPL 110 航點檔案\n"
+            "每架 UCAV 一個 .waypoints，附任務簡報 TXT\n"
+            "包含：DO_SET_HOME / NAV_TAKEOFF / 巡航/俯衝 NAV_WAYPOINT"
+        )
+        self._strike_export_btn.setEnabled(False)
+        self._strike_export_btn.clicked.connect(self.strike_export_requested.emit)
+        layout.addWidget(self._strike_export_btn)
+
+        # ══════════════════════════════════════════════════════════════
+        #  上傳至 SITL (每架 UCAV 綁定一條 SITL link)
+        # ══════════════════════════════════════════════════════════════
+        sitl_group = QGroupBox("蜂群打擊 → SITL 模擬")
+        sitl_group.setStyleSheet(
+            "QGroupBox{color:#00BCD4;border:1px dashed #00BCD4;"
+            "border-radius:3px;margin-top:8px;padding-top:12px;}"
+            "QGroupBox::title{subcontrol-position:top left;padding:0 6px;}"
+        )
+        sitl_layout = QVBoxLayout(sitl_group)
+        sitl_layout.setSpacing(6)
+
+        sitl_hint = QLabel(
+            "需先在「🛰 SITL」分頁啟動 N 台 ArduPlane 實例，\n"
+            "每架 UCAV 會依 uav_id 綁定對應的 SITL link。"
+        )
+        sitl_hint.setWordWrap(True)
+        sitl_hint.setStyleSheet("color:#80DEEA;font-size:10px;padding:2px 4px;")
+        sitl_layout.addWidget(sitl_hint)
+
+        # DTOT 空速核取方塊 — 勾選則用各機協同空速，否則統一用 cruise_speed
+        self._strike_sitl_use_dtot = QCheckBox(
+            "使用 DTOT 協同空速 (各機專屬 V_i)"
+        )
+        self._strike_sitl_use_dtot.setChecked(True)
+        self._strike_sitl_use_dtot.setToolTip(
+            "勾選：上傳時每架 UCAV 插入自己的 DO_CHANGE_SPEED(178)，\n"
+            "      達成同秒同時命中 (Time On Target)\n"
+            "未勾：所有 UCAV 使用統一 cruise_speed (傳統打擊)"
+        )
+        self._strike_sitl_use_dtot.setStyleSheet("color:#B2EBF2;font-size:11px;")
+        sitl_layout.addWidget(self._strike_sitl_use_dtot)
+
+        self._strike_sitl_upload_btn = QPushButton("🚀 上傳蜂群打擊任務至 SITL")
+        self._strike_sitl_upload_btn.setStyleSheet(
+            "QPushButton{background-color:#006064;color:white;font-weight:bold;"
+            "padding:10px;border-radius:4px;font-size:12px;"
+            "border:2px solid #00838F;}"
+            "QPushButton:hover{background-color:#00838F;border-color:#00ACC1;}"
+            "QPushButton:pressed{background-color:#004D40;}"
+            "QPushButton:disabled{background-color:#555;color:#999;border-color:#444;}"
+        )
+        self._strike_sitl_upload_btn.setToolTip(
+            "將蜂群打擊任務上傳到所有已連線的 SITL 實例\n"
+            "每架 UCAV 獨立路徑：DO_CHANGE_SPEED → NAV_TAKEOFF →\n"
+            "  (可選) NAV_LOITER_TIME 補時 → 巡航 NAV_WAYPOINT → 俯衝 NAV_WAYPOINT\n"
+            "（需先完成 EXECUTE SWARM STRIKE 且已有 SITL 連線）"
+        )
+        self._strike_sitl_upload_btn.setEnabled(False)
+        self._strike_sitl_upload_btn.clicked.connect(
+            lambda: self.strike_sitl_upload_requested.emit(
+                self._strike_sitl_use_dtot.isChecked()
+            )
+        )
+        sitl_layout.addWidget(self._strike_sitl_upload_btn)
+
+        layout.addWidget(sitl_group)
+
+        # ══════════════════════════════════════════════════════════════
+        #  動態切換：DCCPP → 蜂群打擊 (ReconToStrikeManager)
+        # ══════════════════════════════════════════════════════════════
+        recon_group = QGroupBox("⚡ 動態偵打切換 (DCCPP → Strike)")
+        recon_group.setStyleSheet(
+            "QGroupBox{color:#FFD54F;border:1px dashed #FFD54F;"
+            "border-radius:3px;margin-top:8px;padding-top:12px;}"
+            "QGroupBox::title{subcontrol-position:top left;padding:0 6px;}"
+        )
+        recon_layout = QVBoxLayout(recon_group)
+        recon_layout.setSpacing(6)
+
+        recon_hint = QLabel(
+            "情境：DCCPP 覆蓋掃描中偵測到目標 → 動態重構為蜂群打擊\n"
+            "需求：(1) 已完成 DCCPP 規劃  (2) 已標記至少 1 個打擊目標\n"
+            "流程：選 N 架最近的 UAV → 平滑銜接 → IAPF 避障 → STOT 匯聚"
+        )
+        recon_hint.setWordWrap(True)
+        recon_hint.setStyleSheet("color:#FFE082;font-size:10px;padding:2px 4px;")
+        recon_layout.addWidget(recon_hint)
+
+        recon_form = QFormLayout()
+        recon_form.setSpacing(4)
+
+        # 聯盟規模
+        self._strike_coalition_size = QSpinBox()
+        self._strike_coalition_size.setRange(1, 12)
+        self._strike_coalition_size.setValue(3)
+        self._strike_coalition_size.setSuffix(" 架")
+        self._strike_coalition_size.setToolTip(
+            "從 DCCPP 掃描機群中挑選幾架轉打擊\n"
+            "其餘 UAV 繼續執行 DCCPP 覆蓋任務"
+        )
+        recon_form.addRow("打擊聯盟規模:", self._strike_coalition_size)
+
+        # IAPF 安全距離
+        self._strike_iapf_dist = QDoubleSpinBox()
+        self._strike_iapf_dist.setRange(100.0, 5000.0)
+        self._strike_iapf_dist.setValue(1500.0)
+        self._strike_iapf_dist.setSuffix(" m")
+        self._strike_iapf_dist.setDecimals(0)
+        self._strike_iapf_dist.setToolTip(
+            "3D IAPF 避障觸發距離\n"
+            "兩機 3D 距離 < 此值啟動切線斥力"
+        )
+        recon_form.addRow("IAPF 安全距離:", self._strike_iapf_dist)
+
+        recon_layout.addLayout(recon_form)
+
+        self._strike_recon_btn = QPushButton("⚡ 觸發偵測事件 → 動態切換打擊")
+        self._strike_recon_btn.setStyleSheet(
+            "QPushButton{background-color:#F57F17;color:white;font-weight:bold;"
+            "padding:10px;border-radius:4px;font-size:12px;"
+            "border:2px solid #FF6F00;}"
+            "QPushButton:hover{background-color:#FF8F00;border-color:#FF6F00;}"
+            "QPushButton:disabled{background-color:#555;color:#999;border-color:#444;}"
+        )
+        self._strike_recon_btn.setToolTip(
+            "模擬 DCCPP 掃描中 UAV 偵測到目標的事件\n"
+            "系統自動：篩選聯盟 → 平滑銜接 → IAPF 避障 → 上傳 SITL\n"
+            "（需先執行 DCCPP + 標記至少 1 個目標）"
+        )
+        self._strike_recon_btn.clicked.connect(self._on_strike_recon_trigger)
+        recon_layout.addWidget(self._strike_recon_btn)
+
+        layout.addWidget(recon_group)
+
+        # ══════════════════════════════════════════════════════════════
+        #  VTOL 模式開關
+        # ══════════════════════════════════════════════════════════════
+        vtol_group = QGroupBox("🛩 VTOL 模式 (垂直起降)")
+        vtol_group.setStyleSheet(
+            "QGroupBox{color:#00ACC1;border:1px dashed #00ACC1;"
+            "border-radius:3px;margin-top:8px;padding-top:12px;}"
+            "QGroupBox::title{subcontrol-position:top left;padding:0 6px;}"
+        )
+        vtol_layout = QVBoxLayout(vtol_group)
+        vtol_layout.setSpacing(4)
+
+        self._strike_vtol_enabled = QCheckBox(
+            "啟用 VTOL 蜂群打擊 (NAV_VTOL_TAKEOFF + Phase 2/3)"
+        )
+        self._strike_vtol_enabled.setChecked(False)
+        self._strike_vtol_enabled.setStyleSheet("color:#80DEEA;font-size:11px;")
+        self._strike_vtol_enabled.setToolTip(
+            "勾選後：\n"
+            "  - 起飛改用 NAV_VTOL_TAKEOFF (垂直) + DO_VTOL_TRANSITION\n"
+            "  - Phase 2 巡航速度 (40-60 kts)\n"
+            "  - 距目標 2 km 切換 Phase 3 末端衝刺 (80-100 kts)\n"
+            "  - 可選觸發 IMAGE_START_CAPTURE AI 尋標\n"
+            "  - CEP 多機散佈涵蓋誤差圓"
+        )
+        self._strike_vtol_enabled.toggled.connect(self._on_strike_vtol_toggled)
+        vtol_layout.addWidget(self._strike_vtol_enabled)
+
+        vtol_form = QFormLayout()
+        vtol_form.setSpacing(4)
+
+        self._strike_vtol_cruise_kts = QDoubleSpinBox()
+        self._strike_vtol_cruise_kts.setRange(30.0, 80.0)
+        self._strike_vtol_cruise_kts.setValue(50.0)
+        self._strike_vtol_cruise_kts.setSuffix(" kts")
+        self._strike_vtol_cruise_kts.setDecimals(0)
+        self._strike_vtol_cruise_kts.setToolTip("Phase 2 巡航空速 (建議 40-60 kts)")
+        self._strike_vtol_cruise_kts.setEnabled(False)
+        vtol_form.addRow("Phase 2 巡航:", self._strike_vtol_cruise_kts)
+
+        self._strike_vtol_terminal_kts = QDoubleSpinBox()
+        self._strike_vtol_terminal_kts.setRange(60.0, 150.0)
+        self._strike_vtol_terminal_kts.setValue(90.0)
+        self._strike_vtol_terminal_kts.setSuffix(" kts")
+        self._strike_vtol_terminal_kts.setDecimals(0)
+        self._strike_vtol_terminal_kts.setToolTip("Phase 3 末端衝刺 (建議 80-100 kts)")
+        self._strike_vtol_terminal_kts.setEnabled(False)
+        vtol_form.addRow("Phase 3 末端:", self._strike_vtol_terminal_kts)
+
+        self._strike_vtol_boundary_m = QDoubleSpinBox()
+        self._strike_vtol_boundary_m.setRange(500.0, 10000.0)
+        self._strike_vtol_boundary_m.setValue(2000.0)
+        self._strike_vtol_boundary_m.setSuffix(" m")
+        self._strike_vtol_boundary_m.setDecimals(0)
+        self._strike_vtol_boundary_m.setToolTip("Phase 3 切換距離 (預設 2 km)")
+        self._strike_vtol_boundary_m.setEnabled(False)
+        vtol_form.addRow("邊界距離:", self._strike_vtol_boundary_m)
+
+        self._strike_vtol_cep_m = QDoubleSpinBox()
+        self._strike_vtol_cep_m.setRange(1.0, 100.0)
+        self._strike_vtol_cep_m.setValue(12.0)
+        self._strike_vtol_cep_m.setSuffix(" m")
+        self._strike_vtol_cep_m.setDecimals(1)
+        self._strike_vtol_cep_m.setToolTip("CEP 末端分佈半徑 (覆蓋目標誤差圓)")
+        self._strike_vtol_cep_m.setEnabled(False)
+        vtol_form.addRow("CEP 散佈:", self._strike_vtol_cep_m)
+
+        self._strike_vtol_ai_seeker = QCheckBox("Phase 3 觸發 AI 尋標 (IMAGE_START_CAPTURE)")
+        self._strike_vtol_ai_seeker.setChecked(True)
+        self._strike_vtol_ai_seeker.setEnabled(False)
+        self._strike_vtol_ai_seeker.setStyleSheet("color:#80DEEA;font-size:10px;")
+        vtol_form.addRow("", self._strike_vtol_ai_seeker)
+
+        vtol_layout.addLayout(vtol_form)
+        layout.addWidget(vtol_group)
+
+        # ══════════════════════════════════════════════════════════════
+        #  時間協同 (Time Coordination) — STOT 同時命中 / DTOT 間隔命中
+        # ══════════════════════════════════════════════════════════════
+        sep_dtot = QFrame()
+        sep_dtot.setFrameShape(QFrame.Shape.HLine)
+        sep_dtot.setStyleSheet("color:#FF6F00;")
+        layout.addWidget(sep_dtot)
+
+        dtot_header = QLabel("時間協同 (Time On Target)")
+        dtot_header.setStyleSheet(
+            "font-weight:bold;color:#FF6F00;font-size:12px;padding:4px 0;"
+        )
+        layout.addWidget(dtot_header)
+
+        dtot_desc = QLabel(
+            "STOT (Simultaneous): 全體 UCAV 同一秒命中 (飽和攻擊)\n"
+            "DTOT (Distributed): slot k 於 T+k·Δ 秒命中 (波次打擊)\n\n"
+            "兩種模式皆自動反推各機所需空速；\n"
+            "V_req < V_stall 時強制插入 Loiter 盤旋補時。"
+        )
+        dtot_desc.setWordWrap(True)
+        dtot_desc.setStyleSheet(
+            "color:#BDBDBD;font-size:10px;padding:2px 4px;"
+        )
+        layout.addWidget(dtot_desc)
+
+        dtot_form = QFormLayout()
+        dtot_form.setSpacing(6)
+
+        # ── 時間協同模式選擇 ───────────────────────────────────
+        self._strike_timing_mode = QComboBox()
+        self._strike_timing_mode.addItems([
+            'STOT — 同時命中',
+            'DTOT — 間隔命中',
+        ])
+        self._strike_timing_mode.setStyleSheet(
+            "QComboBox{font-weight:bold;color:#FF8A65;padding:4px;}"
+        )
+        self._strike_timing_mode.setToolTip(
+            "STOT: 全體 UCAV 同一秒突破末端/命中目標\n"
+            "DTOT: 依 slot 序依序命中 (間隔由下方 interval 決定)"
+        )
+        self._strike_timing_mode.currentIndexChanged.connect(
+            self._on_strike_timing_mode_changed
+        )
+        dtot_form.addRow("時間協同:", self._strike_timing_mode)
+
+        # ── DTOT 間隔時間 (僅 DTOT 模式顯示) ────────────────────
+        self._strike_interval_sec = QDoubleSpinBox()
+        self._strike_interval_sec.setRange(1.0, 300.0)
+        self._strike_interval_sec.setValue(15.0)
+        self._strike_interval_sec.setSuffix(" s")
+        self._strike_interval_sec.setDecimals(1)
+        self._strike_interval_sec.setSingleStep(1.0)
+        self._strike_interval_sec.setToolTip(
+            "DTOT 間隔秒數 Δ：slot 0 命中時刻為 T，\n"
+            "slot 1 於 T+Δ，slot 2 於 T+2Δ ... 依序命中\n"
+            "（STOT 模式此欄位不生效）"
+        )
+        self._strike_interval_sec.setStyleSheet(
+            "QDoubleSpinBox{font-weight:bold;color:#FFAB91;}"
+        )
+        self._strike_interval_label = QLabel("間隔 Δ:")
+        dtot_form.addRow(self._strike_interval_label, self._strike_interval_sec)
+        # 預設 STOT → 隱藏 interval
+        self._strike_interval_sec.setEnabled(False)
+
+        # 最大空速
+        self._strike_max_speed = QDoubleSpinBox()
+        self._strike_max_speed.setRange(30.0, 300.0)
+        self._strike_max_speed.setValue(85.0)
+        self._strike_max_speed.setSuffix(" m/s")
+        self._strike_max_speed.setDecimals(1)
+        self._strike_max_speed.setToolTip(
+            "飛控允許最大空速 (ARSPD_FBW_MAX)\n"
+            "超過此值的 TOT 計算為不可行"
+        )
+        dtot_form.addRow("最大空速 (V_max):", self._strike_max_speed)
+
+        # 失速速度
+        self._strike_stall_speed = QDoubleSpinBox()
+        self._strike_stall_speed.setRange(10.0, 100.0)
+        self._strike_stall_speed.setValue(25.0)
+        self._strike_stall_speed.setSuffix(" m/s")
+        self._strike_stall_speed.setDecimals(1)
+        self._strike_stall_speed.setToolTip(
+            "失速速度下限 (ARSPD_FBW_MIN)\n"
+            "低於此值 = 需插入 Loiter 盤旋補時"
+        )
+        dtot_form.addRow("失速速度 (V_stall):", self._strike_stall_speed)
+
+        # 最小轉彎半徑
+        self._strike_turn_radius = QDoubleSpinBox()
+        self._strike_turn_radius.setRange(30.0, 1000.0)
+        self._strike_turn_radius.setValue(150.0)
+        self._strike_turn_radius.setSuffix(" m")
+        self._strike_turn_radius.setDecimals(0)
+        self._strike_turn_radius.setToolTip(
+            "固定翼最小轉彎半徑 R_min\n"
+            "用於 S-turn/Loiter 補時盤旋與巡航段 Dubins 曲線"
+        )
+        dtot_form.addRow("最小轉彎半徑:", self._strike_turn_radius)
+
+        # TOT 結果預覽
+        self._strike_dtot_preview = QLabel("")
+        self._strike_dtot_preview.setWordWrap(True)
+        self._strike_dtot_preview.setStyleSheet(
+            "color:#FFD54F;font-size:10px;padding:2px 4px;"
+        )
+        dtot_form.addRow("", self._strike_dtot_preview)
+
+        layout.addLayout(dtot_form)
+
+        # DTOT 匯出按鈕
+        self._strike_dtot_export_btn = QPushButton("DTOT/STOT 飽和攻擊匯出 (QGC WPL)")
+        self._strike_dtot_export_btn.setStyleSheet(
+            "QPushButton{background-color:#E65100;color:white;padding:8px;"
+            "font-weight:bold;border-radius:4px;font-size:11px;}"
+            "QPushButton:hover{background-color:#F57C00;}"
+            "QPushButton:disabled{background-color:#555;color:#999;}"
+        )
+        self._strike_dtot_export_btn.setToolTip(
+            "執行 DTOT/STOT 時空協同演算 → 反推各機空速 →\n"
+            "匯出含 DO_CHANGE_SPEED(178) 的 QGC WPL 航點檔\n"
+            "（需先完成 EXECUTE SWARM STRIKE）"
+        )
+        self._strike_dtot_export_btn.setEnabled(False)
+        self._strike_dtot_export_btn.clicked.connect(self._on_dtot_export)
+        layout.addWidget(self._strike_dtot_export_btn)
+
+        # ══════════════════════════════════════════════════════════════
+        #  OWA-UAV 戰術 .parm 生成
+        # ══════════════════════════════════════════════════════════════
+        sep_owa = QFrame()
+        sep_owa.setFrameShape(QFrame.Shape.HLine)
+        sep_owa.setStyleSheet("color:#424242;")
+        layout.addWidget(sep_owa)
+
+        owa_header = QLabel("OWA-UAV 飛控參數")
+        owa_header.setStyleSheet(
+            "font-weight:bold;color:#78909C;font-size:12px;padding:4px 0;"
+        )
+        layout.addWidget(owa_header)
+
+        owa_desc = QLabel(
+            "為 ArduPlane SITL 產生 OWA (One-Way Attack) 戰術參數：\n"
+            "Failsafe=繼續任務 / ICE 內燃機 / 地形跟隨突防"
+        )
+        owa_desc.setWordWrap(True)
+        owa_desc.setStyleSheet("color:#BDBDBD;font-size:10px;padding:2px 4px;")
+        layout.addWidget(owa_desc)
+
+        self._strike_owa_btn = QPushButton("產生 OWA-UAV .parm 參數檔")
+        self._strike_owa_btn.setStyleSheet(
+            "QPushButton{background-color:#37474F;color:white;padding:8px;"
+            "font-weight:bold;border-radius:4px;}"
+            "QPushButton:hover{background-color:#455A64;}"
+        )
+        self._strike_owa_btn.setToolTip(
+            "在 sitl/default_params/ 產生 owa_uav_default.parm\n"
+            "包含 Failsafe 戰術覆寫 / ICE 引擎 / 地形跟隨\n"
+            "SITL 啟動時加 --defaults plane.parm,owa_uav_default.parm"
+        )
+        self._strike_owa_btn.clicked.connect(self.strike_owa_parm_requested.emit)
+        layout.addWidget(self._strike_owa_btn)
+
         # ── 清除按鈕 ─────────────────────────────────────────────────
         clear_btn = QPushButton("清除打擊視覺化")
         clear_btn.setStyleSheet(
@@ -2758,18 +3242,199 @@ class ParameterPanel(QWidget):
 
         return group
 
-    def _on_strike_execute(self):
-        """蜂群打擊執行按鈕"""
+    def set_strike_export_enabled(self, enabled: bool):
+        """規劃完成 / 清除後由主視窗呼叫，切換匯出與 SITL 按鈕啟用狀態"""
+        if hasattr(self, '_strike_export_btn'):
+            self._strike_export_btn.setEnabled(enabled)
+        if hasattr(self, '_strike_dtot_export_btn'):
+            self._strike_dtot_export_btn.setEnabled(enabled)
+        if hasattr(self, '_strike_sitl_upload_btn'):
+            self._strike_sitl_upload_btn.setEnabled(enabled)
+
+    def _on_dtot_export(self):
+        """收集時間協同匯出參數並發射信號。
+
+        2026 重構：明確拆分兩個正交概念，不再混用 'mode' key：
+          - launch_mode: 'SAME' 同地 / 'DIFF' 異地  (發射位置)
+          - timing_mode: 'STOT' 同時 / 'DTOT' 間隔  (命中時間)
+        """
         params = {
-            'cruise_alt': self._strike_cruise_alt.value(),
-            'cruise_speed': self._strike_cruise_speed.value(),
-            'altitude_step': self._strike_alt_step.value(),
-            'max_dive_angle': self._strike_max_dive_angle.value(),
+            'launch_mode':      self.get_strike_launch_mode(),
+            'timing_mode':      self.get_strike_timing_mode(),
+            'interval_sec':     self.get_strike_interval_sec(),
+            'cruise_speed':     self._strike_cruise_speed.value(),
+            'max_speed':        self._strike_max_speed.value(),
+            'stall_speed':      self._strike_stall_speed.value(),
+            'min_turn_radius':  self._strike_turn_radius.value(),
+        }
+        self.strike_dtot_export_requested.emit(params)
+
+    def update_dtot_preview(self, text: str):
+        """由主視窗呼叫，更新 DTOT 結果預覽文字"""
+        if hasattr(self, '_strike_dtot_preview'):
+            self._strike_dtot_preview.setText(text)
+
+    def update_collision_report(self, safe: bool, conflicts: list):
+        """顯示避障報告（Task 3：CollisionReport UI）"""
+        if not hasattr(self, '_strike_dtot_preview'):
+            return
+        current = self._strike_dtot_preview.text()
+        if safe:
+            extra = '\n[避障] SAFE — 無衝突'
+            color = '#FFD54F'
+        else:
+            extra = f'\n[避障] {len(conflicts)} 項衝突:'
+            for c in conflicts[:3]:   # 最多顯示 3 條
+                extra += f'\n  ! {c}'
+            if len(conflicts) > 3:
+                extra += f'\n  ... +{len(conflicts) - 3} more'
+            color = '#FF8A65'
+        self._strike_dtot_preview.setText(current + extra)
+        self._strike_dtot_preview.setStyleSheet(
+            f'color:{color};font-size:10px;padding:2px 4px;'
+        )
+
+    # ─── ReconToStrike / VTOL 動態切換 handlers ─────────────────────
+    def _on_strike_recon_trigger(self):
+        """觸發 DCCPP → 蜂群打擊動態切換"""
+        params = {
+            'coalition_size':   self._strike_coalition_size.value(),
+            'iapf_safe_dist':   self._strike_iapf_dist.value(),
+            'cruise_speed':     self._strike_cruise_speed.value(),
+            'stall_speed':      self._strike_stall_speed.value(),
+            'max_speed':        self._strike_max_speed.value(),
+            'turn_radius':      self._strike_turn_radius.value(),
+            'base_alt':         self._strike_cruise_alt.value(),
+            'alt_step':         self._strike_alt_step.value(),
+        }
+        self.strike_recon_trigger_requested.emit(params)
+
+    def _on_strike_vtol_toggled(self, checked: bool):
+        """VTOL 模式切換 → 啟用/禁用 VTOL 相關 SpinBox + 發射信號"""
+        for w in ('_strike_vtol_cruise_kts', '_strike_vtol_terminal_kts',
+                  '_strike_vtol_boundary_m', '_strike_vtol_cep_m',
+                  '_strike_vtol_ai_seeker'):
+            if hasattr(self, w):
+                getattr(self, w).setEnabled(checked)
+        self.strike_vtol_toggle_changed.emit(checked)
+
+    def get_strike_vtol_params(self) -> dict:
+        """取得 VTOL 模式全部參數（main_window 讀取用）"""
+        if not hasattr(self, '_strike_vtol_enabled'):
+            return {'enabled': False}
+        return {
+            'enabled':        self._strike_vtol_enabled.isChecked(),
+            'cruise_kts':     self._strike_vtol_cruise_kts.value(),
+            'terminal_kts':   self._strike_vtol_terminal_kts.value(),
+            'boundary_m':     self._strike_vtol_boundary_m.value(),
+            'cep_m':          self._strike_vtol_cep_m.value(),
+            'ai_seeker':      self._strike_vtol_ai_seeker.isChecked(),
+        }
+
+    # ─────────────────────────────────────────────────────────────
+    #  發射模式 / 時間協同 getters
+    #
+    #  2026 重構 — 徹底消除 STOT/DTOT 舊/新版歧義：
+    #      launch_mode : 'SAME' (同地) / 'DIFF' (異地)  ← 僅「發射位置」
+    #      timing_mode : 'STOT' (同時命中) / 'DTOT' (間隔命中)  ← 唯一 STOT/DTOT
+    #
+    #  `get_strike_launch_mode()` 的回傳值從 'STOT'/'DTOT' 改為 'SAME'/'DIFF'，
+    #  所有下游 (main_window / strike_controller) 也同步使用新值。
+    # ─────────────────────────────────────────────────────────────
+    def get_strike_launch_mode(self) -> str:
+        """取得發射位置模式 ('SAME' 同地 / 'DIFF' 異地)"""
+        if not hasattr(self, '_strike_launch_mode'):
+            return 'DIFF'
+        text = self._strike_launch_mode.currentText()
+        return 'SAME' if '同地' in text else 'DIFF'
+
+    def get_strike_timing_mode(self) -> str:
+        """取得時間協同模式 ('STOT' 同時命中 / 'DTOT' 間隔命中)"""
+        if not hasattr(self, '_strike_timing_mode'):
+            return 'STOT'
+        return 'DTOT' if 'DTOT' in self._strike_timing_mode.currentText() else 'STOT'
+
+    def get_strike_interval_sec(self) -> float:
+        """取得 DTOT 間隔秒數 (STOT 模式此值無效)"""
+        if not hasattr(self, '_strike_interval_sec'):
+            return 0.0
+        return float(self._strike_interval_sec.value())
+
+    def _on_strike_launch_mode_changed(self, index: int):
+        """發射位置切換 → 顯示/隱藏 STOT 基地區塊 + 發射信號"""
+        mode = self.get_strike_launch_mode()
+        if hasattr(self, '_strike_base_group'):
+            # SAME (同地) 才需要共用發射基地
+            self._strike_base_group.setVisible(mode == 'SAME')
+        self.strike_mode_changed.emit(mode)
+
+    def _on_strike_timing_mode_changed(self, index: int):
+        """時間協同模式切換 → 啟用/禁用 interval 輸入欄位"""
+        is_dtot = self.get_strike_timing_mode() == 'DTOT'
+        if hasattr(self, '_strike_interval_sec'):
+            self._strike_interval_sec.setEnabled(is_dtot)
+        if hasattr(self, '_strike_interval_label'):
+            color = '#FFAB91' if is_dtot else '#555555'
+            self._strike_interval_label.setStyleSheet(f'color:{color};')
+
+    def set_strike_base_marking_mode(self, active: bool):
+        """由主視窗呼叫，同步 STOT 基地標記按鈕狀態"""
+        if hasattr(self, '_strike_mark_base_btn'):
+            self._strike_mark_base_btn.setChecked(active)
+
+    def update_strike_base_label(self, lat: float = None, lon: float = None):
+        """更新 STOT 基地座標顯示；傳 None 代表尚未標記"""
+        if not hasattr(self, '_strike_base_label'):
+            return
+        if lat is None or lon is None:
+            self._strike_base_label.setText("未標記 — 必須先設定基地才能 EXECUTE")
+            self._strike_base_label.setStyleSheet(
+                "color:#FF5252;font-size:10px;padding:2px 4px;"
+            )
+        else:
+            self._strike_base_label.setText(
+                f"✓ 基地: ({lat:.6f}, {lon:.6f})"
+            )
+            self._strike_base_label.setStyleSheet(
+                "color:#81C784;font-size:10px;padding:2px 4px;font-weight:bold;"
+            )
+
+    def _on_strike_execute(self):
+        """蜂群打擊執行按鈕 — 同時攜帶發射位置 + 時間協同模式
+
+        2026 重構：內部值徹底分離歧義：
+          * launch_mode = 'SAME' / 'DIFF'  (發射位置)
+          * timing_mode = 'STOT' / 'DTOT'  (命中時間)
+        為相容舊程式，同時保留 'mode' key (= launch_mode)。
+        """
+        launch = self.get_strike_launch_mode()    # 'SAME' / 'DIFF'
+        timing = self.get_strike_timing_mode()    # 'STOT' / 'DTOT'
+        params = {
+            # 新命名 (推薦使用)
+            'launch_mode':          launch,         # 'SAME' 同地 / 'DIFF' 異地
+            'timing_mode':          timing,         # 'STOT' 同時 / 'DTOT' 間隔
+            'interval_sec':         self.get_strike_interval_sec(),
+            # 舊 key 'mode' 保留以相容已寫好的下游程式；值亦為 SAME/DIFF
+            'mode':                 launch,
+            # 幾何
+            'cruise_alt':           self._strike_cruise_alt.value(),
+            'cruise_speed':         self._strike_cruise_speed.value(),
+            'altitude_step':        self._strike_alt_step.value(),
+            'max_dive_angle':       self._strike_max_dive_angle.value(),
             'dive_initiation_dist': self._strike_dive_dist.value(),
-            'anim_speed': self._strike_anim_speed.value(),
+            'anim_speed':           self._strike_anim_speed.value(),
+            # 時空協同邊界
+            'max_speed':            self._strike_max_speed.value(),
+            'stall_speed':          self._strike_stall_speed.value(),
+            'min_turn_radius':      self._strike_turn_radius.value(),
         }
         self.strike_execute_requested.emit(params)
-        logger.info(f'[Strike] 執行蜂群打擊: {params}')
+        logger.info(
+            f'[Strike] 執行蜂群打擊: launch={launch} '
+            f'({"同地" if launch == "SAME" else "異地"}), '
+            f'timing={timing} ({"同時" if timing == "STOT" else "間隔"})'
+            + (f' Δ={params["interval_sec"]}s' if timing == 'DTOT' else '')
+        )
 
     def update_strike_target_count(self, count: int):
         """更新打擊目標計數顯示"""

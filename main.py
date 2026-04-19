@@ -109,7 +109,16 @@ def initialize_system(args):
     else:
         logger.warning(f"飛行器配置文件不存在: {vehicle_config_path}")
         vehicle_profiles = None
-    
+
+    # ── 清理暫存 HTML 快取 (Folium / Cesium / polygon_editor) ──
+    # 避免每次啟動累積 tmp*.html 於專案根目錄
+    try:
+        from utils.temp_cache import clear_temp_html_dir, purge_legacy_temp_html_in_root
+        purge_legacy_temp_html_in_root()   # 移除舊版散落在根目錄的 tmp*.html
+        clear_temp_html_dir()              # 清空 data/tmp_maps/
+    except Exception as e:
+        logger.warning(f"暫存 HTML 清理失敗: {e}")
+
     return logger, settings, vehicle_profiles
 
 
@@ -141,6 +150,16 @@ def run_gui_mode(logger, settings, vehicle_profiles):
             QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
         except Exception as e:
             logger.warning(f"設置 OpenGL 共享上下文失敗: {e}")
+
+        # ── 高 DPI 支援：4K 螢幕字型/圖示等比例放大，避免視覺過小 ──
+        # Qt 6 預設已啟用 HiDPI，只需設定 rounding policy 讓比例連續而非階梯式
+        try:
+            from PyQt6.QtCore import Qt as _QtCore
+            QApplication.setHighDpiScaleFactorRoundingPolicy(
+                _QtCore.HighDpiScaleFactorRoundingPolicy.PassThrough
+            )
+        except Exception as e:
+            logger.warning(f"HiDPI rounding policy 設定失敗: {e}")
         
         # 創建應用程式
         app = QApplication(sys.argv)

@@ -1,0 +1,51 @@
+# ══════════════════════════════════════════════════════════════════
+# OWA-UAV (One-Way Attack) 長程打擊機戰術參數檔
+# 用途：ArduPlane SITL --defaults 疊加於 plane.parm 之上
+# 生成時間：2026-04-17T10:27:18
+# 
+# 核心戰術假設：
+#   - 內燃機 (ICE) 動力
+#   - 低空地形跟隨突防
+#   - 遭 GCS/GPS 失效時「繼續任務，絕不 RTL」
+# ══════════════════════════════════════════════════════════════════
+
+# ── 1. 失效保護 (FAILSAFE) — OWA 戰術要求「訊號中斷 ≠ RTL」 ───────────────────
+FS_LONG_ACTN         0                  # 0=Continue AUTO (OWA 戰術必須=0，禁止 RTL)
+FS_LONG_TIMEOUT      5                  # 長時 failsafe 觸發秒數
+FS_SHORT_ACTN        0                  # 0=Continue AUTO (短時也必須=0)
+FS_SHORT_TIMEOUT     1.5                # 短時 failsafe 觸發秒數
+FS_GCS_ENABL         1                  # 1=啟用 GCS failsafe (配合 actn=0 仍會繼續)
+THR_FAILSAFE         1                  # 1=啟用油門 RC failsafe
+RTL_AUTOLAND         0                  # 0=禁用自動降落 (絕不回場)
+MIS_DONE_BEHAVE      0                  # 0=任務完成 HOLD (禁止 RTL)
+MIS_RESTART          0                  # 0=從中斷點繼續，不重置 mission
+
+# ── 2. 內燃機動力系統 (ICE) — Shahed 類 50~100cc 雙缸汽油機模擬 ────────────────
+ICE_ENABLE           1                  # 1=啟用 ICE 控制邏輯
+ICE_START_CHAN       0                  # 0=任務自動啟動 (無需 RC)
+ICE_START_PCT        20                 # 啟動油門 % (20~25 為典型 Shahed 類值)
+ICE_IDLE_RPM         1300               # 地面怠速 RPM
+ICE_IDLE_PCT         5                  # 怠速油門 %
+ICE_REDLINE_RPM      9000               # 紅線保護 RPM
+ICE_RPM_THRESH       100                # 判定「引擎已點火」的 RPM 閾值
+RPM_TYPE             1                  # 1=PWM 輸入 (SITL 預設)
+RPM_PIN              54                 # RPM 訊號腳位 (AUX5=54)
+RPM_SCALING          1                  # 訊號倍率 (SITL 模擬用 1.0)
+
+# ── 3. 地形跟隨 & 航點邏輯 — 低空突防、WP 半徑配合巡航速度 ───────────────────────────
+TERRAIN_ENABLE       1                  # 1=啟用地形資料庫
+TERRAIN_FOLLOW       1                  # 1=AUTO/RTL 貼地飛 (低空突防)
+TERRAIN_SPACING      100                # 地形柵格解析度 (m)
+WP_RADIUS            90                 # 航點通過半徑 (建議 = cruise × 1.5 = 90m)
+WP_LOITER_RAD        120                # 盤旋半徑 (m)
+WP_MAX_RADIUS        270                # 最大航點半徑上限 (m)
+NAVL1_PERIOD         18                 # L1 導航週期 (越小越緊貼航線)
+
+# ── 4. 空速與高度 — Shahed 類典型值 (35~50 m/s 巡航) ───────────────────────
+AIRSPEED_CRUISE      60                 # 巡航空速 (m/s)
+ARSPD_FBW_MIN        25                 # FBW 最低空速 (失速保護)
+ARSPD_FBW_MAX        85                 # FBW 最大空速
+TRIM_ARSPD_CM        6000               # 平飛目標空速 (cm/s)
+ALT_HOLD_RTL         -1                 # -1=RTL 維持當前高度 (禁用自動爬升)
+STALL_PREVENTION     1                  # 1=啟用失速保護 (仍不會 RTL)
+

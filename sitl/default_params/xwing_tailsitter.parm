@@ -1,0 +1,84 @@
+# ══════════════════════════════════════════════════════════════════
+# AeroPlan Studio — X-Wing Copter Motor Tailsitter
+# 
+# 適用機型：中科院 勁蜂三型 類純馬達差速 X-Wing 尾座式 VTOL
+#   * 4 顆馬達共用 VTOL + FW 模式 (無後推馬達)
+#   * 無副翼/升降舵/方向舵，所有姿態全靠馬達差速
+#   * 前飛時整機低頭 90° 水平
+# 
+# 用途：ArduPlane SITL --defaults 疊加載入
+# 
+# SITL 啟動指令：
+#   ArduPlane.exe -f tailsitter \
+#       --defaults "sitl/default_params/plane.parm,
+#                   sitl/default_params/xwing_tailsitter.parm"
+# 
+# 關鍵物理約束：
+#   Q_TAILSIT_ENABLE = 2  (純馬達差速，禁動不存在的副翼)
+#   Q_TAILSIT_MOTMX  = 15 (FW 模式仍 4 馬達全開)
+#   Q_FRAME_TYPE     = 17 (NYT QUAD X，無 yaw 扭矩)
+#   Q_TAILSIT_ANGLE  = 60 (低頭 60° 即移交 FW，留 30° 緩衝)
+#   Q_OPTIONS bit18  = 262144 (僅 VTOL 解鎖，防地面暴衝)
+# 
+# 生成時間：2026-04-19T20:06:09
+# ══════════════════════════════════════════════════════════════════
+
+# ── 1. QuadPlane 總開關 + Tailsitter 啟用 ────────────────────────────
+Q_ENABLE             1                  # 1=啟用 QuadPlane (必要)
+Q_TAILSIT_ENABLE     2                  # 2=Copter Motor Tailsitter (純馬達差速，X-Wing 必須=2)
+
+# ── 2. 機架型態 (NYT QUAD X — 無偏航扭矩) ────────────────────────────────
+Q_FRAME_CLASS        1                  # 1=Quad
+Q_FRAME_TYPE         17                 # 17=NYT QUAD X (No Yaw Torque，FW 姿態靠 body yaw)
+Q_TAILSIT_MOTMX      15                 # 15 (0b1111) = 4 馬達全開於 FW 模式 (X-Wing 必須=15)
+
+# ── 3. 轉換角度與角速率 (Transition Dynamics) ───────────────────────────
+Q_TAILSIT_ANGLE      60                 # 低頭達此角度 (度) 移交 FW 控制，推薦 60° (機翼升力充分+緩衝)
+Q_TAILSIT_ANG_VT     0                  # 0=VTOL 轉場沿用 Q_TAILSIT_ANGLE
+Q_TAILSIT_RAT_FW     30                 # 轉 FW 的低頭角速度 (°/s)
+Q_TAILSIT_RAT_VT     40                 # 轉 VTOL 的抬頭角速度 (°/s；比 FW 快以利急停)
+Q_TRANS_FAIL         5                  # FW 過渡超時 (秒)，逾時回 VTOL
+
+# ── 4. Q_OPTIONS 安全/行為 bitmask ──────────────────────────────────
+Q_OPTIONS            327680             # 327680 = bit18(262144, 僅 VTOL 解鎖, 防地面暴衝) + bit16(65536, 停用 FW 盤旋進場, 強制上空垂直降落)
+
+# ── 5. SERVO 輸出 (4 顆共用馬達) ───────────────────────────────────────
+SERVO1_FUNCTION      33                 # Motor 1 (func 33)
+SERVO1_MIN           1000               # PWM min
+SERVO1_MAX           2000               # PWM max
+SERVO1_TRIM          1500               # PWM trim
+SERVO2_FUNCTION      34                 # Motor 2 (func 34)
+SERVO2_MIN           1000               # PWM min
+SERVO2_MAX           2000               # PWM max
+SERVO2_TRIM          1500               # PWM trim
+SERVO3_FUNCTION      35                 # Motor 3 (func 35)
+SERVO3_MIN           1000               # PWM min
+SERVO3_MAX           2000               # PWM max
+SERVO3_TRIM          1500               # PWM trim
+SERVO4_FUNCTION      36                 # Motor 4 (func 36)
+SERVO4_MIN           1000               # PWM min
+SERVO4_MAX           2000               # PWM max
+SERVO4_TRIM          1500               # PWM trim
+
+# ── 6. 多旋翼姿態 PID (VTOL + 過渡期用) ──────────────────────────────────
+Q_A_RAT_RLL_P        0.15               # Roll  rate P
+Q_A_RAT_RLL_I        0.1                # Roll  rate I
+Q_A_RAT_RLL_D        0.004              # Roll  rate D
+Q_A_RAT_PIT_P        0.15               # Pitch rate P
+Q_A_RAT_PIT_I        0.1                # Pitch rate I
+Q_A_RAT_PIT_D        0.004              # Pitch rate D
+Q_A_RAT_YAW_P        0.3                # Yaw   rate P
+Q_A_RAT_YAW_I        0.02               # Yaw   rate I
+Q_A_RAT_YAW_D        0                  # Yaw   rate D
+Q_ANGLE_MAX          3000               # VTOL 最大傾角 (centi-degrees)
+Q_VELZ_MAX           300                # VTOL 爬降率上限 (cm/s)
+Q_PILOT_ACCEL_Z      250                # Pilot 垂直加速度上限 (cm/s²)
+
+# ── 7. 固定翼空速與推力 ─────────────────────────────────────────────────
+AIRSPEED_CRUISE      18                 # FW 巡航空速 (m/s)
+ARSPD_FBW_MIN        12                 # FW 最低空速 (m/s，低於會拉高度)
+ARSPD_FBW_MAX        25                 # FW 最大空速 (m/s)
+TRIM_THROTTLE        50                 # 平飛油門 %
+STALL_PREVENTION     1                  # 1=啟用失速保護
+USE_REV_THRUST       0                  # 0=不反推 (X-Wing 靠抬頭減速)
+

@@ -94,9 +94,19 @@ class Logger:
         # 清除現有處理器
         self.logger.handlers.clear()
         
-        # 控制台處理器
+        # 控制台處理器 — 強制 UTF-8 避免 Windows cp950 遇到 emoji/✓/⚠ 爆炸
         if log_to_console:
-            console_handler = logging.StreamHandler(sys.stdout)
+            # 在 Windows 上，sys.stdout 預設是 cp950；改用 UTF-8 包裝
+            # 搭配 errors='replace' 以防極端情況無法編碼也不中斷日誌
+            try:
+                import io as _io
+                stream = _io.TextIOWrapper(
+                    sys.stdout.buffer, encoding='utf-8',
+                    errors='replace', write_through=True,
+                )
+            except Exception:
+                stream = sys.stdout   # fallback
+            console_handler = logging.StreamHandler(stream)
             console_handler.setFormatter(LogFormatter(use_color=True))
             self.logger.addHandler(console_handler)
         

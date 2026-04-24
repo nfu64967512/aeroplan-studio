@@ -8,8 +8,9 @@ from typing import List, Tuple, Optional
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
-    QPushButton, QLabel, QFrame,
+    QPushButton, QLabel, QFrame, QMenu,
 )
+from PyQt6.QtGui import QAction
 from PyQt6.QtCore import pyqtSignal, Qt
 
 from ui.widgets.map_widget import MapWidget
@@ -105,6 +106,33 @@ class DualMapWidget(QWidget):
         self._btn_fly.clicked.connect(self._on_fly_clicked)
         tb_layout.addWidget(self._btn_fly)
 
+        # 跟隨相機（追尾第三人稱視角）
+        self._chase_sysid = 0   # 0 = 關閉
+        self._fpv_sysid   = 0   # 0 = 關閉
+        self._fpv_mode    = 'forward'  # 'forward' | 'down'
+        self._btn_chase = QPushButton('🎥 跟隨')
+        self._btn_chase.setFixedHeight(24)
+        self._btn_chase.setToolTip('模擬飛行鏡頭：鎖定飛機後方跟隨（僅 3D 模式）')
+        self._btn_chase.setStyleSheet(
+            'QPushButton{background:#37474F;color:#eceff1;border:none;'
+            'border-radius:4px;padding:0 8px;font-size:11px;}'
+            'QPushButton:hover{background:#455A64;}'
+        )
+        self._btn_chase.clicked.connect(self._on_chase_clicked)
+        tb_layout.addWidget(self._btn_chase)
+
+        # FPV 機上相機（第一人稱 / 雲台偵查）
+        self._btn_fpv = QPushButton('📷 FPV')
+        self._btn_fpv.setFixedHeight(24)
+        self._btn_fpv.setToolTip('機上相機視角：前視 / 俯視偵查 + 可調 FOV（僅 3D 模式）')
+        self._btn_fpv.setStyleSheet(
+            'QPushButton{background:#37474F;color:#eceff1;border:none;'
+            'border-radius:4px;padding:0 8px;font-size:11px;}'
+            'QPushButton:hover{background:#455A64;}'
+        )
+        self._btn_fpv.clicked.connect(self._on_fpv_clicked)
+        tb_layout.addWidget(self._btn_fpv)
+
         root.addWidget(toolbar)
 
         # ── 地圖堆疊 ────────────────────────────────────────────────
@@ -142,12 +170,27 @@ class DualMapWidget(QWidget):
         self.map_2d.nfz_circle_drawn.connect(self.nfz_circle_drawn)
 
         # 3D 地圖信號 → 本身信號（若 3D 模式下點擊也要有效）
-        self.map_3d.corner_added.connect(self.corner_added)
-        self.map_3d.corner_moved.connect(self.corner_moved)
+        # 3D 點擊加角點時，同步寫回 map_2d.corners，這樣：
+        #   (a) SAR 熱力圖讀取 map_widget.corners (= map_2d.corners) 能拿到完整資料；
+        #   (b) 日後切回 2D 時，2D 地圖已有正確的角點狀態。
+        self.map_3d.corner_added.connect(self._on_3d_corner_added)
+        self.map_3d.corner_moved.connect(self._on_3d_corner_moved)
         self.map_3d.circle_defined.connect(self.circle_defined)
         self.map_3d.nfz_polygon_drawn.connect(self.nfz_polygon_drawn)
         self.map_3d.nfz_circle_drawn.connect(self.nfz_circle_drawn)
         self.map_3d.strike_target_added.connect(self.strike_target_added)
+
+    def _on_3d_corner_added(self, lat: float, lon: float):
+        """3D 點擊加角點：把資料鏡射到 2D 內部狀態（不重新 emit 2D 訊號以避免重複）"""
+        if (lat, lon) not in self.map_2d.corners:
+            self.map_2d.add_corner(lat, lon)
+        self.corner_added.emit(lat, lon)
+
+    def _on_3d_corner_moved(self, index: int, lat: float, lon: float):
+        """3D 移動角點：同步到 2D"""
+        if 0 <= index < len(self.map_2d.corners):
+            self.map_2d.move_corner(index, lat, lon)
+        self.corner_moved.emit(index, lat, lon)
 
     # ─────────────────────────────────────────────────────────────────
     # 模式切換
@@ -198,6 +241,177 @@ class DualMapWidget(QWidget):
             self.map_3d._js('flyToScene()')
         else:
             self._switch_mode(_MODE_3D)
+
+    # ─────────────────────────────────────────────────────────────────
+    # 跟隨相機（Chase Camera）
+    # ─────────────────────────────────────────────────────────────────
+    def _on_chase_clicked(self):
+        """
+        點擊跟隨按鈕：彈出選單選擇要鎖定的 UAV（若當前已鎖定則顯示關閉選項）。
+        僅列出目前 SITL 面板上已註冊的機體；若未啟動則預設 UAV1~UAV3。
+        """
+        # 切到 3D 模式，否則跟隨無畫面可看
+        if self._mode != _MODE_3D:
+            self._switch_mode(_MODE_3D)
+
+        menu = QMenu(self._btn_chase)
+        active = self._chase_sysid
+
+        if active > 0:
+            act_off = QAction(f'🛑 關閉跟隨 (當前: UAV{active})', self)
+            act_off.triggered.connect(lambda: self._apply_chase(0))
+            menu.addAction(act_off)
+            act_reset = QAction('🎯 歸零視角（回飛機正後方）', self)
+            act_reset.triggered.connect(self.map_3d.reset_chase_view)
+            menu.addAction(act_reset)
+            menu.addSeparator()
+
+        # 從 SITL 即時狀態取得已註冊的 sysid；fallback 到 1..5
+        sysids = self._known_sysids() or [1, 2, 3, 4, 5]
+        for sid in sysids:
+            mark = '✓ ' if sid == active else '   '
+            act = QAction(f'{mark}鎖定 UAV{sid}', self)
+            act.triggered.connect(lambda _, s=sid: self._apply_chase(s))
+            menu.addAction(act)
+
+        # 參數預設值子選單
+        menu.addSeparator()
+        for label, dist, hgt, pit in [
+            ('距離 60m / 俯角 -8°',   60, 15, -8),
+            ('距離 80m / 俯角 -10°',  80, 20, -10),
+            ('距離 120m / 俯角 -15°', 120, 30, -15),
+            ('距離 200m / 俯角 -20°', 200, 50, -20),
+        ]:
+            a = QAction(label, self)
+            a.triggered.connect(
+                lambda _, d=dist, h=hgt, p=pit: self.map_3d.set_chase_camera_params(
+                    distance=d, height=h, pitch_deg=p
+                )
+            )
+            menu.addAction(a)
+
+        # 彈出選單在按鈕下方
+        pos = self._btn_chase.mapToGlobal(self._btn_chase.rect().bottomLeft())
+        menu.exec(pos)
+
+    def _apply_chase(self, sysid: int):
+        self._chase_sysid = max(0, int(sysid))
+        self.map_3d.set_chase_camera(self._chase_sysid)
+        if self._chase_sysid > 0:
+            # 兩模式互斥：chase 啟動就關掉 FPV 的 UI 狀態
+            self._fpv_sysid = 0
+            self._set_btn_style(self._btn_fpv, False, '📷 FPV')
+            self._set_btn_style(self._btn_chase, True, f'🎥 跟隨 UAV{self._chase_sysid}')
+        else:
+            self._set_btn_style(self._btn_chase, False, '🎥 跟隨')
+
+    # ── FPV 第一人稱相機 ──────────────────────────────────────────
+    def _on_fpv_clicked(self):
+        """
+        FPV 選單：選擇鎖定的 UAV + 雲台模式 + FOV 預設。
+        """
+        if self._mode != _MODE_3D:
+            self._switch_mode(_MODE_3D)
+
+        menu = QMenu(self._btn_fpv)
+        active = self._fpv_sysid
+
+        if active > 0:
+            act_off = QAction(f'🛑 關閉 FPV (當前: UAV{active})', self)
+            act_off.triggered.connect(lambda: self._apply_fpv(0))
+            menu.addAction(act_off)
+            menu.addSeparator()
+
+        sysids = self._known_sysids() or [1, 2, 3, 4, 5]
+
+        # 前視（機頭方向 FPV）
+        fwd_menu = menu.addMenu('🚁 機頭前視 (FPV)')
+        for sid in sysids:
+            mark = '✓ ' if (sid == active and self._fpv_mode == 'forward') else '   '
+            act = QAction(f'{mark}UAV{sid}', self)
+            act.triggered.connect(
+                lambda _, s=sid: self._apply_fpv(s, mode='forward')
+            )
+            fwd_menu.addAction(act)
+
+        # 俯視偵查（雲台 -90°）
+        down_menu = menu.addMenu('📷 俯視偵查鏡頭 (雲台 -90°)')
+        for sid in sysids:
+            mark = '✓ ' if (sid == active and self._fpv_mode == 'down') else '   '
+            act = QAction(f'{mark}UAV{sid}', self)
+            act.triggered.connect(
+                lambda _, s=sid: self._apply_fpv(s, mode='down')
+            )
+            down_menu.addAction(act)
+
+        # FOV 預設值
+        menu.addSeparator()
+        fov_menu = menu.addMenu('🔭 FOV 視角')
+        for label, fov in [
+            ('窄角 60°（長焦偵查）', 60),
+            ('標準 75°（一般無人機）', 75),
+            ('廣角 100°（GoPro 類）', 100),
+            ('魚眼 130°（競速 FPV）', 130),
+        ]:
+            a = QAction(label, self)
+            a.triggered.connect(
+                lambda _, f=fov: self.map_3d.set_fpv_camera_params(fov_deg=f)
+            )
+            fov_menu.addAction(a)
+
+        # 雲台 Roll 跟隨
+        roll_menu = menu.addMenu('🎚️ 機體 Roll 跟隨')
+        for label, rf in [
+            ('開啟（沉浸式 / 會傾斜）', True),
+            ('關閉（雲台穩定 / 地平線水平）', False),
+        ]:
+            a = QAction(label, self)
+            a.triggered.connect(
+                lambda _, r=rf: self.map_3d.set_fpv_camera_params(roll_follow=r)
+            )
+            roll_menu.addAction(a)
+
+        pos = self._btn_fpv.mapToGlobal(self._btn_fpv.rect().bottomLeft())
+        menu.exec(pos)
+
+    def _apply_fpv(self, sysid: int, mode: str = None):
+        """套用 FPV 相機設定。mode='forward' 為平視，'down' 為雲台俯視偵查。"""
+        sysid = max(0, int(sysid))
+        if mode is not None:
+            self._fpv_mode = mode
+        gimbal = -90.0 if self._fpv_mode == 'down' else 0.0
+
+        self._fpv_sysid = sysid
+        self.map_3d.set_fpv_camera(sysid, gimbal_pitch_deg=gimbal)
+
+        if self._fpv_sysid > 0:
+            # 關掉 chase 的 UI（JS 端已自動互斥）
+            self._chase_sysid = 0
+            self._set_btn_style(self._btn_chase, False, '🎥 跟隨')
+            tag = '俯視' if self._fpv_mode == 'down' else '前視'
+            self._set_btn_style(self._btn_fpv, True, f'📷 FPV {tag} UAV{self._fpv_sysid}')
+        else:
+            self._set_btn_style(self._btn_fpv, False, '📷 FPV')
+
+    @staticmethod
+    def _set_btn_style(btn: QPushButton, active: bool, text: str):
+        btn.setText(text)
+        if active:
+            btn.setStyleSheet(
+                'QPushButton{background:#1565C0;color:#e3f2fd;border:none;'
+                'border-radius:4px;padding:0 8px;font-size:11px;font-weight:600;}'
+                'QPushButton:hover{background:#1976D2;}'
+            )
+        else:
+            btn.setStyleSheet(
+                'QPushButton{background:#37474F;color:#eceff1;border:none;'
+                'border-radius:4px;padding:0 8px;font-size:11px;}'
+                'QPushButton:hover{background:#455A64;}'
+            )
+
+    def _known_sysids(self) -> list:
+        """回傳目前已出現在 SITL 的 sysid 列表（由 update_uav_position 累積）。"""
+        return sorted(getattr(self, '_active_sysids', set()))
 
     # ─────────────────────────────────────────────────────────────────
     # 以下全部代理到 2D 和 3D（兩者同時更新，切換瞬間完成）
@@ -347,6 +561,11 @@ class DualMapWidget(QWidget):
         SITL / MAVLink 即時 UAV 位置更新（多機支援，含姿態同步）。
         只更新 3D 地圖內部狀態，不強制切換模式（否則使用者切到 2D 會一直被踢回 3D）。
         """
+        # 記錄出現過的 sysid，供跟隨選單列出
+        if not hasattr(self, '_active_sysids'):
+            self._active_sysids = set()
+        self._active_sysids.add(int(sysid))
+
         self.map_3d.update_uav_position(lat, lon, alt, heading_deg, speed_ms,
                                          sysid=sysid, mode=mode, armed=armed,
                                          vehicle_type=vehicle_type,
@@ -355,6 +574,30 @@ class DualMapWidget(QWidget):
             self.map_2d.update_uav_position(lat, lon, alt, heading_deg, speed_ms,
                                              sysid=sysid, mode=mode, armed=armed,
                                              vehicle_type=vehicle_type)
+
+    def set_chase_camera(self, sysid: int):
+        """公開 API：程式化啟用/關閉跟隨相機。"""
+        self._apply_chase(sysid)
+
+    def set_chase_camera_params(self, distance: float = None, height: float = None,
+                                 pitch_deg: float = None, smoothing: float = None):
+        """公開 API：調整跟隨相機距離 / 高度 / 俯角 / 平滑係數。"""
+        self.map_3d.set_chase_camera_params(distance, height, pitch_deg, smoothing)
+
+    def reset_chase_view(self):
+        """公開 API：歸零跟隨鏡頭視角回飛機正後方。"""
+        self.map_3d.reset_chase_view()
+
+    def set_fpv_camera(self, sysid: int, mode: str = 'forward'):
+        """公開 API：程式化啟用 FPV。mode='forward' 平視 / 'down' 俯視偵查。"""
+        self._apply_fpv(sysid, mode=mode)
+
+    def set_fpv_camera_params(self, gimbal_pitch_deg: float = None,
+                               fov_deg: float = None, roll_follow: bool = None,
+                               forward_offset: float = None):
+        """公開 API：微調 FPV 雲台俯角 / FOV / roll 跟隨 / 機頭前偏移。"""
+        self.map_3d.set_fpv_camera_params(gimbal_pitch_deg, fov_deg,
+                                           roll_follow, forward_offset)
 
     def clear_uav(self):
         self.map_3d.clear_uav()

@@ -265,6 +265,8 @@ class CesiumMapWidget(QWidget):
         if self._strike_marking:
             self.strike_target_added.emit(lat, lon)
             return
+        # 在 3D 地圖上即時畫出角點（與 2D MapWidget 行為一致，避免點擊後看不到標記）
+        self.add_corner(lat, lon)
         self.corner_added.emit(lat, lon)
 
     def on_circle_draw_complete(self, lat: float, lon: float, radius: float):
@@ -813,6 +815,74 @@ class CesiumMapWidget(QWidget):
                          alt: float = 0.0, range_m: float = 600.0):
         """相機飛向指定位置"""
         self._js(f'flyToPos({lat},{lon},{alt},{range_m})')
+
+    # ─────────────────────────────────────────────────────────────────
+    # 跟隨相機（Chase Camera / 模擬飛行視角）
+    # ─────────────────────────────────────────────────────────────────
+    def set_chase_camera(self, sysid: int):
+        """
+        啟用或關閉跟隨相機。
+        sysid > 0 鎖定指定 UAV；sysid <= 0 關閉並釋放相機控制權。
+        """
+        self._js(f'setChaseCamera({int(sysid)})')
+
+    def set_chase_camera_params(self, distance: float = None, height: float = None,
+                                  pitch_deg: float = None, smoothing: float = None):
+        """
+        調整跟隨相機參數。None 參數沿用現值。新值會在下一幀把鏡頭歸零回後方視角。
+        distance  ── 相機距飛機後方公尺（預設 80）
+        height    ── 相機高於飛機公尺（預設 20）
+        pitch_deg ── 相機首幀俯角（負值向下看，預設 -10）
+        smoothing ── 預留參數（lookAtTransform 模式下由 Cesium 內部平滑處理）
+        """
+        def _fmt(v):
+            return 'null' if v is None else repr(float(v))
+        self._js(
+            f'setChaseCameraParams({_fmt(distance)},{_fmt(height)},'
+            f'{_fmt(pitch_deg)},{_fmt(smoothing)})'
+        )
+
+    def reset_chase_view(self):
+        """把跟隨鏡頭歸零回「飛機正後方」的預設視角（使用者滑鼠旋轉後可用）。"""
+        self._js('resetChaseView()')
+
+    # ─────────────────────────────────────────────────────────────────
+    # FPV 第一人稱相機（機上相機 / 雲台偵查視角）
+    # ─────────────────────────────────────────────────────────────────
+    def set_fpv_camera(self, sysid: int, gimbal_pitch_deg: float = None,
+                        fov_deg: float = None, roll_follow: bool = None):
+        """
+        啟用或關閉 FPV 第一人稱視角（機上相機）。與 chase 互斥。
+        sysid > 0 鎖定；sysid <= 0 關閉並還原 FOV。
+        gimbal_pitch_deg ── 0 = 平視前方（飛行 FPV）；-90 = 正下方（偵查鏡頭）
+        fov_deg          ── 水平視角度數，典型 70~90°；廣角 FPV 100~130°
+        roll_follow      ── True 相機跟飛機 roll（沉浸感）；False 雲台穩定
+        """
+        def _fmt(v):
+            if v is None:
+                return 'undefined'
+            if isinstance(v, bool):
+                return 'true' if v else 'false'
+            return repr(float(v))
+        self._js(
+            f'setFpvCamera({int(sysid)},{_fmt(gimbal_pitch_deg)},'
+            f'{_fmt(fov_deg)},{_fmt(roll_follow)})'
+        )
+
+    def set_fpv_camera_params(self, gimbal_pitch_deg: float = None,
+                               fov_deg: float = None, roll_follow: bool = None,
+                               forward_offset: float = None):
+        """微調 FPV 參數（雲台俯角 / FOV / 是否跟 roll / 機頭前偏移）。"""
+        def _fmt(v):
+            if v is None:
+                return 'undefined'
+            if isinstance(v, bool):
+                return 'true' if v else 'false'
+            return repr(float(v))
+        self._js(
+            f'setFpvCameraParams({_fmt(gimbal_pitch_deg)},{_fmt(fov_deg)},'
+            f'{_fmt(roll_follow)},{_fmt(forward_offset)})'
+        )
 
     # ─────────────────────────────────────────────────────────────────
     # 戰術模組一：FSDM 高程切片分析

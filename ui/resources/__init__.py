@@ -3,7 +3,7 @@
 提供統一的圖示訪問介面
 """
 
-from ui.resources.icons.icon_manager import (
+from ui.resources.icon_manager import (
     IconManager,
     Icons,
     get_icon,

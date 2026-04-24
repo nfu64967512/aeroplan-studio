@@ -69,6 +69,7 @@ class ParameterPanel(QWidget):
     strike_sitl_upload_requested = pyqtSignal(bool)       # 上傳蜂群打擊任務至 SITL (bool = 是否使用 DTOT 空速)
     strike_recon_trigger_requested = pyqtSignal(dict)     # DCCPP → Strike 動態切換觸發
     strike_vtol_toggle_changed = pyqtSignal(bool)         # VTOL 模式開關切換
+    strike_open_vtol_mission_planner_requested = pyqtSignal()  # 開啟 VTOL 全任務生命週期規劃器（戰術對話框）
 
     def __init__(self, parent=None):
         """初始化參數面板"""
@@ -2613,6 +2614,47 @@ class ParameterPanel(QWidget):
         )
         layout = QVBoxLayout(group)
         layout.setSpacing(8)
+
+        # ══════════════════════════════════════════════════════════════
+        #  VTOL 全任務生命週期規劃器 — 開啟戰術對話框
+        #  （LAUNCH → TRANSITION → CRUISE → 2KM DECISION → ARMED/RECON）
+        # ══════════════════════════════════════════════════════════════
+        vtol_planner_btn = QPushButton(
+            "🎯  VTOL 全任務規劃器  ·  LAUNCH → CRUISE → 2KM → ROE"
+        )
+        vtol_planner_btn.setMinimumHeight(46)
+        vtol_planner_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        vtol_planner_btn.setStyleSheet(
+            "QPushButton{"
+            "  background-color: #0D1B2A;"        # 戰術面板深藍底
+            "  color: #FFB703;"                    # 琥珀重點字
+            "  border: 1px solid #00B4D8;"         # 青色邊框 (NEUTRAL)
+            "  font-family: Consolas, 'Cascadia Mono', monospace;"
+            "  font-weight: bold;"
+            "  font-size: 12px;"
+            "  letter-spacing: 1.5px;"
+            "  padding: 8px 14px;"
+            "}"
+            "QPushButton:hover{"
+            "  background-color: #132236;"
+            "  border: 1px solid #FFB703;"
+            "  color: #FFFFFF;"
+            "}"
+            "QPushButton:pressed{"
+            "  background-color: #06D6A0;"
+            "  color: #0A0F14;"
+            "}"
+        )
+        vtol_planner_btn.setToolTip(
+            "開啟 VTOL 全任務生命週期規劃器：\n"
+            "  Phase 1  VTOL TAKEOFF\n"
+            "  Phase 2  TRANSITION + CRUISE TO 2KM BOUNDARY\n"
+            "  Phase 3  ROE 決斷：ARMED STRIKE 或 RECON & RTL (QRTL)"
+        )
+        vtol_planner_btn.clicked.connect(
+            self.strike_open_vtol_mission_planner_requested
+        )
+        layout.addWidget(vtol_planner_btn)
 
         # ── 說明 ─────────────────────────────────────────────────────
         desc = QLabel(

@@ -32,6 +32,9 @@ from mission.coverage_path import CoveragePath
 # 2026 重構：Swarm Strike 邏輯已抽出至 Controller Mixin (ui/controllers/)
 from ui.controllers import StrikeControllerMixin
 
+# 戰術蜂群打擊面板（VTOL 全任務生命週期）— 彈出式對話框
+from ui.widgets.tactical_swarm_strike_panel import TacticalSwarmStrikeDialog
+
 # 獲取配置和日誌實例
 settings = get_settings()
 logger = get_logger()
@@ -206,10 +209,16 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
 
         self._dccpp_result = None  # 當前 DCCPP 最佳化結果
 
-        # 即時路徑生成設定
-        self.auto_generate_path = True  # 是否自動生成路徑
+        # 即時路徑生成設定（已停用：改由「預覽」按鈕 / Enter 鍵手動觸發，見 on_preview_paths）
+        # 保留屬性以維持 _schedule_path_generation / _auto_generate_path 方法的向後相容
+        self.auto_generate_path = False
         self.path_generation_timer = None  # 延遲生成計時器
-        self.path_generation_delay = 300  # 延遲時間 (ms)
+        self.path_generation_delay = 300   # 延遲時間 (ms)
+
+        # 戰術蜂群打擊面板（VTOL 全任務生命週期）— 單例浮動對話框
+        self._swarm_strike_dialog: Optional[TacticalSwarmStrikeDialog] = None
+        self.picking_swarm_launch: bool = False   # 地圖點擊設為蜂群起飛點
+        self.picking_swarm_target: bool = False   # 地圖點擊設為蜂群目標
     
     def init_ui(self):
         """初始化 UI 組件"""
@@ -523,6 +532,9 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         self.parameter_panel.strike_sitl_upload_requested.connect(self._on_strike_sitl_upload)
         self.parameter_panel.strike_recon_trigger_requested.connect(self._on_strike_recon_trigger)
         self.parameter_panel.strike_vtol_toggle_changed.connect(self._on_strike_vtol_toggled)
+        self.parameter_panel.strike_open_vtol_mission_planner_requested.connect(
+            self.on_open_swarm_strike_panel
+        )
 
         # 蜂群打擊內部狀態
         self._strike_marking_mode = False
@@ -579,7 +591,15 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         toolbar.addAction(export_action)
         
         toolbar.addSeparator()
-        
+
+        # 蜂群打擊（VTOL 全任務生命週期）— 開啟浮動戰術面板
+        swarm_action = QAction("🎯 蜂群打擊", self)
+        swarm_action.setStatusTip("開啟 VTOL 蜂群打擊任務規劃面板（起飛 → 巡航 → 2km 決斷圈 → ROE）")
+        swarm_action.triggered.connect(self.on_open_swarm_strike_panel)
+        toolbar.addAction(swarm_action)
+
+        toolbar.addSeparator()
+
         # 清除全部
         clear_action = QAction("🗑 清除", self)
         clear_action.setStatusTip("清除所有標記和路徑")
@@ -832,8 +852,6 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         self.map_widget.set_home_point_overlay(lat, lon)
         self.statusBar().showMessage(f"起飛點已設定: ({lat:.6f}, {lon:.6f})", 5000)
         logger.info(f"起飛點設定: ({lat:.6f}, {lon:.6f})")
-        if self.auto_generate_path:
-            self._schedule_path_generation()
 
     def on_clear_home_point(self):
         """清除起飛點"""
@@ -844,6 +862,112 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
             self.map_widget.clear_home_point_overlay()
         self.statusBar().showMessage("起飛點已清除", 3000)
         logger.info("起飛點已清除")
+
+    # ═════════════════════════════════════════════════════════════
+    #  蜂群打擊面板（VTOL 全任務生命週期）— 浮動對話框整合
+    # ═════════════════════════════════════════════════════════════
+    def on_open_swarm_strike_panel(self):
+        """開啟戰術蜂群打擊面板（單例浮動對話框）。
+
+        - 首次開啟建立對話框並接線
+        - 預填座標：起飛點用已設定的 home_point，目標用第一個邊界角點（若存在）
+        - 非模態 .show()：視窗保持浮在主視窗上方但不阻擋地圖互動
+        """
+        if self._swarm_strike_dialog is None:
+            dlg = TacticalSwarmStrikeDialog(self)
+            panel = dlg.panel
+            # ── 信號接線 ──
+            panel.pick_launch_requested.connect(self.on_swarm_pick_launch_request)
+            panel.pick_target_requested.connect(self.on_swarm_pick_target_request)
+            panel.mission_planned.connect(self.on_swarm_mission_planned)
+            panel.mission_exported.connect(self.on_swarm_mission_exported)
+            panel.mission_deployed.connect(self.on_swarm_mission_deployed)
+            self._swarm_strike_dialog = dlg
+
+            # ── 預填座標（若主視窗已有對應狀態） ──
+            if self.home_point is not None:
+                panel.set_launch_point(*self.home_point)
+            if self.corners:
+                panel.set_target_point(*self.corners[0])
+
+            logger.info("戰術蜂群打擊面板：已建立")
+
+        self._swarm_strike_dialog.show()
+        self._swarm_strike_dialog.raise_()
+        self._swarm_strike_dialog.activateWindow()
+
+    def on_swarm_pick_launch_request(self):
+        """面板 LAUNCH PICK 按鈕 → 進入地圖拾取模式，暫時隱藏面板。"""
+        self.picking_swarm_launch = True
+        self.picking_swarm_target = False
+        if self._swarm_strike_dialog is not None:
+            self._swarm_strike_dialog.hide()
+        self.statusBar().showMessage(
+            "⚡ SWARM STRIKE：點擊地圖以設定起飛點（LAUNCH POINT）...", 0
+        )
+        logger.info("進入蜂群起飛點拾取模式")
+
+    def on_swarm_pick_target_request(self):
+        """面板 TARGET PICK 按鈕 → 進入地圖拾取模式。"""
+        self.picking_swarm_target = True
+        self.picking_swarm_launch = False
+        if self._swarm_strike_dialog is not None:
+            self._swarm_strike_dialog.hide()
+        self.statusBar().showMessage(
+            "⚡ SWARM STRIKE：點擊地圖以設定打擊目標（TARGET）...", 0
+        )
+        logger.info("進入蜂群目標拾取模式")
+
+    def on_swarm_launch_picked(self, lat: float, lon: float):
+        """使用者在地圖上點擊後，將座標回填至面板並重新顯示對話框。"""
+        self.picking_swarm_launch = False
+        if self._swarm_strike_dialog is not None:
+            self._swarm_strike_dialog.panel.set_launch_point(lat, lon)
+            self._swarm_strike_dialog.show()
+            self._swarm_strike_dialog.raise_()
+            self._swarm_strike_dialog.activateWindow()
+        self.statusBar().showMessage(
+            f"⚡ 蜂群起飛點已設定: ({lat:.6f}, {lon:.6f})", 4000
+        )
+        logger.info(f"蜂群起飛點設定: ({lat:.6f}, {lon:.6f})")
+
+    def on_swarm_target_picked(self, lat: float, lon: float):
+        """同上，目標版本。"""
+        self.picking_swarm_target = False
+        if self._swarm_strike_dialog is not None:
+            self._swarm_strike_dialog.panel.set_target_point(lat, lon)
+            self._swarm_strike_dialog.show()
+            self._swarm_strike_dialog.raise_()
+            self._swarm_strike_dialog.activateWindow()
+        self.statusBar().showMessage(
+            f"⚡ 蜂群打擊目標已設定: ({lat:.6f}, {lon:.6f})", 4000
+        )
+        logger.info(f"蜂群打擊目標設定: ({lat:.6f}, {lon:.6f})")
+
+    def on_swarm_mission_planned(self, params, waypoints):
+        """蜂群任務已規劃完成（已顯示於面板預覽區）。"""
+        logger.info(
+            f"蜂群任務規劃完成 — ROE={params.roe_mode.value} WP={len(waypoints)}"
+        )
+
+    def on_swarm_mission_exported(self, file_path: str):
+        """蜂群任務已匯出 .waypoints 檔案。"""
+        self.statusBar().showMessage(f"⚡ 蜂群任務已匯出: {file_path}", 5000)
+        logger.info(f"蜂群任務匯出: {file_path}")
+
+    def on_swarm_mission_deployed(self, waypoints):
+        """面板 DEPLOY 按鈕 — 此處僅 log 與狀態提示；實際 MAVLink 上傳由連線層處理。
+
+        若後續要串接 SITL/實機上傳，請在此：
+            1. 取得當前 MAVLink 連線 (self.sitl_connection 或等效)
+            2. 呼叫 mission upload (mission_clear_all + mission_item_int × N)
+            3. 確認 MISSION_ACK 後發 status 回饋
+        """
+        logger.info(f"[SwarmStrike] DEPLOY 請求 — {len(waypoints)} 個航點")
+        self.statusBar().showMessage(
+            f"⚡ SWARM STRIKE DEPLOYED — {len(waypoints)} WP（MAVLink 上傳待接線）",
+            8000,
+        )
 
     @staticmethod
     def _haversine(p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
@@ -871,10 +995,6 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
             self.parameter_panel.update_corner_count(len(self.corners))
             self.update_statusbar()
             logger.info(f"刪除角點: ({removed[0]:.6f}, {removed[1]:.6f}), 剩餘 {len(self.corners)} 個")
-
-            # 如果啟用自動生成，觸發路徑更新
-            if self.auto_generate_path and len(self.corners) >= MIN_CORNERS:
-                self._schedule_path_generation()
 
     def _schedule_path_generation(self):
         """排程延遲路徑生成（防止頻繁更新）"""
@@ -1012,19 +1132,23 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
             logger.warning(f"[MP Sync] 同步失敗: {e}")
 
     def load_stylesheet(self):
-        """載入樣式表"""
-        try:
-            from pathlib import Path
-            style_path = Path(__file__).parent / "resources" / "styles" / "dark_theme.qss"
+        """載入戰術 HUD 主題（Tactical HUD Theme）
 
-            if style_path.exists():
-                with open(style_path, 'r', encoding='utf-8') as f:
-                    self.setStyleSheet(f.read())
-                logger.info("樣式表載入成功")
+        標準啟動路徑中 main.py 已於建立 QApplication 時呼叫 apply_tactical_theme。
+        此方法重複套用無副作用 (app.setStyleSheet 冪等)，用途：
+          * 保留 __init__ 既有呼叫鏈的相容性
+          * 支援直接實例化 MainWindow 的測試 / 除錯情境
+        """
+        try:
+            from ui.resources.tactical_theme import apply_tactical_theme
+            app = QApplication.instance()
+            if app is not None:
+                apply_tactical_theme(app)
+                logger.info("戰術主題 (Tactical HUD) 已套用")
             else:
-                logger.warning(f"樣式表不存在: {style_path}")
+                logger.warning("QApplication 尚未建立，跳過主題套用")
         except Exception as e:
-            logger.error(f"載入樣式表失敗: {e}")
+            logger.error(f"載入戰術主題失敗: {e}")
     
     # ==========================================
     # 信號處理函數
@@ -1053,6 +1177,26 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
             self.on_circle_center_set(lat, lon)
             return
 
+        # 蜂群打擊：起飛點拾取模式
+        if self.picking_swarm_launch:
+            if self.map_widget.corners:
+                self.map_widget.corners.pop()
+            if self.map_widget.markers:
+                self.map_widget.markers.pop()
+            self.map_widget._render_map()
+            self.on_swarm_launch_picked(lat, lon)
+            return
+
+        # 蜂群打擊：目標拾取模式
+        if self.picking_swarm_target:
+            if self.map_widget.corners:
+                self.map_widget.corners.pop()
+            if self.map_widget.markers:
+                self.map_widget.markers.pop()
+            self.map_widget._render_map()
+            self.on_swarm_target_picked(lat, lon)
+            return
+
         # 檢查是否超過最大數量
         if len(self.corners) >= MAX_CORNERS:
             QMessageBox.warning(
@@ -1066,10 +1210,6 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         logger.info(f"新增邊界點 #{len(self.corners)}: ({lat:.6f}, {lon:.6f}) [剩餘: {remaining}]")
         self.parameter_panel.update_corner_count(len(self.corners))
         self.update_statusbar()
-
-        # 如果啟用自動生成，觸發路徑更新
-        if self.auto_generate_path and len(self.corners) >= MIN_CORNERS:
-            self._schedule_path_generation()
 
     def on_manual_corner_added(self, lat, lon):
         """處理手動新增邊界點（從參數面板）"""
@@ -1089,10 +1229,6 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         self.parameter_panel.update_corner_count(len(self.corners))
         self.update_statusbar()
 
-        # 如果啟用自動生成，觸發路徑更新
-        if self.auto_generate_path and len(self.corners) >= MIN_CORNERS:
-            self._schedule_path_generation()
-    
     def on_corner_moved(self, index, lat, lon):
         """處理移動邊界點"""
         if 0 <= index < len(self.corners):

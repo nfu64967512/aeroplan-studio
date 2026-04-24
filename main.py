@@ -166,7 +166,17 @@ def run_gui_mode(logger, settings, vehicle_profiles):
         app.setApplicationName("AeroPlan Studio")
         app.setApplicationDisplayName("AeroPlan Studio — Collaborative UAV Mission Planning Suite")
         app.setOrganizationName("AeroPlan")
-        
+
+        # ── 套用戰術 HUD 主題 ─────────────────────────────────────
+        # 暗視覺適應色板 + MIL-STD-1472H 色彩語意 + 窄體/等寬字型 stack
+        # 必須在任何 QWidget 建立前呼叫，否則已建立的視窗不會收到全域 QSS
+        try:
+            from ui.resources.tactical_theme import apply_tactical_theme
+            apply_tactical_theme(app)
+            logger.info("戰術主題 (Tactical HUD) 已套用")
+        except Exception as e:
+            logger.warning(f"套用戰術主題失敗，退回系統預設樣式: {e}")
+
         # 導入並創建主視窗
         from ui.main_window import MainWindow
         window = MainWindow()

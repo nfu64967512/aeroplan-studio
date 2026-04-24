@@ -1,0 +1,498 @@
+/*
+ * AeroPlan Studio — 戰術 HUD 全域樣式表
+ * ---------------------------------------
+ * 本檔為模板，由 ui/resources/tactical_theme.py 的 apply_tactical_theme()
+ * 在執行期以 TacticalColors / TacticalFonts 替換 Mustache 風格佔位符後注入。
+ *
+ * 設計準則：
+ *   1. 全直角（border-radius: 0）— HUD 戰術感、避免 Office 味
+ *   2. 極薄邊線（1px）— 低 GPU 負擔、無發光雜訊
+ *   3. 無漸層（flat）— 避免色階突變干擾暗視覺
+ *   4. 色彩語意嚴守：紅=敵危失、黃=警告、綠=友正常
+ *   5. 預設 hover/pressed 僅改變邊框色與文字色，不改背景大色塊
+ */
+
+/* ======================================================================
+ * 0. 全域基底（Window / Widget）
+ * ====================================================================== */
+QMainWindow,
+QDialog {
+    background-color: {{BG_PRIMARY}};
+    color: {{FG_PRIMARY}};
+}
+
+QWidget {
+    background-color: transparent;
+    color: {{FG_PRIMARY}};
+    font-family: {{FONT_SANS}};
+    font-size: 9pt;
+}
+
+/* Tooltip — 琥珀色重點字，便於暗視覺快速讀取 */
+QToolTip {
+    background-color: {{BG_ELEVATED}};
+    color: {{FG_EMPHASIS}};
+    border: 1px solid {{BORDER_STRONG}};
+    padding: 4px 8px;
+    font-family: {{FONT_MONO}};
+    font-size: 9pt;
+}
+
+/* ======================================================================
+ * 1. 選單列與工具列（MenuBar / ToolBar）
+ * ====================================================================== */
+QMenuBar {
+    background-color: {{BG_SECONDARY}};
+    color: {{FG_PRIMARY}};
+    border-bottom: 1px solid {{BORDER_DEFAULT}};
+    padding: 2px 4px;
+}
+
+QMenuBar::item {
+    background-color: transparent;
+    padding: 6px 12px;
+    font-family: {{FONT_CONDENSED}};
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+
+QMenuBar::item:selected,
+QMenuBar::item:pressed {
+    background-color: {{BG_ELEVATED}};
+    color: {{FG_EMPHASIS}};            /* 琥珀色高亮 */
+    border-bottom: 2px solid {{NEUTRAL}}; /* 青色底線指示選中 */
+}
+
+QMenu {
+    background-color: {{BG_ELEVATED}};
+    color: {{FG_PRIMARY}};
+    border: 1px solid {{BORDER_STRONG}};
+    padding: 4px;
+}
+
+QMenu::item {
+    padding: 6px 24px 6px 20px;
+}
+
+QMenu::item:selected {
+    background-color: {{BG_SECONDARY}};
+    color: {{FG_EMPHASIS}};
+}
+
+QMenu::separator {
+    height: 1px;
+    background-color: {{BORDER_SUBTLE}};
+    margin: 4px 8px;
+}
+
+QToolBar {
+    background-color: {{BG_SECONDARY}};
+    border: none;
+    border-bottom: 1px solid {{BORDER_DEFAULT}};
+    padding: 4px;
+    spacing: 4px;
+}
+
+QToolBar::separator {
+    background-color: {{BORDER_SUBTLE}};
+    width: 1px;
+    margin: 4px 6px;
+}
+
+QToolButton {
+    background-color: transparent;
+    color: {{FG_SECONDARY}};
+    border: 1px solid transparent;
+    padding: 6px 10px;
+    font-family: {{FONT_CONDENSED}};
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+
+QToolButton:hover {
+    background-color: {{BG_ELEVATED}};
+    color: {{FG_EMPHASIS}};
+    border: 1px solid {{BORDER_STRONG}};
+}
+
+QToolButton:pressed,
+QToolButton:checked {
+    background-color: {{BG_ELEVATED}};
+    color: {{NEUTRAL}};
+    border: 1px solid {{NEUTRAL}};
+}
+
+QToolButton:disabled {
+    color: {{FG_MUTED}};
+}
+
+/* ======================================================================
+ * 2. 按鈕（QPushButton）— 戰術指令鈕
+ * ====================================================================== */
+QPushButton {
+    background-color: {{BG_SECONDARY}};
+    color: {{FG_PRIMARY}};
+    border: 1px solid {{BORDER_DEFAULT}};
+    padding: 6px 14px;
+    min-height: 22px;
+    font-family: {{FONT_CONDENSED}};
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+
+QPushButton:hover {
+    border: 1px solid {{NEUTRAL}};
+    color: {{NEUTRAL}};
+}
+
+QPushButton:pressed {
+    background-color: {{BG_ELEVATED}};
+    border: 1px solid {{FG_EMPHASIS}};
+    color: {{FG_EMPHASIS}};
+}
+
+QPushButton:disabled {
+    color: {{FG_MUTED}};
+    border: 1px solid {{BORDER_SUBTLE}};
+}
+
+/* 語意色按鈕 — 以 dynamic property 控制
+ * 使用方式： button.setProperty("tacticalRole", "execute")
+ *          button.style().polish(button)
+ */
+QPushButton[tacticalRole="execute"] {   /* 執行 / 確認 */
+    border: 1px solid {{FRIENDLY}};
+    color: {{FRIENDLY}};
+}
+QPushButton[tacticalRole="execute"]:hover {
+    background-color: rgba(0, 230, 118, 0.12);
+}
+
+QPushButton[tacticalRole="abort"] {     /* 中止 / 危險 */
+    border: 1px solid {{HOSTILE}};
+    color: {{HOSTILE}};
+}
+QPushButton[tacticalRole="abort"]:hover {
+    background-color: rgba(255, 0, 60, 0.14);
+}
+
+QPushButton[tacticalRole="caution"] {   /* 需確認 / 警示 */
+    border: 1px solid {{WARNING}};
+    color: {{WARNING}};
+}
+
+/* ======================================================================
+ * 3. 輸入控制項（LineEdit / SpinBox / ComboBox）
+ * ====================================================================== */
+QLineEdit,
+QSpinBox,
+QDoubleSpinBox,
+QPlainTextEdit,
+QTextEdit {
+    background-color: {{BG_SUNKEN}};
+    color: {{FG_EMPHASIS}};            /* 輸入值用琥珀色數字 */
+    border: 1px solid {{BORDER_DEFAULT}};
+    padding: 4px 6px;
+    selection-background-color: {{NEUTRAL}};
+    selection-color: {{BG_PRIMARY}};
+    font-family: {{FONT_MONO}};
+}
+
+QLineEdit:focus,
+QSpinBox:focus,
+QDoubleSpinBox:focus,
+QPlainTextEdit:focus,
+QTextEdit:focus {
+    border: 1px solid {{NEUTRAL}};
+}
+
+QLineEdit:disabled,
+QSpinBox:disabled,
+QDoubleSpinBox:disabled {
+    color: {{FG_MUTED}};
+    border: 1px solid {{BORDER_SUBTLE}};
+}
+
+QComboBox {
+    background-color: {{BG_SUNKEN}};
+    color: {{FG_PRIMARY}};
+    border: 1px solid {{BORDER_DEFAULT}};
+    padding: 4px 6px;
+    font-family: {{FONT_MONO}};
+}
+QComboBox:hover,
+QComboBox:focus {
+    border: 1px solid {{NEUTRAL}};
+}
+QComboBox::drop-down {
+    border: none;
+    width: 18px;
+    background-color: transparent;
+}
+QComboBox QAbstractItemView {
+    background-color: {{BG_ELEVATED}};
+    color: {{FG_PRIMARY}};
+    border: 1px solid {{BORDER_STRONG}};
+    selection-background-color: {{BG_SECONDARY}};
+    selection-color: {{FG_EMPHASIS}};
+    outline: 0;
+}
+
+/* ======================================================================
+ * 4. 表格（QTableWidget / QTreeView / QListView）
+ * ====================================================================== */
+QTableWidget,
+QTableView,
+QTreeView,
+QListView {
+    background-color: {{BG_SECONDARY}};
+    alternate-background-color: {{BG_ELEVATED}};
+    color: {{FG_PRIMARY}};
+    gridline-color: {{BORDER_SUBTLE}};
+    border: 1px solid {{BORDER_DEFAULT}};
+    selection-background-color: {{BG_ELEVATED}};
+    selection-color: {{FG_EMPHASIS}};
+    font-family: {{FONT_MONO}};
+    outline: 0;
+}
+
+QHeaderView::section {
+    background-color: {{BG_PRIMARY}};
+    color: {{FG_SECONDARY}};
+    border: none;
+    border-right: 1px solid {{BORDER_SUBTLE}};
+    border-bottom: 1px solid {{BORDER_DEFAULT}};
+    padding: 6px 8px;
+    font-family: {{FONT_CONDENSED}};
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+
+QHeaderView::section:hover {
+    color: {{FG_EMPHASIS}};
+}
+
+QTableWidget::item:selected,
+QTableView::item:selected {
+    background-color: {{BG_ELEVATED}};
+    color: {{FG_EMPHASIS}};
+    border-left: 2px solid {{NEUTRAL}};  /* 左側青線指示選中列 */
+}
+
+/* ======================================================================
+ * 5. 進度條（QProgressBar）— 戰術簡約版
+ * ====================================================================== */
+QProgressBar {
+    background-color: {{BG_SUNKEN}};
+    border: 1px solid {{BORDER_DEFAULT}};
+    color: {{FG_PRIMARY}};
+    text-align: center;
+    font-family: {{FONT_MONO}};
+    font-weight: bold;
+    min-height: 14px;
+    max-height: 18px;
+}
+
+QProgressBar::chunk {
+    background-color: {{NEUTRAL}};   /* 預設青色填充（資訊） */
+    margin: 0;
+}
+
+/* 語意色進度條 — 以 dynamic property 控制
+ * button.setProperty("barStatus", "warning" | "critical" | "nominal")
+ */
+QProgressBar[barStatus="nominal"]::chunk  { background-color: {{FRIENDLY}}; }
+QProgressBar[barStatus="warning"]::chunk  { background-color: {{WARNING}}; }
+QProgressBar[barStatus="critical"]::chunk { background-color: {{HOSTILE}}; }
+
+/* ======================================================================
+ * 6. 分頁（QTabWidget）與群組（QGroupBox）
+ * ====================================================================== */
+QTabWidget::pane {
+    background-color: {{BG_SECONDARY}};
+    border: 1px solid {{BORDER_DEFAULT}};
+    top: -1px;
+}
+
+QTabBar::tab {
+    background-color: {{BG_PRIMARY}};
+    color: {{FG_SECONDARY}};
+    border: 1px solid {{BORDER_SUBTLE}};
+    padding: 6px 16px;
+    font-family: {{FONT_CONDENSED}};
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+
+QTabBar::tab:selected {
+    background-color: {{BG_SECONDARY}};
+    color: {{FG_EMPHASIS}};
+    border-top: 2px solid {{NEUTRAL}};   /* 青色頂線指示啟用頁 */
+    border-bottom: 1px solid {{BG_SECONDARY}};
+}
+
+QTabBar::tab:hover:!selected {
+    color: {{FG_PRIMARY}};
+}
+
+QGroupBox {
+    background-color: transparent;
+    border: 1px solid {{BORDER_DEFAULT}};
+    margin-top: 14px;
+    padding-top: 10px;
+    font-family: {{FONT_CONDENSED}};
+    font-weight: bold;
+    letter-spacing: 1px;
+    color: {{FG_SECONDARY}};
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding: 0 8px;
+    left: 8px;
+    color: {{FG_EMPHASIS}};           /* 標題用琥珀色突出 */
+    background-color: {{BG_PRIMARY}};  /* 標題疊在邊框上方，需同底色切斷邊框視覺 */
+}
+
+/* ======================================================================
+ * 7. CheckBox / RadioButton
+ * ====================================================================== */
+QCheckBox,
+QRadioButton {
+    color: {{FG_PRIMARY}};
+    spacing: 6px;
+}
+
+QCheckBox::indicator,
+QRadioButton::indicator {
+    width: 14px;
+    height: 14px;
+    background-color: {{BG_SUNKEN}};
+    border: 1px solid {{BORDER_DEFAULT}};
+}
+
+QCheckBox::indicator:hover,
+QRadioButton::indicator:hover {
+    border: 1px solid {{NEUTRAL}};
+}
+
+QCheckBox::indicator:checked {
+    background-color: {{NEUTRAL}};
+    border: 1px solid {{NEUTRAL}};
+}
+
+QRadioButton::indicator:checked {
+    background-color: {{BG_SUNKEN}};
+    border: 4px solid {{NEUTRAL}};
+}
+
+/* ======================================================================
+ * 8. ScrollBar — 極簡直角
+ * ====================================================================== */
+QScrollBar:vertical {
+    background-color: {{BG_PRIMARY}};
+    width: 10px;
+    margin: 0;
+    border: none;
+}
+
+QScrollBar::handle:vertical {
+    background-color: {{BORDER_DEFAULT}};
+    min-height: 24px;
+    border: none;
+}
+
+QScrollBar::handle:vertical:hover {
+    background-color: {{BORDER_STRONG}};
+}
+
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical {
+    height: 0;
+    background: none;
+    border: none;
+}
+
+QScrollBar:horizontal {
+    background-color: {{BG_PRIMARY}};
+    height: 10px;
+    margin: 0;
+    border: none;
+}
+
+QScrollBar::handle:horizontal {
+    background-color: {{BORDER_DEFAULT}};
+    min-width: 24px;
+    border: none;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background-color: {{BORDER_STRONG}};
+}
+
+QScrollBar::add-line:horizontal,
+QScrollBar::sub-line:horizontal {
+    width: 0;
+    background: none;
+    border: none;
+}
+
+/* ======================================================================
+ * 9. StatusBar / Splitter / Dock
+ * ====================================================================== */
+QStatusBar {
+    background-color: {{BG_SECONDARY}};
+    color: {{FG_SECONDARY}};
+    border-top: 1px solid {{BORDER_DEFAULT}};
+    font-family: {{FONT_MONO}};
+}
+
+QStatusBar::item {
+    border: none;
+}
+
+QSplitter::handle {
+    background-color: {{BORDER_SUBTLE}};
+}
+
+QSplitter::handle:horizontal { width: 1px; }
+QSplitter::handle:vertical   { height: 1px; }
+
+QDockWidget {
+    color: {{FG_SECONDARY}};
+    font-family: {{FONT_CONDENSED}};
+    font-weight: bold;
+    letter-spacing: 1px;
+    titlebar-close-icon: none;
+    titlebar-normal-icon: none;
+}
+
+QDockWidget::title {
+    background-color: {{BG_SECONDARY}};
+    border-bottom: 1px solid {{BORDER_DEFAULT}};
+    padding: 4px 8px;
+    text-align: left;
+}
+
+/* ======================================================================
+ * 10. TacticalUAVCard — 戰術資產卡專用樣式
+ *     Widget 內自繪優先，此處僅處理外框與 hover
+ * ====================================================================== */
+TacticalUAVCard {
+    background-color: {{BG_SECONDARY}};
+    border: 1px solid {{BORDER_DEFAULT}};
+}
+
+TacticalUAVCard:hover {
+    border: 1px solid {{BORDER_STRONG}};
+}
+
+TacticalUAVCard[selected="true"] {
+    border: 1px solid {{NEUTRAL}};
+}
+
+TacticalUAVCard[alarm="true"] {
+    /* paintEvent 內再繪四角瞄準框，此處提供底色提示 */
+    background-color: {{BG_SECONDARY}};
+}

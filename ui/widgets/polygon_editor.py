@@ -428,12 +428,15 @@ class PolygonEditorWidget(QWidget):
             if self.temp_html_file:
                 try:
                     os.unlink(self.temp_html_file)
-                except:
+                except OSError:
                     pass
 
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8') as f:
+            # 寫入 data/tmp_maps/polygon_editor_NNNN.html (每次覆蓋舊檔)
+            from utils.temp_cache import new_temp_html_path
+            out_path = new_temp_html_path(prefix='polygon_editor', keep_last=1)
+            with open(out_path, 'w', encoding='utf-8') as f:
                 f.write(html)
-                self.temp_html_file = f.name
+            self.temp_html_file = str(out_path)
 
             # 載入到 WebView
             self.web_view.setUrl(QUrl.fromLocalFile(self.temp_html_file))

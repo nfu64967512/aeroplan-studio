@@ -29,6 +29,12 @@ from core.collision import CollisionChecker
 from mission.swarm_coordinator import SwarmCoordinator, SwarmMission, DroneInfo
 from mission.coverage_path import CoveragePath
 
+# 2026 重構：Swarm Strike 邏輯已抽出至 Controller Mixin (ui/controllers/)
+from ui.controllers import StrikeControllerMixin
+
+# 戰術蜂群打擊面板（VTOL 全任務生命週期）— 彈出式對話框
+from ui.widgets.tactical_swarm_strike_panel import TacticalSwarmStrikeDialog
+
 # 獲取配置和日誌實例
 settings = get_settings()
 logger = get_logger()
@@ -39,7 +45,7 @@ MAX_CORNERS = 100  # 最大邊界點數量
 _WP_LIMIT = 655   # Mission Planner 單次最大匯入航點數
 
 
-class MainWindow(QMainWindow):
+class MainWindow(QMainWindow, StrikeControllerMixin):
     """
     主視窗類
     
@@ -53,10 +59,10 @@ class MainWindow(QMainWindow):
     def __init__(self):
         """初始化主視窗"""
         super().__init__()
-        
+
         # 視窗基本設置（使用 settings 替代 Config）
         self.setWindowTitle(settings.ui.window_title)
-        self.setGeometry(100, 100, settings.ui.window_width, settings.ui.window_height)
+        self._apply_responsive_geometry()
         self.setMinimumSize(settings.ui.min_window_width, settings.ui.min_window_height)
         
         # 初始化核心組件
@@ -76,6 +82,68 @@ class MainWindow(QMainWindow):
         
         logger.info("主視窗初始化完成")
     
+    def _apply_responsive_geometry(self,
+                                    target_ratio: float = 0.85,
+                                    min_w: int = 1280,
+                                    min_h: int = 720):
+        """依螢幕尺寸動態決定主視窗大小，跨 1080p / 2K / 4K 不跑版。
+
+        規則：
+          - 取得主螢幕 availableGeometry (扣掉工作列)
+          - 預設佔 85% × 85% 空間
+          - 水平置中、垂直偏上 (讓標題列不會被遮住)
+          - 視 DPR 縮放：4K 上也會維持合理視覺比例
+          - 夾底：不小於 min_w × min_h (1280×720)
+
+        Parameters
+        ----------
+        target_ratio : float
+            視窗佔螢幕可用區域的比例 (0~1)
+        min_w, min_h : int
+            視窗最小像素尺寸 (logical px)
+        """
+        try:
+            from PyQt6.QtGui import QGuiApplication
+            screen = (self.screen() if hasattr(self, 'screen') and self.screen()
+                      else QGuiApplication.primaryScreen())
+            if screen is None:
+                # fallback: 使用 settings 固定值
+                self.setGeometry(100, 100,
+                                 settings.ui.window_width,
+                                 settings.ui.window_height)
+                return
+
+            avail = screen.availableGeometry()   # QRect (logical px，已扣工作列)
+            scr_w, scr_h = avail.width(), avail.height()
+
+            # 計算目標尺寸 (依比例 + 下限)
+            win_w = max(int(scr_w * target_ratio), min_w)
+            win_h = max(int(scr_h * target_ratio), min_h)
+            # 上限不能超過螢幕可用區 (4K 下會卡到 3400 左右)
+            win_w = min(win_w, scr_w)
+            win_h = min(win_h, scr_h)
+
+            # 居中對齊 (垂直偏上 8%)
+            x = avail.left() + (scr_w - win_w) // 2
+            y = avail.top() + max(0, (scr_h - win_h) // 3)
+
+            self.setGeometry(x, y, win_w, win_h)
+
+            # DPI 資訊記錄 (供除錯用)
+            try:
+                dpr = screen.devicePixelRatio()
+                logger.info(
+                    f'[Window] 螢幕 {scr_w}x{scr_h} (DPR={dpr:.1f}), '
+                    f'視窗尺寸 {win_w}x{win_h} @ ({x},{y})'
+                )
+            except Exception:
+                pass
+        except Exception as e:
+            logger.warning(f'[Window] 自適應尺寸失敗，使用 settings 預設: {e}')
+            self.setGeometry(100, 100,
+                             settings.ui.window_width,
+                             settings.ui.window_height)
+
     def init_variables(self):
         """初始化變數"""
         self.current_mission = None
@@ -141,44 +209,83 @@ class MainWindow(QMainWindow):
 
         self._dccpp_result = None  # 當前 DCCPP 最佳化結果
 
-        # 即時路徑生成設定
-        self.auto_generate_path = True  # 是否自動生成路徑
+        # 即時路徑生成設定（已停用：改由「預覽」按鈕 / Enter 鍵手動觸發，見 on_preview_paths）
+        # 保留屬性以維持 _schedule_path_generation / _auto_generate_path 方法的向後相容
+        self.auto_generate_path = False
         self.path_generation_timer = None  # 延遲生成計時器
-        self.path_generation_delay = 300  # 延遲時間 (ms)
+        self.path_generation_delay = 300   # 延遲時間 (ms)
+
+        # 戰術蜂群打擊面板（VTOL 全任務生命週期）— 單例浮動對話框
+        self._swarm_strike_dialog: Optional[TacticalSwarmStrikeDialog] = None
+        self.picking_swarm_launch: bool = False   # 地圖點擊設為蜂群起飛點
+        self.picking_swarm_target: bool = False   # 地圖點擊設為蜂群目標
     
     def init_ui(self):
         """初始化 UI 組件"""
         # 創建中央部件
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        
-        # 主佈局
-        main_layout = QHBoxLayout(central_widget)
+
+        # 主佈局：垂直排列 — 上方為「地圖 | 控制面板」splitter；
+        # 下方為「STOT TIME-ON-TARGET 同步狀態儀表板」（蜂群打擊規劃完成時顯示）。
+        main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
-        
-        # 創建分割器（地圖 | 控制面板）
+
+        # 創建分割器（地圖 | 控制面板）— 可拖拉決定比例
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        
+        splitter.setHandleWidth(6)
+        splitter.setChildrenCollapsible(False)
+        splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #37474F; border: 1px solid #263238;
+            }
+            QSplitter::handle:horizontal { width: 6px; }
+            QSplitter::handle:hover      { background-color: #FFB74D; }
+            QSplitter::handle:pressed    { background-color: #FF9800; }
+        """)
+
         # 左側：地圖區域
         self.map_widget = self.create_map_widget()
         splitter.addWidget(self.map_widget)
-        
+
         # 右側：控制面板
         control_panel = self.create_control_panel()
         splitter.addWidget(control_panel)
         
-        # 依螢幕解析度自適應分割比例（地圖 60%，控制面板 40%）
-        screen = QApplication.primaryScreen()
-        screen_w = screen.availableGeometry().width() if screen else 1280
-        map_w   = int(screen_w * 0.60)
-        panel_w = int(screen_w * 0.40)
+        # 依「視窗寬度」自適應分割比例（地圖 60%，控制面板 40%）
+        # 使用視窗寬度而非螢幕寬度，避免 4K 上 splitter 超出視窗
+        win_w = self.width() or 1280
+        map_w   = int(win_w * 0.60)
+        panel_w = int(win_w * 0.40)
         splitter.setStretchFactor(0, 60)
         splitter.setStretchFactor(1, 40)
         splitter.setSizes([map_w, panel_w])
+        # 快取 splitter 以便 resizeEvent 時重新分配
+        self._main_splitter = splitter
         
-        main_layout.addWidget(splitter)
-        
+        main_layout.addWidget(splitter, 1)   # stretch 1 → 占滿剩餘空間
+
+        # ── STOT TIME-ON-TARGET Dashboard（底部固定高度）──────
+        # 蜂群打擊規劃完成時顯示 4-12 機 TTT + Loiter/Delay 補償；
+        # 平時隱藏不佔空間，clear() 後也會自動隱藏。
+        # KAMIKAZE LAUNCH 按鈕 → 觸發 GCS 端排程同步啟動所有 SITL。
+        try:
+            from ui.widgets.strike_ttt_dashboard import StrikeTTTDashboard
+            self.strike_ttt_dashboard = StrikeTTTDashboard(self)
+            self.strike_ttt_dashboard.setVisible(False)   # 預設隱藏
+            main_layout.addWidget(self.strike_ttt_dashboard, 0)
+            # 連接按鈕信號到 strike controller
+            self.strike_ttt_dashboard.launch_requested.connect(
+                self.launch_kamikaze_synchronized
+            )
+            self.strike_ttt_dashboard.abort_requested.connect(
+                self.strike_ttt_dashboard.stop_countdown
+            )
+        except Exception as e:
+            logger.warning(f'[TTT Dashboard] 初始化失敗: {e}')
+            self.strike_ttt_dashboard = None
+
         # 創建工具列
         self.create_toolbar()
         
@@ -190,6 +297,13 @@ class MainWindow(QMainWindow):
 
         # 設置快捷鍵
         self.setup_shortcuts()
+
+        # 建立 Undo/Redo Stack（Ctrl+Z / Ctrl+Y）
+        try:
+            from ui.undo_commands import setup_undo_stack
+            setup_undo_stack(self)
+        except Exception as e:
+            logger.warning(f'[Undo] 初始化失敗: {e}')
     
     def create_map_widget(self):
         """創建地圖組件（DualMapWidget：2D Folium + 3D Cesium 雙模式）"""
@@ -325,6 +439,10 @@ class MainWindow(QMainWindow):
         self.parameter_panel.vtol_export_requested.connect(self._on_vtol_export_requested)
         self.parameter_panel.delete_last_corner_requested.connect(self.on_delete_last_corner)
         self.parameter_panel.dem_loaded.connect(self._on_dem_loaded)
+        self.parameter_panel.fence_export_requested.connect(self._on_fence_export)
+        # 圍籬建構完成 → 同步更新所有 Tab 的狀態標籤
+        if hasattr(self.map_widget, 'fence_built'):
+            self.map_widget.fence_built.connect(self.parameter_panel.update_fence_status)
 
         # 將參數面板包進 QScrollArea，解決高解析度以外螢幕時內容被截斷的問題
         scroll = QScrollArea()
@@ -337,11 +455,33 @@ class MainWindow(QMainWindow):
         screen = QApplication.primaryScreen()
         min_panel_w = max(280, int((screen.availableGeometry().width() if screen else 1280) * 0.22))
         scroll.setMinimumWidth(min_panel_w)
-        panel_layout.addWidget(scroll, 1)   # stretch=1 讓 scroll 佔用所有剩餘高度
 
-        # 任務面板（固定在底部，不隨捲動）
+        # 任務面板
         self.mission_panel = MissionPanel(self)
-        panel_layout.addWidget(self.mission_panel, 0)
+
+        # 以 QSplitter 取代 VBox → 使用者可拖拉決定「參數面板 / 任務面板」比例
+        from PyQt6.QtWidgets import QSplitter, QSizePolicy
+        self._right_panel_splitter = QSplitter(Qt.Orientation.Vertical)
+        self._right_panel_splitter.setChildrenCollapsible(False)
+        self._right_panel_splitter.setHandleWidth(6)
+        self._right_panel_splitter.setStyleSheet("""
+            QSplitter::handle {
+                background-color: #37474F; border: 1px solid #263238;
+            }
+            QSplitter::handle:vertical { height: 6px; }
+            QSplitter::handle:hover    { background-color: #FFB74D; }
+            QSplitter::handle:pressed  { background-color: #FF9800; }
+        """)
+        scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.mission_panel.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        )
+        self._right_panel_splitter.addWidget(scroll)
+        self._right_panel_splitter.addWidget(self.mission_panel)
+        # 預設比例：參數面板 78% / 任務面板 22%
+        self._right_panel_splitter.setStretchFactor(0, 78)
+        self._right_panel_splitter.setStretchFactor(1, 22)
+        panel_layout.addWidget(self._right_panel_splitter, 1)
 
         # SITL HUD 分頁（Mission Planner 風格即時遙測）
         from ui.widgets.sitl_hud import SITLHud
@@ -355,6 +495,7 @@ class MainWindow(QMainWindow):
         self.sitl_hud.cmd_set_mode.connect(lambda m: self._sitl_broadcast('set_mode', m))
         self.sitl_hud.cmd_takeoff.connect(lambda a: self._sitl_broadcast('takeoff', a))
         self.sitl_hud.cmd_upload.connect(self.on_sitl_upload_mission)
+        self.sitl_hud.cmd_upload_fence.connect(self.on_sitl_upload_fence)
         self.sitl_hud.cmd_auto_start.connect(lambda: self._sitl_broadcast('auto_start'))
         self.sitl_hud.cmd_param_set.connect(
             lambda n, v, t: self._sitl_broadcast('set_param', (n, v, t))
@@ -407,12 +548,43 @@ class MainWindow(QMainWindow):
 
         # ── 蜂群打擊模組信號連接 ──────────────────────────────────────
         self.parameter_panel.strike_mark_targets_requested.connect(self._on_strike_mark_targets)
+        self.parameter_panel.strike_mark_base_requested.connect(self._on_strike_mark_base)
+        self.parameter_panel.strike_mode_changed.connect(self._on_strike_mode_changed)
         self.parameter_panel.strike_execute_requested.connect(self._on_strike_execute)
         self.parameter_panel.strike_clear_requested.connect(self._on_strike_clear)
+        self.parameter_panel.strike_export_requested.connect(self._on_strike_export)
+        self.parameter_panel.strike_dtot_export_requested.connect(self._on_strike_dtot_export)
+        self.parameter_panel.strike_owa_parm_requested.connect(self._on_strike_owa_parm)
+        self.parameter_panel.strike_sitl_upload_requested.connect(self._on_strike_sitl_upload)
+        self.parameter_panel.strike_recon_trigger_requested.connect(self._on_strike_recon_trigger)
+        self.parameter_panel.strike_vtol_toggle_changed.connect(self._on_strike_vtol_toggled)
+        self.parameter_panel.strike_open_vtol_mission_planner_requested.connect(
+            self.on_open_swarm_strike_panel
+        )
+        # 目標座標手動輸入（lat/lon spinbox） → 同步 _strike_targets + 3D 標記
+        self.parameter_panel.strike_target_coord_changed.connect(
+            self._on_strike_target_coord_input
+        )
+        # 切換到蜂群打擊分頁 → 自動啟用目標標記模式（離開時關閉）
+        self.parameter_panel.tab_changed.connect(self._on_param_tab_changed)
 
         # 蜂群打擊內部狀態
         self._strike_marking_mode = False
-        self._strike_targets: list = []  # [(lat, lon), ...]
+        self._strike_base_marking_mode = False         # STOT 基地標記模式
+        self._strike_launch_base = None                # (lat, lon) 或 None (STOT 模式才用)
+        self._strike_targets: list = []                # [(lat, lon), ...]
+        # 菱形編隊 STOT 飽和打擊（單目標、4 機）規劃結果快取
+        self._diamond_plans = None                     # list[UAVStrikePlan] 或 None
+        self._diamond_target = None
+        self._diamond_cfg = None
+        # 快取最近一次規劃結果，供匯出使用
+        self._strike_result = None   # {'trajectories': [...], 'targets': [...], 'params': {...}, 'mode': 'DTOT'/'STOT', 'is_vtol': bool}
+        # VTOL 模式專屬快取
+        self._vtol_strike_planner = None   # VTOLSwarmStrikePlanner 實例
+        self._vtol_strike_plans = None     # VTOLPlan list
+        # ReconToStrikeManager 快取
+        self._recon_strike_manager = None
+        self._recon_strike_report = None
 
         return panel_widget
     
@@ -455,7 +627,15 @@ class MainWindow(QMainWindow):
         toolbar.addAction(export_action)
         
         toolbar.addSeparator()
-        
+
+        # 蜂群打擊（VTOL 全任務生命週期）— 開啟浮動戰術面板
+        swarm_action = QAction("🎯 蜂群打擊", self)
+        swarm_action.setStatusTip("開啟 VTOL 蜂群打擊任務規劃面板（起飛 → 巡航 → 2km 決斷圈 → ROE）")
+        swarm_action.triggered.connect(self.on_open_swarm_strike_panel)
+        toolbar.addAction(swarm_action)
+
+        toolbar.addSeparator()
+
         # 清除全部
         clear_action = QAction("🗑 清除", self)
         clear_action.setStatusTip("清除所有標記和路徑")
@@ -495,7 +675,20 @@ class MainWindow(QMainWindow):
         action = file_menu.addAction("儲存任務")
         action.setShortcut(QKeySequence("Ctrl+S"))
         action.triggered.connect(self.on_save_mission)
-        
+
+        file_menu.addSeparator()
+
+        # 專案檔 (.aeroplan) — 包含目標標記、邊界、STOT 基地等 UI 狀態
+        action = file_menu.addAction("儲存專案 (.aeroplan)")
+        action.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        action.setStatusTip("儲存當前所有 UI 狀態 (邊界 + 打擊目標 + 參數)")
+        action.triggered.connect(self.on_save_project)
+
+        action = file_menu.addAction("讀取專案 (.aeroplan)")
+        action.setShortcut(QKeySequence("Ctrl+Shift+O"))
+        action.setStatusTip("載入先前儲存的專案檔")
+        action.triggered.connect(self.on_load_project)
+
         file_menu.addSeparator()
         
         action = file_menu.addAction("匯出航點")
@@ -523,12 +716,24 @@ class MainWindow(QMainWindow):
         
         # === 檢視選單 ===
         view_menu = menubar.addMenu("檢視(&V)")
-        
+
         action = view_menu.addAction("重置視圖")
         action.triggered.connect(self.on_reset_view)
-        
+
         action = view_menu.addAction("顯示網格")
         action.triggered.connect(self.on_toggle_grid)
+
+        view_menu.addSeparator()
+
+        # 重置版面 (所有 Splitter 恢復預設比例)
+        action = view_menu.addAction("重置版面比例")
+        action.setShortcut(QKeySequence("Ctrl+Shift+R"))
+        action.setStatusTip("將所有可拖拉分隔線恢復為預設比例")
+        action.triggered.connect(self.on_reset_layout)
+
+        # 切換視窗自適應尺寸
+        action = view_menu.addAction("自適應視窗尺寸 (85%)")
+        action.triggered.connect(self._apply_responsive_geometry)
         
         # === 工具選單 ===
         tools_menu = menubar.addMenu("工具(&T)")
@@ -683,8 +888,6 @@ class MainWindow(QMainWindow):
         self.map_widget.set_home_point_overlay(lat, lon)
         self.statusBar().showMessage(f"起飛點已設定: ({lat:.6f}, {lon:.6f})", 5000)
         logger.info(f"起飛點設定: ({lat:.6f}, {lon:.6f})")
-        if self.auto_generate_path:
-            self._schedule_path_generation()
 
     def on_clear_home_point(self):
         """清除起飛點"""
@@ -695,6 +898,112 @@ class MainWindow(QMainWindow):
             self.map_widget.clear_home_point_overlay()
         self.statusBar().showMessage("起飛點已清除", 3000)
         logger.info("起飛點已清除")
+
+    # ═════════════════════════════════════════════════════════════
+    #  蜂群打擊面板（VTOL 全任務生命週期）— 浮動對話框整合
+    # ═════════════════════════════════════════════════════════════
+    def on_open_swarm_strike_panel(self):
+        """開啟戰術蜂群打擊面板（單例浮動對話框）。
+
+        - 首次開啟建立對話框並接線
+        - 預填座標：起飛點用已設定的 home_point，目標用第一個邊界角點（若存在）
+        - 非模態 .show()：視窗保持浮在主視窗上方但不阻擋地圖互動
+        """
+        if self._swarm_strike_dialog is None:
+            dlg = TacticalSwarmStrikeDialog(self)
+            panel = dlg.panel
+            # ── 信號接線 ──
+            panel.pick_launch_requested.connect(self.on_swarm_pick_launch_request)
+            panel.pick_target_requested.connect(self.on_swarm_pick_target_request)
+            panel.mission_planned.connect(self.on_swarm_mission_planned)
+            panel.mission_exported.connect(self.on_swarm_mission_exported)
+            panel.mission_deployed.connect(self.on_swarm_mission_deployed)
+            self._swarm_strike_dialog = dlg
+
+            # ── 預填座標（若主視窗已有對應狀態） ──
+            if self.home_point is not None:
+                panel.set_launch_point(*self.home_point)
+            if self.corners:
+                panel.set_target_point(*self.corners[0])
+
+            logger.info("戰術蜂群打擊面板：已建立")
+
+        self._swarm_strike_dialog.show()
+        self._swarm_strike_dialog.raise_()
+        self._swarm_strike_dialog.activateWindow()
+
+    def on_swarm_pick_launch_request(self):
+        """面板 LAUNCH PICK 按鈕 → 進入地圖拾取模式，暫時隱藏面板。"""
+        self.picking_swarm_launch = True
+        self.picking_swarm_target = False
+        if self._swarm_strike_dialog is not None:
+            self._swarm_strike_dialog.hide()
+        self.statusBar().showMessage(
+            "⚡ SWARM STRIKE：點擊地圖以設定起飛點（LAUNCH POINT）...", 0
+        )
+        logger.info("進入蜂群起飛點拾取模式")
+
+    def on_swarm_pick_target_request(self):
+        """面板 TARGET PICK 按鈕 → 進入地圖拾取模式。"""
+        self.picking_swarm_target = True
+        self.picking_swarm_launch = False
+        if self._swarm_strike_dialog is not None:
+            self._swarm_strike_dialog.hide()
+        self.statusBar().showMessage(
+            "⚡ SWARM STRIKE：點擊地圖以設定打擊目標（TARGET）...", 0
+        )
+        logger.info("進入蜂群目標拾取模式")
+
+    def on_swarm_launch_picked(self, lat: float, lon: float):
+        """使用者在地圖上點擊後，將座標回填至面板並重新顯示對話框。"""
+        self.picking_swarm_launch = False
+        if self._swarm_strike_dialog is not None:
+            self._swarm_strike_dialog.panel.set_launch_point(lat, lon)
+            self._swarm_strike_dialog.show()
+            self._swarm_strike_dialog.raise_()
+            self._swarm_strike_dialog.activateWindow()
+        self.statusBar().showMessage(
+            f"⚡ 蜂群起飛點已設定: ({lat:.6f}, {lon:.6f})", 4000
+        )
+        logger.info(f"蜂群起飛點設定: ({lat:.6f}, {lon:.6f})")
+
+    def on_swarm_target_picked(self, lat: float, lon: float):
+        """同上，目標版本。"""
+        self.picking_swarm_target = False
+        if self._swarm_strike_dialog is not None:
+            self._swarm_strike_dialog.panel.set_target_point(lat, lon)
+            self._swarm_strike_dialog.show()
+            self._swarm_strike_dialog.raise_()
+            self._swarm_strike_dialog.activateWindow()
+        self.statusBar().showMessage(
+            f"⚡ 蜂群打擊目標已設定: ({lat:.6f}, {lon:.6f})", 4000
+        )
+        logger.info(f"蜂群打擊目標設定: ({lat:.6f}, {lon:.6f})")
+
+    def on_swarm_mission_planned(self, params, waypoints):
+        """蜂群任務已規劃完成（已顯示於面板預覽區）。"""
+        logger.info(
+            f"蜂群任務規劃完成 — ROE={params.roe_mode.value} WP={len(waypoints)}"
+        )
+
+    def on_swarm_mission_exported(self, file_path: str):
+        """蜂群任務已匯出 .waypoints 檔案。"""
+        self.statusBar().showMessage(f"⚡ 蜂群任務已匯出: {file_path}", 5000)
+        logger.info(f"蜂群任務匯出: {file_path}")
+
+    def on_swarm_mission_deployed(self, waypoints):
+        """面板 DEPLOY 按鈕 — 此處僅 log 與狀態提示；實際 MAVLink 上傳由連線層處理。
+
+        若後續要串接 SITL/實機上傳，請在此：
+            1. 取得當前 MAVLink 連線 (self.sitl_connection 或等效)
+            2. 呼叫 mission upload (mission_clear_all + mission_item_int × N)
+            3. 確認 MISSION_ACK 後發 status 回饋
+        """
+        logger.info(f"[SwarmStrike] DEPLOY 請求 — {len(waypoints)} 個航點")
+        self.statusBar().showMessage(
+            f"⚡ SWARM STRIKE DEPLOYED — {len(waypoints)} WP（MAVLink 上傳待接線）",
+            8000,
+        )
 
     @staticmethod
     def _haversine(p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
@@ -722,10 +1031,6 @@ class MainWindow(QMainWindow):
             self.parameter_panel.update_corner_count(len(self.corners))
             self.update_statusbar()
             logger.info(f"刪除角點: ({removed[0]:.6f}, {removed[1]:.6f}), 剩餘 {len(self.corners)} 個")
-
-            # 如果啟用自動生成，觸發路徑更新
-            if self.auto_generate_path and len(self.corners) >= MIN_CORNERS:
-                self._schedule_path_generation()
 
     def _schedule_path_generation(self):
         """排程延遲路徑生成（防止頻繁更新）"""
@@ -863,19 +1168,23 @@ class MainWindow(QMainWindow):
             logger.warning(f"[MP Sync] 同步失敗: {e}")
 
     def load_stylesheet(self):
-        """載入樣式表"""
-        try:
-            from pathlib import Path
-            style_path = Path(__file__).parent / "resources" / "styles" / "dark_theme.qss"
+        """載入戰術 HUD 主題（Tactical HUD Theme）
 
-            if style_path.exists():
-                with open(style_path, 'r', encoding='utf-8') as f:
-                    self.setStyleSheet(f.read())
-                logger.info("樣式表載入成功")
+        標準啟動路徑中 main.py 已於建立 QApplication 時呼叫 apply_tactical_theme。
+        此方法重複套用無副作用 (app.setStyleSheet 冪等)，用途：
+          * 保留 __init__ 既有呼叫鏈的相容性
+          * 支援直接實例化 MainWindow 的測試 / 除錯情境
+        """
+        try:
+            from ui.resources.tactical_theme import apply_tactical_theme
+            app = QApplication.instance()
+            if app is not None:
+                apply_tactical_theme(app)
+                logger.info("戰術主題 (Tactical HUD) 已套用")
             else:
-                logger.warning(f"樣式表不存在: {style_path}")
+                logger.warning("QApplication 尚未建立，跳過主題套用")
         except Exception as e:
-            logger.error(f"載入樣式表失敗: {e}")
+            logger.error(f"載入戰術主題失敗: {e}")
     
     # ==========================================
     # 信號處理函數
@@ -904,6 +1213,26 @@ class MainWindow(QMainWindow):
             self.on_circle_center_set(lat, lon)
             return
 
+        # 蜂群打擊：起飛點拾取模式
+        if self.picking_swarm_launch:
+            if self.map_widget.corners:
+                self.map_widget.corners.pop()
+            if self.map_widget.markers:
+                self.map_widget.markers.pop()
+            self.map_widget._render_map()
+            self.on_swarm_launch_picked(lat, lon)
+            return
+
+        # 蜂群打擊：目標拾取模式
+        if self.picking_swarm_target:
+            if self.map_widget.corners:
+                self.map_widget.corners.pop()
+            if self.map_widget.markers:
+                self.map_widget.markers.pop()
+            self.map_widget._render_map()
+            self.on_swarm_target_picked(lat, lon)
+            return
+
         # 檢查是否超過最大數量
         if len(self.corners) >= MAX_CORNERS:
             QMessageBox.warning(
@@ -917,10 +1246,6 @@ class MainWindow(QMainWindow):
         logger.info(f"新增邊界點 #{len(self.corners)}: ({lat:.6f}, {lon:.6f}) [剩餘: {remaining}]")
         self.parameter_panel.update_corner_count(len(self.corners))
         self.update_statusbar()
-
-        # 如果啟用自動生成，觸發路徑更新
-        if self.auto_generate_path and len(self.corners) >= MIN_CORNERS:
-            self._schedule_path_generation()
 
     def on_manual_corner_added(self, lat, lon):
         """處理手動新增邊界點（從參數面板）"""
@@ -940,10 +1265,6 @@ class MainWindow(QMainWindow):
         self.parameter_panel.update_corner_count(len(self.corners))
         self.update_statusbar()
 
-        # 如果啟用自動生成，觸發路徑更新
-        if self.auto_generate_path and len(self.corners) >= MIN_CORNERS:
-            self._schedule_path_generation()
-    
     def on_corner_moved(self, index, lat, lon):
         """處理移動邊界點"""
         if 0 <= index < len(self.corners):
@@ -1011,6 +1332,30 @@ class MainWindow(QMainWindow):
                 f"（螺旋/同心圓模式請先點擊「地圖拖曳定義圓形」設定圓心）"
             )
             return
+
+        # ── Schema 驗證飛行參數 (2026 重構：fail-fast 防無效輸入)──
+        try:
+            from config.schemas import FlightParameters
+            fp = FlightParameters.from_dict({
+                'altitude':     self.flight_params.get('altitude', 50.0),
+                'speed':        self.flight_params.get('speed', 15.0),
+                'angle':        self.flight_params.get('angle', 0.0),
+                'spacing':      self.flight_params.get('spacing', 20.0),
+                'turn_radius':  self.flight_params.get('turn_radius', 50.0),
+                'vehicle_type': {
+                    '多旋翼': 'multirotor', '固定翼': 'fixed_wing', 'VTOL': 'vtol',
+                }.get(self.current_vehicle_type, 'multirotor'),
+            })
+            fp.validate()
+        except ValueError as e:
+            QMessageBox.warning(
+                self, '飛行參數錯誤',
+                f'預覽前參數驗證失敗，請修正設定:\n\n{e}'
+            )
+            logger.warning(f'[Preview] flight_params 驗證失敗: {e}')
+            return
+        except Exception as e:
+            logger.debug(f'[Preview] Schema 驗證異常 (忽略): {e}')
 
         try:
             # 獲取當前選擇的演算法
@@ -2723,6 +3068,49 @@ class MainWindow(QMainWindow):
                 logger.error(f"載入任務失敗: {e}")
                 QMessageBox.critical(self, "載入錯誤", f"載入任務時發生錯誤：\n{str(e)}")
     
+    # ═════════════════════════════════════════════════════════════════
+    #  專案檔 (.aeroplan) 保存 / 讀取
+    # ═════════════════════════════════════════════════════════════════
+    def on_save_project(self):
+        """儲存當前 UI 狀態為 .aeroplan 專案檔"""
+        from mission.project_io import (
+            build_project_from_main_window, save_project,
+        )
+        path, _ = QFileDialog.getSaveFileName(
+            self, '儲存 AeroPlan 專案', '', 'AeroPlan Project (*.aeroplan)'
+        )
+        if not path:
+            return
+        try:
+            proj = build_project_from_main_window(self)
+            save_project(proj, path)
+            self.statusBar().showMessage(f'專案已儲存: {path}', 4000)
+            logger.info(f'[Project] 儲存至 {path}')
+        except Exception as e:
+            logger.error(f'[Project] 儲存失敗: {e}', exc_info=True)
+            QMessageBox.critical(self, '儲存失敗', str(e))
+
+    def on_load_project(self):
+        """從 .aeroplan 檔案復原 UI 狀態"""
+        from mission.project_io import load_project, apply_project_to_main_window
+        path, _ = QFileDialog.getOpenFileName(
+            self, '讀取 AeroPlan 專案', '', 'AeroPlan Project (*.aeroplan)'
+        )
+        if not path:
+            return
+        try:
+            proj = load_project(path)
+            apply_project_to_main_window(proj, self)
+            self.statusBar().showMessage(
+                f'專案已載入: {path} '
+                f'(邊界 {len(proj.corners)} 點, 打擊目標 {len(proj.strike_targets)} 個)',
+                5000,
+            )
+            logger.info(f'[Project] 從 {path} 載入')
+        except Exception as e:
+            logger.error(f'[Project] 載入失敗: {e}', exc_info=True)
+            QMessageBox.critical(self, '載入失敗', str(e))
+
     def on_save_mission(self):
         """儲存任務"""
         if not self.current_mission:
@@ -3380,6 +3768,9 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, 'DEM', f'載入失敗：\n{dem_path}')
                 return
             self._dem_manager = dem
+            # 將 DEM 注入 3D 地圖：供「地形跟隨」模式採樣每個航點的地形海拔
+            if hasattr(self.map_widget, 'set_dem_manager'):
+                self.map_widget.set_dem_manager(dem)
             # 嘗試在 3D 地圖顯示
             cesium = None
             if hasattr(self, 'map_widget'):
@@ -3711,6 +4102,8 @@ class MainWindow(QMainWindow):
         link.telemetry.connect(self._on_sitl_telemetry)
         link.status_text.connect(self.sitl_hud.on_status_text)
         link.error.connect(self.sitl_hud.on_error)
+        # SERVO 參數（FUNCTION/MIN/TRIM/MAX/REVERSED）→ ServoOutputPanel
+        link.servo_param.connect(self.sitl_hud.on_servo_param)
         link.start()
         self._sitl_links.append(link)
         if self._sitl_link is None:
@@ -3780,11 +4173,94 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 logger.error(f'[SITL] {cmd} 失敗: {e}')
 
-    def on_sitl_upload_mission(self):
-        """把當前路徑上傳到所有連線的 SITL"""
+    def _on_fence_export(self):
+        """
+        匯出當前自動建構的電子圍籬（QGC .plan / Mission Planner .fen）。
+        每個 Tab 上的「🛡 匯出電子圍籬」按鈕都會走到這裡。
+        """
+        from PyQt6.QtWidgets import QFileDialog
+        from datetime import datetime
+        bundle = getattr(self.map_widget, 'last_fence_bundle', None)
+        if bundle is None:
+            try:
+                from ui.widgets.mil_std_message import MilStdMessageBox, Severity
+                MilStdMessageBox(
+                    severity=Severity.CAUTION,
+                    title='電子圍籬',
+                    what_happened='系統尚未自動建構任何電子圍籬',
+                    detail='規劃路徑後（任一演算法、DCCPP 或蜂群打擊），系統會立即自動建構矩形圍籬。',
+                    recommended_action='請先在「基本演算法」或「DCCPP」分頁規劃一條路徑，再回此頁匯出。',
+                    parent=self,
+                ).exec()
+            except Exception:
+                QMessageBox.information(
+                    self, '電子圍籬',
+                    '尚無圍籬可匯出。\n請先規劃路徑，系統會自動建立圍籬。'
+                )
+            return
+
+        default_name = f'fence_{datetime.now():%Y%m%d_%H%M%S}'
+        path, _flt = QFileDialog.getSaveFileName(
+            self, '匯出電子圍籬', default_name,
+            'QGroundControl Plan (*.plan);;Mission Planner Fence (*.fen);;'
+            'JSON 全部資料 (*.json);;All files (*)'
+        )
+        if not path:
+            return
+        try:
+            from mission.geofence_manager import GeofenceConstraintManager
+            p_lower = path.lower()
+            if p_lower.endswith('.fen'):
+                out = GeofenceConstraintManager.export_mission_planner_fen(bundle, path)
+                fmt = 'Mission Planner .fen'
+            elif p_lower.endswith('.plan'):
+                out = GeofenceConstraintManager.export_qgc_plan(bundle, path)
+                fmt = 'QGroundControl .plan'
+            else:
+                # 預設用 .plan 格式（較完整含 mission + geoFence）
+                if not p_lower.endswith('.json'):
+                    path = path + '.plan'
+                out = GeofenceConstraintManager.export_qgc_plan(bundle, path)
+                fmt = 'QGroundControl .plan (預設格式)'
+            self.statusBar().showMessage(f'🛡️ {fmt} 已匯出: {out}', 6000)
+            QMessageBox.information(
+                self, '匯出完成',
+                f'格式：{fmt}\n路徑：{out}\n\n'
+                f'圍籬：{bundle.geofence.vertex_count()} 頂點 {bundle.geofence.method.upper()}\n'
+                f'高度：[{bundle.geofence.alt_min_m:.0f}, {bundle.geofence.alt_max_m:.0f}] m\n'
+                f'Buffer：{bundle.geofence.buffer_radius_m:.0f} m'
+            )
+        except Exception as e:
+            logger.error(f'[Fence] 匯出失敗: {e}', exc_info=True)
+            QMessageBox.warning(self, '匯出失敗', f'寫入檔案失敗：\n{e}')
+
+    def on_sitl_upload_fence(self):
+        """把目前自動建構的電子圍籬上傳到所有連線的 SITL。"""
         if not self._sitl_links:
             QMessageBox.information(self, 'SITL', '尚未連線任何 SITL')
             return
+        bundle = getattr(self.map_widget, 'last_fence_bundle', None)
+        if bundle is None:
+            QMessageBox.warning(self, 'SITL',
+                '尚無圍籬可上傳。\n建議：先規劃任何路徑，系統會自動建立圍籬，再點此上傳。')
+            return
+        for link in self._sitl_links:
+            try:
+                link.upload_fence(bundle)
+            except Exception as e:
+                logger.error(f'[SITL] 上傳圍籬失敗 sysid={getattr(link,"sysid_label","?")}: {e}')
+        self.statusBar().showMessage(
+            f'🛡️ 已送出圍籬上傳請求到 {len(self._sitl_links)} 台 SITL', 5000
+        )
+
+    def on_sitl_upload_mission(self):
+        """把當前路徑上傳到所有連線的 SITL（支援 Diamond 蜂群打擊 / DCCPP / 一般路徑）"""
+        if not self._sitl_links:
+            QMessageBox.information(self, 'SITL', '尚未連線任何 SITL')
+            return
+        # ── 優先：菱形蜂群打擊（每架獨立任務 + 友善參數）──────
+        if getattr(self, '_diamond_plans', None):
+            return self._on_diamond_strike_sitl_upload()
         # 從 map_widget.paths 收集所有航點；若無則改抓 DCCPP / swarm 結果
         wps = []
         try:
@@ -3809,7 +4285,14 @@ class MainWindow(QMainWindow):
                             elif len(p) == 2:
                                 wps.append((float(p[0]), float(p[1]), default_alt))
 
-            # DCCPP 多機：每架 SITL 綁到各自的 UAV 路徑（dict: link_index → wps list）
+            # DCCPP 多機：每架 SITL 綁到各自的 UAV 路徑
+            # ★ 修 bug：原本用 link_idx 為 key（依 self._sitl_links 順序），
+            #   但 link 順序不一定等於 sysid 順序（使用者分批啟動 / 重連時錯亂）；
+            #   且 link 數 > 路徑數時會用 max(keys) 讓多 link 共用同一份 mission
+            #   → 兩架固定翼上傳到同一份任務的 bug。
+            #   改為以 uav_id 為 key，上傳時用 link.sysid_label 對應 UAV 路徑。
+            per_uav_wps: dict = {}     # {uav_id: (link_idx_for_log, wps_list)}
+            # 向後相容（不再用，但保留變數避免下方判斷式 NameError）
             per_link_wps: dict = {}
 
             if not wps and getattr(self, '_dccpp_result', None):
@@ -3970,34 +4453,59 @@ class MainWindow(QMainWindow):
                                               0.0, turn_radius, 0.0, 0.0))
                     return wps_local
 
-                # 每個 UAV 建立獨立 wps，對應到相同 index 的 SITL link
-                for link_idx, (uav_id, bpath) in enumerate(sorted_paths):
+                # 每個 UAV 建立獨立 wps；以 uav_id 為 key（不再用 link_idx）
+                for uav_id, bpath in sorted_paths:
                     path_wps = _build_wps_for_path(bpath)
                     if path_wps:
-                        per_link_wps[link_idx] = (uav_id, path_wps)
+                        per_uav_wps[int(uav_id)] = path_wps
                         logger.info(
-                            f'[SITL] UAV-{uav_id} → link#{link_idx}: {len(path_wps)} 點'
+                            f'[SITL] DCCPP path 已建立: UAV-{uav_id}  ({len(path_wps)} 點)'
                         )
                 # 若只有 1 筆路徑，維持舊行為（讓 wps 非空觸發上傳判斷）
-                if per_link_wps and 0 in per_link_wps:
-                    wps = per_link_wps[0][1]
+                if per_uav_wps:
+                    first_uav_id = sorted(per_uav_wps.keys())[0]
+                    wps = per_uav_wps[first_uav_id]
         except Exception as e:
             logger.error(f'[SITL] 收集航點失敗: {e}', exc_info=True)
-        if not wps and not per_link_wps:
+        if not wps and not per_uav_wps:
             QMessageBox.warning(self, 'SITL', '目前沒有可上傳的路徑，請先預覽生成路徑')
             return
 
-        # 分派：每架 link 使用對應 uav 的路徑；若 link 數 > 路徑數則剩餘 link 共用最後一份
-        if per_link_wps:
+        # 分派：每架 link 用 link.sysid_label 對應自己的 UAV 路徑
+        # 修 bug：之前用 link_idx 對應 → 順序錯亂時兩架機可能收到同一份 mission。
+        # 改為「按 sysid 對應」確保 sysid=1 飛 UAV-1 路徑、sysid=2 飛 UAV-2 路徑...
+        # 沒有對應路徑的 link 會被跳過（並警告），避免重複上傳。
+        if per_uav_wps:
+            uploaded = []   # [(sysid, uav_id, count)]
+            skipped = []    # [(sysid, reason)]
+            sorted_uav_ids = sorted(per_uav_wps.keys())
+            used_uav_ids = set()    # 同一份 path 不重複上傳
             for link_idx, link in enumerate(self._sitl_links):
-                key = link_idx if link_idx in per_link_wps else max(per_link_wps.keys())
-                uav_id, path_wps = per_link_wps[key]
+                sysid = int(getattr(link, 'sysid_label', link_idx + 1) or (link_idx + 1))
+                # 1) 直接用 sysid 對應 uav_id 找路徑
+                if sysid in per_uav_wps and sysid not in used_uav_ids:
+                    target_uav_id = sysid
+                # 2) 沒有完全對應的 sysid → 找尚未使用的最小 uav_id 作為 fallback
+                #    (常見情境：UAV id 從 1..N 連續但 sysid 從 0 起算)
+                else:
+                    remaining = [u for u in sorted_uav_ids if u not in used_uav_ids]
+                    if not remaining:
+                        skipped.append((sysid, 'all paths uploaded'))
+                        logger.warning(
+                            f'[SITL] sysid={sysid} 無可用 DCCPP 路徑，跳過'
+                        )
+                        continue
+                    target_uav_id = remaining[0]
+                used_uav_ids.add(target_uav_id)
+                path_wps = per_uav_wps[target_uav_id]
                 link.upload_mission(path_wps)
+                uploaded.append((sysid, target_uav_id, len(path_wps)))
                 logger.info(
-                    f'[SITL] link#{link_idx} ← UAV-{uav_id} ({len(path_wps)} 點)'
+                    f'[SITL] sysid={sysid} ← UAV-{target_uav_id} ({len(path_wps)} 點)'
                 )
             self.statusBar().showMessage(
-                f'已為 {len(self._sitl_links)} 台 SITL 各自上傳獨立 DCCPP 路徑', 5000
+                f'已為 {len(uploaded)}/{len(self._sitl_links)} 台 SITL 上傳獨立 '
+                f'DCCPP 路徑（{len(skipped)} 跳過）', 6000
             )
         else:
             for link in self._sitl_links:
@@ -4032,23 +4540,32 @@ class MainWindow(QMainWindow):
             self._sitl_launcher = SITLLauncher()
 
         try:
-            dccpp = getattr(self, '_dccpp_result', None)
-            if dccpp:
-                ap = dccpp.get('assembled_paths') or {}
-                first_path = next(iter(ap.values()), None)
-                if first_path is not None:
-                    wp_list = getattr(first_path, 'waypoints', None) or []
-                    has_takeoff = any(
-                        getattr(getattr(w, 'segment_type', None), 'name', '') == 'TAKEOFF'
-                        for w in wp_list
+            # ── 載具自動推斷（蜂群打擊優先 — 一定是固定翼）──
+            diamond_plans = getattr(self, '_diamond_plans', None)
+            if diamond_plans:
+                if vehicle.upper() != 'VTOL' and vehicle.upper() != 'PLANE':
+                    logger.warning(
+                        f'[SITL] 依蜂群打擊結果自動切換載具：{vehicle} → PLANE'
                     )
-                    inferred = 'PLANE' if has_takeoff else 'COPTER'
-                    # VTOL 由使用者明確選擇，不被 DCCPP 推斷覆寫
-                    if vehicle.upper() != 'VTOL' and inferred != vehicle.upper():
-                        logger.warning(
-                            f'[SITL] 依 DCCPP 結果自動切換載具：{vehicle} → {inferred}'
+                    vehicle = 'PLANE'
+            else:
+                dccpp = getattr(self, '_dccpp_result', None)
+                if dccpp:
+                    ap = dccpp.get('assembled_paths') or {}
+                    first_path = next(iter(ap.values()), None)
+                    if first_path is not None:
+                        wp_list = getattr(first_path, 'waypoints', None) or []
+                        has_takeoff = any(
+                            getattr(getattr(w, 'segment_type', None), 'name', '') == 'TAKEOFF'
+                            for w in wp_list
                         )
-                        vehicle = inferred
+                        inferred = 'PLANE' if has_takeoff else 'COPTER'
+                        # VTOL 由使用者明確選擇，不被 DCCPP 推斷覆寫
+                        if vehicle.upper() != 'VTOL' and inferred != vehicle.upper():
+                            logger.warning(
+                                f'[SITL] 依 DCCPP 結果自動切換載具：{vehicle} → {inferred}'
+                            )
+                            vehicle = inferred
         except Exception as _e:
             logger.warning(f'[SITL] 推斷載具類型失敗: {_e}')
 
@@ -4072,34 +4589,66 @@ class MainWindow(QMainWindow):
             spawn_heading = 0.0
             per_uav_homes: list = []  # [(lat, lon, heading), ...] 依 uav_id 排序
             try:
-                # 1. DCCPP 結果中每架 UAV 的起飛點
-                dccpp = getattr(self, '_dccpp_result', None)
-                if dccpp:
-                    ap = dccpp.get('assembled_paths') or {}
-                    import math as _m
-                    for uav_id, bpath in sorted(ap.items(), key=lambda kv: kv[0]):
-                        wps_u = getattr(bpath, 'waypoints', None) or []
-                        if not wps_u:
+                import math as _m
+                # 0. 蜂群打擊（DiamondSwarmStrikePlanner）每架獨立起飛點 — 最高優先
+                #    每架 UAV 的 formation_path[0] = slot 起飛點 (slot_lat0, slot_lon0)
+                #    formation_path[0] → formation_path[1] 沿 cruise_heading 斜爬升 →
+                #    用兩點方位角作為機頭航向，讓 SITL 一生成就對齊跑道方向
+                diamond_plans = getattr(self, '_diamond_plans', None)
+                if diamond_plans:
+                    for plan in sorted(diamond_plans, key=lambda p: p.sysid):
+                        fp = plan.formation_path or []
+                        if len(fp) < 2:
                             continue
-                        u_wp0 = wps_u[0]
-                        u_lat = float(u_wp0.lat)
-                        u_lon = float(u_wp0.lon)
+                        u_lat = float(fp[0][0])
+                        u_lon = float(fp[0][1])
                         u_hdg = 0.0
-                        if len(wps_u) >= 2:
-                            u_wp1 = wps_u[1]
-                            dN = (float(u_wp1.lat) - u_lat) * 111320.0
-                            dE = (float(u_wp1.lon) - u_lon) * 111320.0 * _m.cos(_m.radians(u_lat))
+                        # 找第一個與 fp[0] 不同位置的點來算航向（爬升段沿 cruise_heading）
+                        for nxt in fp[1:]:
+                            dN = (float(nxt[0]) - u_lat) * 111320.0
+                            dE = (float(nxt[1]) - u_lon) * 111320.0 * _m.cos(_m.radians(u_lat))
                             if abs(dN) + abs(dE) > 1e-6:
                                 u_hdg = (_m.degrees(_m.atan2(dE, dN))) % 360.0
+                                break
                         per_uav_homes.append((u_lat, u_lon, u_hdg))
                         logger.info(
-                            f'[SITL] UAV-{uav_id} 起飛點: '
-                            f'({u_lat:.6f}, {u_lon:.6f}) hdg={u_hdg:.1f}°'
+                            f'[SITL] Diamond UAV{plan.sysid} [{plan.role}] 起飛點: '
+                            f'({u_lat:.6f}, {u_lon:.6f}) hdg={u_hdg:.1f}° '
+                            f'attack@{plan.attack_bearing_deg:.0f}°'
                         )
                     if per_uav_homes:
                         lat, lon = per_uav_homes[0][0], per_uav_homes[0][1]
                         spawn_heading = per_uav_homes[0][2]
-                        origin_src = f'DCCPP 每架獨立起飛點 ({len(per_uav_homes)} 個)'
+                        origin_src = f'蜂群打擊每架獨立起飛點 ({len(per_uav_homes)} 架)'
+
+                # 1. DCCPP 結果中每架 UAV 的起飛點
+                if not per_uav_homes:
+                    dccpp = getattr(self, '_dccpp_result', None)
+                    if dccpp:
+                        ap = dccpp.get('assembled_paths') or {}
+                        for uav_id, bpath in sorted(ap.items(), key=lambda kv: kv[0]):
+                            wps_u = getattr(bpath, 'waypoints', None) or []
+                            if not wps_u:
+                                continue
+                            u_wp0 = wps_u[0]
+                            u_lat = float(u_wp0.lat)
+                            u_lon = float(u_wp0.lon)
+                            u_hdg = 0.0
+                            if len(wps_u) >= 2:
+                                u_wp1 = wps_u[1]
+                                dN = (float(u_wp1.lat) - u_lat) * 111320.0
+                                dE = (float(u_wp1.lon) - u_lon) * 111320.0 * _m.cos(_m.radians(u_lat))
+                                if abs(dN) + abs(dE) > 1e-6:
+                                    u_hdg = (_m.degrees(_m.atan2(dE, dN))) % 360.0
+                            per_uav_homes.append((u_lat, u_lon, u_hdg))
+                            logger.info(
+                                f'[SITL] UAV-{uav_id} 起飛點: '
+                                f'({u_lat:.6f}, {u_lon:.6f}) hdg={u_hdg:.1f}°'
+                            )
+                        if per_uav_homes:
+                            lat, lon = per_uav_homes[0][0], per_uav_homes[0][1]
+                            spawn_heading = per_uav_homes[0][2]
+                            origin_src = f'DCCPP 每架獨立起飛點 ({len(per_uav_homes)} 個)'
                 # 2. 當前多邊形的第一個角點
                 if origin_src is None and getattr(self, 'corners', None):
                     c0 = self.corners[0]
@@ -4115,11 +4664,12 @@ class MainWindow(QMainWindow):
             logger.info(f'[SITL] 生成座標: ({lat:.6f}, {lon:.6f}) heading={spawn_heading:.1f}°'
                         + (f' (來源: {origin_src})' if origin_src else ' (預設)'))
 
-            # 若有 DCCPP 每架獨立起飛點，count 自動對齊路徑數量
+            # 若有任務每架獨立起飛點（蜂群打擊 / DCCPP），count 自動對齊路徑數量
             if per_uav_homes:
                 if count != len(per_uav_homes):
                     logger.info(
-                        f'[SITL] 依 DCCPP 結果將 SITL 數量 {count} → {len(per_uav_homes)}'
+                        f'[SITL] 依任務結果將 SITL 數量 {count} → {len(per_uav_homes)} '
+                        f'(來源: {origin_src})'
                     )
                 count = len(per_uav_homes)
 
@@ -4264,9 +4814,12 @@ class MainWindow(QMainWindow):
         """
         if self._fov_cone_enabled:
             fov_r = self.parameter_panel.get_fov_radius()
+            # ★ 傳入 sysid → 每架 UAV 各自獨立的 FOV entity，
+            #   不再互相覆寫造成「跳到誰那就顯示誰」閃爍。
             self.map_widget.update_fov_cone(
                 lat, lon, alt, fov_r,
                 heading_deg, pitch_deg, roll_deg,
+                sysid=sysid,
             )
             # 同時更新熱力圖（光錐掃過的區域）
             self.map_widget.update_heatmap(lat, lon, fov_r)
@@ -4276,136 +4829,68 @@ class MainWindow(QMainWindow):
                 lat, lon, alt, heading_deg, sysid,
             )
 
-    # ─────────────────────────────────────────────────────────────────
-    # 蜂群打擊模組 (Swarm Strike) 處理
-    # ─────────────────────────────────────────────────────────────────
-    def _on_strike_mark_targets(self):
-        """切換打擊目標標記模式"""
-        self._strike_marking_mode = not self._strike_marking_mode
-
-        # 取得 3D 地圖 widget（通過 DualMapWidget）
-        cesium = self._get_cesium_widget()
-        if cesium:
-            cesium.strike_set_marking_mode(self._strike_marking_mode)
-
-        self.parameter_panel.set_strike_marking_mode(self._strike_marking_mode)
-
-        if self._strike_marking_mode:
-            # 啟動標記模式：連接地圖點擊信號
-            self.map_widget.strike_target_added.connect(self._on_strike_target_clicked)
-            self.statusBar().showMessage(
-                '🎯 打擊目標標記模式：左鍵點擊 3D 地圖新增地面目標', 0
-            )
-        else:
-            # 關閉標記模式
-            try:
-                self.map_widget.strike_target_added.disconnect(self._on_strike_target_clicked)
-            except TypeError:
-                pass
-            self.statusBar().showMessage(
-                f'已結束目標標記，共 {len(self._strike_targets)} 個目標', 3000
-            )
-
-    def _on_strike_target_clicked(self, lat: float, lon: float):
-        """地圖點擊 → 新增打擊目標"""
-        idx = len(self._strike_targets) + 1
-        self._strike_targets.append((lat, lon))
-
-        cesium = self._get_cesium_widget()
-        if cesium:
-            cesium.strike_add_target(lat, lon, idx)
-
-        self.parameter_panel.update_strike_target_count(len(self._strike_targets))
-        self.statusBar().showMessage(
-            f'🎯 TGT-{idx} 已標記: ({lat:.6f}, {lon:.6f})', 3000
-        )
-        logger.info(f'[Strike] 新增打擊目標 TGT-{idx}: ({lat:.6f}, {lon:.6f})')
-
-    def _on_strike_execute(self, params: dict):
-        """執行蜂群打擊（自動模式：N 個目標 → N 架 UCAV，高度與路線完全錯開）"""
-        import json
-        from core.strike.terminal_strike_planner import (
-            TerminalStrikePlanner, StrikeTarget,
-        )
-
-        if not self._strike_targets:
-            QMessageBox.warning(self, '蜂群打擊', '請先標記至少一個打擊目標')
-            return
-
-        # 關閉標記模式
-        if self._strike_marking_mode:
-            self._on_strike_mark_targets()
-
-        cruise_alt = params.get('cruise_alt', 500.0)
-        cruise_speed = params.get('cruise_speed', 60.0)
-        max_dive = params.get('max_dive_angle', 45.0)
-        dive_dist = params.get('dive_initiation_dist', 800.0)
-        alt_step = params.get('altitude_step', 30.0)
-        anim_speed = params.get('anim_speed', 3.0)
-
-        # 建立目標列表
-        targets = []
-        for i, (lat, lon) in enumerate(self._strike_targets):
-            targets.append(StrikeTarget(target_id=i + 1, lat=lat, lon=lon))
-
-        # 建立規劃器（含高度錯層參數）
-        planner = TerminalStrikePlanner(
-            max_dive_angle_deg=max_dive,
-            dive_initiation_dist_m=dive_dist,
-            cruise_alt_m=cruise_alt,
-            cruise_speed_mps=cruise_speed,
-            altitude_step_m=alt_step,
-        )
-
-        # 自動模式：N 目標 → 自動生成 N 架 UCAV
-        # 每架 UCAV 的巡航高度自動錯層（+i*alt_step）
-        # 進場方位角自動分散（360°/N），航線完全不交叉
-        trajectories = planner.plan_auto(targets, spawn_dist_m=1500.0)
-
-        if not trajectories:
-            QMessageBox.warning(self, '蜂群打擊', '軌跡規劃失敗：無有效分配')
-            return
-
-        # 轉換為 Cesium JSON 並送往前端
-        cesium_data = planner.trajectories_to_cesium_data(trajectories, targets)
-        data_json = json.dumps(cesium_data)
-
-        cesium = self._get_cesium_widget()
-        if cesium:
-            cesium.strike_execute_animation(data_json, anim_speed)
-
-        # 顯示結果摘要
-        summary_lines = [
-            f'蜂群打擊規劃完成：{len(trajectories)} 架 UCAV → {len(targets)} 個目標'
-            f'（高度錯層 {alt_step:.0f}m）'
-        ]
-        for tr in trajectories:
-            summary_lines.append(
-                f'  {tr.uav_name} → {tr.target_name}: '
-                f'{tr.total_distance_m:.0f}m, alt={tr.cruise_alt_m:.0f}m, '
-                f'dive@WP{tr.dive_start_index}'
-            )
-        self.statusBar().showMessage(summary_lines[0], 5000)
-        logger.info('\n'.join(summary_lines))
-
-    def _on_strike_clear(self):
-        """清除打擊視覺化"""
-        self._strike_targets.clear()
-        self._strike_marking_mode = False
-
-        cesium = self._get_cesium_widget()
-        if cesium:
-            cesium.strike_clear_all()
-
-        self.parameter_panel.update_strike_target_count(0)
-        self.parameter_panel.set_strike_marking_mode(False)
-        self.statusBar().showMessage('已清除打擊視覺化', 3000)
+    # ═════════════════════════════════════════════════════════════════
+    # Swarm Strike 處理 — 已抽出至 ui.controllers.StrikeControllerMixin
+    # (MainWindow 透過多重繼承自動獲得所有 _on_strike_* 方法)
+    # ═════════════════════════════════════════════════════════════════
 
     def _get_cesium_widget(self):
         """取得 CesiumMapWidget 實例（通過 DualMapWidget）"""
         if hasattr(self.map_widget, 'map_3d'):
             return self.map_widget.map_3d
         return None
+
+    def on_reset_layout(self):
+        """重置所有 Splitter 為預設比例 (Ctrl+Shift+R)
+
+        涵蓋三層：
+          1. 主水平 splitter (地圖 ⇄ 右側控制面板) → 60:40
+          2. 右側垂直 splitter (參數面板 ⇄ 任務面板) → 78:22
+          3. 各 tab 內的垂直 splitter (所有 GroupBox 平均分配)
+        """
+        try:
+            # (1) 主 splitter
+            if hasattr(self, '_main_splitter') and self._main_splitter:
+                w = self.width() or 1280
+                self._main_splitter.setSizes([int(w * 0.60), int(w * 0.40)])
+            # (2) 右側面板 splitter
+            if hasattr(self, '_right_panel_splitter') and self._right_panel_splitter:
+                h = self.height() or 720
+                self._right_panel_splitter.setSizes([int(h * 0.78), int(h * 0.22)])
+            # (3) ParameterPanel 內的所有 tab splitter
+            if hasattr(self, 'parameter_panel') and hasattr(
+                self.parameter_panel, 'reset_resizable_layout'
+            ):
+                self.parameter_panel.reset_resizable_layout()
+            self.statusBar().showMessage('已重置版面比例', 3000)
+            logger.info('[Layout] 版面比例已重置')
+        except Exception as e:
+            logger.warning(f'[Layout] 重置失敗: {e}')
+
+    def resizeEvent(self, event):
+        """視窗大小變更時，保持地圖/控制面板 60:40 比例。
+
+        這讓使用者在 1080p / 2K / 4K 之間拖拉視窗到不同螢幕時，
+        splitter 會自動重新分配，不會跑版。
+        """
+        super().resizeEvent(event)
+        splitter = getattr(self, '_main_splitter', None)
+        if splitter is None:
+            return
+        try:
+            w = event.size().width()
+            if w < 200:
+                return
+            # 讀當前使用者是否手動改過比例；若變動 <5% 則視為自動，重新調整
+            cur = splitter.sizes()
+            if len(cur) == 2 and sum(cur) > 0:
+                cur_ratio = cur[0] / sum(cur)
+                if abs(cur_ratio - 0.60) > 0.05:
+                    # 使用者自己拖過分隔線 → 尊重其設定，不覆寫
+                    return
+            splitter.setSizes([int(w * 0.60), int(w * 0.40)])
+        except Exception:
+            pass
 
     def closeEvent(self, event):
         """視窗關閉事件"""

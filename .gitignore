@@ -10,6 +10,36 @@ dist/
 build/
 *.egg
 
+# 2026 重構新增：暫存地圖 HTML 目錄 (utils.temp_cache)
+data/tmp_maps/
+data/logs/
+
+# SITL 多機實例工作目錄 (動態產生)
+sitl/plane/i*/
+sitl/plane/terrain/
+
+# pytest / coverage cache
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+
+# 測試產生的臨時匯出目錄 (會被清掉，不入庫)
+_test_dtot/
+dtot_export_demo/
+vtol_stot_out/
+recon2strike_out/
+swarm_strike_out/
+
+# 根目錄任務檔誤生成保護 (應該都存在 exports/)
+/VTOL_*.waypoints
+/VTOL_briefing.txt
+/STRIKE_*.waypoints
+/DTOT_*.waypoints
+
+# 大型 3D 模型 (應走 Git LFS 或 release 附件，不放 main branch)
+ui/resources/*.glb
+
 # IDE
 .vscode/
 .idea/

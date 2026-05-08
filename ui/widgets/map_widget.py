@@ -542,15 +542,19 @@ class MapWidget(QWidget):
             html = self._inject_javascript(html, map_var_name)
 
             # 清理舊檔案
+            # 舊檔清理 (回寫相容)
             if self.temp_html_file:
                 try:
                     os.unlink(self.temp_html_file)
                 except OSError:
                     pass
 
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8') as f:
+            # 寫入 data/tmp_maps/folium_NNNN.html (每次覆蓋舊檔)
+            from utils.temp_cache import new_temp_html_path
+            out_path = new_temp_html_path(prefix='folium', keep_last=1)
+            with open(out_path, 'w', encoding='utf-8') as f:
                 f.write(html)
-                self.temp_html_file = f.name
+            self.temp_html_file = str(out_path)
 
             self.web_view.setUrl(QUrl.fromLocalFile(self.temp_html_file))
 

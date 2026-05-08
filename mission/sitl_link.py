@@ -54,10 +54,59 @@ class TelemetryFrame:
     vehicle_type: str = '---' # 'COPTER' / 'PLANE' / 'ROVER' / ...
     system_status: str = ''   # ACTIVE/STANDBY/...
     mav_time_us: int = 0
+    # SERVO_OUTPUT_RAW：16 通道 PWM（μs），未收到時為 0
+    servo_pwm: List[int] = field(default_factory=lambda: [0] * 16)
     last_update: float = field(default_factory=time.time)
 
     def is_valid_gps(self) -> bool:
         return self.gps_fix >= 3 and abs(self.lat) > 1e-6
+
+
+# ──────────────────────────────────────────────────────────────────────
+# ArduPilot SERVO_FUNCTION 對照表（節選 — 涵蓋 VTOL / QuadPlane / 雲台常見功能）
+# 完整列表見 ArduPilot/libraries/SRV_Channel/SRV_Channel.h
+# ──────────────────────────────────────────────────────────────────────
+SERVO_FUNCTIONS = {
+    0:  'Disabled',
+    1:  'RCPassThru',
+    4:  'Aileron',
+    6:  'Mount1Yaw',
+    7:  'Mount1Pitch',
+    8:  'Mount1Roll',
+    19: 'Elevator',
+    21: 'Rudder',
+    24: 'Flap',
+    25: 'FlapAuto',
+    26: 'Air Brake',
+    33: 'Motor1', 34: 'Motor2', 35: 'Motor3', 36: 'Motor4',
+    37: 'Motor5', 38: 'Motor6', 39: 'Motor7', 40: 'Motor8',
+    51: 'RCIN1', 52: 'RCIN2', 53: 'RCIN3', 54: 'RCIN4',
+    55: 'RCIN5', 56: 'RCIN6', 57: 'RCIN7', 58: 'RCIN8',
+    59: 'RCIN9', 60: 'RCIN10', 61: 'RCIN11', 62: 'RCIN12',
+    63: 'RCIN13', 64: 'RCIN14', 65: 'RCIN15', 66: 'RCIN16',
+    70: 'Throttle',
+    73: 'ThrottleLeft',
+    74: 'ThrottleRight',
+    75: 'TiltMotorLeft',
+    76: 'TiltMotorRight',
+    77: 'ElevonLeft',
+    78: 'ElevonRight',
+    79: 'VTailLeft',
+    80: 'VTailRight',
+    81: 'BoostThrottle',
+    82: 'Motor9', 83: 'Motor10', 84: 'Motor11', 85: 'Motor12',
+    91: 'TiltMotorRear',
+    92: 'TiltMotorRearLeft',
+    93: 'TiltMotorRearRight',
+    94: 'Mount2Yaw',
+    95: 'Mount2Pitch',
+    96: 'Mount2Roll',
+}
+
+
+def servo_function_name(code: int) -> str:
+    """把 SERVO_FUNCTION 數字代碼轉為人類可讀名稱。"""
+    return SERVO_FUNCTIONS.get(int(code), f'Func{int(code)}')
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -123,12 +172,16 @@ class SITLLink(QThread):
     telemetry      = pyqtSignal(object)           # TelemetryFrame
     status_text    = pyqtSignal(int, str)         # severity, text
     error          = pyqtSignal(str)
+    servo_param    = pyqtSignal(int, str, float)  # ch (1-16), key (FUNCTION/MIN/TRIM/MAX/REVERSED), value
 
     def __init__(self, conn_str: str = 'udpin:0.0.0.0:14550',
                  sysid_label: int = 1, vehicle_hint: str = '',
                  parent=None):
         super().__init__(parent)
         self.conn_str = conn_str
+        self.sysid_label = int(sysid_label)   # ★ 公開的 sysid 識別碼，供外部
+                                              # 邏輯（如 DCCPP 上傳分配）按 sysid
+                                              # 而非 list index 對應 UAV 路徑使用
         self._stop = False
         self._mav = None
         self._frame = TelemetryFrame(sysid=sysid_label)
@@ -159,6 +212,20 @@ class SITLLink(QThread):
     def upload_mission(self, waypoints: List[Tuple[float, float, float]]):
         """waypoints: [(lat, lon, alt_rel), ...]"""
         self._cmd_queue.put(('upload_mission', list(waypoints)))
+
+    def upload_fence(self, bundle):
+        """
+        上傳電子圍籬。
+        bundle: mission.geofence_manager.MissionBundle
+        """
+        self._cmd_queue.put(('upload_fence', bundle))
+
+    def clear_fence(self):
+        """清除飛控 EEPROM 中所有 polygon fence 頂點 + 強制 FENCE_ENABLE=0。
+
+        用於蜂群打擊上傳前，徹底排除任何殘留 fence 干擾自殺攻擊俯衝。
+        """
+        self._cmd_queue.put(('clear_fence', None))
     def mission_start(self):
         self._cmd_queue.put(('mission_start', None))
     def auto_start(self):
@@ -229,15 +296,24 @@ class SITLLink(QThread):
         if 'VTOL' in self._frame.vehicle_type or 'PLANE' in self._frame.vehicle_type:
             self._verify_vtol_q_enable()
 
-        # 要求高頻串流（與 Mission Planner 一致：4 Hz 位置/姿態）
+        # 要求高頻串流（與 Mission Planner 一致）
         try:
             self._mav.mav.request_data_stream_send(
                 self._mav.target_system, self._mav.target_component,
                 0,  # MAV_DATA_STREAM_ALL
                 4, 1
             )
+            # 額外要求 RC_CHANNELS 串流（含 SERVO_OUTPUT_RAW），10 Hz 以利 PWM 條圖即時
+            self._mav.mav.request_data_stream_send(
+                self._mav.target_system, self._mav.target_component,
+                8,  # MAV_DATA_STREAM_RC_CHANNELS
+                10, 1
+            )
         except Exception:
             pass
+
+        # 連線後讀取 SERVO{1..16}_FUNCTION 參數，供 ServoOutputPanel 顯示功能名稱
+        self._request_servo_function_params()
 
         # 主迴圈
         _last_hb = 0.0
@@ -414,10 +490,30 @@ class SITLLink(QThread):
             f.battery_a   = msg.current_battery / 100.0 if msg.current_battery != -1 else 0.0
             f.battery_pct = msg.battery_remaining
 
+        elif mtype == 'SERVO_OUTPUT_RAW':
+            # MAVLink 提供 servo1_raw ~ servo16_raw（μs）
+            for ch in range(1, 17):
+                attr = f'servo{ch}_raw'
+                if hasattr(msg, attr):
+                    f.servo_pwm[ch - 1] = int(getattr(msg, attr))
+            emit = True
+
         elif mtype == 'PARAM_VALUE':
             try:
                 pname = msg.param_id if isinstance(msg.param_id, str) else msg.param_id.decode('utf-8','ignore')
-                self.status_text.emit(6, f'PARAM {pname.strip(chr(0))} = {msg.param_value:g}')
+                pname = pname.strip('\x00').upper()
+                pval = float(msg.param_value)
+                # 攔截 SERVOn_FUNCTION/MIN/TRIM/MAX/REVERSED → 推送到 ServoOutputPanel
+                # 例如 SERVO5_FUNCTION → ch=5, key=FUNCTION
+                import re as _re
+                m = _re.match(r'^SERVO(\d+)_(FUNCTION|MIN|TRIM|MAX|REVERSED)$', pname)
+                if m:
+                    ch = int(m.group(1))
+                    key = m.group(2)
+                    if 1 <= ch <= 16:
+                        self.servo_param.emit(ch, key, pval)
+                else:
+                    self.status_text.emit(6, f'PARAM {pname} = {pval:g}')
             except Exception:
                 pass
 
@@ -464,6 +560,10 @@ class SITLLink(QThread):
                     self._send_param_request(arg)
                 elif cmd == 'vtol_transition':
                     self._send_vtol_transition(int(arg))
+                elif cmd == 'upload_fence':
+                    self._send_fence(arg)
+                elif cmd == 'clear_fence':
+                    self._send_clear_fence()
                 logger.info(f'[SITL] 已發送命令: {cmd} {arg if cmd != "upload_mission" else f"{len(arg)} 點"}')
         except Exception as e:
             logger.error(f'[SITL] 命令 {cmd} 失敗: {e}', exc_info=True)
@@ -623,6 +723,132 @@ class SITLLink(QThread):
             pid, -1,
         )
 
+    def _send_clear_fence(self):
+        """清除飛控 EEPROM 中所有 polygon fence 頂點，並強制 FENCE_ENABLE=0。
+
+        用法：蜂群末端飽和打擊（自殺撞擊任務）上傳前呼叫，徹底排除
+        任何殘留 fence 攔截俯衝。
+        """
+        from pymavlink import mavutil
+        if self._mav is None:
+            return
+        try:
+            # 1) FENCE_ENABLE=0 → 立即停用 fence 動作（即便仍有頂點殘留）
+            self._send_param_set('FENCE_ENABLE', 0, 'INT8')
+            time.sleep(0.05)
+            # 2) FENCE_TOTAL=0 → 標記 polygon 頂點數為 0
+            self._send_param_set('FENCE_TOTAL', 0, 'INT8')
+            time.sleep(0.05)
+            # 3) FENCE_TYPE=0 → bitmask 清空，不啟用任何 fence 類型
+            self._send_param_set('FENCE_TYPE', 0, 'INT8')
+            time.sleep(0.05)
+            # 4) 用 mission_clear_all_send 對 FENCE mission type 清空頂點
+            self._mav.mav.mission_clear_all_send(
+                self._mav.target_system, self._mav.target_component,
+                mavutil.mavlink.MAV_MISSION_TYPE_FENCE,
+            )
+            self.status_text.emit(6, '🚫 已清除所有 fence (蜂群打擊不使用)')
+            logger.info(f'[SITL] sysid={self.sysid_label} 清除 fence 完成')
+        except Exception as e:
+            logger.warning(f'[SITL] 清除 fence 失敗: {e}')
+
+    def _send_fence(self, bundle):
+        """
+        上傳電子圍籬到飛控。
+        bundle: mission.geofence_manager.MissionBundle（含 .geofence 與 .fence_params）
+
+        實作步驟（依 ArduPilot 4.2+ AC_PolyFence_loader）：
+            1) 寫入所有 FENCE_* 參數（FENCE_ENABLE 最後寫入避免半成品 trigger）
+            2) 多邊形頂點透過 MISSION_COUNT + MISSION_ITEM_INT 上傳，
+               mission_type = MAV_MISSION_TYPE_FENCE (=1)
+        """
+        from pymavlink import mavutil
+        if bundle is None or self._mav is None:
+            return
+        g = bundle.geofence
+        fp = dict(bundle.fence_params)
+        # 先停用 fence，等所有頂點/參數上傳完才重啟，避免中途 RTL
+        self._send_param_set('FENCE_ENABLE', 0, 'INT8')
+        time.sleep(0.05)
+
+        # 1) 上傳頂點（mission type = 1 = FENCE）
+        try:
+            verts = g.vertices
+            count = len(verts)
+            self._mav.mav.mission_count_send(
+                self._mav.target_system, self._mav.target_component,
+                count,
+                mavutil.mavlink.MAV_MISSION_TYPE_FENCE,
+            )
+            # ArduPilot 4.2+ Polygon Fence 用
+            #   MAV_CMD_NAV_FENCE_POLYGON_VERTEX_INCLUSION (5001)
+            CMD_INCL = mavutil.mavlink.MAV_CMD_NAV_FENCE_POLYGON_VERTEX_INCLUSION
+            for seq, (lat, lon) in enumerate(verts):
+                # 等待 MISSION_REQUEST(_INT) 再回送對應 seq
+                msg = self._mav.recv_match(
+                    type=['MISSION_REQUEST', 'MISSION_REQUEST_INT'],
+                    blocking=True, timeout=2,
+                )
+                if msg is None:
+                    logger.warning(f'[Fence] 上傳超時 seq={seq}')
+                    break
+                self._mav.mav.mission_item_int_send(
+                    self._mav.target_system, self._mav.target_component,
+                    seq,
+                    mavutil.mavlink.MAV_FRAME_GLOBAL,
+                    CMD_INCL,
+                    0,    # current
+                    1,    # autocontinue
+                    float(count),  # param1: 頂點總數
+                    0, 0, 0,
+                    int(round(lat * 1e7)), int(round(lon * 1e7)),
+                    0.0,
+                    mavutil.mavlink.MAV_MISSION_TYPE_FENCE,
+                )
+            # 等 MISSION_ACK
+            ack = self._mav.recv_match(type='MISSION_ACK', blocking=True, timeout=3)
+            if ack is None:
+                logger.warning('[Fence] 未收到 MISSION_ACK')
+        except Exception as e:
+            logger.error(f'[Fence] 頂點上傳失敗: {e}', exc_info=True)
+
+        # 2) 寫入 FENCE_* 參數（高度上下限、ACTION、TYPE 等）
+        for name, val in fp.items():
+            if name == 'FENCE_ENABLE':
+                continue
+            ptype = 'INT8' if isinstance(val, int) and -128 <= val <= 127 \
+                else ('INT16' if isinstance(val, int) and abs(val) < 32768 else 'REAL32')
+            try:
+                self._send_param_set(name, val, ptype)
+                time.sleep(0.04)
+            except Exception:
+                pass
+
+        # 3) 最後啟用 fence
+        time.sleep(0.1)
+        self._send_param_set('FENCE_ENABLE', 1, 'INT8')
+        self.status_text.emit(6,
+            f'🛡️ 圍籬已上傳: {len(g.vertices)} 頂點, '
+            f'alt=[{g.alt_min_m:.0f},{g.alt_max_m:.0f}]m')
+
+    def _request_servo_function_params(self):
+        """連線後讀取 SERVO{1..16}_FUNCTION/MIN/TRIM/MAX/REVERSED，
+        供 UI 端對應 PWM 通道顯示功能名稱與設定範圍。"""
+        if self._mav is None:
+            return
+        try:
+            with self._mav_lock:
+                for ch in range(1, 17):
+                    for key in ('FUNCTION', 'MIN', 'TRIM', 'MAX', 'REVERSED'):
+                        pname = f'SERVO{ch}_{key}'
+                        try:
+                            self._send_param_request(pname)
+                        except Exception:
+                            pass
+                        time.sleep(0.02)  # 避免一次塞爆 buffer
+        except Exception as e:
+            logger.warning(f'[SITL] SERVO 參數讀取失敗: {e}')
+
     def _send_vtol_transition(self, state: int):
         """MAV_CMD_DO_VTOL_TRANSITION (3000)：VTOL 飛行模式轉換。
 
@@ -695,7 +921,9 @@ class SITLLink(QThread):
             lat, lon, alt, cmd, p1, p2, p3, p4 = items[req.seq]
             # DO_* 指令 (非 NAV) 使用 MISSION frame；NAV 指令用 relative alt
             # 3000 = DO_VTOL_TRANSITION 也屬於 DO 類指令
-            if cmd in (178, 179, 177, 20, 115, 3000):  # DO_CHANGE_SPEED/SET_HOME/JUMP/RTL/CONDITION_YAW/DO_VTOL_TRANSITION
+            # 93 = NAV_DELAY（地面/空中等待）— 不需要實際 lat/lon/alt 用 MISSION
+            if cmd in (93, 112, 113, 114, 178, 179, 177, 20, 115, 3000):
+                # NAV_DELAY/CONDITION_DELAY/DISTANCE/CHANGE_ALT/DO_CHANGE_SPEED/...
                 frame = mavutil.mavlink.MAV_FRAME_MISSION
             else:
                 frame = mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT

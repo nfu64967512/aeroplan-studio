@@ -23,8 +23,12 @@ import math
 from functools import lru_cache
 from typing import Any, List, Optional, Tuple
 
-# 地球平均半徑 (WGS-84 近似)
-R_EARTH: float = 6_371_000.0
+from utils.math_utils import EARTH_RADIUS_M
+
+# (0-2 標準化) 地球半徑統一為 WGS-84 赤道半徑 6_378_137（單一來源：utils.math_utils），
+# 與 GPS / MAVLink / ArduPilot 一致。原為球面平均 6_371_000；strike 全幾何
+# （haversine / destination / ENU / Dubins）隨之等比 +0.112%。
+R_EARTH: float = EARTH_RADIUS_M
 
 # MAVLink frame: 3 = MAV_FRAME_GLOBAL_RELATIVE_ALT
 MAV_FRAME_REL: int = 3

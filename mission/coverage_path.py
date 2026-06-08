@@ -12,6 +12,8 @@ import math
 from dataclasses import dataclass, field
 from typing import List, Tuple, Optional, Dict
 
+from utils.math_utils import EARTH_RADIUS_M  # 0-2 標準化：WGS84 單一來源
+
 
 # ==========================================
 # 單條作業路徑段
@@ -261,7 +263,7 @@ class CoveragePath:
 
 def _haversine(p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
     """計算兩個 (lat, lon) 點之間的距離（公尺）"""
-    R = 6371000.0
+    R = EARTH_RADIUS_M
     lat1, lon1 = math.radians(p1[0]), math.radians(p1[1])
     lat2, lon2 = math.radians(p2[0]), math.radians(p2[1])
     dlat = lat2 - lat1

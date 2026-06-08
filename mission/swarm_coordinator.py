@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 import math
 import logging
 
+from utils.math_utils import EARTH_RADIUS_M  # 0-2 標準化：WGS84 單一來源
+
 # 添加專案根目錄到路徑
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
@@ -586,7 +588,7 @@ class SwarmCoordinator:
         參數:
             p1, p2: (lat, lon) 格式
         """
-        R = 6371000.0
+        R = EARTH_RADIUS_M
         lat1, lon1 = math.radians(p1[0]), math.radians(p1[1])
         lat2, lon2 = math.radians(p2[0]), math.radians(p2[1])
         dlat = lat2 - lat1

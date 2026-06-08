@@ -51,8 +51,8 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# 地球平均半徑（用於 Eq. 35 曲率補償）
-EARTH_RADIUS_M: float = 6_371_000.0
+# 地球半徑（用於 Eq. 35 曲率補償）— 0-2 標準化：WGS84 單一來源 (6_378_137)
+from utils.math_utils import EARTH_RADIUS_M
 
 # 型別別名
 WaypointXY = Tuple[float, float]           # (x, y) 或 (lat, lon)

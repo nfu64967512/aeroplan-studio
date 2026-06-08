@@ -26,6 +26,7 @@ from typing import (
 )
 from enum import Enum, auto
 
+from utils.math_utils import EARTH_RADIUS_M  # 0-2 標準化：WGS84 單一來源
 from mission.coverage_path import CoveragePath, OperationSegment
 
 
@@ -104,7 +105,7 @@ class MDTSPResult:
 
 def _haversine(p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
     """Haversine 距離（公尺）"""
-    R = 6_371_000.0
+    R = EARTH_RADIUS_M
     lat1, lat2 = math.radians(p1[0]), math.radians(p2[0])
     dlat = lat2 - lat1
     dlon = math.radians(p2[1] - p1[1])
@@ -677,7 +678,7 @@ class AltitudePlanner:
         gda_iterations: int = 50,
         gda_learning_rate: float = 0.01,
         collinear_epsilon: float = 0.01,
-        earth_radius: float = 6_371_000.0,
+        earth_radius: float = EARTH_RADIUS_M,
     ):
         """
         參數:

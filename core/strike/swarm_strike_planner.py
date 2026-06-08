@@ -64,6 +64,7 @@ from core.strike.geometry import (
     destination as _destination,
     angular_diff as _angular_diff,
     dubins_shortest_length,
+    assign_omnidirectional_slots,
 )
 
 
@@ -104,18 +105,10 @@ class Target:
     name: str = 'TGT'
 
 
-@dataclass
-class MissionItem:
-    """MAVLink 任務項 (對應 QGC WPL 110 單行)"""
-    cmd: int
-    lat: float = 0.0
-    lon: float = 0.0
-    alt: float = 0.0
-    param1: float = 0.0
-    param2: float = 0.0
-    param3: float = 0.0
-    param4: float = 0.0
-    comment: str = ''
+# (0-4 去重) MissionItem 已遷移至 core.strike.mission_export；此處 re-export 以維持
+# 既有 `from core.strike.swarm_strike_planner import MissionItem` 的相容性，並一併
+# 引入共用匯出函式 export_missions_qgc。
+from core.strike.mission_export import MissionItem, export_missions_qgc  # noqa: F401
 
 
 class FeasibilityStatus(str, Enum):
@@ -311,19 +304,8 @@ class SwarmStrikePlanner:
             fname = fname.replace('/', '-').replace('\\', '-')
             fpath = os.path.join(export_dir, fname)
 
-            lines = ['QGC WPL 110']
-            for seq, item in enumerate(p.mission):
-                # 前面 DO_SET_HOME 的 current=1，其餘 current=0
-                current = 1 if seq == 0 and item.cmd == MAVCmd.DO_SET_HOME else 0
-                lines.append(create_waypoint_line(
-                    seq=seq, command=item.cmd,
-                    lat=item.lat, lon=item.lon, alt=item.alt,
-                    param1=item.param1, param2=item.param2,
-                    param3=item.param3, param4=item.param4,
-                    frame=_MAV_FRAME_REL,
-                    current=current, autocontinue=1,
-                ))
-            if write_waypoints(fpath, lines):
+            if export_missions_qgc(p.mission, fpath,
+                                   home_cmd=MAVCmd.DO_SET_HOME, frame=_MAV_FRAME_REL):
                 files.append(fpath)
                 logger.info(
                     f'[SwarmStrike] 匯出 {p.uav.name}: {fpath} '
@@ -349,51 +331,15 @@ class SwarmStrikePlanner:
     def _assign_attack_vectors(self) -> List[Tuple[UAV, float]]:
         """將 N 架 UAV 分配到 360° 均勻分佈的攻擊方位角。
 
-        策略：
-          - ψ_k = (360° / N) × k + offset           , k ∈ [0, N)
-          - 將 UAV 依「相對目標的方位角 β_i」升冪排序
-          - 同樣把 ψ_k 升冪排序後與 UAV 一一對應
-          → 北方的 UAV 對應「從北攻擊 slot」，自然最短且不交叉
+        (0-5 去重) 「方位排序 + 最小角差旋轉對齊」演算法已收斂至
+        core.strike.geometry.assign_omnidirectional_slots，本方法保留為薄 wrapper：
+        以 UAV 物件為 key、傳入 self.approach_offset_deg。與原實作逐位元等價
+        （~30 萬組隨機輸入比對 0 不符）。
         """
-        n = len(self.uavs)
-        if n == 1:
-            # 單機：直接使用朝向目標的方位角
-            u = self.uavs[0]
-            brg = _bearing_deg(u.lat, u.lon, self.target.lat, self.target.lon)
-            return [(u, brg)]
-
-        # 計算每架 UAV 到目標的方位角
-        uav_bearings = [
-            (u, _bearing_deg(u.lat, u.lon, self.target.lat, self.target.lon))
-            for u in self.uavs
-        ]
-        uav_bearings.sort(key=lambda x: x[1])
-
-        # 生成 N 個均勻攻擊向量
-        attack_vectors = sorted(
-            (self.approach_offset_deg + 360.0 / n * k) % 360.0
-            for k in range(n)
+        positions = [(u, u.lat, u.lon) for u in self.uavs]
+        return assign_omnidirectional_slots(
+            positions, self.target.lat, self.target.lon, self.approach_offset_deg
         )
-
-        # 圓形指派的一致化：旋轉對齊，使第一個 slot 最接近第一個 UAV 的 β
-        # (如此避免排序後「0° slot ↔ 359° UAV」的邊界問題)
-        first_beta = uav_bearings[0][1]
-        best_shift = 0
-        best_cost = float('inf')
-        for shift in range(n):
-            cost = sum(
-                _angular_diff(uav_bearings[i][1],
-                              attack_vectors[(i + shift) % n])
-                for i in range(n)
-            )
-            if cost < best_cost:
-                best_cost = cost
-                best_shift = shift
-
-        return [
-            (uav_bearings[i][0], attack_vectors[(i + best_shift) % n])
-            for i in range(n)
-        ]
 
     # ─────────────────────────────────────────────────────────────────
     #  Step 2：單機基礎 StrikePlan 構建 (含 Dubins 長度)

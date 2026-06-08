@@ -40,7 +40,7 @@ from ui.resources.tactical_theme import TacticalColors, TacticalFonts
 # ══════════════════════════════════════════════════════════════════════
 #  Geodesy helpers — 大地量測
 # ══════════════════════════════════════════════════════════════════════
-_EARTH_R_M: float = 6_371_000.0
+from utils.math_utils import EARTH_RADIUS_M as _EARTH_R_M  # 0-2 標準化：WGS84 單一來源
 
 
 def haversine_m(p1: tuple[float, float], p2: tuple[float, float]) -> float:

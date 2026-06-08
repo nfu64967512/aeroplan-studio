@@ -21,10 +21,14 @@ from __future__ import annotations
 
 import math
 from functools import lru_cache
-from typing import Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
-# 地球平均半徑 (WGS-84 近似)
-R_EARTH: float = 6_371_000.0
+from utils.math_utils import EARTH_RADIUS_M
+
+# (0-2 標準化) 地球半徑統一為 WGS-84 赤道半徑 6_378_137（單一來源：utils.math_utils），
+# 與 GPS / MAVLink / ArduPilot 一致。原為球面平均 6_371_000；strike 全幾何
+# （haversine / destination / ENU / Dubins）隨之等比 +0.112%。
+R_EARTH: float = EARTH_RADIUS_M
 
 # MAVLink frame: 3 = MAV_FRAME_GLOBAL_RELATIVE_ALT
 MAV_FRAME_REL: int = 3
@@ -79,6 +83,60 @@ def angular_diff(a_deg: float, b_deg: float) -> float:
     """兩角度的最短差 (0 ≤ 回傳值 ≤ 180°)"""
     d = abs((a_deg - b_deg) % 360.0)
     return min(d, 360.0 - d)
+
+
+def assign_omnidirectional_slots(
+    positions: List[Tuple[Any, float, float]],
+    target_lat: float,
+    target_lon: float,
+    offset_deg: float = 0.0,
+) -> List[Tuple[Any, float]]:
+    """將 N 個來源點分配到以目標為中心、360° 均勻分佈的攻擊方位角 slot。
+
+    這是 swarm / advanced_swarm / vtol_swarm / recon_to_strike 四個 planner
+    原本各自重複實作的「方位排序 + 最小角差旋轉對齊」演算法，收斂為單一權威來源。
+    與原四份逐位元等價（同 bearing_deg / angular_diff、同嚴格 `<` tie-break）。
+
+    參數
+    ----
+    positions : List[(key, lat, lon)]
+        key 為穩定識別子（可為 UAV 物件、uid 等），呼叫端用以映回來源。
+    target_lat, target_lon : float
+        目標座標。
+    offset_deg : float
+        攻擊向量起始相位（預設 0.0；recon 路徑固定用 0.0，切勿傳非 0 值）。
+
+    回傳
+    ----
+    List[(key, attack_heading_deg)]，順序為依方位升冪排序後與攻擊向量的對應。
+    """
+    n = len(positions)
+    if n == 0:
+        return []
+    if n == 1:
+        key, lat, lon = positions[0]
+        return [(key, bearing_deg(lat, lon, target_lat, target_lon))]
+
+    # 依各點相對目標的方位角升冪排序（Timsort 穩定，方位相同保留原序）
+    by = sorted(
+        positions,
+        key=lambda p: bearing_deg(p[1], p[2], target_lat, target_lon),
+    )
+    # 360° 均勻攻擊向量
+    vectors = sorted((offset_deg + 360.0 / n * k) % 360.0 for k in range(n))
+    # 圓形旋轉對齊：使總角差最小（嚴格 < 保留最小 shift 的 tie-break）
+    best_shift, best_cost = 0, float('inf')
+    for shift in range(n):
+        cost = sum(
+            angular_diff(
+                bearing_deg(by[i][1], by[i][2], target_lat, target_lon),
+                vectors[(i + shift) % n],
+            )
+            for i in range(n)
+        )
+        if cost < best_cost:
+            best_cost, best_shift = cost, shift
+    return [(by[i][0], vectors[(i + best_shift) % n]) for i in range(n)]
 
 
 # ═══════════════════════════════════════════════════════════════════════

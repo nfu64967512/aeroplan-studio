@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
+from utils.math_utils import EARTH_RADIUS_M  # 0-2 標準化：WGS84 單一來源
 from PyQt6.QtCore import QObject, pyqtSignal
 
 
@@ -97,7 +98,7 @@ class FenceZone:
         if self.center is None or self.radius_m <= 0:
             return []
         lat0, lon0 = self.center
-        R = 6371000.0
+        R = EARTH_RADIUS_M
         ang = self.radius_m / R
         lat0r = math.radians(lat0)
         lon0r = math.radians(lon0)

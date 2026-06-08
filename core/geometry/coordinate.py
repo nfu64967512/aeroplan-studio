@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from typing import Tuple, Optional
 import math
 
+from utils.math_utils import EARTH_RADIUS_M  # 0-2 標準化：WGS84 單一來源
+
 
 @dataclass
 class GeoPoint:
@@ -286,7 +288,7 @@ class UTMConverter:
     E3 = E2 * E
     E_P2 = E / (1 - E)
     
-    R = 6378137.0  # 赤道半徑
+    R = EARTH_RADIUS_M  # 赤道半徑（WGS84 單一來源，值不變）
     
     def __init__(self):
         pass

@@ -9,6 +9,8 @@ from typing import List, Optional, Tuple, Dict, Any
 from enum import IntEnum
 import math
 
+from utils.math_utils import EARTH_RADIUS_M  # 0-2 標準化：WGS84 單一來源
+
 
 # ==========================================
 # MAVLink 命令定義
@@ -160,7 +162,7 @@ class Waypoint:
             距離（公尺）
         """
         # 使用 Haversine 公式
-        R = 6378137.0  # 地球半徑（公尺）
+        R = EARTH_RADIUS_M  # 地球半徑（公尺）— WGS84 單一來源（值不變）
         
         lat1 = math.radians(self.lat)
         lat2 = math.radians(other.lat)

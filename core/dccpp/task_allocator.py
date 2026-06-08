@@ -36,6 +36,7 @@ import numpy as np
 
 from mission.coverage_path import CoveragePath, OperationSegment
 from core.global_planner.mdtsp_solver import UAVState, VehicleType
+from utils.math_utils import EARTH_RADIUS_M  # 0-2 標準化：WGS84 單一來源
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +73,7 @@ def _haversine_m(p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
     Haversine 公式計算兩個 (lat, lon) 點間的地面距離 [m]。
     適用於多旋翼（直線飛行，無方向約束）。
     """
-    R = 6_371_000.0
+    R = EARTH_RADIUS_M
     lat1, lat2 = math.radians(p1[0]), math.radians(p2[0])
     dlat = lat2 - lat1
     dlon = math.radians(p2[1] - p1[1])

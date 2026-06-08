@@ -13,6 +13,7 @@ import math
 from typing import List, Tuple, Dict, Optional
 from dataclasses import dataclass, field
 
+from core.strike.geometry import haversine, bearing_deg, destination
 from utils.logger import get_logger
 
 logger = get_logger()
@@ -91,44 +92,12 @@ class StrikeTrajectory:
 #  地理計算工具
 # ═══════════════════════════════════════════════════════════════════════
 
-_R_EARTH = 6_371_000.0  # 地球平均半徑 (m)
-
-
-def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Haversine 公式計算兩點間大圓距離 (m)"""
-    rlat1, rlon1 = math.radians(lat1), math.radians(lon1)
-    rlat2, rlon2 = math.radians(lat2), math.radians(lon2)
-    dlat = rlat2 - rlat1
-    dlon = rlon2 - rlon1
-    a = math.sin(dlat / 2) ** 2 + math.cos(rlat1) * math.cos(rlat2) * math.sin(dlon / 2) ** 2
-    return 2 * _R_EARTH * math.asin(min(1.0, math.sqrt(a)))
-
-
-def _bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """計算從 (lat1,lon1) 到 (lat2,lon2) 的方位角 (degrees, 0=北, 順時針)"""
-    rlat1, rlon1 = math.radians(lat1), math.radians(lon1)
-    rlat2, rlon2 = math.radians(lat2), math.radians(lon2)
-    dlon = rlon2 - rlon1
-    x = math.sin(dlon) * math.cos(rlat2)
-    y = math.cos(rlat1) * math.sin(rlat2) - math.sin(rlat1) * math.cos(rlat2) * math.cos(dlon)
-    return (math.degrees(math.atan2(x, y)) + 360) % 360
-
-
-def _destination(lat: float, lon: float, bearing_deg: float, dist_m: float) -> Tuple[float, float]:
-    """從起點出發，沿方位角移動指定距離，回傳目的點 (lat, lon)"""
-    rlat = math.radians(lat)
-    rlon = math.radians(lon)
-    rb = math.radians(bearing_deg)
-    d = dist_m / _R_EARTH
-
-    rlat2 = math.asin(
-        math.sin(rlat) * math.cos(d) + math.cos(rlat) * math.sin(d) * math.cos(rb)
-    )
-    rlon2 = rlon + math.atan2(
-        math.sin(rb) * math.sin(d) * math.cos(rlat),
-        math.cos(d) - math.sin(rlat) * math.sin(rlat2),
-    )
-    return math.degrees(rlat2), math.degrees(rlon2)
+# (0-6 去重) 原 _haversine/_bearing/_destination 與 core.strike.geometry 的權威
+# 實作逐行等價（同 R_EARTH、同公式、同回傳型別），改用別名保留原私有
+# 名稱，所有呼叫點維持不動。_R_EARTH 已隨之移除（僅這三個函式用過）。
+_haversine = haversine
+_bearing = bearing_deg
+_destination = destination
 
 
 def _interp_geo(lat1: float, lon1: float, alt1: float,

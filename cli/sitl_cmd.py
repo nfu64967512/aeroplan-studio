@@ -75,12 +75,8 @@ def run(args: argparse.Namespace) -> int:
     instance_configs: List[dict] = []
     fanout = not args.no_fanout
     if fanout:
-        for i in range(drones):
-            instance_configs.append({
-                "sysid": i + 1,
-                "embedded_ip": "",
-                "embedded_port": 14550 + 10 * i,
-            })
+        # 0-8 去重：instance 預設設定統一由 SITLLauncher 產生
+        instance_configs = SITLLauncher.default_instance_configs(drones)
 
     launcher = SITLLauncher()
     if not args.no_dashboard:

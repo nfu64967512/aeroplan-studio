@@ -50,7 +50,7 @@ from core.strike.swarm_strike_planner import (
 )
 # 0-3 去重：ENU/3D 向量工具改用 core.strike.geometry 的權威實作。
 # 以別名保留原私有名稱（_latlon_to_enu 等），呼叫端一行不動；
-# geometry 版與原私有版公式、常數（R_EARTH=6_371_000）、回傳型別逐行等價。
+# geometry 版與原私有版公式、常數、回傳型別逐行等價（半徑統一後皆指向 geometry.R_EARTH）。
 from core.strike.geometry import (
     latlon_to_enu as _latlon_to_enu,
     enu_to_latlon as _enu_to_latlon,

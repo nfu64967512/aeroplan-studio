@@ -18,6 +18,7 @@ from PyQt6.QtGui import QAction, QIcon, QKeySequence, QShortcut
 from config import get_settings
 from utils.logger import get_logger
 from utils.file_io import write_waypoints, create_waypoint_line
+from utils.math_utils import EARTH_RADIUS_M  # 0-2 標準化：WGS84 單一來源
 from mission import MissionManager
 from core.global_planner.coverage_planner import CoveragePlanner, CoverageParameters, ScanPattern
 from core.global_planner.astar import AStarPlanner
@@ -1057,7 +1058,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
     @staticmethod
     def _haversine(p1: Tuple[float, float], p2: Tuple[float, float]) -> float:
         """兩點間大地距離（公尺）"""
-        R = 6371000.0
+        R = EARTH_RADIUS_M
         lat1, lon1 = math.radians(p1[0]), math.radians(p1[1])
         lat2, lon2 = math.radians(p2[0]), math.radians(p2[1])
         dlat = lat2 - lat1

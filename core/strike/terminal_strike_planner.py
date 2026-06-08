@@ -93,7 +93,7 @@ class StrikeTrajectory:
 # ═══════════════════════════════════════════════════════════════════════
 
 # (0-6 去重) 原 _haversine/_bearing/_destination 與 core.strike.geometry 的權威
-# 實作逐行等價（同 R_EARTH=6_371_000、同公式、同回傳型別），改用別名保留原私有
+# 實作逐行等價（同 R_EARTH、同公式、同回傳型別），改用別名保留原私有
 # 名稱，所有呼叫點維持不動。_R_EARTH 已隨之移除（僅這三個函式用過）。
 _haversine = haversine
 _bearing = bearing_deg

@@ -77,6 +77,9 @@ taiwan_dem.tif
 # 本機絕對路徑設定 (執行期由 config/settings.py 產生)
 config/settings.json
 
+# Phase 0 重構臨時驗證工具 (反汙染黃金比對，不入庫)
+scripts/_phase0_golden_capture.py
+
 # Legacy duplicate folder
 uav_path_planner/
 

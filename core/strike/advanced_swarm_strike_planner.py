@@ -39,6 +39,7 @@ from core.strike.swarm_strike_planner import (
     _haversine, _bearing_deg, _destination, _angular_diff,
     _MAV_FRAME_REL,
 )
+from core.strike.geometry import assign_omnidirectional_slots  # 0-5 去重共用函式
 from utils.file_io import create_waypoint_line, write_waypoints
 from utils.logger import get_logger
 
@@ -332,47 +333,14 @@ class AdvancedSwarmStrikePlanner:
     def _assign_omnidirectional_slots(self) -> List[Tuple[UAV, float]]:
         """依 UAV 相對目標的方位角，分配至 360° 均勻攻擊向量。
 
-        排序策略：
-          - 每架 UAV 到目標的方位角 β_k
-          - 攻擊向量 ψ_k = (360°/N)·k + φ_offset, k ∈ [0, N)
-          - 升冪排序後成本最小 (以角度圓距離) 的旋轉對齊
+        (0-5 去重) 演算法已收斂至 core.strike.geometry.assign_omnidirectional_slots，
+        本方法保留為薄 wrapper：以 UAV 物件為 key、傳入 self.approach_offset_deg。
+        與原實作逐位元等價。
         """
-        n = len(self.uavs)
-        if n == 1:
-            u = self.uavs[0]
-            brg = _bearing_deg(u.lat, u.lon, self.target.lat, self.target.lon)
-            return [(u, brg)]
-
-        # 依 UAV 對目標方位升冪排序
-        by_bearing = sorted(
-            self.uavs,
-            key=lambda u: _bearing_deg(
-                u.lat, u.lon, self.target.lat, self.target.lon
-            ),
+        positions = [(u, u.lat, u.lon) for u in self.uavs]
+        return assign_omnidirectional_slots(
+            positions, self.target.lat, self.target.lon, self.approach_offset_deg
         )
-        # 360° 均勻攻擊向量
-        attack_vectors = sorted(
-            (self.approach_offset_deg + 360.0 / n * k) % 360.0
-            for k in range(n)
-        )
-        # 圓形旋轉對齊 (避免 0°/359° 邊界錯配)
-        best_shift, best_cost = 0, float('inf')
-        for shift in range(n):
-            cost = sum(
-                _angular_diff(
-                    _bearing_deg(by_bearing[i].lat, by_bearing[i].lon,
-                                 self.target.lat, self.target.lon),
-                    attack_vectors[(i + shift) % n],
-                )
-                for i in range(n)
-            )
-            if cost < best_cost:
-                best_cost, best_shift = cost, shift
-
-        return [
-            (by_bearing[i], attack_vectors[(i + best_shift) % n])
-            for i in range(n)
-        ]
 
     # ═════════════════════════════════════════════════════════════════
     #  Step 2：基礎計畫 (Dubins 長度 + 名義時間)

@@ -49,6 +49,7 @@ from core.strike.terminal_strike_planner import (
     StrikeTrajectory,
     StrikeWaypoint,
 )
+from core.strike.geometry import haversine
 from utils.file_io import create_waypoint_line, write_waypoints
 from utils.logger import get_logger
 
@@ -67,8 +68,8 @@ _CMD_DO_SET_HOME         = 179
 # MAV_FRAME
 _FRAME_GLOBAL_REL_ALT    = 3    # 相對起飛高度，Plane/Copter 任務最常用
 
-# 地球半徑
-_R_EARTH = 6_371_000.0
+# (0-6 去重) 原 _R_EARTH=6_371_000 已移除；水平 Haversine 改用 core.strike.geometry
+# 的權威 haversine（同半徑、同公式），_haversine_3d 僅保留垂直合成邏輯。
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -129,13 +130,7 @@ class TimingPlan:
 
 def _haversine_3d(wp1: StrikeWaypoint, wp2: StrikeWaypoint) -> float:
     """兩個 3D 航點的歐氏距離 (m)，水平用 Haversine + 垂直差 sqrt 合成"""
-    rlat1, rlon1 = math.radians(wp1.lat), math.radians(wp1.lon)
-    rlat2, rlon2 = math.radians(wp2.lat), math.radians(wp2.lon)
-    dlat = rlat2 - rlat1
-    dlon = rlon2 - rlon1
-    a = (math.sin(dlat / 2) ** 2 +
-         math.cos(rlat1) * math.cos(rlat2) * math.sin(dlon / 2) ** 2)
-    horiz = 2 * _R_EARTH * math.asin(min(1.0, math.sqrt(a)))
+    horiz = haversine(wp1.lat, wp1.lon, wp2.lat, wp2.lon)
     dh = wp2.alt - wp1.alt
     return math.hypot(horiz, dh)
 

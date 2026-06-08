@@ -45,10 +45,8 @@ def run(args: argparse.Namespace) -> int:
         return 2
 
     drones = max(1, min(10, int(args.drones)))
-    instance_configs: List[dict] = [
-        {"sysid": i + 1, "embedded_ip": "", "embedded_port": 14550 + 10 * i}
-        for i in range(drones)
-    ]
+    # 0-8 去重：instance 預設設定統一由 SITLLauncher 產生
+    instance_configs: List[dict] = SITLLauncher.default_instance_configs(drones)
 
     print(f"[DEMO] vehicle={args.vehicle}  drones={drones}  "
           f"home=({_DEMO_LAT}, {_DEMO_LON})  ports={[c['embedded_port'] for c in instance_configs]}")

@@ -144,7 +144,7 @@ hiddenimports += collect_submodules('sensors')
 
 # ── 排除模組（縮小體積）──────────────────────────────────────
 excludes = [
-    'tkinter',           # 雖有 tkinter_map_widget.py，但在 PyQt 環境下不使用
+    'tkinter',           # PyQt 環境不使用 tkinter（地圖一律走 Folium / Cesium）
     'unittest',          # 測試框架
     'pytest',
     'pytest_cov',

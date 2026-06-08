@@ -64,6 +64,7 @@ from core.strike.geometry import (
     destination as _destination,
     angular_diff as _angular_diff,
     dubins_shortest_length,
+    assign_omnidirectional_slots,
 )
 
 
@@ -349,51 +350,15 @@ class SwarmStrikePlanner:
     def _assign_attack_vectors(self) -> List[Tuple[UAV, float]]:
         """將 N 架 UAV 分配到 360° 均勻分佈的攻擊方位角。
 
-        策略：
-          - ψ_k = (360° / N) × k + offset           , k ∈ [0, N)
-          - 將 UAV 依「相對目標的方位角 β_i」升冪排序
-          - 同樣把 ψ_k 升冪排序後與 UAV 一一對應
-          → 北方的 UAV 對應「從北攻擊 slot」，自然最短且不交叉
+        (0-5 去重) 「方位排序 + 最小角差旋轉對齊」演算法已收斂至
+        core.strike.geometry.assign_omnidirectional_slots，本方法保留為薄 wrapper：
+        以 UAV 物件為 key、傳入 self.approach_offset_deg。與原實作逐位元等價
+        （~30 萬組隨機輸入比對 0 不符）。
         """
-        n = len(self.uavs)
-        if n == 1:
-            # 單機：直接使用朝向目標的方位角
-            u = self.uavs[0]
-            brg = _bearing_deg(u.lat, u.lon, self.target.lat, self.target.lon)
-            return [(u, brg)]
-
-        # 計算每架 UAV 到目標的方位角
-        uav_bearings = [
-            (u, _bearing_deg(u.lat, u.lon, self.target.lat, self.target.lon))
-            for u in self.uavs
-        ]
-        uav_bearings.sort(key=lambda x: x[1])
-
-        # 生成 N 個均勻攻擊向量
-        attack_vectors = sorted(
-            (self.approach_offset_deg + 360.0 / n * k) % 360.0
-            for k in range(n)
+        positions = [(u, u.lat, u.lon) for u in self.uavs]
+        return assign_omnidirectional_slots(
+            positions, self.target.lat, self.target.lon, self.approach_offset_deg
         )
-
-        # 圓形指派的一致化：旋轉對齊，使第一個 slot 最接近第一個 UAV 的 β
-        # (如此避免排序後「0° slot ↔ 359° UAV」的邊界問題)
-        first_beta = uav_bearings[0][1]
-        best_shift = 0
-        best_cost = float('inf')
-        for shift in range(n):
-            cost = sum(
-                _angular_diff(uav_bearings[i][1],
-                              attack_vectors[(i + shift) % n])
-                for i in range(n)
-            )
-            if cost < best_cost:
-                best_cost = cost
-                best_shift = shift
-
-        return [
-            (uav_bearings[i][0], attack_vectors[(i + best_shift) % n])
-            for i in range(n)
-        ]
 
     # ─────────────────────────────────────────────────────────────────
     #  Step 2：單機基礎 StrikePlan 構建 (含 Dubins 長度)

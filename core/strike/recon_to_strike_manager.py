@@ -46,7 +46,19 @@ from typing import Dict, List, Optional, Tuple
 from core.strike.swarm_strike_planner import (
     MissionItem, dubins_shortest_length,
     _haversine, _bearing_deg, _destination, _angular_diff,
-    _MAV_FRAME_REL, _R_EARTH,
+    _MAV_FRAME_REL,
+)
+# 0-3 去重：ENU/3D 向量工具改用 core.strike.geometry 的權威實作。
+# 以別名保留原私有名稱（_latlon_to_enu 等），呼叫端一行不動；
+# geometry 版與原私有版公式、常數（R_EARTH=6_371_000）、回傳型別逐行等價。
+from core.strike.geometry import (
+    latlon_to_enu as _latlon_to_enu,
+    enu_to_latlon as _enu_to_latlon,
+    v3_norm as _vec3_norm,
+    v3_normalize as _vec3_normalize,
+    v3_add as _vec3_add,
+    v3_scale as _vec3_scale,
+    assign_omnidirectional_slots,  # 0-5 去重共用函式
 )
 from utils.file_io import create_waypoint_line, write_waypoints
 from utils.logger import get_logger
@@ -152,52 +164,9 @@ class CoalitionReport:
 #  地理/向量工具 (ENU 區域平面)
 # ═══════════════════════════════════════════════════════════════════════
 
-def _latlon_to_enu(lat: float, lon: float, alt: float,
-                   ref_lat: float, ref_lon: float,
-                   ref_alt: float = 0.0) -> Tuple[float, float, float]:
-    """經緯度 → 以 ref 為原點的局部 ENU (公尺)
-
-    使用等距圓柱近似（小範圍 < 20 km 精度足夠）。
-    """
-    coslat = math.cos(math.radians(ref_lat))
-    dx = math.radians(lon - ref_lon) * _R_EARTH * coslat    # 東向
-    dy = math.radians(lat - ref_lat) * _R_EARTH             # 北向
-    dz = alt - ref_alt                                       # 垂直
-    return (dx, dy, dz)
-
-
-def _enu_to_latlon(dx: float, dy: float, dz: float,
-                   ref_lat: float, ref_lon: float,
-                   ref_alt: float = 0.0) -> Tuple[float, float, float]:
-    """ENU → 經緯度"""
-    coslat = math.cos(math.radians(ref_lat))
-    lat = ref_lat + math.degrees(dy / _R_EARTH)
-    lon = ref_lon + math.degrees(dx / (_R_EARTH * max(coslat, 1e-9)))
-    alt = ref_alt + dz
-    return (lat, lon, alt)
-
-
-def _vec3_norm(v: Tuple[float, float, float]) -> float:
-    return math.sqrt(v[0] ** 2 + v[1] ** 2 + v[2] ** 2)
-
-
-def _vec3_normalize(v: Tuple[float, float, float],
-                    eps: float = 1e-9) -> Tuple[float, float, float]:
-    n = _vec3_norm(v)
-    if n < eps:
-        return (0.0, 0.0, 0.0)
-    return (v[0] / n, v[1] / n, v[2] / n)
-
-
-def _vec3_add(*vs: Tuple[float, float, float]) -> Tuple[float, float, float]:
-    return (sum(v[0] for v in vs),
-            sum(v[1] for v in vs),
-            sum(v[2] for v in vs))
-
-
-def _vec3_scale(v: Tuple[float, float, float],
-                s: float) -> Tuple[float, float, float]:
-    return (v[0] * s, v[1] * s, v[2] * s)
+# (0-3 去重) 原本此處定義的 _latlon_to_enu / _enu_to_latlon / _vec3_norm /
+# _vec3_normalize / _vec3_add / _vec3_scale 六個私有函式，與 core.strike.geometry
+# 的權威實作逐行等價，已於檔頭以別名匯入取代（呼叫端 542-649 維持原名不變）。
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -446,38 +415,17 @@ class ReconToStrikeManager:
                                        target_lat: float,
                                        target_lon: float,
                                        ) -> List[Tuple[int, float]]:
-        """將聯盟 UAV 分配至 360° 均勻進場角 (最小衝突旋轉對齊)"""
-        n = len(coalition)
-        if n == 1:
-            uid = coalition[0]
-            uav = self.uav_states[uid]
-            brg = _bearing_deg(uav.lat, uav.lon, target_lat, target_lon)
-            return [(uid, brg)]
+        """將聯盟 UAV 分配至 360° 均勻進場角 (最小衝突旋轉對齊)。
 
-        # 按 UAV 相對目標的方位角排序
-        by_bearing = sorted(
-            coalition,
-            key=lambda uid: _bearing_deg(
-                self.uav_states[uid].lat, self.uav_states[uid].lon,
-                target_lat, target_lon,
-            ),
-        )
-        vectors = sorted((360.0 / n * k) % 360.0 for k in range(n))
-        best_shift, best_cost = 0, float('inf')
-        for shift in range(n):
-            cost = sum(
-                _angular_diff(
-                    _bearing_deg(self.uav_states[by_bearing[i]].lat,
-                                 self.uav_states[by_bearing[i]].lon,
-                                 target_lat, target_lon),
-                    vectors[(i + shift) % n],
-                )
-                for i in range(n)
-            )
-            if cost < best_cost:
-                best_cost, best_shift = cost, shift
-        return [(by_bearing[i], vectors[(i + best_shift) % n])
-                for i in range(n)]
+        (0-5 去重) 演算法已收斂至 geometry.assign_omnidirectional_slots，本方法保留為
+        薄 wrapper：以 uid 為 key、offset 固定 0.0（recon 路徑歷史上無 offset，切勿傳非 0）。
+        與原實作逐位元等價。
+        """
+        positions = [
+            (uid, self.uav_states[uid].lat, self.uav_states[uid].lon)
+            for uid in coalition
+        ]
+        return assign_omnidirectional_slots(positions, target_lat, target_lon)
 
     # ═════════════════════════════════════════════════════════════════
     #  4. 平滑過渡航點 (飛控銜接保護)

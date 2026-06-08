@@ -121,7 +121,7 @@ def _find_free_sitl_instance(
     for inst in range(start_instance, start_instance + max_instance):
         if inst in reserved:
             continue
-        port = 5760 + 10 * inst
+        port = SITLLauncher.tcp_port_for(inst)
         if _tcp_port_listener_pid(port) is None:
             return inst
     return start_instance
@@ -412,6 +412,43 @@ class SITLLauncher:
     def _proc(self):
         return self._procs[0][0] if self._procs else None
 
+    # ── 連接埠 / 實例設定的單一真相來源 (0-8 去重) ──────────────
+    @staticmethod
+    def tcp_port_for(instance: int) -> int:
+        """ArduPilot SITL 慣例：instance N 的 SERIAL0 TCP 埠 = 5760 + 10·N。
+
+        參數
+        ----
+        instance : int
+            SITL 實例編號（0-based）。
+
+        回傳
+        ----
+        int：對應 TCP 監聽埠（i0→5760, i1→5770, i2→5780, ...）。
+        """
+        return 5760 + 10 * instance
+
+    @staticmethod
+    def default_instance_configs(count: int) -> List[dict]:
+        """產生 N 台 SITL 的預設 instance 設定（CLI 與啟動對話框共用）。
+
+        每台：sysid = i+1（對齊 MAVROS tgt_system）、embedded_ip 預設空字串、
+        embedded_port = 14550 + 10·i（SITL --serial1=udpin 被動監聽埠）。
+
+        參數
+        ----
+        count : int
+            SITL 台數。
+
+        回傳
+        ----
+        List[dict]：長度 count 的設定串列。
+        """
+        return [
+            {"sysid": i + 1, "embedded_ip": "", "embedded_port": 14550 + 10 * i}
+            for i in range(count)
+        ]
+
     # ── 路徑檢查 ──────────────────────────────────────────────────────
     @classmethod
     def sitl_dir(cls) -> Path:
@@ -473,7 +510,7 @@ class SITLLauncher:
         # 2) start_multi 連續呼叫時，前一台 SITL 還沒完成 bind，下一輪
         #    port-check 可能誤判 free 而重派同一個 instance → bind 撞車。
         #    用 `_allocated_instances` 防止此種 race。
-        requested_port = 5760 + 10 * instance
+        requested_port = self.tcp_port_for(instance)
         listener_pid = _tcp_port_listener_pid(requested_port)
         in_batch_collision = instance in self._allocated_instances
         if listener_pid is not None or in_batch_collision:
@@ -488,7 +525,7 @@ class SITLLauncher:
                 instance + 1, max_instance=16,
                 reserved=self._allocated_instances,
             )
-            new_port = 5760 + 10 * new_inst
+            new_port = self.tcp_port_for(new_inst)
             logger.warning(
                 f'[SITL Launcher] {reason}，自動 shift instance '
                 f'{instance} → {new_inst} (port {new_port})。'
@@ -600,7 +637,7 @@ class SITLLauncher:
 
         # 在 Popen 之前嘗試新增防火牆規則（首次會跳 UAC，之後存在則略過）
         # 不擋 SITL 啟動：失敗只 log 警告，使用者可手動補規則
-        tcp_port_pre = 5760 + 10 * instance
+        tcp_port_pre = self.tcp_port_for(instance)
         if auto_firewall:
             _ensure_firewall_rule(
                 tcp_port_pre, 'TCP',
@@ -638,7 +675,7 @@ class SITLLauncher:
                 f'請查看彈出的 console 視窗訊息'
             )
 
-        tcp_port = 5760 + 10 * instance
+        tcp_port = self.tcp_port_for(instance)
         conn_str = f'tcp:127.0.0.1:{tcp_port}'
         self._procs.append((proc, vehicle, instance, conn_str))
         # 主訊息：簡潔一行給 status bar 用

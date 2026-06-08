@@ -4133,7 +4133,17 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         n_rerouted = 0
         for uav_idx, uav_id in enumerate(sorted_uav_ids):
             apath = assembled[uav_id]
-            wps = apath.waypoints
+            # ★ 降落段豁免：尾端連續的 LANDING 段是「在 home 降落」的必要航段，
+            #   不可被 NFZ 避障繞掉/丟棄（否則匯出就沒有 NAV_LAND）。這裡把它剝離，
+            #   避障只處理非降落段（TAKEOFF/ENTRY/OPERATION/TRANSFER），最後原樣接回。
+            _full_wps = apath.waypoints
+            _ls = len(_full_wps)
+            while _ls > 0 and getattr(
+                getattr(_full_wps[_ls - 1], 'segment_type', None), 'name', ''
+            ) == 'LANDING':
+                _ls -= 1
+            landing_tail = list(_full_wps[_ls:])
+            wps = _full_wps[:_ls]
             if not wps or len(wps) < 2:
                 continue
 
@@ -4336,7 +4346,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
                     import dataclasses as _dc
                     new_wp = _dc.replace(ref, lat=lat, lon=lon)
                 new_wps.append(new_wp)
-            apath.waypoints = new_wps
+            # ★ 降落段原樣接回（避障豁免）— 確保匯出時仍有 LANDING → NAV_LAND
+            apath.waypoints = new_wps + landing_tail
             n_rerouted += 1
 
         # ── 統一摘要 ──

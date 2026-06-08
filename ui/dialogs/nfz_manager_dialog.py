@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import pyqtSignal
 
+from ui.resources.aeroplan_theme.widgets import IconButton
 from utils.logger import get_logger
 
 logger = get_logger()
@@ -44,12 +45,13 @@ class NFZManagerDialog(QDialog):
         root.setSpacing(8)
 
         hint = QLabel(
-            "💡 若要新增禁航區，請關閉此視窗後\n"
-            "使用主介面的「✏️ 繪製多邊形」或「⭕ 拖曳圓形」按鈕直接在地圖上畫。"
+            "若要新增禁航區，請關閉此視窗後\n"
+            "使用主介面的「繪製多邊形」或「拖曳圓形」按鈕直接在地圖上畫。"
         )
         hint.setWordWrap(True)
-        hint.setStyleSheet("color: #FF9800; font-size: 11px; padding: 6px; "
-                           "background: #FFF8E1; border-radius: 4px;")
+        # 用 warning role 取得 amber 警示色字體
+        hint.setProperty('role', 'warning')
+        hint.style().polish(hint)
         root.addWidget(hint)
 
         list_group = QGroupBox("目前禁航區清單")
@@ -59,15 +61,9 @@ class NFZManagerDialog(QDialog):
         list_layout.addWidget(self.nfz_list_widget)
 
         btn_row = QHBoxLayout()
-        self.del_btn = QPushButton("刪除選取")
-        self.del_btn.setStyleSheet(
-            "background-color: #E53935; color: white; padding: 5px; border-radius: 3px;"
-        )
+        self.del_btn = IconButton('clear', '刪除選取', tone='danger', compact=True)
         self.del_btn.clicked.connect(self._on_delete)
-        self.clear_btn = QPushButton("清除全部")
-        self.clear_btn.setStyleSheet(
-            "background-color: #78909C; color: white; padding: 5px; border-radius: 3px;"
-        )
+        self.clear_btn = IconButton('clear', '清除全部', tone='neutral', compact=True)
         self.clear_btn.clicked.connect(self._on_clear_all)
         btn_row.addWidget(self.del_btn)
         btn_row.addWidget(self.clear_btn)
@@ -75,10 +71,7 @@ class NFZManagerDialog(QDialog):
         root.addWidget(list_group)
 
         footer = QHBoxLayout()
-        ok_btn = QPushButton("確定")
-        ok_btn.setStyleSheet(
-            "background-color: #1976D2; color: white; padding: 6px; border-radius: 3px;"
-        )
+        ok_btn = IconButton('confirm', '確定', tone='primary')
         ok_btn.clicked.connect(self._on_ok)
         cancel_btn = QPushButton("取消")
         cancel_btn.clicked.connect(self.reject)

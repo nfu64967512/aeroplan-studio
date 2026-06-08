@@ -6,8 +6,8 @@
 import os
 import json
 from pathlib import Path
-from dataclasses import dataclass, asdict
-from typing import Dict, Any, Optional
+from dataclasses import dataclass, asdict, field
+from typing import Dict, Any, Optional, List
 
 
 @dataclass
@@ -190,6 +190,24 @@ class UISettings:
             ]
 
 
+@dataclass
+class SITLLaunchSettings:
+    """SITL 啟動彈窗的持久化設定。
+    用途：記住使用者上次填的「每台 SITL 的 sysid + 嵌入式 fan-out 目標」，
+         下次啟動時自動回填到 SITLLaunchDialog，免重打。
+    """
+    # 是否啟用嵌入式 fan-out（取消 → 純本機 SITL，沿用舊行為）
+    enable_fanout: bool = False
+    # 啟動 SITL 時是否自動嘗試新增 Windows Firewall 入站規則（首次會跳 UAC）
+    auto_firewall: bool = True
+    # 每台 SITL 的設定列表，list[dict]，每個 dict 包含：
+    #   sysid: int           — 覆寫 SYSID_THISMAV，讓嵌入式 tgt_system 對得上
+    #   embedded_ip: str     — 嵌入式裝置 LAN IP，例如 '192.168.1.50'
+    #   embedded_port: int   — 嵌入式 MAVROS apm.launch 監聽的 UDP port
+    # 注意：刻意存 list[dict] 而非 nested dataclass，避免 asdict 序列化遞迴複雜度
+    instances: list = field(default_factory=list)
+
+
 class GlobalSettings:
     """全局配置管理器"""
     
@@ -207,7 +225,8 @@ class GlobalSettings:
         self.performance = PerformanceSettings()
         self.safety = SafetySettings()
         self.ui = UISettings()
-        
+        self.sitl_launch = SITLLaunchSettings()
+
         # 配置文件路徑
         self.config_file = config_file or os.path.join(
             self.paths.config_dir, "settings.json"
@@ -241,7 +260,10 @@ class GlobalSettings:
                     self.safety = SafetySettings(**config_data['safety'])
                 if 'ui' in config_data:
                     self.ui = UISettings(**config_data['ui'])
-                
+                if 'sitl_launch' in config_data:
+                    # SITL 啟動彈窗設定 — instances 維持 list[dict]，不再包裝
+                    self.sitl_launch = SITLLaunchSettings(**config_data['sitl_launch'])
+
                 return True
         except Exception as e:
             print(f"載入配置失敗: {e}")
@@ -262,9 +284,10 @@ class GlobalSettings:
                 'export': asdict(self.export),
                 'performance': asdict(self.performance),
                 'safety': asdict(self.safety),
-                'ui': asdict(self.ui)
+                'ui': asdict(self.ui),
+                'sitl_launch': asdict(self.sitl_launch),
             }
-            
+
             os.makedirs(os.path.dirname(self.config_file), exist_ok=True)
             
             with open(self.config_file, 'w', encoding='utf-8') as f:
@@ -283,7 +306,8 @@ class GlobalSettings:
         self.performance = PerformanceSettings()
         self.safety = SafetySettings()
         self.ui = UISettings()
-    
+        self.sitl_launch = SITLLaunchSettings()
+
     def get_dict(self) -> Dict[str, Any]:
         """獲取配置字典"""
         return {
@@ -292,7 +316,8 @@ class GlobalSettings:
             'export': asdict(self.export),
             'performance': asdict(self.performance),
             'safety': asdict(self.safety),
-            'ui': asdict(self.ui)
+            'ui': asdict(self.ui),
+            'sitl_launch': asdict(self.sitl_launch),
         }
 
 

@@ -265,7 +265,15 @@ function addPath(ptsJson, colorHex, width, label, dashed, forceClamp) {
   const pts = JSON.parse(ptsJson);
   if (pts.length < 2) return;
   const positions = toPts(pts);
-  const useClamp = (forceClamp === true) || clampToGround;
+  // forceClamp 三態：
+  //   true        → 強制貼地（舊版基本演算法）
+  //   "off"/false → 強制不貼地（地形跟隨模式：航點 alt 已含 DEM+AGL）
+  //   undefined   → 跟隨全域 clampToGround 設定
+  let useClamp;
+  if (forceClamp === true)              useClamp = true;
+  else if (forceClamp === false ||
+           forceClamp === 'off')        useClamp = false;
+  else                                  useClamp = clampToGround;
   const color = hexColor(colorHex);
 
   let material;
@@ -424,6 +432,341 @@ function setCorners(cornersJson) {
   }
 }
 
+// ── 戰術視覺化：四散決斷圈 + 預備點盤旋圓 + 俯衝紅線 ───────────────────
+// （Diamond Swarm Strike — Phase 2 dispersion ring / Phase 3 loiter & dive）
+let _tacticalEntities = [];
+function clearTacticalOverlay() {
+  _tacticalEntities.forEach(e => { try { viewer.entities.remove(e); } catch(_){} });
+  _tacticalEntities = [];
+}
+// 四散決斷圈：以目標為圓心畫琥珀色虛線圓 (TABLE XL caution boundary)
+function setDispersionRing(lat, lon, radius_m) {
+  const e = viewer.entities.add({
+    name: 'DispersionRing',
+    position: Cesium.Cartesian3.fromDegrees(lon, lat, 0),
+    ellipse: {
+      semiMajorAxis: radius_m,
+      semiMinorAxis: radius_m,
+      material: Cesium.Color.fromCssColorString('#FFB703').withAlpha(0.06),
+      outline: true,
+      outlineColor: Cesium.Color.fromCssColorString('#FFB703').withAlpha(0.95),
+      outlineWidth: 3,
+      // 虛線效果（Cesium 不支援 ellipse 虛線輪廓 → 改用 2 個 polyline）
+      heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+    },
+  });
+  _tacticalEntities.push(e);
+  // 補充：用 polyline 重疊一條虛線軌跡，模擬 dashed 效果
+  const pts = [];
+  for (let i = 0; i <= 64; i++) {
+    const ang = (i / 64) * 2 * Math.PI;
+    const dlat = (radius_m * Math.cos(ang)) / 111320.0;
+    const dlon = (radius_m * Math.sin(ang)) / (111320.0 * Math.cos(lat * Math.PI / 180));
+    pts.push(lon + dlon, lat + dlat, 0);
+  }
+  const dashed = viewer.entities.add({
+    polyline: {
+      positions: Cesium.Cartesian3.fromDegreesArrayHeights(pts),
+      width: 3,
+      material: new Cesium.PolylineDashMaterialProperty({
+        color: Cesium.Color.fromCssColorString('#FFB703'),
+        dashLength: 16.0,
+      }),
+      clampToGround: true,
+    },
+  });
+  _tacticalEntities.push(dashed);
+}
+// 預備點盤旋圓 (NAV_LOITER_TIME 視覺化)
+function addLoiterCircle(lat, lon, radius_m, alt_m, colorHex) {
+  const c = colorHex || '#FFB703';
+  const e = viewer.entities.add({
+    position: Cesium.Cartesian3.fromDegrees(lon, lat, alt_m || 500),
+    ellipse: {
+      semiMajorAxis: radius_m,
+      semiMinorAxis: radius_m,
+      material: Cesium.Color.fromCssColorString(c).withAlpha(0.10),
+      outline: true,
+      outlineColor: Cesium.Color.fromCssColorString(c).withAlpha(0.85),
+      outlineWidth: 2,
+      height: alt_m || 500,
+    },
+  });
+  _tacticalEntities.push(e);
+}
+// 俯衝紅線（從 P_dive 切到目標，血紅）
+function addDiveLine(lat0, lon0, alt0, lat_t, lon_t, alt_t) {
+  const e = viewer.entities.add({
+    polyline: {
+      positions: Cesium.Cartesian3.fromDegreesArrayHeights([
+        lon0, lat0, alt0,
+        lon_t, lat_t, alt_t,
+      ]),
+      width: 4,
+      material: new Cesium.PolylineGlowMaterialProperty({
+        glowPower: 0.18,
+        color: Cesium.Color.fromCssColorString('#FF003C'),
+      }),
+      arcType: Cesium.ArcType.NONE,
+    },
+  });
+  _tacticalEntities.push(e);
+}
+
+// ── 電子圍籬 (Geofence) — 黃色邊界 = §5.17.25 TABLE XL「caution boundary」─────
+// 4 頂點矩形 + altitude band 視覺化（地面外框 + 高度上限頂蓋）
+let geofenceEntities = [];
+function clearGeofence() {
+  geofenceEntities.forEach(e => { try { viewer.entities.remove(e); } catch(_){} });
+  geofenceEntities = [];
+}
+function setGeofence(jsonStr) {
+  clearGeofence();
+  let g;
+  try { g = JSON.parse(jsonStr); } catch(_) { return; }
+  if (!g || !g.vertices || g.vertices.length < 3) return;
+
+  const verts = g.vertices;             // [{lat,lon}, ...] 4 點
+  const altMin = g.alt_min || 0;
+  const altMax = g.alt_max || 100;
+  const fenceColor = '#FFB703';         // WARNING 琥珀（caution boundary）
+
+  // 1) 地面投影矩形（半透明填充 + 黃色實線外框）
+  const flatDegs = verts.flatMap(v => [v.lon, v.lat]);
+  geofenceEntities.push(viewer.entities.add({
+    name: 'Geofence-floor',
+    polygon: {
+      hierarchy: Cesium.Cartesian3.fromDegreesArray(flatDegs),
+      material: hexColor(fenceColor, 0.10),
+      outline: true,
+      outlineColor: hexColor(fenceColor, 0.95),
+      outlineWidth: 2,
+      classificationType: Cesium.ClassificationType.TERRAIN,
+    },
+  }));
+
+  // 2) 4 個側牆 (vertical wall) — 從 altMin 到 altMax
+  const ring = [...verts, verts[0]];
+  for (let i = 0; i < ring.length - 1; i++) {
+    const v0 = ring[i], v1 = ring[i+1];
+    const wall = Cesium.Cartesian3.fromDegreesArrayHeights([
+      v0.lon, v0.lat, altMin,
+      v1.lon, v1.lat, altMin,
+      v1.lon, v1.lat, altMax,
+      v0.lon, v0.lat, altMax,
+    ]);
+    geofenceEntities.push(viewer.entities.add({
+      name: 'Geofence-wall',
+      polygon: {
+        hierarchy: wall,
+        perPositionHeight: true,
+        material: hexColor(fenceColor, 0.12),
+        outline: true,
+        outlineColor: hexColor(fenceColor, 0.7),
+      },
+    }));
+  }
+
+  // 3) 頂蓋 (max altitude ceiling) — 較淡，用虛線概念
+  const ceilingDegsHeights = verts.flatMap(v => [v.lon, v.lat, altMax]);
+  geofenceEntities.push(viewer.entities.add({
+    name: 'Geofence-ceiling',
+    polygon: {
+      hierarchy: Cesium.Cartesian3.fromDegreesArrayHeights(ceilingDegsHeights),
+      perPositionHeight: true,
+      material: hexColor(fenceColor, 0.06),
+      outline: true,
+      outlineColor: hexColor(fenceColor, 0.5),
+    },
+  }));
+
+  // 4) 角點標籤（顯示 4 個頂點編號 + 海拔範圍註解）
+  verts.forEach((v, i) => {
+    geofenceEntities.push(viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(v.lon, v.lat, altMax + 5),
+      label: {
+        text: 'F' + (i+1),
+        font: 'bold 11px sans-serif',
+        fillColor: hexColor(fenceColor),
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 2,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        pixelOffset: new Cesium.Cartesian2(0, -10),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    }));
+  });
+  console.log('[3D] Geofence: ' + verts.length + ' 頂點, alt='
+              + altMin.toFixed(0) + '~' + altMax.toFixed(0) + 'm');
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  Fence Zone Multi-Zone Visualization
+//  ---------------------------------------------------------------------
+//  把 NFZ / 動態威脅 / 任務作業圍籬統一成「fence-style」3D 立體呈現：
+//      floor (地面投影填色) + walls (4+ 側牆) + ceiling (淡色頂蓋) +
+//      角點 F1..Fn 標籤
+//
+//  與既有 setGeofence() 同視覺風格，差別在：
+//    - 支援同時多區（fenceZoneEntities[zoneId] → entity 陣列）
+//    - 接受 colorHex 參數（依 category 上色）
+//    - 接受任意頂點數（圓形由 Python 端展開為 N 邊形再傳入）
+//    - 加上 inclusion 標記（exclusion 用斜線視覺）
+// ══════════════════════════════════════════════════════════════════════
+var fenceZoneEntities = {};   // {zoneId: [entity, ...]}
+
+/**
+ * 新增或更新一個 fence zone（同 id 會先 remove 再 add）
+ *
+ * @param {string} zoneId       唯一 ID
+ * @param {Array}  vertices     [{lat, lon}, ...] 至少 3 點
+ * @param {number} altMin       海拔下限 (m)
+ * @param {number} altMax       海拔上限 (m)
+ * @param {string} name         顯示名稱
+ * @param {string} colorHex     顏色 (#RRGGBB)
+ * @param {string} category     'NFZ' | 'THREAT' | 'GEOFENCE'（顯示用）
+ * @param {boolean} inclusion   true=圍住飛機在內、false=禁止進入
+ */
+function addFenceZone(zoneId, vertices, altMin, altMax, name,
+                      colorHex, category, inclusion) {
+  if (!zoneId || !vertices || vertices.length < 3) return;
+  removeFenceZone(zoneId);
+
+  var color = colorHex || '#E53935';
+  var entList = [];
+  var aMin = (typeof altMin === 'number') ? altMin : 0;
+  var aMax = (typeof altMax === 'number') ? altMax : 200;
+
+  // 1) 地面投影多邊形 — exclusion 用較濃填色（強調禁區），inclusion 較淡
+  var floorAlpha = inclusion ? 0.08 : 0.18;
+  var flatDegs = vertices.flatMap(function (v) { return [v.lon, v.lat]; });
+  entList.push(viewer.entities.add({
+    name: 'FenceZone-floor-' + zoneId,
+    polygon: {
+      hierarchy: Cesium.Cartesian3.fromDegreesArray(flatDegs),
+      material: hexColor(color, floorAlpha),
+      outline: true,
+      outlineColor: hexColor(color, 0.95),
+      outlineWidth: 2,
+      classificationType: Cesium.ClassificationType.TERRAIN,
+    },
+  }));
+
+  // 2) 側牆（N 面） — 從 altMin 到 altMax
+  var ring = vertices.slice();
+  ring.push(vertices[0]);
+  for (var i = 0; i < ring.length - 1; i++) {
+    var v0 = ring[i], v1 = ring[i + 1];
+    var wall = Cesium.Cartesian3.fromDegreesArrayHeights([
+      v0.lon, v0.lat, aMin,
+      v1.lon, v1.lat, aMin,
+      v1.lon, v1.lat, aMax,
+      v0.lon, v0.lat, aMax,
+    ]);
+    entList.push(viewer.entities.add({
+      name: 'FenceZone-wall-' + zoneId + '-' + i,
+      polygon: {
+        hierarchy: wall,
+        perPositionHeight: true,
+        material: hexColor(color, 0.14),
+        outline: true,
+        outlineColor: hexColor(color, 0.7),
+      },
+    }));
+  }
+
+  // 3) 頂蓋（較淡）
+  var ceilingDegsHeights = vertices.flatMap(function (v) {
+    return [v.lon, v.lat, aMax];
+  });
+  entList.push(viewer.entities.add({
+    name: 'FenceZone-ceiling-' + zoneId,
+    polygon: {
+      hierarchy: Cesium.Cartesian3.fromDegreesArrayHeights(ceilingDegsHeights),
+      perPositionHeight: true,
+      material: hexColor(color, 0.06),
+      outline: true,
+      outlineColor: hexColor(color, 0.5),
+    },
+  }));
+
+  // 4) 角點標籤（F1..Fn，限制至多 8 個避免太擠；超過則只標前 8）
+  var labelCount = Math.min(vertices.length, 8);
+  for (var j = 0; j < labelCount; j++) {
+    var v = vertices[j];
+    entList.push(viewer.entities.add({
+      name: 'FenceZone-label-' + zoneId + '-' + j,
+      position: Cesium.Cartesian3.fromDegrees(v.lon, v.lat, aMax + 5),
+      label: {
+        text: 'F' + (j + 1),
+        font: 'bold 10px sans-serif',
+        fillColor: hexColor(color),
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 2,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        pixelOffset: new Cesium.Cartesian2(0, -8),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    }));
+  }
+
+  // 5) 中心標籤（顯示 category + name + alt 範圍）
+  var cx = 0, cy = 0;
+  vertices.forEach(function (v) { cx += v.lon; cy += v.lat; });
+  cx /= vertices.length; cy /= vertices.length;
+  var catTag = (category || 'ZONE').toUpperCase();
+  var incTag = inclusion ? 'IN' : 'OUT';
+  entList.push(viewer.entities.add({
+    name: 'FenceZone-title-' + zoneId,
+    position: Cesium.Cartesian3.fromDegrees(cx, cy, aMax + 30),
+    label: {
+      text: '[' + catTag + ' / ' + incTag + ']  ' + (name || zoneId)
+            + '\nalt ' + aMin.toFixed(0) + '–' + aMax.toFixed(0) + ' m',
+      font: 'bold 11px monospace',
+      fillColor: Cesium.Color.WHITE,
+      outlineColor: Cesium.Color.BLACK,
+      outlineWidth: 2,
+      style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+      backgroundColor: hexColor(color, 0.65),
+      showBackground: true,
+      backgroundPadding: new Cesium.Cartesian2(6, 4),
+      pixelOffset: new Cesium.Cartesian2(0, -6),
+      horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+      verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    },
+  }));
+
+  fenceZoneEntities[zoneId] = entList;
+  console.log('[FenceZone] add ' + zoneId + ' (' + catTag + ', n='
+              + vertices.length + ', alt=' + aMin.toFixed(0) + '~'
+              + aMax.toFixed(0) + 'm, inclusion=' + inclusion + ')');
+}
+
+/**
+ * 移除指定 fence zone
+ */
+function removeFenceZone(zoneId) {
+  var arr = fenceZoneEntities[zoneId];
+  if (!arr) return;
+  arr.forEach(function (e) {
+    try { viewer.entities.remove(e); } catch (_) {}
+  });
+  delete fenceZoneEntities[zoneId];
+}
+
+/**
+ * 清除全部 fence zones
+ */
+function clearAllFenceZones() {
+  Object.keys(fenceZoneEntities).forEach(function (zid) {
+    fenceZoneEntities[zid].forEach(function (e) {
+      try { viewer.entities.remove(e); } catch (_) {}
+    });
+  });
+  fenceZoneEntities = {};
+}
+
 // ── 圓形覆蓋 ─────────────────────────────────────────────────────────
 function setCircleOverlay(lat, lon, radius, colorHex) {
   if (circleEntity) { viewer.entities.remove(circleEntity); circleEntity = null; }
@@ -556,9 +899,11 @@ const _COPTER_MODEL_URI = '__COPTER_MODEL_URI__';
 // Cesium HPR heading 軸繞 -Z，若模型預設 forward 為 +X(東)，需 -90° 將其轉向北。
 // 若視覺仍偏離 HUD 儀表板，調整這兩個值即可。
 const _PLANE_HEADING_OFFSET  = -90;   // 固定翼 GLB forward = +X (Cesium 慣例)
-const _PLANE_PITCH_OFFSET    = 0;
-const _COPTER_HEADING_OFFSET = -90;   // 多旋翼 GLB 同慣例
-const _COPTER_PITCH_OFFSET   = 0;
+const _PLANE_PITCH_OFFSET    = 90;   // 固定翼 GLB pitch +90° 校正
+const _PLANE_ROLL_OFFSET     = 180;   // GLB 機身上下倒置校正 (roll 翻正)
+const _COPTER_HEADING_OFFSET = -90;   // 多旋翼 GLB yaw 逆時針 90°
+const _COPTER_PITCH_OFFSET   = 90;   // 多旋翼 GLB pitch +90° 校正
+const _COPTER_ROLL_OFFSET    = 180;   // GLB 機身上下倒置校正 (roll 翻正)
 
 // 各機即時姿態緩存（由 updateUAVPosition 填入），供跟隨相機/FOV 等使用
 const _UAV_STATE = {};
@@ -604,25 +949,28 @@ function setChaseCamera(sysid) {
       new Cesium.HeadingPitchRoll(hdgRad, 0, 0)
     );
 
+    // 關鍵：lookAtTransform(T) 不傳 offset 時，Cesium 只更新 reference frame
+    // 而保留相機 world 座標 → 相機不會跟著飛機平移！
+    // 必須每幀都傳 offset。為了保留滑鼠旋轉/縮放輸入，offset 取自上一幀
+    // 結束時相機在 body frame 中的相對位置 (camera.position) — 也就是
+    // 使用者滑鼠調整後的「相對機體位置」，再套用到新 body frame，達成
+    // 「跟隨 + 自由旋轉」並存。
+    let offset;
     if (!_chaseFrameInit) {
-      // 首幀：把相機放在 body frame 的後方(-Y) + 上方(+Z)
-      // Cesium 慣例：body +Y = forward, 所以 -Y = 後方
-      const offset = new Cesium.Cartesian3(
+      // 首幀：放在後方 -Y + 上方 +Z
+      offset = new Cesium.Cartesian3(
         0,
         -_chaseConfig.distance,
         _chaseConfig.height
       );
-      viewer.camera.lookAtTransform(bodyFrame, offset);
-      // 初始俯角：預設 setView 中已隱含 look-at-target；若要更明顯俯視，
-      // 用 camera.rotateDown 調整（僅首幀一次，之後使用者自行控制）
-      if (_chaseConfig.pitchDeg < 0) {
-        viewer.camera.rotateDown(Cesium.Math.toRadians(-_chaseConfig.pitchDeg * 0.5));
-      }
       _chaseFrameInit = true;
     } else {
-      // 後續只更新 reference frame，不傳 offset → 保留使用者滑鼠旋轉/縮放狀態
-      viewer.camera.lookAtTransform(bodyFrame);
+      // 後續：把上一幀末的 camera.position（已含使用者滑鼠調整）轉成
+      // 新 body frame 的 offset，本質上「保留使用者軌道在 body frame 中
+      // 的相對角度與距離」。
+      offset = Cesium.Cartesian3.clone(viewer.camera.position);
     }
+    viewer.camera.lookAtTransform(bodyFrame, offset);
   };
   viewer.scene.preRender.addEventListener(_chasePreRender);
   console.log('[3D] 跟隨相機：鎖定 UAV' + _chaseSysid + '（可滑鼠拖曳旋轉 / 滾輪縮放）');
@@ -792,21 +1140,28 @@ function _appendTrail(sysid, lat, lon, alt, colorHex) {
   // 限制最多 1500 點 (= 500 個 3D 點)
   if (arr.length > 1500 * 3) arr.splice(0, 3);
   if (arr.length < 6) return;
-  if (uavTrails[sysid]) {
-    try { viewer.entities.remove(uavTrails[sysid]); } catch(_) {}
+
+  // ★ 修復閃爍：原本每次 update_uav_position (5-10Hz) 都 remove+add entity，
+  // 造成軌跡先消失再重畫 → 視覺上「一閃一閃」。
+  // 改用 CallbackProperty：positions 從共享 arr 變數動態拉取，entity 只建一次，
+  // 之後僅 push 點到 arr，Cesium 每幀自動拿到最新陣列繪製，零閃爍。
+  if (!uavTrails[sysid]) {
+    uavTrails[sysid] = viewer.entities.add({
+      name: 'UAV-trail-' + sysid,
+      polyline: {
+        positions: new Cesium.CallbackProperty(function () {
+          return Cesium.Cartesian3.fromDegreesArrayHeights(arr);
+        }, false),    // false = 非 time-varying，每幀直接呼叫
+        width: 4,
+        material: new Cesium.PolylineGlowMaterialProperty({
+          glowPower: 0.15,
+          color: Cesium.Color.fromCssColorString(colorHex).withAlpha(0.9),
+        }),
+        arcType: Cesium.ArcType.NONE,
+      }
+    });
   }
-  uavTrails[sysid] = viewer.entities.add({
-    name: 'UAV-trail-' + sysid,
-    polyline: {
-      positions: Cesium.Cartesian3.fromDegreesArrayHeights(arr),
-      width: 4,
-      material: new Cesium.PolylineGlowMaterialProperty({
-        glowPower: 0.15,
-        color: Cesium.Color.fromCssColorString(colorHex).withAlpha(0.9),
-      }),
-      arcType: Cesium.ArcType.NONE,
-    }
-  });
+  // 後續呼叫不再動 entity；CallbackProperty 會自動讀取 arr 最新值
 }
 
 // ── 碰撞預警系統 ────────────────────────────────────────────────
@@ -820,14 +1175,14 @@ function _uavDistance(pos1, pos2) {
 }
 
 function _checkCollisions() {
-  // 清除舊預警
-  Object.values(collisionWarnings).forEach(e => {
-    try { viewer.entities.remove(e); } catch(_) {}
-  });
-  collisionWarnings = {};
-
+  // ★ 修復閃爍：原本每次 update_uav_position 都 remove + add 所有 collision
+  // 警告線（pair 數 = N×(N-1)/2，N=4 時 6 條）→ 高頻 mavlink 更新下嚴重閃爍。
+  // 改為「保留 entity，只更新 positions/text，不再 remove+add」。
+  // pair 不在警告距離內時則 hide（show=false）但保留 entity 以便重新顯示。
   const ids = Object.keys(uavEntities);
   if (ids.length < 2) {
+    // 飛機數 < 2，把所有警告線隱藏
+    Object.values(collisionWarnings).forEach(e => { e.show = false; });
     document.getElementById('collisionAlert').style.display = 'none';
     return;
   }
@@ -835,6 +1190,9 @@ function _checkCollisions() {
   let worstLevel = 0; // 0=safe, 1=warn, 2=danger
   let worstDist = Infinity;
   let worstPair = '';
+
+  // 標記哪些 pair 在這一幀有效；其他 pair 設 show=false
+  const activeKeys = new Set();
 
   for (let i = 0; i < ids.length; i++) {
     for (let j = i + 1; j < ids.length; j++) {
@@ -853,38 +1211,81 @@ function _checkCollisions() {
           worstDist = dist;
           worstPair = 'UAV' + ids[i] + '↔UAV' + ids[j];
         }
-        // 繪製預警連線
+
+        const key = ids[i] + '-' + ids[j];
+        activeKeys.add(key);
         const lineColor = isDanger
           ? Cesium.Color.RED.withAlpha(0.9)
           : Cesium.Color.YELLOW.withAlpha(0.7);
-        const key = ids[i] + '-' + ids[j];
-        collisionWarnings[key] = viewer.entities.add({
-          polyline: {
-            positions: [pA, pB],
-            width: isDanger ? 5 : 3,
-            material: new Cesium.PolylineDashMaterialProperty({
-              color: lineColor,
-              dashLength: isDanger ? 8 : 14,
-            }),
-            arcType: Cesium.ArcType.NONE,
-          },
-          label: {
-            text: '⚠ ' + dist.toFixed(1) + 'm',
-            font: 'bold 13px sans-serif',
-            fillColor: isDanger ? Cesium.Color.RED : Cesium.Color.YELLOW,
-            outlineColor: Cesium.Color.BLACK,
-            outlineWidth: 3,
-            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-            position: Cesium.Cartesian3.midpoint(pA, pB, new Cesium.Cartesian3()),
-            disableDepthTestDistance: Number.POSITIVE_INFINITY,
-            showBackground: true,
-            backgroundColor: new Cesium.Color(0, 0, 0, 0.7),
-          },
-          position: Cesium.Cartesian3.midpoint(pA, pB, new Cesium.Cartesian3()),
-        });
+        const midPos = Cesium.Cartesian3.midpoint(pA, pB, new Cesium.Cartesian3());
+
+        // 軟狀態 — 用 closure 抓 pA/pB 的快取，每幀刷新
+        let entry = collisionWarnings[key];
+        if (!entry) {
+          // 第一次建立 — positions 用 CallbackProperty 動態取兩端 UAV 位置
+          // 這樣後續位置變動時 entity 不需重建，僅 Cesium 內部刷新
+          const idA = ids[i], idB = ids[j];
+          const posCb = new Cesium.CallbackProperty(function () {
+            const a = uavEntities[idA], b = uavEntities[idB];
+            if (!a || !b || !a.position || !b.position) return [];
+            const _pa = a.position.getValue(Cesium.JulianDate.now());
+            const _pb = b.position.getValue(Cesium.JulianDate.now());
+            if (!_pa || !_pb) return [];
+            return [_pa, _pb];
+          }, false);
+          const midCb = new Cesium.CallbackProperty(function () {
+            const a = uavEntities[idA], b = uavEntities[idB];
+            if (!a || !b || !a.position || !b.position) return midPos;
+            const _pa = a.position.getValue(Cesium.JulianDate.now());
+            const _pb = b.position.getValue(Cesium.JulianDate.now());
+            if (!_pa || !_pb) return midPos;
+            return Cesium.Cartesian3.midpoint(_pa, _pb, new Cesium.Cartesian3());
+          }, false);
+          entry = viewer.entities.add({
+            position: midCb,
+            polyline: {
+              positions: posCb,
+              width: isDanger ? 5 : 3,
+              material: new Cesium.PolylineDashMaterialProperty({
+                color: lineColor,
+                dashLength: isDanger ? 8 : 14,
+              }),
+              arcType: Cesium.ArcType.NONE,
+            },
+            label: {
+              text: '⚠ ' + dist.toFixed(1) + 'm',
+              font: 'bold 13px sans-serif',
+              fillColor: isDanger ? Cesium.Color.RED : Cesium.Color.YELLOW,
+              outlineColor: Cesium.Color.BLACK,
+              outlineWidth: 3,
+              style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+              showBackground: true,
+              backgroundColor: new Cesium.Color(0, 0, 0, 0.7),
+            },
+          });
+          collisionWarnings[key] = entry;
+        }
+        // 後續每幀僅更新 label 文字（距離數值）+ 顏色 + 確保 show=true
+        entry.show = true;
+        if (entry.label) {
+          entry.label.text = '⚠ ' + dist.toFixed(1) + 'm';
+          entry.label.fillColor = isDanger ? Cesium.Color.RED : Cesium.Color.YELLOW;
+        }
+        if (entry.polyline) {
+          entry.polyline.material = new Cesium.PolylineDashMaterialProperty({
+            color: lineColor,
+            dashLength: isDanger ? 8 : 14,
+          });
+          entry.polyline.width = isDanger ? 5 : 3;
+        }
       }
     }
   }
+  // 把這幀沒進入警告距離的 pair 設 show=false（不刪除 entity 避免閃爍）
+  Object.keys(collisionWarnings).forEach(function (k) {
+    if (!activeKeys.has(k)) collisionWarnings[k].show = false;
+  });
 
   // 更新警告面板
   const alertEl = document.getElementById('collisionAlert');
@@ -920,13 +1321,13 @@ function updateUAVPosition(lat, lon, alt, headingDeg, speedMs, sysid, mode, arme
   // 計算 orientation（含姿態：heading + pitch + roll）
   const isPlaneGlb = isPlane && _PLANE_MODEL_URI && _PLANE_MODEL_URI.length > 0;
   const isCopterGlb = !isPlane && _COPTER_MODEL_URI && _COPTER_MODEL_URI.length > 0;
-  let headingOffset = 0, pitchOffset = 0;
-  if (isPlaneGlb)  { headingOffset = _PLANE_HEADING_OFFSET;  pitchOffset = _PLANE_PITCH_OFFSET; }
-  if (isCopterGlb) { headingOffset = _COPTER_HEADING_OFFSET; pitchOffset = _COPTER_PITCH_OFFSET; }
+  let headingOffset = 0, pitchOffset = 0, rollOffset = 0;
+  if (isPlaneGlb)  { headingOffset = _PLANE_HEADING_OFFSET;  pitchOffset = _PLANE_PITCH_OFFSET;  rollOffset = _PLANE_ROLL_OFFSET; }
+  if (isCopterGlb) { headingOffset = _COPTER_HEADING_OFFSET; pitchOffset = _COPTER_PITCH_OFFSET; rollOffset = _COPTER_ROLL_OFFSET; }
   const hpr = new Cesium.HeadingPitchRoll(
     Cesium.Math.toRadians((headingDeg || 0) + headingOffset),
     Cesium.Math.toRadians((pitchDeg || 0) + pitchOffset),
-    Cesium.Math.toRadians(rollDeg || 0)
+    Cesium.Math.toRadians((rollDeg || 0) + rollOffset)
   );
   const orientation = Cesium.Transforms.headingPitchRollQuaternion(pos, hpr);
 
@@ -1067,18 +1468,340 @@ function clearUAV(sysid) {
   document.getElementById('sitlStatus').style.display = 'none';
 }
 
-// ── 滑鼠點擊（對應 MapWidget 的 pyqt://click 橋接）──────────────────
-const clickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
-clickHandler.setInputAction(function(e) {
-  const ray = viewer.camera.getPickRay(e.position);
-  const cartesian = viewer.scene.globe.pick(ray, viewer.scene);
-  if (cartesian) {
-    const carto = Cesium.Ellipsoid.WGS84.cartesianToCartographic(cartesian);
-    const lat = Cesium.Math.toDegrees(carto.latitude);
-    const lon = Cesium.Math.toDegrees(carto.longitude);
-    window.location.href = 'pyqt://click/' + lat + '/' + lon;
+// ══════════════════════════════════════════════════════════════════════
+//  NFZ 繪製模式（多邊形 + 圓形）— Cesium 3D 端原生支援
+//  ─────────────────────────────────────────────────────────────────────
+//  POLYGON：左鍵點頂點、右鍵 / 雙擊 / Esc / 外部呼叫 finishNFZPolygon() 完成
+//  CIRCLE ：兩段點擊（第一次點圓心、第二次點邊緣定半徑），Esc 取消
+//
+//  完成後透過 pyqt:// URL 橋接送回 Python（acceptNavigationRequest 攔截）
+// ══════════════════════════════════════════════════════════════════════
+var _nfzDrawMode = null;          // null | 'polygon' | 'circle'
+var _nfzPolyVerts = [];           // [{lat, lon}, ...] 繪製中暫存
+var _nfzPolyPreviewEntity = null; // 進行中的 polyline 預覽
+var _nfzPolyDotEntities = [];     // 每個頂點的提示點
+var _nfzCircleStart = null;       // {lat, lon} 圓心
+var _nfzCirclePreviewEntity = null;
+var _nfzCircleCenterDotEntity = null;
+var _nfzCircleMouseMoveEntity = null;  // 隨滑鼠的「即時半徑預覽」
+
+/**
+ * 切換 NFZ 多邊形繪製模式
+ *   true  → 進入繪製：左鍵點頂點，右鍵 / 雙擊 / Esc 完成
+ *   false → 取消（清掉預覽，不送資料）
+ */
+function setNFZPolygonDrawMode(enabled) {
+  _clearNFZPolyPreview();
+  _clearNFZCirclePreview();
+  if (enabled) {
+    _nfzDrawMode = 'polygon';
+    _nfzPolyVerts = [];
+    _showNFZDrawHint(
+      '🛑 繪製 NFZ 多邊形（至少 3 點）',
+      '左鍵：新增頂點　│　右鍵 / 雙擊：完成　│　Esc：取消'
+    );
+    console.log('[NFZ Draw] polygon mode ON');
+  } else {
+    _nfzDrawMode = null;
+    _hideNFZDrawHint();
+    console.log('[NFZ Draw] polygon mode OFF');
   }
+}
+
+/**
+ * 完成多邊形（≥3 頂點）— 把頂點打包成 pyqt://nfz_poly_done URL 送回 Python
+ */
+function finishNFZPolygon() {
+  if (_nfzDrawMode !== 'polygon') return;
+  if (_nfzPolyVerts.length < 3) {
+    console.warn('[NFZ Draw] 頂點不足 ' + _nfzPolyVerts.length + ' < 3，取消');
+    setNFZPolygonDrawMode(false);
+    return;
+  }
+  var payload = _nfzPolyVerts
+    .map(function (v) { return v.lat + ',' + v.lon; })
+    .join('|');
+  var verts = _nfzPolyVerts.slice();
+  setNFZPolygonDrawMode(false);
+  console.log('[NFZ Draw] polygon finish, n=' + verts.length);
+  window.location.href = 'pyqt://nfz_poly_done/' + encodeURIComponent(payload);
+}
+
+/**
+ * 切換 NFZ 圓形繪製模式（兩段點擊）
+ *   true  → 進入繪製：左鍵點圓心 → 滑鼠移動即時預覽 → 左鍵點邊緣完成
+ *   false → 取消
+ *
+ * 改成兩段點擊（不用拖曳）是因為 Cesium 預設左鍵 down+drag 是相機平移，
+ * 即使停用相機 input 也偶爾失靈；兩段點擊行為穩定可靠。
+ */
+function setNFZCircleDrawMode(enabled) {
+  _clearNFZPolyPreview();
+  _clearNFZCirclePreview();
+  if (enabled) {
+    _nfzDrawMode = 'circle';
+    _nfzCircleStart = null;
+    _showNFZDrawHint(
+      '🛑 繪製 NFZ 圓形（兩段點擊）',
+      '左鍵：① 點圓心 → ② 點邊緣定半徑　│　Esc：取消'
+    );
+    console.log('[NFZ Draw] circle mode ON');
+  } else {
+    _nfzDrawMode = null;
+    _hideNFZDrawHint();
+    console.log('[NFZ Draw] circle mode OFF');
+  }
+}
+
+function _clearNFZPolyPreview() {
+  if (_nfzPolyPreviewEntity) {
+    try { viewer.entities.remove(_nfzPolyPreviewEntity); } catch (_) {}
+    _nfzPolyPreviewEntity = null;
+  }
+  _nfzPolyDotEntities.forEach(function (e) {
+    try { viewer.entities.remove(e); } catch (_) {}
+  });
+  _nfzPolyDotEntities = [];
+}
+
+function _clearNFZCirclePreview() {
+  if (_nfzCirclePreviewEntity) {
+    try { viewer.entities.remove(_nfzCirclePreviewEntity); } catch (_) {}
+    _nfzCirclePreviewEntity = null;
+  }
+  if (_nfzCircleCenterDotEntity) {
+    try { viewer.entities.remove(_nfzCircleCenterDotEntity); } catch (_) {}
+    _nfzCircleCenterDotEntity = null;
+  }
+  if (_nfzCircleMouseMoveEntity) {
+    try { viewer.entities.remove(_nfzCircleMouseMoveEntity); } catch (_) {}
+    _nfzCircleMouseMoveEntity = null;
+  }
+}
+
+// ── 繪製模式浮動提示 banner（地圖頂部中央，純 HTML/CSS）──
+function _showNFZDrawHint(title, hint) {
+  var el = document.getElementById('nfzDrawHint');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'nfzDrawHint';
+    el.style.cssText = (
+      'position:absolute; top:48px; left:50%; transform:translateX(-50%);'
+      + ' background:rgba(220,40,40,0.95); color:#fff; padding:8px 16px;'
+      + ' border:1px solid #fff; border-radius:4px; font-family:monospace;'
+      + ' font-size:12px; font-weight:bold; z-index:10000;'
+      + ' box-shadow:0 2px 8px rgba(0,0,0,0.4); line-height:1.5;'
+      + ' pointer-events:none; text-align:center;'
+    );
+    document.body.appendChild(el);
+  }
+  el.innerHTML = '<div style="font-size:13px;margin-bottom:3px;">' + title
+                 + '</div><div style="opacity:0.9;font-weight:normal;">' + hint + '</div>';
+  el.style.display = 'block';
+}
+
+function _hideNFZDrawHint() {
+  var el = document.getElementById('nfzDrawHint');
+  if (el) el.style.display = 'none';
+}
+
+function _redrawNFZPolyPreview() {
+  _clearNFZPolyPreview();
+  if (_nfzPolyVerts.length === 0) return;
+  // 每個頂點放一個小紅球
+  _nfzPolyVerts.forEach(function (v, i) {
+    _nfzPolyDotEntities.push(viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(v.lon, v.lat, 1.0),
+      point: {
+        pixelSize: 10,
+        color: Cesium.Color.RED,
+        outlineColor: Cesium.Color.WHITE,
+        outlineWidth: 2,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+      label: {
+        text: 'F' + (i + 1),
+        font: 'bold 10px sans-serif',
+        fillColor: Cesium.Color.WHITE,
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 2,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        pixelOffset: new Cesium.Cartesian2(8, -8),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    }));
+  });
+  // 連線（≥2 點才畫，閉環處理：頂點數 ≥3 時尾端連回起點）
+  if (_nfzPolyVerts.length >= 2) {
+    var coords = _nfzPolyVerts.map(function (v) {
+      return Cesium.Cartesian3.fromDegrees(v.lon, v.lat, 1.0);
+    });
+    if (_nfzPolyVerts.length >= 3) coords.push(coords[0]);
+    _nfzPolyPreviewEntity = viewer.entities.add({
+      polyline: {
+        positions: coords,
+        width: 2,
+        material: Cesium.Color.RED.withAlpha(0.85),
+        clampToGround: true,
+      },
+    });
+  }
+}
+
+function _drawNFZCirclePreview(centerLat, centerLon, radiusM) {
+  _clearNFZCirclePreview();
+  if (radiusM <= 0) return;
+  _nfzCirclePreviewEntity = viewer.entities.add({
+    position: Cesium.Cartesian3.fromDegrees(centerLon, centerLat, 0.5),
+    ellipse: {
+      semiMajorAxis: radiusM,
+      semiMinorAxis: radiusM,
+      material: Cesium.Color.RED.withAlpha(0.18),
+      outline: true,
+      outlineColor: Cesium.Color.RED.withAlpha(0.9),
+      outlineWidth: 2,
+      height: 0.5,
+    },
+  });
+}
+
+function _pickLatLon(screenPos) {
+  var ray = viewer.camera.getPickRay(screenPos);
+  if (!ray) return null;
+  var cart = viewer.scene.globe.pick(ray, viewer.scene);
+  if (!cart) return null;
+  var carto = Cesium.Ellipsoid.WGS84.cartesianToCartographic(cart);
+  return {
+    lat: Cesium.Math.toDegrees(carto.latitude),
+    lon: Cesium.Math.toDegrees(carto.longitude),
+  };
+}
+
+function _haversineM(lat1, lon1, lat2, lon2) {
+  var R = 6371000.0;
+  var dLat = Cesium.Math.toRadians(lat2 - lat1);
+  var dLon = Cesium.Math.toRadians(lon2 - lon1);
+  var a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+        + Math.cos(Cesium.Math.toRadians(lat1))
+        * Math.cos(Cesium.Math.toRadians(lat2))
+        * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// ── 滑鼠事件 dispatch（NFZ 繪製優先，否則走原有 click 橋接）────────
+const clickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+
+// LEFT_CLICK — 多邊形：新增頂點；圓形：① 點圓心 → ② 點邊緣完成；正常：corner_added
+clickHandler.setInputAction(function (e) {
+  var p = _pickLatLon(e.position);
+  if (!p) return;
+
+  if (_nfzDrawMode === 'polygon') {
+    _nfzPolyVerts.push(p);
+    _redrawNFZPolyPreview();
+    console.log('[NFZ Draw] add vertex F' + _nfzPolyVerts.length
+                + ' (' + p.lat.toFixed(6) + ', ' + p.lon.toFixed(6) + ')');
+    return;
+  }
+
+  if (_nfzDrawMode === 'circle') {
+    if (_nfzCircleStart === null) {
+      // ① 第一段：設圓心
+      _nfzCircleStart = p;
+      _nfzCircleCenterDotEntity = viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(p.lon, p.lat, 1.0),
+        point: {
+          pixelSize: 12, color: Cesium.Color.RED,
+          outlineColor: Cesium.Color.WHITE, outlineWidth: 2,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+        label: {
+          text: 'C', font: 'bold 11px sans-serif',
+          fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK,
+          outlineWidth: 2, style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+          pixelOffset: new Cesium.Cartesian2(10, -10),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      });
+      _showNFZDrawHint(
+        '🛑 繪製 NFZ 圓形 — 圓心已設',
+        '移動滑鼠預覽半徑　│　左鍵：點邊緣完成　│　Esc：取消'
+      );
+      console.log('[NFZ Draw] circle center @ ('
+                  + p.lat.toFixed(6) + ', ' + p.lon.toFixed(6) + ')');
+    } else {
+      // ② 第二段：定半徑、完成
+      var r = _haversineM(_nfzCircleStart.lat, _nfzCircleStart.lon, p.lat, p.lon);
+      if (r < 5) {
+        console.warn('[NFZ Draw] 半徑過小 ' + r.toFixed(1) + 'm，請點較遠處');
+        return;
+      }
+      var c = _nfzCircleStart;
+      setNFZCircleDrawMode(false);
+      console.log('[NFZ Draw] circle finish r=' + r.toFixed(1) + 'm');
+      window.location.href = 'pyqt://nfz_circle_done/'
+        + c.lat + '/' + c.lon + '/' + r;
+    }
+    return;
+  }
+
+  // 預設：corner_added
+  window.location.href = 'pyqt://click/' + p.lat + '/' + p.lon;
 }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+// MOUSE_MOVE — 圓形第二段：即時預覽半徑圓
+clickHandler.setInputAction(function (e) {
+  if (_nfzDrawMode !== 'circle' || _nfzCircleStart === null) return;
+  var p = _pickLatLon(e.endPosition);
+  if (!p) return;
+  var r = _haversineM(_nfzCircleStart.lat, _nfzCircleStart.lon, p.lat, p.lon);
+  // 移除舊預覽圓再畫新的
+  if (_nfzCirclePreviewEntity) {
+    try { viewer.entities.remove(_nfzCirclePreviewEntity); } catch (_) {}
+    _nfzCirclePreviewEntity = null;
+  }
+  if (r > 0) {
+    _nfzCirclePreviewEntity = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(
+        _nfzCircleStart.lon, _nfzCircleStart.lat, 0.5
+      ),
+      ellipse: {
+        semiMajorAxis: r, semiMinorAxis: r,
+        material: Cesium.Color.RED.withAlpha(0.18),
+        outline: true,
+        outlineColor: Cesium.Color.RED.withAlpha(0.9),
+        outlineWidth: 2, height: 0.5,
+      },
+    });
+  }
+}, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+
+// LEFT_DOUBLE_CLICK — 多邊形完成（次要觸發，主要用右鍵）
+clickHandler.setInputAction(function (e) {
+  if (_nfzDrawMode === 'polygon') {
+    finishNFZPolygon();
+  }
+}, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
+
+// RIGHT_CLICK — 多邊形完成（主要觸發，比雙擊穩定）
+clickHandler.setInputAction(function (e) {
+  if (_nfzDrawMode === 'polygon') {
+    finishNFZPolygon();
+  } else if (_nfzDrawMode === 'circle') {
+    // 圓形繪製中右鍵 = 取消
+    setNFZCircleDrawMode(false);
+    console.log('[NFZ Draw] circle cancelled via right-click');
+  }
+}, Cesium.ScreenSpaceEventType.RIGHT_CLICK);
+
+// Esc 取消當前繪製模式
+document.addEventListener('keydown', function (ev) {
+  if (ev.key === 'Escape' && _nfzDrawMode !== null) {
+    console.log('[NFZ Draw] cancelled via Esc');
+    if (_nfzDrawMode === 'polygon') setNFZPolygonDrawMode(false);
+    else if (_nfzDrawMode === 'circle') setNFZCircleDrawMode(false);
+  }
+});
 
 // ── 初始相機（會由 Python 端在載入後呼叫 setInitialView 覆寫）────────
 // ── DEM 地形疊加 ──────────────────────────────────────────────
@@ -1420,163 +2143,590 @@ function clearElevationSlicer() {
 //  目標發現機率遵循指數探測定律：P_detect = 1 - exp(-W * q)
 //  累積發現機率 (COS) 隨掃過次數遞增
 // ══════════════════════════════════════════════════════════════════════
-let fovConeEntity = null;       // FOV 光錐 Entity
-let fovOutlineEntity = null;    // FOV 地面投影圓環 Entity
+// ★ 多機 FOV 支援：每架 UAV 一個獨立 entity + state，避免互相覆寫造成
+//   「FOV 跳到誰那就顯示誰」閃爍與「一次只能顯示一台」問題。
+let fovConeEntities    = {};    // {sysid: cylinder entity}
+let fovOutlineEntities = {};    // {sysid: ellipse entity}      ─ legacy circular cone 用
+let fovEdgeEntities    = {};    // {sysid: [polyline x4]}        ─ pyramid frustum 4 條邊
+let fovGroundPolyEntities = {}; // {sysid: polyline entity}      ─ frustum 地面封閉迴圈 (wireframe)
+let fovFillPrimitives  = {};    // {sysid: Cesium.Primitive}     ─ GPU 半透明填色（baked 幾何）
+let _fovStates         = {};    // {sysid: {lat, lon, alt, radius, heading, pitch, roll,
+                                //          hfov, vfov, mountAngle, mode, lastUpdate,
+                                //          _cornersKey, _cornersCache}}
+// 向後相容（舊全域變數，未使用，避免外部呼叫 ReferenceError）
+let fovConeEntity = null;
+let fovOutlineEntity = null;
 let heatmapEntities = [];       // 熱力圖網格 Entity 陣列
 let heatmapGrid = null;         // 網格狀態 {rows, cols, cells: [{lat, lon, cos, entity}]}
 let _heatmapSweepWidth = 50.0;  // 掃描有效寬度 W (公尺)
 let _heatmapQuality = 0.8;      // 探測品質 q (0~1)
 
-// FOV 光錐的即時狀態（供 CallbackProperty 讀取，避免每幀重建 Entity）
-let _fovState = {
-  lat: 0, lon: 0, alt: 100,
-  radius: 50, heading: 0,
-  pitch: 0, roll: 0,
-  active: false,
-  lastUpdate: 0,
-};
+/**
+ * 計算 frustum Primitive 的 modelMatrix（位置/航向/高度純 GPU 變換）
+ *
+ *   modelMatrix = ENU(lat,lon,alt) × RotZ(-heading) × ScaleUniform(alt)
+ *
+ * - canonical body frame 中：apex 在原點 (0,0,0)、角點在 (dx, dy, -1)
+ * - Scale(alt) 把 z=-1 的角點拉到地面 z=-alt（uniform scale 不會破壞角度）
+ * - RotZ(-h) 把 body +y 對齊到 heading h 的方位（ENU 右手系、CW = 負角）
+ * - ENU 把原點放到 UAV 經緯高，整個角錐 apex 自動坐落在 UAV 模型上
+ *
+ * @param {Object} s  _fovStates[sysid] 狀態物件
+ * @returns {Cesium.Matrix4}  4x4 變換矩陣
+ */
+function _computeFrustumModelMatrix(s) {
+  var origin = Cesium.Cartesian3.fromDegrees(s.lon, s.lat, s.alt);
+  var enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(origin);
+  var h = Cesium.Math.toRadians(s.heading || 0);
+  // CW heading（北 0、東 90）→ ENU +Z 軸的 CCW 旋轉為 -h
+  var rotZ = Cesium.Matrix3.fromRotationZ(-h);
+  var rotMatrix = Cesium.Matrix4.fromRotationTranslation(
+    rotZ, Cesium.Cartesian3.ZERO
+  );
+  var scale = Math.max(1.0, s.alt || 100.0);
+  var scaleMatrix = Cesium.Matrix4.fromScale(
+    new Cesium.Cartesian3(scale, scale, scale)
+  );
+  var tmp = new Cesium.Matrix4();
+  Cesium.Matrix4.multiply(enuMatrix, rotMatrix, tmp);
+  Cesium.Matrix4.multiply(tmp, scaleMatrix, tmp);
+  return tmp;
+}
 
 /**
- * 更新 FOV 光錐狀態
+ * 依當前 HFOV / VFOV / 掛載角 烘焙 canonical body-frame 的 frustum 三角網格，
+ * 並包成 GPU Primitive（PerInstanceColorAppearance + 半透明）。
+ *
+ * canonical 頂點：
+ *   v0 = apex (0,0,0)
+ *   v1..v4 = 4 個 ground corner 在 z = -1 平面：(dx_b/|dz_b|, dy_b/|dz_b|, -1)
+ *
+ * 索引：4 側面三角形 (apex, c_i, c_{i+1}) + 2 地面三角形 (c0,c1,c2)(c0,c2,c3)
+ *
+ * @param {number} sysid
+ * @param {Cesium.Color} color
+ * @returns {Cesium.Primitive | null}
+ */
+function _buildFrustumPrimitive(sysid, color) {
+  var s = _fovStates[sysid];
+  if (!s) return null;
+
+  var am = Cesium.Math.toRadians(Math.max(0, Math.min(89.5, s.mountAngle || 0)));
+  var hfovHalf = Cesium.Math.toRadians(Math.max(1, Math.min(85, (s.hfov || 60) / 2)));
+  var vfovHalf = Cesium.Math.toRadians(Math.max(1, Math.min(85, (s.vfov || 45) / 2)));
+  var sinAm = Math.sin(am), cosAm = Math.cos(am);
+  var tanH = Math.tan(hfovHalf), tanV = Math.tan(vfovHalf);
+
+  // 與 _computeFrustumGroundCorners 同一組 SIGNS 順序：TL, TR, BR, BL
+  var SIGNS = [[-1, +1], [+1, +1], [+1, -1], [-1, -1]];
+  var c = [];   // [[x,y,z], ...]
+  for (var i = 0; i < 4; i++) {
+    var sx = SIGNS[i][0], sy = SIGNS[i][1];
+    var dxB = sx * tanH;
+    var dyB = sinAm + sy * tanV * cosAm;
+    var dzB = -cosAm + sy * tanV * sinAm;
+    if (dzB >= -1e-6) {
+      // 射線指向上方或水平 → 用遠處替代（不會渲染負無限大）
+      c.push([dxB * 10, dyB * 10, -1.0]);
+    } else {
+      var inv = 1.0 / Math.abs(dzB);
+      c.push([dxB * inv, dyB * inv, -1.0]);
+    }
+  }
+
+  // Float64 頂點：apex + 4 corners
+  var positions = new Float64Array([
+    0.0,    0.0,    0.0,     // 0: apex
+    c[0][0], c[0][1], c[0][2], // 1: TL
+    c[1][0], c[1][1], c[1][2], // 2: TR
+    c[2][0], c[2][1], c[2][2], // 3: BR
+    c[3][0], c[3][1], c[3][2], // 4: BL
+  ]);
+
+  // 6 個三角形（4 側面 + 2 地面四邊形分割）
+  var indices = new Uint16Array([
+    0, 1, 2,   // 側 TL→TR
+    0, 2, 3,   // 側 TR→BR
+    0, 3, 4,   // 側 BR→BL
+    0, 4, 1,   // 側 BL→TL
+    1, 2, 3,   // 地面 △1
+    1, 3, 4,   // 地面 △2
+  ]);
+
+  var geometry = new Cesium.Geometry({
+    attributes: {
+      position: new Cesium.GeometryAttribute({
+        componentDatatype: Cesium.ComponentDatatype.DOUBLE,
+        componentsPerAttribute: 3,
+        values: positions,
+      }),
+    },
+    indices: indices,
+    primitiveType: Cesium.PrimitiveType.TRIANGLES,
+    boundingSphere: Cesium.BoundingSphere.fromVertices(positions),
+  });
+
+  var instance = new Cesium.GeometryInstance({
+    geometry: geometry,
+    modelMatrix: _computeFrustumModelMatrix(s),
+    attributes: {
+      color: Cesium.ColorGeometryInstanceAttribute.fromColor(
+        color.withAlpha(0.20)
+      ),
+    },
+    id: 'fov-fill-uav' + sysid,
+  });
+
+  return new Cesium.Primitive({
+    geometryInstances: instance,
+    appearance: new Cesium.PerInstanceColorAppearance({
+      translucent: true,
+      closed: false,
+      flat: true,
+    }),
+    asynchronous: false,   // 立即建好以避免閃爍
+  });
+}
+
+/**
+ * 確保該 sysid 有 frustum Primitive；shape 不變則只更新 modelMatrix（GPU side）。
+ *
+ *   - 首次呼叫     → 建 Primitive
+ *   - HFOV/VFOV/α_m 變 → 拆掉重建（重建只發生在使用者拖滑桿時，極低頻）
+ *   - 其它 (lat/lon/alt/heading) 變 → 只改 primitive.modelMatrix，純 GPU
+ */
+function _ensureFrustumFillPrimitive(sysid, color) {
+  var s = _fovStates[sysid];
+  if (!s) return;
+  var shapeKey = (s.hfov || 0) + '|' + (s.vfov || 0) + '|' + (s.mountAngle || 0);
+  var prim = fovFillPrimitives[sysid];
+  if (prim && prim._shapeKey === shapeKey) {
+    // 形狀沒變 → 只更新矩陣（每幀的位置/航向/高度變動走這條，零幾何重建）
+    prim.modelMatrix = _computeFrustumModelMatrix(s);
+    return;
+  }
+  // shape 變了或首次：拆舊建新
+  if (prim) {
+    try { viewer.scene.primitives.remove(prim); } catch (_) {}
+    delete fovFillPrimitives[sysid];
+  }
+  var newPrim = _buildFrustumPrimitive(sysid, color);
+  if (newPrim) {
+    newPrim._shapeKey = shapeKey;
+    fovFillPrimitives[sysid] = viewer.scene.primitives.add(newPrim);
+  }
+}
+
+/**
+ * 4 點凸多邊形的點面內判定（用於熱力圖梯形覆蓋判定）
+ *
+ * 利用「對所有相鄰邊的 cross product 符號一致」判定點是否在凸多邊形內：
+ *   - 若四條邊的 (邊向量 × 點向量) 同號 → 點在內部
+ *   - 任一條符號相反 → 點在外部
+ *
+ * 在小範圍 (km 級) 內，lat/lon 平面近似為歐式平面，直接用度數做 cross
+ * 不會明顯失真。對 SAR 搜救熱力圖網格（通常 < 5 km × 5 km）足夠精準。
+ *
+ * @param {number} lat   待測點緯度
+ * @param {number} lon   待測點經度
+ * @param {Array}  quad  [{lat, lon} × 4] 依固定順序 (TL/TR/BR/BL)
+ * @returns {boolean}
+ */
+function _pointInConvexQuad(lat, lon, quad) {
+  let prev = quad[3];
+  let sign = 0;
+  for (let i = 0; i < 4; i++) {
+    const cur = quad[i];
+    const ex = cur.lon - prev.lon;
+    const ey = cur.lat - prev.lat;
+    const px = lon - prev.lon;
+    const py = lat - prev.lat;
+    const cross = ex * py - ey * px;
+    if (cross !== 0) {
+      if (sign === 0) {
+        sign = cross > 0 ? 1 : -1;
+      } else if ((sign > 0) !== (cross > 0)) {
+        return false;
+      }
+    }
+    prev = cur;
+  }
+  return true;
+}
+
+/**
+ * 計算矩形角錐 frustum 的 4 個地面投影頂點（梯形 FOV）
+ *
+ * 數學模型（論文 Eq. 2-3 對應）：
+ *   - 載具體座標：+x = 右、+y = 前、+z = 上
+ *   - 光軸方向：axis_b = (0, sin(α_m), -cos(α_m))
+ *     α_m = 0 → 垂直朝下（nadir，矩形投影）
+ *     α_m > 0 → 前傾安裝（梯形投影：遠端寬、近端窄）
+ *   - 影像右向：r_b = (1, 0, 0)
+ *   - 影像上向：u_b = r_b × axis_b = (0, cos(α_m), sin(α_m))
+ *   - 角錐 4 邊射線：dir = axis ± tan(HFOV/2)·r ± tan(VFOV/2)·u
+ *   - 套用 heading 旋轉至 ENU，與 z=0 地平面相交即得 ground corner
+ *
+ * @param {Object} s  _fovStates[sysid] 狀態物件
+ * @returns {Array<Cesium.Cartesian3>}  4 個 Cartesian3 地面點（順序：TL, TR, BR, BL）
+ */
+function _computeFrustumGroundCorners(s) {
+  // ── Memoization：相同 state 直接回傳快取（避免每幀 5 次重複 trig） ──
+  // Callback 每幀觸發（4 條邊 + 1 個地面 loop = 5 次/UAV/幀），
+  // 多機時計算量會 N×5×60Hz，必須對未變化 state 做 short-circuit。
+  var key = s.lat + '|' + s.lon + '|' + s.alt + '|' + (s.heading || 0)
+            + '|' + (s.mountAngle || 0) + '|' + (s.hfov || 0) + '|' + (s.vfov || 0);
+  if (s._cornersKey === key && s._cornersCache) {
+    return s._cornersCache;
+  }
+
+  var h  = Cesium.Math.toRadians(s.heading || 0);
+  var am = Cesium.Math.toRadians(Math.max(0, Math.min(89.5, s.mountAngle || 0)));
+  // 半角，clamp 至安全範圍（避免 tan 發散）
+  var hfovHalf = Cesium.Math.toRadians(Math.max(1, Math.min(85, (s.hfov || 60) / 2)));
+  var vfovHalf = Cesium.Math.toRadians(Math.max(1, Math.min(85, (s.vfov || 45) / 2)));
+
+  var sinAm = Math.sin(am), cosAm = Math.cos(am);
+  var tanH = Math.tan(hfovHalf), tanV = Math.tan(vfovHalf);
+
+  // 4 個影像角點：TL(-,+), TR(+,+), BR(+,-), BL(-,-)
+  // 影像上 = 前方（遠端）、影像下 = 後方（近端）
+  var SIGNS = [[-1, +1], [+1, +1], [+1, -1], [-1, -1]];
+  var corners = [];     // Cartesian3[]：給 Cesium polyline 用
+  var cornersLL = [];   // {lat, lon}[]：給熱力圖點面內判定用（共享同次計算）
+
+  var cosLat = Math.cos(Cesium.Math.toRadians(s.lat));
+  if (Math.abs(cosLat) < 1e-9) cosLat = 1e-9;
+
+  for (var i = 0; i < 4; i++) {
+    var sx = SIGNS[i][0], sy = SIGNS[i][1];
+    // 體座標射線方向（未正規化即可，後續比例求交點）
+    var dxB = sx * tanH;
+    var dyB = sinAm + sy * tanV * cosAm;
+    var dzB = -cosAm + sy * tanV * sinAm;
+
+    // 套 heading：體 → ENU
+    //   east  =  cos(h)·xB + sin(h)·yB
+    //   north = -sin(h)·xB + cos(h)·yB
+    //   up    =  zB
+    var dE =  Math.cos(h) * dxB + Math.sin(h) * dyB;
+    var dN = -Math.sin(h) * dxB + Math.cos(h) * dyB;
+    var dU =  dzB;
+
+    var t;
+    if (dU >= -1e-6) {
+      // 射線指向上方或水平 → 投影至遠處（10×alt）避免無窮大
+      t = (s.alt || 100) * 10.0;
+    } else {
+      t = -(s.alt || 100) / dU;
+    }
+
+    var offE = dE * t;
+    var offN = dN * t;
+    var dLat = offN / 111320.0;
+    var dLon = offE / (111320.0 * cosLat);
+
+    corners.push(Cesium.Cartesian3.fromDegrees(
+      s.lon + dLon, s.lat + dLat, 1.0
+    ));
+    cornersLL.push({ lat: s.lat + dLat, lon: s.lon + dLon });
+  }
+  // 寫入快取（同時暴露 lat/lon 版本給熱力圖點面內判定用）
+  s._cornersKey = key;
+  s._cornersCache = corners;
+  s._cornersLL = cornersLL;
+  return corners;
+}
+
+/**
+ * 更新 FOV 光錐狀態（支援梯形角錐 frustum + 圓錐 legacy 兩模式）
  *
  * 設計改良：
  * 1. 使用 CallbackProperty 讓 Cesium 自行在渲染迴圈中讀取最新狀態，
  *    避免每幀重建 ConstantPositionProperty 造成的跳動。
- * 2. 圓錐保持垂直（不套用 pitch/roll），僅用 heading 旋轉。
- *    pitch/roll 改為微幅偏移地面投影圓心，模擬感測器斜視效果。
+ * 2. 提供 hfovDeg / vfovDeg / mountAngleDeg 時 → 矩形角錐 frustum 模式
+ *    （4 條 polyline 邊 + 地面四邊形 polygon，掛載角即時投影成梯形）
+ *    未提供時 → 退回原有圓錐（cylinder + ellipse）相容舊呼叫端。
  * 3. 內建 100ms 節流，避免高頻遙測導致 GPU 過載。
  *
- * @param {number} lat  UAV 緯度
- * @param {number} lon  UAV 經度
- * @param {number} alt  UAV 高度 (m)
- * @param {number} fovRadius  地面投影半徑 (m)
- * @param {number} headingDeg  航向角 (度)
- * @param {number} pitchDeg    俯仰角 (度)
- * @param {number} rollDeg     滾轉角 (度)
+ * @param {number} sysid          UAV 系統 ID（1-12）
+ * @param {number} lat            UAV 緯度
+ * @param {number} lon            UAV 經度
+ * @param {number} alt            UAV 高度 (m)
+ * @param {number} fovRadius      地面投影半徑 (m)，legacy 圓錐模式用
+ * @param {number} headingDeg     航向角 (度)
+ * @param {number} pitchDeg       俯仰角 (度)，legacy 圓錐地面投影偏移
+ * @param {number} rollDeg        滾轉角 (度)
+ * @param {number} [hfovDeg]      水平 FOV 全角 (度)，>0 啟用 frustum 模式
+ * @param {number} [vfovDeg]      垂直 FOV 全角 (度)，>0 啟用 frustum 模式
+ * @param {number} [mountAngleDeg] 感測器掛載角 α_m (度)，0=nadir，>0 前傾
  */
-function updateFOVCone(lat, lon, alt, fovRadius, headingDeg, pitchDeg, rollDeg) {
+function updateFOVCone(sysid, lat, lon, alt, fovRadius, headingDeg, pitchDeg, rollDeg,
+                       hfovDeg, vfovDeg, mountAngleDeg) {
+  // 向後相容：若舊呼叫端未傳 sysid（第一個參數是 lat），順移所有參數
+  if (typeof sysid === 'number' && (sysid > 90 || sysid < -90)) {
+    // sysid 應為整數 1-12，若值像 lat（>90 或 <-90 屬於緯度範圍）→ 視為舊式呼叫
+    rollDeg = pitchDeg; pitchDeg = headingDeg; headingDeg = fovRadius;
+    fovRadius = alt; alt = lon; lon = lat; lat = sysid; sysid = 1;
+  }
+  sysid = sysid || 1;
+
   if (!lat || !lon || !alt || alt <= 0) {
-    if (fovConeEntity) {
-      viewer.entities.remove(fovConeEntity);
-      fovConeEntity = null;
-    }
-    if (fovOutlineEntity) {
-      viewer.entities.remove(fovOutlineEntity);
-      fovOutlineEntity = null;
-    }
-    _fovState.active = false;
+    _removeFOVConeForSysid(sysid);
     return;
   }
 
-  // 節流：100ms 內不重複更新，避免高頻遙測造成 GPU 閃爍
-  const now = Date.now();
-  if (now - _fovState.lastUpdate < 100 && fovConeEntity) {
-    // 只更新狀態數值，讓 CallbackProperty 下一幀自動讀取
-    _fovState.lat = lat;
-    _fovState.lon = lon;
-    _fovState.alt = alt;
-    _fovState.radius = fovRadius || (alt * 0.6);
-    _fovState.heading = headingDeg || 0;
-    _fovState.pitch = pitchDeg || 0;
-    _fovState.roll = rollDeg || 0;
+  // 是否使用 pyramid frustum 模式（必須同時給 HFOV+VFOV）
+  var usePyramid = (typeof hfovDeg === 'number' && typeof vfovDeg === 'number'
+                    && hfovDeg > 0 && vfovDeg > 0);
+  var newMode = usePyramid ? 'pyramid' : 'cylinder';
+
+  if (!_fovStates[sysid]) {
+    _fovStates[sysid] = {
+      lat: 0, lon: 0, alt: 100, radius: 50,
+      heading: 0, pitch: 0, roll: 0,
+      hfov: 0, vfov: 0, mountAngle: 0,
+      mode: null, lastUpdate: 0,
+    };
+  }
+  var st = _fovStates[sysid];
+  st.lat = lat; st.lon = lon; st.alt = alt;
+  st.radius = fovRadius || (alt * 0.6);
+  st.heading = headingDeg || 0;
+  st.pitch = pitchDeg || 0;
+  st.roll = rollDeg || 0;
+  st.hfov = hfovDeg || 0;
+  st.vfov = vfovDeg || 0;
+  st.mountAngle = mountAngleDeg || 0;
+
+  // 模式切換 → 移除舊 entity 強制重建（但保留 state）
+  if (st.mode && st.mode !== newMode &&
+      (fovConeEntities[sysid] || fovEdgeEntities[sysid])) {
+    var savedState = Object.assign({}, st);
+    _removeFOVConeForSysid(sysid);
+    _fovStates[sysid] = savedState;
+    st = _fovStates[sysid];
+  }
+  st.mode = newMode;
+
+  // 節流 100ms — 期間僅更新 state，CallbackProperty 自動讀取
+  var now = Date.now();
+  var hasEntity = usePyramid
+    ? !!fovGroundPolyEntities[sysid]
+    : !!fovConeEntities[sysid];
+  if (now - st.lastUpdate < 100 && hasEntity) {
+    // 節流期內：仍要把 modelMatrix 推給 GPU Primitive
+    // （shape 沒變只會走純矩陣更新分支，零幾何重建）
+    if (usePyramid) {
+      var coneColorCached = (typeof _UAV_COLORS !== 'undefined' && _UAV_COLORS.length > 0)
+        ? Cesium.Color.fromCssColorString(_UAV_COLORS[(sysid - 1) % _UAV_COLORS.length])
+        : Cesium.Color.fromCssColorString('#FFB703');
+      _ensureFrustumFillPrimitive(sysid, coneColorCached);
+    }
     return;
   }
-  _fovState.lastUpdate = now;
-  _fovState.lat = lat;
-  _fovState.lon = lon;
-  _fovState.alt = alt;
-  _fovState.radius = fovRadius || (alt * 0.6);
-  _fovState.heading = headingDeg || 0;
-  _fovState.pitch = pitchDeg || 0;
-  _fovState.roll = rollDeg || 0;
-  _fovState.active = true;
+  st.lastUpdate = now;
 
-  if (!fovConeEntity) {
-    // 首次建立：使用 CallbackProperty 綁定位置和尺寸
-    fovConeEntity = viewer.entities.add({
-      name: 'FOV-Cone',
-      // CallbackProperty：每渲染幀自動讀取 _fovState，無需手動刷新
-      position: new Cesium.CallbackProperty(function() {
-        // 圓錐中心在 UAV 與地面之間的中點
-        return Cesium.Cartesian3.fromDegrees(
-          _fovState.lon, _fovState.lat, _fovState.alt / 2.0
-        );
+  // entity 已存在 → 不重建（CallbackProperty 會拉新值）+ 仍要更新 GPU 矩陣
+  if (hasEntity) {
+    if (usePyramid) {
+      var coneColor2 = (typeof _UAV_COLORS !== 'undefined' && _UAV_COLORS.length > 0)
+        ? Cesium.Color.fromCssColorString(_UAV_COLORS[(sysid - 1) % _UAV_COLORS.length])
+        : Cesium.Color.fromCssColorString('#FFB703');
+      _ensureFrustumFillPrimitive(sysid, coneColor2);
+    }
+    return;
+  }
+
+  // 首次建立 — 用該機 sysid 對應顏色（與 UAV polyline 同色，方便辨認）
+  var color = (typeof _UAV_COLORS !== 'undefined' && _UAV_COLORS.length > 0)
+    ? _UAV_COLORS[(sysid - 1) % _UAV_COLORS.length]
+    : '#FFB703';
+  var coneColor = Cesium.Color.fromCssColorString(color);
+
+  // 注意：CallbackProperty 內必須用 closure 抓 sysid（不能用外層 var）
+  var sid = sysid;
+
+  if (usePyramid) {
+    // ── 矩形角錐 frustum：GPU Primitive 半透明填色 + 4 條邊 polyline + 地面 wireframe ──
+    // GPU 填色：幾何只 bake 一次，每幀只更新 modelMatrix（無 CPU 三角化）
+    _ensureFrustumFillPrimitive(sid, coneColor);
+
+    fovEdgeEntities[sid] = [];
+    for (var i = 0; i < 4; i++) {
+      (function (idx) {
+        fovEdgeEntities[sid].push(viewer.entities.add({
+          name: 'FOV-Edge-' + idx + '-UAV' + sid,
+          polyline: {
+            positions: new Cesium.CallbackProperty(function () {
+              var s = _fovStates[sid];
+              if (!s) return [];
+              var apex = Cesium.Cartesian3.fromDegrees(s.lon, s.lat, s.alt);
+              var corners = _computeFrustumGroundCorners(s);
+              return [apex, corners[idx]];
+            }, false),
+            width: 1.5,
+            material: coneColor.withAlpha(0.85),
+            arcType: Cesium.ArcType.NONE,
+          },
+        }));
+      })(i);
+    }
+
+    // 地面 footprint：用 closed-loop polyline 取代 polygon
+    //   → 避免 Cesium 每幀對 polygon hierarchy 做 CPU 三角化（卡頓主因）
+    //   → polyline 走 GPU vertex buffer 更新，多機高速重繪也順暢
+    fovGroundPolyEntities[sid] = viewer.entities.add({
+      name: 'FOV-GroundLoop-UAV' + sid,
+      polyline: {
+        positions: new Cesium.CallbackProperty(function () {
+          var s = _fovStates[sid];
+          if (!s) return [];
+          var c = _computeFrustumGroundCorners(s);
+          // 5 點封閉迴圈（c0→c1→c2→c3→c0）
+          return [c[0], c[1], c[2], c[3], c[0]];
+        }, false),
+        width: 2.5,
+        material: coneColor.withAlpha(0.85),
+        arcType: Cesium.ArcType.NONE,
+      },
+    });
+
+    console.log('[FOV] UAV' + sid + ' 梯形角錐 frustum 建立（H/V/α_m='
+                + (hfovDeg | 0) + '/' + (vfovDeg | 0) + '/' + (mountAngleDeg | 0)
+                + '°, color=' + color + '）');
+  } else {
+    // ── Legacy 圓錐模式 ──
+    fovConeEntities[sid] = viewer.entities.add({
+      name: 'FOV-Cone-UAV' + sid,
+      position: new Cesium.CallbackProperty(function () {
+        var s = _fovStates[sid];
+        if (!s) return Cesium.Cartesian3.ZERO;
+        return Cesium.Cartesian3.fromDegrees(s.lon, s.lat, s.alt / 2.0);
       }, false),
-      // 只用 heading 旋轉（不套用 pitch/roll 避免劇烈晃動）
-      orientation: new Cesium.CallbackProperty(function() {
-        var pos = Cesium.Cartesian3.fromDegrees(
-          _fovState.lon, _fovState.lat, _fovState.alt / 2.0
-        );
+      orientation: new Cesium.CallbackProperty(function () {
+        var s = _fovStates[sid];
+        if (!s) return Cesium.Quaternion.IDENTITY;
+        var pos = Cesium.Cartesian3.fromDegrees(s.lon, s.lat, s.alt / 2.0);
         var hpr = new Cesium.HeadingPitchRoll(
-          Cesium.Math.toRadians(_fovState.heading), 0, 0
+          Cesium.Math.toRadians(s.heading), 0, 0
         );
         return Cesium.Transforms.headingPitchRollQuaternion(pos, hpr);
       }, false),
       cylinder: {
-        // CallbackProperty 控制長度與半徑，隨高度自動調整
-        length: new Cesium.CallbackProperty(function() {
-          return Math.max(_fovState.alt, 10);
+        length: new Cesium.CallbackProperty(function () {
+          var s = _fovStates[sid];
+          return Math.max((s ? s.alt : 100), 10);
         }, false),
-        topRadius: 0.5,  // 頂端微小（近似尖頂，但不為 0 避免渲染瑕疵）
-        bottomRadius: new Cesium.CallbackProperty(function() {
-          return _fovState.radius;
+        topRadius: 0.5,
+        bottomRadius: new Cesium.CallbackProperty(function () {
+          var s = _fovStates[sid];
+          return s ? s.radius : 50;
         }, false),
-        material: Cesium.Color.YELLOW.withAlpha(0.15),
+        material: coneColor.withAlpha(0.15),
         outline: true,
-        outlineColor: Cesium.Color.YELLOW.withAlpha(0.45),
+        outlineColor: coneColor.withAlpha(0.5),
         numberOfVerticalLines: 8,
         slices: 24,
       },
     });
 
-    // 地面投影圓環：顯示光錐在地面的覆蓋範圍
-    fovOutlineEntity = viewer.entities.add({
-      name: 'FOV-Ground-Ring',
-      position: new Cesium.CallbackProperty(function() {
-        // pitch/roll 偏移地面投影中心，模擬感測器斜視
-        // 偏移量 = alt × tan(pitch) 沿航向方向
-        var pitchRad = Cesium.Math.toRadians(_fovState.pitch || 0);
-        var hdgRad = Cesium.Math.toRadians(_fovState.heading || 0);
-        var offsetM = _fovState.alt * Math.tan(Math.min(Math.abs(pitchRad), 0.6));
+    fovOutlineEntities[sid] = viewer.entities.add({
+      name: 'FOV-Ground-Ring-UAV' + sid,
+      position: new Cesium.CallbackProperty(function () {
+        var s = _fovStates[sid];
+        if (!s) return Cesium.Cartesian3.ZERO;
+        var pitchRad = Cesium.Math.toRadians(s.pitch || 0);
+        var hdgRad = Cesium.Math.toRadians(s.heading || 0);
+        var offsetM = s.alt * Math.tan(Math.min(Math.abs(pitchRad), 0.6));
         var dLat = offsetM * Math.cos(hdgRad) / 111320.0;
-        var dLon = offsetM * Math.sin(hdgRad) / (111320.0 * Math.cos(Cesium.Math.toRadians(_fovState.lat)));
-        return Cesium.Cartesian3.fromDegrees(
-          _fovState.lon + dLon, _fovState.lat + dLat, 1.0
-        );
+        var dLon = offsetM * Math.sin(hdgRad)
+                   / (111320.0 * Math.cos(Cesium.Math.toRadians(s.lat)));
+        return Cesium.Cartesian3.fromDegrees(s.lon + dLon, s.lat + dLat, 1.0);
       }, false),
       ellipse: {
-        semiMajorAxis: new Cesium.CallbackProperty(function() {
-          return _fovState.radius;
+        semiMajorAxis: new Cesium.CallbackProperty(function () {
+          var s = _fovStates[sid];
+          return s ? s.radius : 50;
         }, false),
-        semiMinorAxis: new Cesium.CallbackProperty(function() {
-          return _fovState.radius;
+        semiMinorAxis: new Cesium.CallbackProperty(function () {
+          var s = _fovStates[sid];
+          return s ? s.radius : 50;
         }, false),
-        material: Cesium.Color.YELLOW.withAlpha(0.08),
+        material: coneColor.withAlpha(0.08),
         outline: true,
-        outlineColor: Cesium.Color.YELLOW.withAlpha(0.6),
+        outlineColor: coneColor.withAlpha(0.65),
         outlineWidth: 2,
         height: 0.5,
       },
     });
 
-    console.log('[FOV] 光錐 Entity 建立（CallbackProperty 模式）');
+    console.log('[FOV] UAV' + sid + ' 圓錐 Entity 建立（color=' + color + '）');
   }
-  // 後續更新不需手動設定 Entity 屬性，CallbackProperty 會自動讀取 _fovState
+}
+
+function _removeFOVConeForSysid(sysid) {
+  // legacy 圓錐
+  if (fovConeEntities[sysid]) {
+    try { viewer.entities.remove(fovConeEntities[sysid]); } catch (_) {}
+    delete fovConeEntities[sysid];
+  }
+  if (fovOutlineEntities[sysid]) {
+    try { viewer.entities.remove(fovOutlineEntities[sysid]); } catch (_) {}
+    delete fovOutlineEntities[sysid];
+  }
+  // pyramid frustum 4 條邊
+  if (fovEdgeEntities[sysid]) {
+    fovEdgeEntities[sysid].forEach(function (e) {
+      try { viewer.entities.remove(e); } catch (_) {}
+    });
+    delete fovEdgeEntities[sysid];
+  }
+  // pyramid frustum 地面四邊形
+  if (fovGroundPolyEntities[sysid]) {
+    try { viewer.entities.remove(fovGroundPolyEntities[sysid]); } catch (_) {}
+    delete fovGroundPolyEntities[sysid];
+  }
+  // GPU 填色 Primitive（scene.primitives 與 entities 是不同集合，要分開清）
+  if (fovFillPrimitives[sysid]) {
+    try { viewer.scene.primitives.remove(fovFillPrimitives[sysid]); } catch (_) {}
+    delete fovFillPrimitives[sysid];
+  }
+  if (_fovStates[sysid]) delete _fovStates[sysid];
 }
 
 /**
  * 清除 FOV 光錐
+ * @param {number} [sysid]  指定 sysid 則只清該機，未指定則清全部
  */
-function clearFOVCone() {
-  if (fovConeEntity) {
-    viewer.entities.remove(fovConeEntity);
-    fovConeEntity = null;
+function clearFOVCone(sysid) {
+  if (typeof sysid === 'number' && sysid > 0) {
+    _removeFOVConeForSysid(sysid);
+    return;
   }
-  if (fovOutlineEntity) {
-    viewer.entities.remove(fovOutlineEntity);
-    fovOutlineEntity = null;
-  }
-  _fovState.active = false;
+  Object.keys(fovConeEntities).forEach(function (k) {
+    try { viewer.entities.remove(fovConeEntities[k]); } catch (_) {}
+  });
+  Object.keys(fovOutlineEntities).forEach(function (k) {
+    try { viewer.entities.remove(fovOutlineEntities[k]); } catch (_) {}
+  });
+  Object.keys(fovEdgeEntities).forEach(function (k) {
+    (fovEdgeEntities[k] || []).forEach(function (e) {
+      try { viewer.entities.remove(e); } catch (_) {}
+    });
+  });
+  Object.keys(fovGroundPolyEntities).forEach(function (k) {
+    try { viewer.entities.remove(fovGroundPolyEntities[k]); } catch (_) {}
+  });
+  Object.keys(fovFillPrimitives).forEach(function (k) {
+    try { viewer.scene.primitives.remove(fovFillPrimitives[k]); } catch (_) {}
+  });
+  fovConeEntities = {};
+  fovOutlineEntities = {};
+  fovEdgeEntities = {};
+  fovGroundPolyEntities = {};
+  fovFillPrimitives = {};
+  _fovStates = {};
 }
 
 /**
@@ -1661,9 +2811,10 @@ function initSARHeatmap(latMin, latMax, lonMin, lonMax, rows, cols, sweepWidth, 
  *
  * @param {number} uavLat    UAV 緯度
  * @param {number} uavLon    UAV 經度
- * @param {number} fovRadius FOV 地面投影半徑 (m)
+ * @param {number} fovRadius FOV 地面投影半徑 (m) — legacy 圓形覆蓋 fallback 用
+ * @param {number} [sysid]   指定 sysid → 使用該機 frustum 真實梯形投影做覆蓋判定
  */
-function updateHeatmap(uavLat, uavLon, fovRadius) {
+function updateHeatmap(uavLat, uavLon, fovRadius, sysid) {
   if (!heatmapGrid || !heatmapGrid.cells.length) return;
   if (!uavLat || !uavLon) return;
 
@@ -1672,21 +2823,60 @@ function updateHeatmap(uavLat, uavLon, fovRadius) {
   const mPerDegLat = 111320.0;
   const mPerDegLon = 111320.0 * Math.cos(Cesium.Math.toRadians(uavLat));
 
+  // ── 是否啟用 frustum 真實梯形覆蓋 ──
+  // 條件：sysid 有給、_fovStates 內含 HFOV/VFOV > 0（pyramid 模式運作中）
+  let useFrustum = false;
+  let llCorners = null;   // [{lat, lon} × 4]，順序 TL, TR, BR, BL
+  if (sysid && _fovStates[sysid]
+      && _fovStates[sysid].hfov > 0 && _fovStates[sysid].vfov > 0) {
+    // 觸發 memoized 角點計算（cache hit 時零成本），同步取得 lat/lon 版本
+    _computeFrustumGroundCorners(_fovStates[sysid]);
+    llCorners = _fovStates[sysid]._cornersLL;
+    if (llCorners && llCorners.length === 4) useFrustum = true;
+  }
+
   // 單次探測機率：P_single = 1 - exp(-W * q)
   // 這裡 W 正規化為 (掃描寬度/格子寬度)，q 為探測品質
   const cellWidthM = heatmapGrid.dLon * mPerDegLon;
   const normalizedW = _heatmapSweepWidth / Math.max(cellWidthM, 1.0);
   const pSingle = 1.0 - Math.exp(-normalizedW * _heatmapQuality);
 
+  // ── frustum 模式：先算 AABB 做 broad-phase 剔除（萬格網格時關鍵效能） ──
+  let bbox = null;
+  if (useFrustum) {
+    let minLat = +Infinity, maxLat = -Infinity;
+    let minLon = +Infinity, maxLon = -Infinity;
+    for (let k = 0; k < 4; k++) {
+      if (llCorners[k].lat < minLat) minLat = llCorners[k].lat;
+      if (llCorners[k].lat > maxLat) maxLat = llCorners[k].lat;
+      if (llCorners[k].lon < minLon) minLon = llCorners[k].lon;
+      if (llCorners[k].lon > maxLon) maxLon = llCorners[k].lon;
+    }
+    bbox = { minLat: minLat, maxLat: maxLat, minLon: minLon, maxLon: maxLon };
+  }
+
   for (let i = 0; i < heatmapGrid.cells.length; i++) {
     const cell = heatmapGrid.cells[i];
 
-    // 計算 UAV 到網格中心的距離（公尺）
-    const dLatM = (cell.latCenter - uavLat) * mPerDegLat;
-    const dLonM = (cell.lonCenter - uavLon) * mPerDegLon;
-    const dist = Math.sqrt(dLatM * dLatM + dLonM * dLonM);
+    let covered;
+    if (useFrustum) {
+      // 1) AABB 快速剔除
+      if (cell.latCenter < bbox.minLat || cell.latCenter > bbox.maxLat
+          || cell.lonCenter < bbox.minLon || cell.lonCenter > bbox.maxLon) {
+        covered = false;
+      } else {
+        // 2) 4 點凸多邊形精確判定
+        covered = _pointInConvexQuad(cell.latCenter, cell.lonCenter, llCorners);
+      }
+    } else {
+      // Legacy 圓形覆蓋（sysid 未給 / 未啟用 frustum 時 fallback）
+      const dLatM = (cell.latCenter - uavLat) * mPerDegLat;
+      const dLonM = (cell.lonCenter - uavLon) * mPerDegLon;
+      const dist = Math.sqrt(dLatM * dLatM + dLonM * dLonM);
+      covered = (dist <= R);
+    }
 
-    if (dist <= R) {
+    if (covered) {
       // 光錐覆蓋此網格 → 更新 COS
       cell.sweepCount += 1;
 
@@ -2522,8 +3712,497 @@ const _origStrikeClear = strikeClearAll;
 strikeClearAll = function() {
   _strikeClearTickListeners();
   _strikePathClearAll();
+  _strikeVizClearAll();
   _origStrikeClear();
 };
+
+// ══════════════════════════════════════════════════════════════════════
+//  Strike Visual Overlay — 攻擊執行階段的即時視覺化
+//  ---------------------------------------------------------------
+//  此模組與「規劃靜態渲染」(strikeRenderPath) 分離。
+//  在使用者按下 KAMIKAZE LAUNCH 後由 Python 端：
+//      1) strikeVizBegin(targetLat, targetLon, targetAlt)
+//      2) 每筆 telemetry → strikeVizUpdateUav(sysid, lat, lon, alt, heading,
+//                                            callsign, plannedEtaS,
+//                                            loiterLat, loiterLon, loiterRad)
+//      3) 全機 IMPACT 或 timeout → strikeVizEnd() → 回傳統計
+//
+//  視覺呈現：
+//      • 每架 UAV 一條「軌跡 polyline」，段段依當下階段著色
+//          CRUISE        — 黃 #FFCC33
+//          TERMINAL_DIVE — 橘 #FF8800
+//          IMPACT        — 暗紅 #B22020（短暫脈衝後轉灰）
+//      • 每架 UAV 一個漂浮 HUD 標籤（CALL ▸ PHASE ▸ d= ▸ eta=）
+//      • 每架 UAV 一個 loiter 軌道虛線環（規劃中的 pre-strike loiter）
+//      • IMPACT 觸發瞬間：爆炸閃光 + 衝擊波擴散環 + 地面焦痕（持續 60s）
+//
+//  資料模型：
+//      _strikeViz = {
+//        active: bool,
+//        target: {lat, lon, alt},
+//        t0: ms,
+//        uavs: { sysid: {
+//          callsign, color, lat, lon, alt, heading, distToTargetM,
+//          plannedEtaS, etaS,
+//          phase, phaseEnteredAt,
+//          trailPositions: [Cartesian3...],
+//          trailColors: [Cesium.Color...],
+//          entities: { trail, label, loiter },
+//          impactFired: bool,
+//          impactStats: { missM, bearingDeg, ttImpactS, lat, lon } | null,
+//        }}
+//      }
+// ══════════════════════════════════════════════════════════════════════
+var _strikeViz = {
+  active: false,
+  target: { lat: 0, lon: 0, alt: 0 },
+  t0: 0,
+  uavs: {},
+  effectsEntities: [],   // 爆炸/衝擊波/焦痕 entity 池（一次性 + 持久）
+};
+
+// 階段顏色（CSS 字串 → Cesium.Color 在使用時轉換）
+var _STRIKE_PHASE_COLORS = {
+  CRUISE:        '#FFCC33',
+  TERMINAL_DIVE: '#FF8800',
+  IMPACT:        '#B22020',
+  POST_IMPACT:   '#555555',
+};
+
+/**
+ * 啟動 strike 視覺化階段。會清掉前一輪殘留（保留 strikeRenderPath 的規劃線）。
+ *
+ * @param {number} targetLat
+ * @param {number} targetLon
+ * @param {number} [targetAlt]
+ */
+function strikeVizBegin(targetLat, targetLon, targetAlt) {
+  _strikeVizClearAll();
+  _strikeViz.active = true;
+  _strikeViz.target = { lat: targetLat, lon: targetLon, alt: targetAlt || 0 };
+  _strikeViz.t0 = Date.now();
+  console.log('[Strike VIZ] BEGIN @ ('
+              + targetLat.toFixed(5) + ', ' + targetLon.toFixed(5) + ')');
+}
+
+/**
+ * 每筆 telemetry 呼叫一次 — 維護該 UAV 的視覺狀態 + 階段判定。
+ * 整套 entity（trail / label / loiter）首次呼叫時建立，之後只更新 state，
+ * 由 CallbackProperty 自動讀取。
+ *
+ * @param {number} sysid
+ * @param {number} lat / lon / alt   UAV 目前位置
+ * @param {number} headingDeg
+ * @param {string} callsign           顯示用
+ * @param {number} plannedEtaS        規劃命中時刻（從 t0 起算秒數）
+ * @param {number} [loiterLat]        loiter 點 lat（>0 則畫軌道環）
+ * @param {number} [loiterLon]
+ * @param {number} [loiterRad]
+ */
+function strikeVizUpdateUav(sysid, lat, lon, alt, headingDeg,
+                            callsign, plannedEtaS,
+                            loiterLat, loiterLon, loiterRad) {
+  if (!_strikeViz.active) return;
+  sysid = Number(sysid) || 1;
+
+  var u = _strikeViz.uavs[sysid];
+  if (!u) {
+    var colorHex = (typeof _UAV_COLORS !== 'undefined' && _UAV_COLORS.length > 0)
+      ? _UAV_COLORS[(sysid - 1) % _UAV_COLORS.length]
+      : '#FFCC33';
+    u = _strikeViz.uavs[sysid] = {
+      sysid: sysid,
+      callsign: callsign || ('UAV-' + sysid),
+      color: colorHex,
+      lat: lat, lon: lon, alt: alt, heading: headingDeg || 0,
+      distToTargetM: Infinity, plannedEtaS: plannedEtaS || 0, etaS: 0,
+      phase: 'CRUISE', phaseEnteredAt: Date.now(),
+      trailPositions: [],
+      trailColors: [],
+      entities: { trail: null, label: null, loiter: null },
+      impactFired: false,
+      impactStats: null,
+    };
+    _strikeVizEnsureEntities(u);
+  }
+
+  // 更新 state
+  u.lat = lat; u.lon = lon; u.alt = Math.max(0, alt);
+  u.heading = headingDeg || 0;
+  u.callsign = callsign || u.callsign;
+  if (plannedEtaS) u.plannedEtaS = plannedEtaS;
+
+  // 距目標水平距離（公尺）
+  u.distToTargetM = _strikeVizHaversine(
+    lat, lon, _strikeViz.target.lat, _strikeViz.target.lon
+  );
+
+  // ETA：剩餘規劃時間（粗略，從 t0 起算）
+  var elapsedS = (Date.now() - _strikeViz.t0) / 1000.0;
+  u.etaS = Math.max(0, u.plannedEtaS - elapsedS);
+
+  // 階段判定（latched IMPACT → POST_IMPACT）
+  var newPhase = _strikeVizClassifyPhase(u);
+  if (newPhase !== u.phase) {
+    u.phase = newPhase;
+    u.phaseEnteredAt = Date.now();
+    if (newPhase === 'IMPACT' && !u.impactFired) {
+      _strikeVizFireImpact(u);
+    }
+  }
+
+  // 軌跡點：每 ~20m 推一個新點，避免高頻 telemetry 灌爆
+  var addPoint = true;
+  if (u.trailPositions.length > 0) {
+    var last = u.trailPositions[u.trailPositions.length - 1];
+    var lastCarto = Cesium.Cartographic.fromCartesian(last);
+    var dM = _strikeVizHaversine(
+      lat, lon,
+      Cesium.Math.toDegrees(lastCarto.latitude),
+      Cesium.Math.toDegrees(lastCarto.longitude)
+    );
+    if (dM < 15.0) addPoint = false;
+  }
+  if (addPoint) {
+    u.trailPositions.push(Cesium.Cartesian3.fromDegrees(lon, lat, alt));
+    u.trailColors.push(
+      Cesium.Color.fromCssColorString(_STRIKE_PHASE_COLORS[u.phase] || u.color)
+    );
+    // 滾動緩衝：超過 500 點丟最舊
+    if (u.trailPositions.length > 500) {
+      u.trailPositions.shift();
+      u.trailColors.shift();
+    }
+  }
+
+  // loiter 圈：若有規劃且尚未繪製
+  if (loiterLat && loiterLon && loiterRad && loiterRad > 0
+      && !u.entities.loiter) {
+    _strikeVizEnsureLoiter(u, loiterLat, loiterLon, loiterRad);
+  }
+}
+
+/**
+ * 結束 strike 視覺化，回傳每機統計（給 BDA 對話框用）。
+ * 標籤、loiter 環會淡出；爆炸焦痕保留（戰場標記）。
+ *
+ * @returns {string} JSON 序列化的統計：
+ *   { uavs: [{sysid, callsign, missM, bearingDeg, ttImpactS, impactLat, impactLon}],
+ *     summary: { meanMissM, maxMissM, ttSpreadS, targetLat, targetLon } }
+ */
+function strikeVizEnd() {
+  if (!_strikeViz.active) return JSON.stringify({ uavs: [], summary: {} });
+  _strikeViz.active = false;
+
+  // 收集統計
+  var uavStats = [];
+  var ttImpacts = [];
+  var misses = [];
+  Object.keys(_strikeViz.uavs).forEach(function (sid) {
+    var u = _strikeViz.uavs[sid];
+    var s = u.impactStats;
+    if (s) {
+      uavStats.push({
+        sysid: u.sysid, callsign: u.callsign,
+        missM: s.missM, bearingDeg: s.bearingDeg, ttImpactS: s.ttImpactS,
+        impactLat: s.lat, impactLon: s.lon,
+      });
+      ttImpacts.push(s.ttImpactS);
+      misses.push(s.missM);
+    } else {
+      // 未抵達 IMPACT：用最後位置計算 miss
+      var m = _strikeVizHaversine(
+        u.lat, u.lon, _strikeViz.target.lat, _strikeViz.target.lon
+      );
+      uavStats.push({
+        sysid: u.sysid, callsign: u.callsign,
+        missM: m, bearingDeg: NaN, ttImpactS: NaN,
+        impactLat: u.lat, impactLon: u.lon,
+      });
+    }
+  });
+
+  var summary = {
+    meanMissM: misses.length ? misses.reduce(function (a, b) { return a + b; }, 0) / misses.length : 0,
+    maxMissM:  misses.length ? Math.max.apply(null, misses) : 0,
+    ttSpreadS: ttImpacts.length >= 2 ? (Math.max.apply(null, ttImpacts) - Math.min.apply(null, ttImpacts)) : 0,
+    targetLat: _strikeViz.target.lat,
+    targetLon: _strikeViz.target.lon,
+  };
+
+  // 標籤淡出（loiter 也清掉，但保留爆炸焦痕作為戰場標記）
+  Object.keys(_strikeViz.uavs).forEach(function (sid) {
+    var u = _strikeViz.uavs[sid];
+    if (u.entities.label) {
+      try { viewer.entities.remove(u.entities.label); } catch (_) {}
+      u.entities.label = null;
+    }
+    if (u.entities.loiter) {
+      try { viewer.entities.remove(u.entities.loiter); } catch (_) {}
+      u.entities.loiter = null;
+    }
+  });
+
+  console.log('[Strike VIZ] END — n=' + uavStats.length
+              + ', meanMiss=' + summary.meanMissM.toFixed(1) + 'm'
+              + ', ttSpread=' + summary.ttSpreadS.toFixed(2) + 's');
+
+  return JSON.stringify({ uavs: uavStats, summary: summary });
+}
+
+/**
+ * 完整清掉 strike 視覺化所有 entity（軌跡 / 標籤 / loiter / 爆炸特效）。
+ */
+function _strikeVizClearAll() {
+  Object.keys(_strikeViz.uavs).forEach(function (sid) {
+    var u = _strikeViz.uavs[sid];
+    Object.keys(u.entities).forEach(function (k) {
+      if (u.entities[k]) {
+        try { viewer.entities.remove(u.entities[k]); } catch (_) {}
+      }
+    });
+  });
+  _strikeViz.uavs = {};
+  _strikeViz.effectsEntities.forEach(function (e) {
+    try { viewer.entities.remove(e); } catch (_) {}
+  });
+  _strikeViz.effectsEntities = [];
+  _strikeViz.active = false;
+}
+
+/**
+ * 階段判定：依距離 / 高度 / latched IMPACT
+ *
+ *   POST_IMPACT (sticky)  ← 一旦進入 IMPACT 就不再退回 CRUISE
+ *   IMPACT                ← d < 60m AND alt < 30m
+ *   TERMINAL_DIVE         ← d < 2000m
+ *   CRUISE                ← 其它（含尚未抵達 2km 邊界）
+ */
+function _strikeVizClassifyPhase(u) {
+  if (u.phase === 'IMPACT' || u.phase === 'POST_IMPACT') {
+    // IMPACT 進入 800ms 後改為 POST_IMPACT（靜態紀念色）
+    if (u.phase === 'IMPACT' && Date.now() - u.phaseEnteredAt > 800) {
+      return 'POST_IMPACT';
+    }
+    return u.phase;
+  }
+  if (u.distToTargetM < 60 && u.alt < 30) return 'IMPACT';
+  if (u.distToTargetM < 2000) return 'TERMINAL_DIVE';
+  return 'CRUISE';
+}
+
+/**
+ * 建立該 UAV 的三個基礎 entity：trail polyline + HUD label + loiter（延後）
+ */
+function _strikeVizEnsureEntities(u) {
+  var sid = u.sysid;
+  var baseColor = Cesium.Color.fromCssColorString(u.color);
+
+  // ── 軌跡 polyline（多色段）──
+  u.entities.trail = viewer.entities.add({
+    name: 'Strike-Trail-UAV' + sid,
+    polyline: {
+      positions: new Cesium.CallbackProperty(function () {
+        var s = _strikeViz.uavs[sid];
+        return s ? s.trailPositions : [];
+      }, false),
+      width: 2.5,
+      material: new Cesium.PolylineOutlineMaterialProperty({
+        color: baseColor.withAlpha(0.95),
+        outlineColor: Cesium.Color.BLACK.withAlpha(0.4),
+        outlineWidth: 1,
+      }),
+      arcType: Cesium.ArcType.NONE,
+    },
+  });
+
+  // ── HUD 標籤（漂浮於 UAV 上方 25m）──
+  u.entities.label = viewer.entities.add({
+    name: 'Strike-Label-UAV' + sid,
+    position: new Cesium.CallbackProperty(function () {
+      var s = _strikeViz.uavs[sid];
+      if (!s) return Cesium.Cartesian3.ZERO;
+      return Cesium.Cartesian3.fromDegrees(s.lon, s.lat, s.alt + 25.0);
+    }, false),
+    label: {
+      text: new Cesium.CallbackProperty(function () {
+        var s = _strikeViz.uavs[sid];
+        if (!s) return '';
+        var dKm = s.distToTargetM / 1000.0;
+        var dStr = dKm >= 1 ? dKm.toFixed(2) + 'km' : s.distToTargetM.toFixed(0) + 'm';
+        var etaStr = s.phase === 'POST_IMPACT' ? 'HIT'
+                   : (s.etaS > 0 ? s.etaS.toFixed(0) + 's' : '—');
+        return s.callsign + ' │ ' + s.phase
+             + '\nd=' + dStr + ' │ eta=' + etaStr;
+      }, false),
+      font: 'bold 11px monospace',
+      fillColor: Cesium.Color.WHITE,
+      outlineColor: Cesium.Color.BLACK,
+      outlineWidth: 2,
+      style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+      backgroundColor: new Cesium.CallbackProperty(function () {
+        var s = _strikeViz.uavs[sid];
+        if (!s) return Cesium.Color.BLACK.withAlpha(0.55);
+        var c = Cesium.Color.fromCssColorString(_STRIKE_PHASE_COLORS[s.phase] || '#000');
+        return c.withAlpha(0.55);
+      }, false),
+      showBackground: true,
+      backgroundPadding: new Cesium.Cartesian2(6, 4),
+      pixelOffset: new Cesium.Cartesian2(0, -8),
+      horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+      verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      eyeOffset: new Cesium.Cartesian3(0, 0, -50),
+    },
+  });
+}
+
+/**
+ * 建立 loiter 軌道環（虛線 ellipse，dashed material）
+ */
+function _strikeVizEnsureLoiter(u, lat, lon, radius) {
+  var sid = u.sysid;
+  var baseColor = Cesium.Color.fromCssColorString(u.color);
+  u.entities.loiter = viewer.entities.add({
+    name: 'Strike-Loiter-UAV' + sid,
+    position: Cesium.Cartesian3.fromDegrees(lon, lat, 1.0),
+    ellipse: {
+      semiMajorAxis: radius,
+      semiMinorAxis: radius,
+      material: baseColor.withAlpha(0.06),
+      outline: true,
+      outlineColor: baseColor.withAlpha(0.7),
+      outlineWidth: 1.5,
+      height: 1.0,
+      heightReference: Cesium.HeightReference.NONE,
+    },
+  });
+}
+
+/**
+ * 一次性命中特效：閃光 + 衝擊波擴散 + 持久焦痕。
+ * 同時記錄 impactStats 到 u 上給 BDA 使用。
+ */
+function _strikeVizFireImpact(u) {
+  if (u.impactFired) return;
+  u.impactFired = true;
+
+  var lat = u.lat, lon = u.lon;
+  var elapsedS = (Date.now() - _strikeViz.t0) / 1000.0;
+  // miss = UAV 落點與規劃目標的水平距離
+  var missM = _strikeVizHaversine(
+    lat, lon, _strikeViz.target.lat, _strikeViz.target.lon
+  );
+  var brg = _strikeVizBearingDeg(
+    _strikeViz.target.lat, _strikeViz.target.lon, lat, lon
+  );
+  u.impactStats = {
+    missM: missM, bearingDeg: brg, ttImpactS: elapsedS,
+    lat: lat, lon: lon,
+  };
+
+  // ── 閃光（沿用既有 _strikeAnimateExplosion 但獨立 entity） ──
+  var blast = viewer.entities.add({
+    name: 'Strike-Blast-UAV' + u.sysid,
+    position: Cesium.Cartesian3.fromDegrees(lon, lat, 1.0),
+    ellipse: {
+      semiMajorAxis: 10, semiMinorAxis: 10,
+      material: Cesium.Color.YELLOW.withAlpha(0.9),
+      outline: true,
+      outlineColor: Cesium.Color.ORANGE.withAlpha(0.85),
+      outlineWidth: 2,
+      height: 1.5,
+    },
+  });
+  _strikeViz.effectsEntities.push(blast);
+  _strikeAnimateExplosion(blast, { lat: lat, lon: lon, alt: 0 });
+
+  // ── 衝擊波擴散環（比閃光更大、更快、純外框） ──
+  var shockMaxR = 220;
+  var shockMs = 1400;
+  var shockStart = Date.now();
+  var shock = viewer.entities.add({
+    name: 'Strike-Shock-UAV' + u.sysid,
+    position: Cesium.Cartesian3.fromDegrees(lon, lat, 0.5),
+    ellipse: {
+      semiMajorAxis: 5, semiMinorAxis: 5,
+      material: Cesium.Color.TRANSPARENT,
+      outline: true,
+      outlineColor: Cesium.Color.WHITE.withAlpha(0.95),
+      outlineWidth: 3,
+      height: 0.5,
+    },
+  });
+  _strikeViz.effectsEntities.push(shock);
+  function _shockExpand() {
+    var t = (Date.now() - shockStart) / shockMs;
+    if (t >= 1) {
+      shock.ellipse.outlineColor = Cesium.Color.TRANSPARENT;
+      return;
+    }
+    var eased = 1 - Math.pow(1 - t, 2);  // quad easeOut
+    var r = 5 + (shockMaxR - 5) * eased;
+    var a = 0.95 * (1 - t);
+    shock.ellipse.semiMajorAxis = r;
+    shock.ellipse.semiMinorAxis = r;
+    shock.ellipse.outlineColor = Cesium.Color.WHITE.withAlpha(a);
+    requestAnimationFrame(_shockExpand);
+  }
+  _shockExpand();
+
+  // ── 持久焦痕（深褐色暗影，60s 內逐漸淡化但不完全消失） ──
+  var scorch = viewer.entities.add({
+    name: 'Strike-Scorch-UAV' + u.sysid,
+    position: Cesium.Cartesian3.fromDegrees(lon, lat, 0.2),
+    ellipse: {
+      semiMajorAxis: 55, semiMinorAxis: 45,
+      material: new Cesium.Color(0.15, 0.08, 0.05, 0.75),
+      outline: true,
+      outlineColor: Cesium.Color.BLACK.withAlpha(0.45),
+      outlineWidth: 1,
+      height: 0.3,
+    },
+  });
+  _strikeViz.effectsEntities.push(scorch);
+  var scorchStart = Date.now();
+  function _scorchFade() {
+    var t = (Date.now() - scorchStart) / 60000.0;
+    if (t >= 1) {
+      scorch.ellipse.material = new Cesium.Color(0.18, 0.10, 0.06, 0.30);
+      return;
+    }
+    var a = 0.75 - 0.45 * t;
+    scorch.ellipse.material = new Cesium.Color(0.15, 0.08, 0.05, a);
+    requestAnimationFrame(_scorchFade);
+  }
+  _scorchFade();
+
+  console.log('[Strike VIZ] IMPACT UAV' + u.sysid
+              + ' miss=' + missM.toFixed(1) + 'm bearing=' + brg.toFixed(1) + '°');
+}
+
+// ── 數學 helpers ─────────────────────────────────────────────────────
+
+function _strikeVizHaversine(lat1, lon1, lat2, lon2) {
+  var R = 6371000.0;
+  var dLat = Cesium.Math.toRadians(lat2 - lat1);
+  var dLon = Cesium.Math.toRadians(lon2 - lon1);
+  var a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+        + Math.cos(Cesium.Math.toRadians(lat1))
+        * Math.cos(Cesium.Math.toRadians(lat2))
+        * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function _strikeVizBearingDeg(fromLat, fromLon, toLat, toLon) {
+  var phi1 = Cesium.Math.toRadians(fromLat);
+  var phi2 = Cesium.Math.toRadians(toLat);
+  var dLon = Cesium.Math.toRadians(toLon - fromLon);
+  var y = Math.sin(dLon) * Math.cos(phi2);
+  var x = Math.cos(phi1) * Math.sin(phi2)
+        - Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLon);
+  return (Cesium.Math.toDegrees(Math.atan2(y, x)) + 360) % 360;
+}
 
 // ══════════════════════════════════════════════════════════════════════
 //  靜態路徑渲染（非動畫）— strikeRenderPath()

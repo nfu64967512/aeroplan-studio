@@ -22,13 +22,14 @@ from PyQt6.QtCore import pyqtSignal, QUrl, Qt
 from urllib.parse import unquote
 
 from utils.logger import get_logger
+from ui.resources.tactical_theme import TacticalColors as TC
 
 logger = get_logger()
 
-# ── 顏色常數（與 MapWidget 一致）─────────────────────────────────────
-_REGION_COLORS = ['#08EC91', '#FF6B35', '#3D87FF', '#FFD700', '#FF69B4', '#9B59B6']
-_DRONE_COLORS  = ['#E53935', '#1E88E5', '#43A047', '#FB8C00',
-                  '#8E24AA', '#00ACC1', '#F4511E', '#3949AB']
+# ── 顏色常數（取自 TacticalColors 識別色板）──────────────────────
+# MIL-STD-1472H 5.8.5 允許多目標識別色板；統一從中央 palette 取得
+_REGION_COLORS = list(TC.REGION_PALETTE)
+_DRONE_COLORS  = list(TC.UAV_PALETTE)
 
 
 
@@ -98,6 +99,14 @@ class CesiumPage(QWebEnginePage):
                         pass
             self.widget.on_nfz_poly_done(vertices)
             return False
+        if url_str.startswith('pyqt://nfz_circle_done/'):
+            try:
+                parts = url_str.replace('pyqt://nfz_circle_done/', '').split('/')
+                lat, lon, radius = float(parts[0]), float(parts[1]), float(parts[2])
+                self.widget.on_nfz_circle_done(lat, lon, radius)
+            except Exception as e:
+                print(f'❌ [Cesium] 解析 NFZ 圓形失敗: {e}')
+            return False
         return True
 
 
@@ -133,6 +142,14 @@ class CesiumMapWidget(QWidget):
         self._fw_result: Optional[dict] = None   # fw_mission_result，用於 3D 高度
         self._last_altitude: float = 50.0        # 多旋翼路徑高度
         self._clamp_basic: bool = False          # 基本演算法 grid 是否貼地
+        # ── 地形跟隨（terrain-following）─────────────────────────────
+        # _terrain_follow_agl > 0 表示啟用：每個航點高度改寫為
+        #     alt = DEM(lat, lon) + _terrain_follow_agl
+        # 若 _dem_manager 為 None 則此模式無效（fallback 到原始 alt）
+        self._dem_manager = None
+        self._terrain_follow_agl: float = 0.0    # 0 = 停用
+        # Geofence — 強制飛安：每次顯示路徑時自動建立並渲染
+        self._geofence = None
         self._strike_marking: bool = False       # 打擊目標標記模式
 
         self._cesium_html_file = None
@@ -247,16 +264,83 @@ class CesiumMapWidget(QWidget):
         """執行 JavaScript（非同步）"""
         self._page.runJavaScript(script)
 
-    @staticmethod
-    def _pts_to_json(pts, default_alt: float = 50.0) -> str:
-        """將 [(lat,lon)] 或 [(lat,lon,alt)] 序列化為 JSON"""
+    def _pts_to_json(self, pts, default_alt: float = 50.0) -> str:
+        """
+        將 [(lat,lon)] 或 [(lat,lon,alt)] 序列化為 JSON。
+
+        若啟用地形跟隨（_terrain_follow_agl > 0 且 _dem_manager 存在）：
+        每個航點高度改寫為 DEM(lat, lon) + AGL，保持固定離地高度。
+        否則使用原始 alt（或 default_alt fallback）。
+        """
+        agl = float(self._terrain_follow_agl)
+        use_tf = (agl > 0.0 and self._dem_manager is not None
+                   and getattr(self._dem_manager, '_loaded', False))
         result = []
         for p in pts:
-            if len(p) >= 3:
-                result.append({'lat': p[0], 'lon': p[1], 'alt': p[2]})
+            lat, lon = p[0], p[1]
+            base_alt = p[2] if len(p) >= 3 else default_alt
+            if use_tf:
+                terrain = self._dem_manager.get_elevation(lat, lon)
+                alt = terrain + agl
             else:
-                result.append({'lat': p[0], 'lon': p[1], 'alt': default_alt})
+                alt = base_alt
+            result.append({'lat': lat, 'lon': lon, 'alt': alt})
         return json.dumps(result)
+
+    # ─────────────────────────────────────────────────────────────────
+    # Geofence（電子圍籬）— 強制飛安政策
+    # ─────────────────────────────────────────────────────────────────
+    def set_geofence(self, geofence) -> None:
+        """
+        顯示矩形電子圍籬。
+        geofence: mission.geofence_manager.Geofence（4 vertices + alt_min/max）
+        """
+        if geofence is None:
+            self.clear_geofence()
+            return
+        verts = [{'lat': float(la), 'lon': float(lo)}
+                 for (la, lo) in geofence.vertices]
+        payload = {
+            'vertices': verts,
+            'alt_min':  float(geofence.alt_min_m),
+            'alt_max':  float(geofence.alt_max_m),
+            'method':   getattr(geofence, 'method', 'aabb'),
+        }
+        self._geofence = geofence
+        self._js(f'setGeofence({json.dumps(json.dumps(payload))})')
+
+    def clear_geofence(self) -> None:
+        self._geofence = None
+        self._js('clearGeofence()')
+
+    # ─────────────────────────────────────────────────────────────────
+    # 地形跟隨（Terrain Following at constant AGL）
+    # ─────────────────────────────────────────────────────────────────
+    def set_dem_manager(self, dem_manager):
+        """注入 DEMTerrainManager（由 main_window 在 DEM 載入後呼叫）。"""
+        self._dem_manager = dem_manager
+
+    def set_terrain_following(self, agl_meters: float):
+        """
+        啟用地形跟隨：每個航點高度改寫為 DEM + AGL。
+        agl_meters <= 0 → 停用（沿用原始 alt 或固定海拔）。
+        必須先呼叫 set_dem_manager() 才會生效。
+        """
+        self._terrain_follow_agl = max(0.0, float(agl_meters))
+        # 啟用時強制關閉舊的「貼地」模式，避免兩者衝突（貼地會覆蓋我們的 AGL alt）
+        if self._terrain_follow_agl > 0:
+            self._js('clampToGround = false;')
+            self._clamp_basic = False
+        self._refresh_paths()
+
+    def clear_terrain_following(self):
+        """關閉地形跟隨。"""
+        self._terrain_follow_agl = 0.0
+        self._refresh_paths()
+
+    @property
+    def terrain_following_agl(self) -> float:
+        return self._terrain_follow_agl
 
     # ─────────────────────────────────────────────────────────────────
     # URL Bridge 回調（由 CesiumPage 呼叫）
@@ -274,6 +358,23 @@ class CesiumMapWidget(QWidget):
 
     def on_nfz_poly_done(self, vertices):
         self.nfz_polygon_drawn.emit(vertices)
+
+    def on_nfz_circle_done(self, lat: float, lon: float, radius_m: float):
+        """JS 端拖曳圓形完成 → 發 nfz_circle_drawn signal"""
+        self.nfz_circle_drawn.emit(lat, lon, radius_m)
+
+    # ── NFZ 繪製模式（給 MainWindow / DualMapWidget 統一介面）─────────
+    def set_nfz_polygon_draw_mode(self, enabled: bool):
+        """3D Cesium 端進入多邊形繪製模式：左鍵點頂點、雙擊完成。"""
+        self._js(f'setNFZPolygonDrawMode({"true" if enabled else "false"})')
+
+    def finish_nfz_polygon(self):
+        """外部觸發完成多邊形（給「完成多邊形」按鈕用）"""
+        self._js('finishNFZPolygon()')
+
+    def set_nfz_circle_draw_mode(self, enabled: bool):
+        """3D Cesium 端進入圓形拖曳模式：按住左鍵從圓心拖曳、放開完成。"""
+        self._js(f'setNFZCircleDrawMode({"true" if enabled else "false"})')
 
     # ─────────────────────────────────────────────────────────────────
     # 狀態同步（由 DualMapWidget 呼叫，切換到 3D 時同步 2D 狀態）
@@ -322,7 +423,16 @@ class CesiumMapWidget(QWidget):
 
             dashed = '轉移' in tooltip or 'transfer' in tooltip.lower()
             label_escaped = json.dumps(tooltip)
-            clamp = 'true' if getattr(self, '_clamp_basic', False) else 'false'
+            # forceClamp 三態：
+            #   TF 啟用 → '"off"' 強制不貼地（航點 alt 已含 DEM+AGL）
+            #   _clamp_basic → 'true' 強制貼地（舊版基本演算法）
+            #   其餘    → 'false' = 跟隨 JS 端 clampToGround 全域設定
+            if self._terrain_follow_agl > 0:
+                clamp = '"off"'
+            elif getattr(self, '_clamp_basic', False):
+                clamp = 'true'
+            else:
+                clamp = 'false'
             self._js(f'addPath({json.dumps(pts_json)},{json.dumps(color)},10,{label_escaped},{str(dashed).lower()},{clamp})')
 
         # 轉場路徑（虛線）
@@ -357,7 +467,7 @@ class CesiumMapWidget(QWidget):
     def _refresh_overlays(self):
         if self._circle_center:
             lat, lon = self._circle_center
-            self._js(f'setCircleOverlay({lat},{lon},{self._circle_radius_m},"#2196F3")')
+            self._js(f'setCircleOverlay({lat},{lon},{self._circle_radius_m},{json.dumps(TC.NEUTRAL)})')
         if self._home_point:
             h_lat, h_lon = self._home_point
             self._js(f'setHomePoint({h_lat},{h_lon})')
@@ -405,17 +515,17 @@ class CesiumMapWidget(QWidget):
         # 起飛段（金黃）
         if len(takeoff) >= 2:
             pts_json = self._pts_to_json(takeoff, default_alt=50.0)
-            self._js(f'addPath({json.dumps(pts_json)},"#FFD700",12,"起飛爬升",false)')
+            self._js(f'addPath({json.dumps(pts_json)},{json.dumps(TC.FRIENDLY)},12,"起飛爬升",false)')
 
         # 任務段（藍）
         if len(mission) >= 2:
             pts_json = self._pts_to_json(mission, default_alt=100.0)
-            self._js(f'addPath({json.dumps(pts_json)},"#3D87FF",10,"任務掃描",false)')
+            self._js(f'addPath({json.dumps(pts_json)},{json.dumps(TC.NEUTRAL)},10,"任務掃描",false)')
 
         # 降落段（橙）
         if len(landing) >= 2:
             pts_json = self._pts_to_json(landing, default_alt=80.0)
-            self._js(f'addPath({json.dumps(pts_json)},"#FF6B35",10,"五邊進場",false)')
+            self._js(f'addPath({json.dumps(pts_json)},{json.dumps(TC.WARNING)},10,"五邊進場",false)')
 
         # 飛向路徑
         self._js('flyToScene()')
@@ -459,7 +569,7 @@ class CesiumMapWidget(QWidget):
         else:
             mission_paths = [m for m in mission if m and len(m) >= 2]
 
-        _SCAN_COLORS = ['#3D87FF', '#08EC91', '#FF69B4', '#9B59B6', '#00BCD4', '#FF4500']
+        _SCAN_COLORS = list(TC.REGION_PALETTE)
 
         self.paths = []
         self.path_colors = []
@@ -467,7 +577,7 @@ class CesiumMapWidget(QWidget):
 
         if takeoff and len(takeoff) >= 2:
             self.paths.append(takeoff)
-            self.path_colors.append('#FFD700')
+            self.path_colors.append(TC.FG_EMPHASIS)
             self._path_tooltips.append('起飛爬升路徑')
 
         for i, mp in enumerate(mission_paths):
@@ -478,7 +588,7 @@ class CesiumMapWidget(QWidget):
 
         if landing and len(landing) >= 2:
             self.paths.append(landing)
-            self.path_colors.append('#FF6B35')
+            self.path_colors.append(TC.WARNING)
             self._path_tooltips.append('五邊進場路徑')
 
         # 如果已有 fw_result，用高度完整版渲染
@@ -493,7 +603,7 @@ class CesiumMapWidget(QWidget):
         self._refresh_nfz()
 
     def draw_circle_overlay(self, center_lat: float, center_lon: float,
-                             radius_m: float, color: str = '#2196F3'):
+                             radius_m: float, color: str = None):
         self._circle_center   = (center_lat, center_lon)
         self._circle_radius_m = radius_m
         self._js(f'setCircleOverlay({center_lat},{center_lon},{radius_m},{json.dumps(color)})')
@@ -533,9 +643,13 @@ class CesiumMapWidget(QWidget):
             logger.error(f'Cesium 群飛顯示失敗: {e}')
 
     def display_swarm_raw(self, swarm_data: dict):
-        """群飛原始資料顯示（3D 版）— 支援 DCCPP 五階段分色：
-        TAKEOFF（綠）/ ENTRY（青）/ OPERATION（無人機主色）/
-        TRANSFER（主色長虛線）/ LANDING（橘 dash-dot）。
+        """群飛原始資料顯示（3D 版）— **1 架 UAV = 1 種顏色、全實線**。
+
+        segment 類型僅透過「線寬」區分，不再用虛線（避免視覺凌亂）：
+            TAKEOFF / LANDING           → UAV 色，較粗實線（起降段）
+            OPERATION                   → UAV 色，主寬實線（偵蒐主體）
+            ENTRY / TRANSFER            → UAV 色，較細實線（dead-heading）
+
         點可為 (lat, lon) 或 (lat, lon, alt)。
         """
         try:
@@ -547,39 +661,40 @@ class CesiumMapWidget(QWidget):
                          'alt': (p[2] if len(p) > 2 else default_alt)}
                         for p in seg]
 
-            def _add(seg, color, width, label, dashed, default_alt=80.0):
+            def _add(seg, color, width, label, default_alt=80.0):
+                """全實線繪製單一 segment（dashed 永為 False）"""
                 if not seg or len(seg) < 2:
                     return
                 pts = _to_pts(seg, default_alt)
                 self._js(
                     f'addPath({json.dumps(json.dumps(pts))},'
-                    f'{json.dumps(color)},{width},{json.dumps(label)},'
-                    f'{"true" if dashed else "false"})'
+                    f'{json.dumps(color)},{width},{json.dumps(label)},false)'
                 )
 
             for drone_info in drones:
                 drone_id = drone_info.get('drone_id', 1)
-                color    = _DRONE_COLORS[(drone_id - 1) % len(_DRONE_COLORS)]
+                # 整架 UAV 統一用一種色 — 由 drone_id 決定 (UAV 1 = palette[0], etc.)
+                color = _DRONE_COLORS[(drone_id - 1) % len(_DRONE_COLORS)]
 
-                # TAKEOFF — 金黃實線
+                # TAKEOFF — 較粗（起飛段視覺強調）
                 for seg in drone_info.get('takeoff_paths', []) or []:
-                    _add(seg, '#FFD700', 8, f'D{drone_id} 起飛', False, 30.0)
+                    _add(seg, color, 9, f'D{drone_id} 起飛', 30.0)
 
-                # ENTRY — 青色實線
+                # ENTRY — 較細（dead-heading 段）
                 for seg in drone_info.get('entry_paths', []) or []:
-                    _add(seg, '#26C6DA', 6, f'D{drone_id} 進入', False)
+                    _add(seg, color, 5, f'D{drone_id} 進入')
 
-                # OPERATION — 無人機主色，最粗實線
+                # OPERATION — 主寬（偵蒐主體）
                 for seg in drone_info.get('operation_paths', []) or []:
-                    _add(seg, color, 8, f'D{drone_id} 作業', False)
+                    _add(seg, color, 8, f'D{drone_id} 作業')
 
-                # TRANSFER — 主色虛線
+                # TRANSFER — 較細（U-turn dead-heading）
                 for seg in drone_info.get('transfer_paths', []) or []:
-                    _add(seg, color, 5, f'D{drone_id} 轉移', True)
+                    _add(seg, color, 5, f'D{drone_id} 轉移')
 
-                # LANDING — 橘色實線
+                # LANDING — 中等寬（降落段收束）
                 for seg in drone_info.get('landing_paths', []) or []:
-                    _add(seg, '#FF6B35', 7, f'D{drone_id} 降落', False, 40.0)
+                    _add(seg, color, 7, f'D{drone_id} 降落', 40.0)
 
             self._js('flyToScene()')
         except Exception as e:
@@ -902,16 +1017,36 @@ class CesiumMapWidget(QWidget):
                         fov_radius: float = 50.0,
                         heading_deg: float = 0.0,
                         pitch_deg: float = 0.0,
-                        roll_deg: float = 0.0):
-        """更新 FOV 光錐位置與姿態"""
+                        roll_deg: float = 0.0,
+                        sysid: int = 1,
+                        hfov_deg: float = 0.0,
+                        vfov_deg: float = 0.0,
+                        mount_angle_deg: float = 0.0):
+        """更新指定 UAV 的 FOV 光錐位置與姿態（多機支援）
+
+        Args:
+            lat / lon / alt   : UAV 位置（度、度、公尺）
+            fov_radius        : Legacy 圓錐地面投影半徑（公尺），HFOV/VFOV=0 時使用
+            heading_deg       : 航向角（度，順時針自北）
+            pitch_deg         : 俯仰角（度），legacy 模式用於地面投影偏移
+            roll_deg          : 滾轉角（度）
+            sysid             : UAV 系統 ID（1-12）
+            hfov_deg          : 水平視場角全角（度）；> 0 啟用梯形角錐 frustum 模式
+            vfov_deg          : 垂直視場角全角（度）；> 0 啟用梯形角錐 frustum 模式
+            mount_angle_deg   : 感測器掛載角 α_m（度）；0 = nadir、> 0 前傾安裝
+        """
         self._js(
-            f'updateFOVCone({lat},{lon},{alt},{fov_radius},'
-            f'{heading_deg},{pitch_deg},{roll_deg})'
+            f'updateFOVCone({int(sysid)},{lat},{lon},{alt},{fov_radius},'
+            f'{heading_deg},{pitch_deg},{roll_deg},'
+            f'{hfov_deg},{vfov_deg},{mount_angle_deg})'
         )
 
-    def clear_fov_cone(self):
-        """清除 FOV 光錐"""
-        self._js('clearFOVCone()')
+    def clear_fov_cone(self, sysid: int = None):
+        """清除 FOV 光錐 (sysid=None 清全部，否則只清指定 UAV)"""
+        if sysid is None:
+            self._js('clearFOVCone()')
+        else:
+            self._js(f'clearFOVCone({int(sysid)})')
 
     def init_sar_heatmap(self, lat_min: float, lat_max: float,
                          lon_min: float, lon_max: float,
@@ -925,9 +1060,18 @@ class CesiumMapWidget(QWidget):
         )
 
     def update_heatmap(self, uav_lat: float, uav_lon: float,
-                       fov_radius: float = 50.0):
-        """更新搜救熱力圖（UAV 光錐掃過時更新 COS）"""
-        self._js(f'updateHeatmap({uav_lat},{uav_lon},{fov_radius})')
+                       fov_radius: float = 50.0,
+                       sysid: int = 0):
+        """更新搜救熱力圖（UAV 光錐掃過時更新 COS）
+
+        Args:
+            uav_lat / uav_lon : UAV 經緯度
+            fov_radius        : Legacy 圓形覆蓋半徑（公尺），sysid=0 時用
+            sysid             : > 0 時改用該機 frustum 真實梯形覆蓋判定
+                                （依 HFOV/VFOV/掛載角即時投影，視角變寬則
+                                掃描範圍同步變寬）
+        """
+        self._js(f'updateHeatmap({uav_lat},{uav_lon},{fov_radius},{int(sysid)})')
 
     def clear_sar_heatmap(self):
         """清除搜救熱力圖"""
@@ -991,6 +1135,96 @@ class CesiumMapWidget(QWidget):
         """清除所有打擊視覺化"""
         self._strike_marking = False
         self._js('strikeClearAll()')
+
+    # ── Fence Zone（統一 NFZ / 威脅 / 作業圍籬視覺化）───────────────
+    def add_fence_zone(self, zone_id: str, vertices: list,
+                       alt_min: float, alt_max: float,
+                       name: str, color_hex: str,
+                       category: str, inclusion: bool):
+        """新增 / 更新 fence-style 區域視覺。
+
+        Args:
+            zone_id      : 唯一 ID（從 FenceZone.id 來）
+            vertices     : [(lat, lon), ...]  圓形請先在 Python 端展開為 N 邊形
+            alt_min/max  : 海拔上下限（公尺）
+            name         : 顯示名稱
+            color_hex    : '#RRGGBB' 顏色（依 category 而定）
+            category     : 'NFZ' | 'THREAT' | 'GEOFENCE'
+            inclusion    : True=圍住飛機在內、False=禁止進入
+        """
+        verts_js = json.dumps([
+            {'lat': float(lat), 'lon': float(lon)} for lat, lon in vertices
+        ])
+        self._js(
+            f'addFenceZone({json.dumps(zone_id)},{verts_js},'
+            f'{float(alt_min)},{float(alt_max)},'
+            f'{json.dumps(name)},{json.dumps(color_hex)},'
+            f'{json.dumps(category)},{"true" if inclusion else "false"})'
+        )
+
+    def remove_fence_zone(self, zone_id: str):
+        self._js(f'removeFenceZone({json.dumps(zone_id)})')
+
+    def clear_fence_zones(self):
+        self._js('clearAllFenceZones()')
+
+    # ── Strike Visual Overlay — 攻擊執行階段即時視覺化 ──────────────
+    def strike_viz_begin(self, target_lat: float, target_lon: float,
+                         target_alt: float = 0.0):
+        """啟動攻擊視覺化（清空前一輪殘留 + 開始接收 telemetry 更新）。"""
+        self._js(
+            f'strikeVizBegin({float(target_lat)},{float(target_lon)},'
+            f'{float(target_alt)})'
+        )
+
+    def strike_viz_update_uav(self, sysid: int,
+                              lat: float, lon: float, alt: float,
+                              heading_deg: float,
+                              callsign: str = '',
+                              planned_eta_s: float = 0.0,
+                              loiter_lat: float = 0.0,
+                              loiter_lon: float = 0.0,
+                              loiter_radius_m: float = 0.0):
+        """每筆 telemetry 呼叫一次 — 階段判定 + 軌跡 + HUD label。
+
+        Args:
+            sysid              : UAV 系統 ID
+            lat/lon/alt        : UAV 目前 ENU 位置
+            heading_deg        : 航向角（度）
+            callsign           : 顯示用呼號（'UAV-3' 等）
+            planned_eta_s      : 規劃命中時刻（從 strike_viz_begin 後幾秒）
+            loiter_lat/lon     : 該 UAV 規劃 loiter 點（>0 → 繪製軌道環）
+            loiter_radius_m    : loiter 半徑（公尺）
+        """
+        cs = json.dumps(callsign or f'UAV-{int(sysid)}')
+        self._js(
+            f'strikeVizUpdateUav({int(sysid)},'
+            f'{float(lat)},{float(lon)},{float(alt)},{float(heading_deg)},'
+            f'{cs},{float(planned_eta_s)},'
+            f'{float(loiter_lat)},{float(loiter_lon)},{float(loiter_radius_m)})'
+        )
+
+    def strike_viz_end(self, callback=None):
+        """結束攻擊視覺化，可選 callback(stats_json: str) 接收 BDA 統計。
+
+        若提供 callback，會 async 取回 JS 端 `strikeVizEnd()` 的 JSON 結果
+        並轉成 dict 後呼叫 callback({'uavs': [...], 'summary': {...}})。
+        """
+        if callback is None:
+            self._js('strikeVizEnd()')
+            return
+        import json as _json
+
+        def _wrap(result_json):
+            try:
+                if isinstance(result_json, str) and result_json:
+                    callback(_json.loads(result_json))
+                else:
+                    callback({'uavs': [], 'summary': {}})
+            except Exception:
+                callback({'uavs': [], 'summary': {}})
+
+        self._page.runJavaScript('strikeVizEnd()', _wrap)
 
     # ── VTOL 3D 軌跡視覺化 ────────────────────────────────────────
     def draw_vtol_swarm_paths(self, uav_data_list: list):

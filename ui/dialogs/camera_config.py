@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 
 from sensors import CameraDatabase, CameraCalculator, SurveyParameters
+from ui.resources.aeroplan_theme.widgets import IconButton
 from utils.logger import get_logger
 
 logger = get_logger()
@@ -64,14 +65,14 @@ class CameraConfigDialog(QDialog):
         # 按鈕
         button_layout = QHBoxLayout()
         
-        calc_btn = QPushButton("📊 計算航線參數")
+        calc_btn = IconButton('tool', '計算航線參數', tone='warn')
         calc_btn.clicked.connect(self.calculate_parameters)
         button_layout.addWidget(calc_btn)
-        
-        apply_btn = QPushButton("✓ 應用設定")
+
+        apply_btn = IconButton('confirm', '應用設定', tone='primary')
         apply_btn.clicked.connect(self.apply_settings)
         button_layout.addWidget(apply_btn)
-        
+
         close_btn = QPushButton("關閉")
         close_btn.clicked.connect(self.close)
         button_layout.addWidget(close_btn)

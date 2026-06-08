@@ -18,6 +18,7 @@ import os
 
 from mission.mission_manager import Mission
 from mission.mavlink_exporter import MAVLinkExporter, ExportFormat, ExportHelper
+from ui.resources.aeroplan_theme.widgets import IconButton
 
 
 class ExportDialog(QDialog):
@@ -114,7 +115,8 @@ class ExportDialog(QDialog):
                 f"時間: {stats.get('estimated_time_s', 0):.0f} s"
             )
             stats_label = QLabel(stats_text)
-            stats_label.setStyleSheet("color: #666;")
+            stats_label.setProperty('role', 'caption')
+            stats_label.style().polish(stats_label)
             info_layout.addRow("統計:", stats_label)
         
         info_group.setLayout(info_layout)
@@ -145,7 +147,8 @@ class ExportDialog(QDialog):
             "可用變數: {mission_name}, {timestamp}, {date}, {index}\n"
             "範例: mission_{date}_{index}"
         )
-        hint_label.setStyleSheet("color: #888; font-size: 9px;")
+        hint_label.setProperty('role', 'caption')
+        hint_label.style().polish(hint_label)
         hint_label.setWordWrap(True)
         output_layout.addRow("", hint_label)
         
@@ -205,7 +208,8 @@ class ExportDialog(QDialog):
             
             # 說明文字
             desc_label = QLabel(f"  └─ {desc}")
-            desc_label.setStyleSheet("color: #666; font-size: 9px; margin-left: 20px;")
+            desc_label.setProperty('role', 'caption')
+            desc_label.style().polish(desc_label)
             
             format_layout.addWidget(cb)
             format_layout.addWidget(desc_label)
@@ -315,24 +319,13 @@ class ExportDialog(QDialog):
         
         # 提示文字
         hint = QLabel("將生成以下檔案：")
-        hint.setStyleSheet("font-weight: bold; color: #2196F3;")
+        hint.setProperty('role', 'emphasis')
+        hint.style().polish(hint)
         layout.addWidget(hint)
-        
-        # 檔案列表
+
+        # 檔案列表（QListWidget 走全域 QSS 預設樣式，與 dark theme 統一）
         self.preview_list = QListWidget()
         self.preview_list.setMaximumHeight(120)
-        self.preview_list.setStyleSheet("""
-            QListWidget {
-                background-color: #f5f5f5;
-                border: 1px solid #ddd;
-                border-radius: 3px;
-                font-family: 'Consolas', monospace;
-                font-size: 9px;
-            }
-            QListWidget::item {
-                padding: 2px;
-            }
-        """)
         layout.addWidget(self.preview_list)
         
         group.setLayout(layout)
@@ -344,30 +337,15 @@ class ExportDialog(QDialog):
         
         # 左側資訊
         self.status_label = QLabel("")
-        self.status_label.setStyleSheet("color: #666;")
+        self.status_label.setProperty('role', 'caption')
+        self.status_label.style().polish(self.status_label)
         layout.addWidget(self.status_label)
-        
+
         layout.addStretch()
-        
-        # 匯出按鈕
-        self.export_btn = QPushButton("匯出")
+
+        # 匯出按鈕（IconButton 走 success tone，hover/disabled 由全域 QSS 處理）
+        self.export_btn = IconButton('export', '匯出', tone='success')
         self.export_btn.setMinimumWidth(100)
-        self.export_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                font-weight: bold;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-            }
-        """)
         self.export_btn.clicked.connect(self.do_export)
         layout.addWidget(self.export_btn)
         

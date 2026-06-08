@@ -1,0 +1,562 @@
+/* ──────────────────────────────────────────────────────────────────
+   AeroPlan Studio — Global stylesheet
+   Loaded by ui/resources/aeroplan_theme/apply_theme(app).
+   All {{TOKEN}} placeholders are substituted at runtime from tokens.py.
+   ────────────────────────────────────────────────────────────────── */
+
+/* ─── Base ──────────────────────────────────────────────────────── */
+QWidget {
+    background: {{BG_PRIMARY}};
+    color: {{FG}};
+    font-family: {{FONT_SANS}};
+    font-size: 11px;
+    selection-background-color: {{NEUTRAL}};
+    selection-color: {{BG_PRIMARY}};
+}
+
+QMainWindow, QDialog {
+    background: {{BG_PRIMARY}};
+}
+
+QToolTip {
+    background: {{BG_ELEVATED}};
+    color: {{FG_EMPHASIS}};
+    border: 1px solid {{BORDER_STRONG}};
+    padding: 4px 8px;
+    font-family: {{FONT_MONO}};
+    font-size: 11px;
+}
+
+/* ─── Frames / GroupBox ─────────────────────────────────────────── */
+QFrame {
+    background: {{BG_SECONDARY}};
+    border: 1px solid {{BORDER}};
+    border-radius: 6px;
+}
+QFrame[noBorder="true"] {
+    border: none;
+    background: transparent;
+}
+
+QGroupBox {
+    background: {{BG_SECONDARY}};
+    border: 1px solid {{BORDER}};
+    border-radius: 6px;
+    margin-top: 14px;
+    padding: 10px 10px 8px;
+    font-family: {{FONT_CONDENSED}};
+    font-weight: 700;
+    font-size: 11px;
+    color: {{FG}};
+    letter-spacing: 0.8px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    padding: 0 6px;
+    left: 10px;
+    color: {{NEUTRAL}};
+    background: {{BG_SECONDARY}};
+}
+
+/* ─── Labels ─────────────────────────────────────────────────────── */
+QLabel {
+    background: transparent;
+    border: none;
+    color: {{FG}};
+}
+QLabel[role="caption"]   { color: {{FG_MUTED}}; font-size: 10px; }
+QLabel[role="emphasis"]  { color: {{FG_EMPHASIS}}; font-family: {{FONT_MONO}}; font-weight: 700; }
+QLabel[role="hostile"]   { color: {{HOSTILE}}; font-family: {{FONT_CONDENSED}}; font-weight: 700; letter-spacing: 1px; }
+QLabel[role="friendly"]  { color: {{FRIENDLY}}; font-family: {{FONT_CONDENSED}}; font-weight: 700; letter-spacing: 1px; }
+QLabel[role="warning"]   { color: {{WARNING}}; font-family: {{FONT_CONDENSED}}; font-weight: 700; letter-spacing: 1px; }
+QLabel[role="value"] {
+    font-family: {{FONT_MONO}};
+    font-weight: 700;
+    font-size: 18px;        /* 1472H Table XVIII floor */
+    color: #e3f2fd;
+}
+
+/* ─── Buttons (legacy QPushButton) ──────────────────────────────── */
+QPushButton {
+    background: {{BG_ELEVATED}};
+    color: {{FG}};
+    border: 1px solid {{BORDER}};
+    border-radius: 4px;
+    padding: 6px 14px;
+    min-height: 30px;
+    font-family: {{FONT_SANS}};
+    font-weight: 600;
+    font-size: 12px;
+}
+QPushButton:hover    { background: {{BORDER}}; border-color: {{BORDER_STRONG}}; }
+QPushButton:pressed  { background: {{BG_SECONDARY}}; }
+QPushButton:disabled { background: #1a1f2e; color: {{FG_MUTED}}; border-color: {{BORDER_SUBTLE}}; }
+
+/* Toned IconButton variants（合併 ADOS accent 主按鈕） */
+QPushButton#btnPrimary  { background: {{ACCENT}}; color: {{FG}}; border-color: {{ACCENT}}; }
+QPushButton#btnPrimary:hover  { background: {{ACCENT_HOVER}}; border-color: {{ACCENT_HOVER}}; }
+QPushButton#btnSuccess  { background: {{FRIENDLY_DEEP}}; color: #fff; border-color: #1b5e20; }
+QPushButton#btnSuccess:hover  { background: {{FRIENDLY}}; color: #04220c; }
+QPushButton#btnDanger   { background: {{HOSTILE_DEEP}};  color: #fff; border-color: #8e0000; }
+QPushButton#btnDanger:hover   { background: {{HOSTILE}}; }
+QPushButton#btnWarn     { background: {{WARNING}};       color: #1c1208; border-color: #cc7700; }
+QPushButton#btnWarn:hover     { background: {{WARNING_DEEP}}; color: #fff; }
+QPushButton#btnPurple   { background: {{PURPLE}};        color: #fff; border-color: #4a148c; }
+QPushButton#btnPurple:hover   { background: #7B1FA2; }
+QPushButton#btnOrange   { background: {{ORANGE}};        color: #fff; border-color: #a82c00; }
+QPushButton#btnOrange:hover   { background: #E64A19; }
+QPushButton#btnNeutral  { background: #37474f; color: {{FG}}; border-color: #263238; }
+QPushButton#btnNeutral:hover  { background: #455a64; }
+QPushButton#btnGhost    { background: {{BG_ELEVATED}}; color: {{FG}}; border-color: {{BORDER}}; }
+QPushButton#btnGhost:hover    { background: {{BG_SECONDARY}}; border-color: {{BORDER_STRONG}}; }
+
+QPushButton[compact="true"] { min-height: 26px; padding: 4px 10px; font-size: 11px; }
+
+/* ─── ADOS Hero CTA（lime；全畫面只允許 1 個）──────────────────── */
+QPushButton#btnHero {
+    background: {{ACCENT_2}};
+    color: {{BG_PRIMARY}};
+    border: 1px solid {{ACCENT_2}};
+    border-radius: 4px;
+    padding: 8px 20px;
+    min-height: 36px;
+    font-family: {{FONT_DISPLAY}};
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.4px;
+}
+QPushButton#btnHero:hover    { background: #e8f96a; border-color: #e8f96a; }
+QPushButton#btnHero:pressed  { background: #c7d937; border-color: #c7d937; }
+QPushButton#btnHero:disabled { background: #4a4f1a; color: #8a8a8a; border-color: #4a4f1a; }
+
+/* ─── ADOS Button variants — Phase L make_button() 對應 ──────────
+   Variant 透過 dynamic property [btnVariant="..."] 選取，
+   Size 透過 [btnSize="..."] 選取。共 7 × 4 = 28 種狀態。 */
+
+/* primary（藍 accent） */
+QPushButton[btnVariant="primary"] {
+    background: {{ACCENT}};
+    color: {{FG}};
+    border: 1px solid {{ACCENT}};
+    border-radius: 4px;
+    font-family: {{FONT_SANS}};
+    font-weight: 600;
+}
+QPushButton[btnVariant="primary"]:hover   { background: {{ACCENT_HOVER}}; border-color: {{ACCENT_HOVER}}; }
+QPushButton[btnVariant="primary"]:pressed { background: #2a6acc; border-color: #2a6acc; }
+QPushButton[btnVariant="primary"]:disabled{ background: #1a2840; color: {{FG_MUTED}}; border-color: #1a2840; }
+
+/* secondary（電梯灰） */
+QPushButton[btnVariant="secondary"] {
+    background: {{BG_ELEVATED}};
+    color: {{FG}};
+    border: 1px solid {{BORDER}};
+    border-radius: 4px;
+    font-family: {{FONT_SANS}};
+    font-weight: 600;
+}
+QPushButton[btnVariant="secondary"]:hover   { background: #1f1f1f; border-color: {{BORDER_STRONG}}; }
+QPushButton[btnVariant="secondary"]:pressed { background: {{BG_SECONDARY}}; }
+QPushButton[btnVariant="secondary"]:disabled{ background: #0e0e0e; color: {{FG_MUTED}}; border-color: {{BORDER_SUBTLE}}; }
+
+/* outline（透明 + 邊框） */
+QPushButton[btnVariant="outline"] {
+    background: transparent;
+    color: {{FG}};
+    border: 1px solid {{BORDER}};
+    border-radius: 4px;
+    font-family: {{FONT_SANS}};
+    font-weight: 600;
+}
+QPushButton[btnVariant="outline"]:hover   { background: {{BG_ELEVATED}}; border-color: {{BORDER_STRONG}}; }
+QPushButton[btnVariant="outline"]:pressed { background: {{BG_SECONDARY}}; }
+QPushButton[btnVariant="outline"]:disabled{ color: {{FG_MUTED}}; border-color: {{BORDER_SUBTLE}}; }
+
+/* ghost（純透明） */
+QPushButton[btnVariant="ghost"] {
+    background: transparent;
+    color: {{FG}};
+    border: 1px solid transparent;
+    border-radius: 4px;
+    font-family: {{FONT_SANS}};
+    font-weight: 600;
+}
+QPushButton[btnVariant="ghost"]:hover   { background: {{BG_ELEVATED}}; }
+QPushButton[btnVariant="ghost"]:pressed { background: {{BG_SECONDARY}}; }
+QPushButton[btnVariant="ghost"]:disabled{ color: {{FG_MUTED}}; }
+
+/* destructive（1472H 紅，動作不可逆） */
+QPushButton[btnVariant="destructive"] {
+    background: {{HOSTILE_DEEP}};
+    color: #fff;
+    border: 1px solid {{HOSTILE_DEEP}};
+    border-radius: 4px;
+    font-family: {{FONT_SANS}};
+    font-weight: 700;
+}
+QPushButton[btnVariant="destructive"]:hover   { background: {{HOSTILE}}; border-color: {{HOSTILE}}; }
+QPushButton[btnVariant="destructive"]:pressed { background: #8e0000; border-color: #8e0000; }
+QPushButton[btnVariant="destructive"]:disabled{ background: #3a1010; color: #8a8a8a; border-color: #3a1010; }
+
+/* success（1472H 綠，正向確認） */
+QPushButton[btnVariant="success"] {
+    background: {{FRIENDLY_DEEP}};
+    color: #fff;
+    border: 1px solid {{FRIENDLY_DEEP}};
+    border-radius: 4px;
+    font-family: {{FONT_SANS}};
+    font-weight: 700;
+}
+QPushButton[btnVariant="success"]:hover   { background: {{FRIENDLY}}; color: #04220c; border-color: {{FRIENDLY}}; }
+QPushButton[btnVariant="success"]:pressed { background: #1b5e20; border-color: #1b5e20; }
+QPushButton[btnVariant="success"]:disabled{ background: #15301a; color: #8a8a8a; border-color: #15301a; }
+
+/* hero（與 #btnHero 同款，提供 variant 形式） */
+QPushButton[btnVariant="hero"] {
+    background: {{ACCENT_2}};
+    color: {{BG_PRIMARY}};
+    border: 1px solid {{ACCENT_2}};
+    border-radius: 4px;
+    font-family: {{FONT_DISPLAY}};
+    font-weight: 700;
+    letter-spacing: 0.4px;
+}
+QPushButton[btnVariant="hero"]:hover   { background: #e8f96a; border-color: #e8f96a; }
+QPushButton[btnVariant="hero"]:pressed { background: #c7d937; border-color: #c7d937; }
+QPushButton[btnVariant="hero"]:disabled{ background: #4a4f1a; color: #8a8a8a; border-color: #4a4f1a; }
+
+/* Sizes（與 btnVariant 正交）—— xs/sm/md/lg */
+QPushButton[btnSize="xs"] { min-height: 24px; padding: 2px 8px;  font-size: 11px; }
+QPushButton[btnSize="sm"] { min-height: 32px; padding: 4px 12px; font-size: 12px; }
+QPushButton[btnSize="md"] { min-height: 36px; padding: 6px 16px; font-size: 13px; }
+QPushButton[btnSize="lg"] { min-height: 44px; padding: 8px 20px; font-size: 14px; }
+
+/* loading 狀態（spinner 由 QMovie 帶；按鈕本身禁互動） */
+QPushButton[loading="true"] { color: {{FG_MUTED}}; }
+
+/* ─── Inputs ─────────────────────────────────────────────────────── */
+QLineEdit, QPlainTextEdit, QTextEdit {
+    background: {{BG_SUNKEN}};
+    color: #e3f2fd;
+    border: 1px solid {{BORDER_STRONG}};
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-family: {{FONT_MONO}};
+    font-size: 12px;
+    selection-background-color: {{NEUTRAL}};
+    selection-color: {{BG_PRIMARY}};
+}
+QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus {
+    border-color: {{NEUTRAL}};
+    background: #0a141e;
+}
+QLineEdit:disabled, QPlainTextEdit:disabled {
+    color: {{FG_MUTED}};
+    background: {{BG_SECONDARY}};
+}
+
+QSpinBox, QDoubleSpinBox {
+    background: {{BG_SUNKEN}};
+    color: #e3f2fd;
+    border: 1px solid {{BORDER_STRONG}};
+    border-radius: 4px;
+    padding: 3px 6px;
+    min-height: 24px;
+    font-family: {{FONT_MONO}};
+    font-size: 12px;
+}
+QSpinBox:focus, QDoubleSpinBox:focus { border-color: {{NEUTRAL}}; }
+QSpinBox::up-button, QDoubleSpinBox::up-button,
+QSpinBox::down-button, QDoubleSpinBox::down-button {
+    background: {{BG_ELEVATED}};
+    border-left: 1px solid {{BORDER}};
+    width: 14px;
+}
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {
+    background: {{BORDER}};
+}
+
+QComboBox {
+    background: {{BG_SUNKEN}};
+    color: #e3f2fd;
+    border: 1px solid {{BORDER_STRONG}};
+    border-radius: 4px;
+    padding: 3px 24px 3px 8px;
+    min-height: 24px;
+    font-family: {{FONT_MONO}};
+    font-size: 11px;
+}
+QComboBox:focus { border-color: {{NEUTRAL}}; }
+QComboBox::drop-down {
+    border: none;
+    width: 20px;
+    background: {{BG_ELEVATED}};
+    border-left: 1px solid {{BORDER}};
+}
+QComboBox::down-arrow {
+    width: 0; height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid {{FG_SECONDARY}};
+}
+QComboBox QAbstractItemView {
+    background: {{BG_ELEVATED}};
+    color: {{FG}};
+    border: 1px solid {{BORDER_STRONG}};
+    selection-background-color: {{NEUTRAL}};
+    selection-color: {{BG_PRIMARY}};
+    padding: 2px;
+}
+
+/* ─── Checkbox / Radio ──────────────────────────────────────────── */
+QCheckBox, QRadioButton {
+    color: {{FG}};
+    spacing: 6px;
+    background: transparent;
+}
+QCheckBox::indicator, QRadioButton::indicator {
+    width: 14px; height: 14px;
+    background: {{BG_SUNKEN}};
+    border: 1px solid {{BORDER_STRONG}};
+}
+QCheckBox::indicator { border-radius: 2px; }
+QRadioButton::indicator { border-radius: 7px; }
+QCheckBox::indicator:checked, QRadioButton::indicator:checked {
+    background: {{NEUTRAL}};
+    border-color: {{NEUTRAL}};
+}
+QCheckBox::indicator:hover, QRadioButton::indicator:hover {
+    border-color: {{NEUTRAL}};
+}
+
+/* ─── Tab widget ────────────────────────────────────────────────── */
+QTabWidget::pane {
+    background: {{BG_SECONDARY}};
+    border: 1px solid {{BORDER}};
+    border-radius: 4px;
+    top: -1px;
+}
+QTabBar { background: transparent; }
+QTabBar::tab {
+    background: {{BG_PRIMARY}};
+    color: {{FG_SECONDARY}};
+    border: 1px solid {{BORDER}};
+    border-bottom: none;
+    padding: 6px 14px;
+    margin-right: 2px;
+    font-family: {{FONT_CONDENSED}};
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 1px;
+}
+QTabBar::tab:hover { color: {{FG}}; background: {{BG_SECONDARY}}; }
+QTabBar::tab:selected {
+    color: {{NEUTRAL}};
+    background: {{BG_SECONDARY}};
+    border-bottom: 2px solid {{NEUTRAL}};
+    padding-bottom: 4px;
+}
+
+/* ─── Scrollbar ─────────────────────────────────────────────────── */
+QScrollBar:vertical {
+    background: {{BG_PRIMARY}};
+    border-left: 1px solid {{BORDER_SUBTLE}};
+    width: 10px;
+    margin: 0;
+}
+QScrollBar:horizontal {
+    background: {{BG_PRIMARY}};
+    border-top: 1px solid {{BORDER_SUBTLE}};
+    height: 10px;
+    margin: 0;
+}
+QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
+    background: {{BORDER}};
+    border-radius: 2px;
+    min-height: 30px; min-width: 30px;
+}
+QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover {
+    background: {{BORDER_STRONG}};
+}
+QScrollBar::add-line, QScrollBar::sub-line { height: 0; width: 0; }
+QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
+
+/* ─── Menus ─────────────────────────────────────────────────────── */
+QMenuBar {
+    background: {{BG_SECONDARY}};
+    color: {{FG}};
+    border-bottom: 1px solid {{BORDER}};
+    padding: 2px;
+    font-family: {{FONT_CONDENSED}};
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: 0.6px;
+}
+QMenuBar::item {
+    background: transparent;
+    padding: 4px 12px;
+}
+QMenuBar::item:selected { background: {{BG_ELEVATED}}; color: {{NEUTRAL}}; }
+QMenu {
+    background: {{BG_ELEVATED}};
+    color: {{FG}};
+    border: 1px solid {{BORDER_STRONG}};
+    padding: 4px;
+}
+QMenu::item {
+    padding: 5px 24px 5px 16px;
+    border-radius: 2px;
+}
+QMenu::item:selected { background: {{NEUTRAL}}; color: {{BG_PRIMARY}}; }
+QMenu::separator { background: {{BORDER}}; height: 1px; margin: 4px 8px; }
+
+/* ─── Status bar ────────────────────────────────────────────────── */
+QStatusBar {
+    background: {{BG_SECONDARY}};
+    color: {{FG_SECONDARY}};
+    border-top: 1px solid {{BORDER}};
+    font-family: {{FONT_MONO}};
+    font-size: 10px;
+}
+QStatusBar::item { border: none; }
+
+/* ─── Slider ────────────────────────────────────────────────────── */
+QSlider::groove:horizontal {
+    background: {{BG_SUNKEN}};
+    border: 1px solid {{BORDER}};
+    height: 4px;
+    border-radius: 2px;
+}
+QSlider::handle:horizontal {
+    background: {{NEUTRAL}};
+    border: 1px solid {{BORDER_STRONG}};
+    width: 14px;
+    height: 14px;
+    margin: -6px 0;
+    border-radius: 7px;
+}
+QSlider::handle:horizontal:hover { background: {{FRIENDLY}}; }
+
+/* ─── Progress bar ──────────────────────────────────────────────── */
+QProgressBar {
+    background: {{BG_SUNKEN}};
+    border: 1px solid {{BORDER}};
+    border-radius: 2px;
+    text-align: center;
+    color: {{FG}};
+    font-family: {{FONT_MONO}};
+    font-size: 10px;
+    height: 12px;
+}
+QProgressBar::chunk { background: {{NEUTRAL}}; }
+
+/* ─── Splitter ──────────────────────────────────────────────────── */
+QSplitter::handle { background: {{BORDER}}; }
+QSplitter::handle:horizontal { width: 1px; }
+QSplitter::handle:vertical   { height: 1px; }
+QSplitter::handle:hover      { background: {{NEUTRAL}}; }
+
+/* ─── ScrollArea ────────────────────────────────────────────────── */
+QScrollArea {
+    background: transparent;
+    border: none;
+}
+
+/* ─── Plain text log well (SITL FC log) ─────────────────────────── */
+QPlainTextEdit[role="log"] {
+    background: #0e1216;
+    color: {{FG}};
+    border: 1px solid {{BORDER}};
+    border-radius: 4px;
+    font-family: {{FONT_MONO}};
+    font-size: 10px;
+}
+
+/* ─── ADOS Command Shell ─ Top Bar（48px 高，wordmark + 中導覽 + 右狀態） */
+QWidget#CommandShellTopBar {
+    background: {{BG_SECONDARY}};
+    border: none;
+    border-bottom: 1px solid {{BORDER_SUBTLE}};
+    min-height: 48px;
+    max-height: 48px;
+}
+
+QLabel#WordmarkLabel {
+    background: transparent;
+    color: {{FG}};
+    font-family: {{FONT_DISPLAY}};
+    font-weight: 600;
+    font-size: 14px;
+    letter-spacing: 0.5px;
+    padding-left: 16px;
+}
+
+/* 中央 inline 導覽：active 用 2px {{ACCENT}} 底線 */
+QToolButton[role="navtab"] {
+    background: transparent;
+    color: {{FG_SECONDARY}};
+    padding: 14px 14px 12px 14px;
+    border: none;
+    border-bottom: 2px solid transparent;
+    font-family: {{FONT_DISPLAY}};
+    font-weight: 600;
+    letter-spacing: 0.6px;
+    font-size: 12px;
+}
+QToolButton[role="navtab"]:hover    { color: {{FG}}; }
+QToolButton[role="navtab"]:checked  { color: {{ACCENT}}; border-bottom-color: {{ACCENT}}; }
+QToolButton[role="navtab"]:disabled { color: {{FG_MUTED}}; }
+
+/* ─── ADOS 卡片 chrome（FleetCard / Dashboard stat tile） ───────── */
+QFrame[role="card"] {
+    background: {{BG_SECONDARY}};
+    border: 1px solid {{BORDER_SUBTLE}};
+    border-radius: 8px;
+}
+QFrame[role="card"]:hover {
+    border-color: {{BORDER}};
+    background: {{BG_ELEVATED}};
+}
+QFrame[role="card"][selected="true"] {
+    border-color: {{ACCENT}};
+}
+QFrame[role="card"][severity="critical"] { border-color: {{HOSTILE}}; }
+QFrame[role="card"][severity="warning"]  { border-color: {{WARNING}}; }
+QFrame[role="card"][severity="success"]  { border-color: {{FRIENDLY}}; }
+
+/* 大型 stat 數字（dashboard 統計列） */
+QLabel[role="stat-value"] {
+    color: {{HUD_GREEN}};
+    font-family: {{FONT_MONO}};
+    font-weight: 700;
+    font-size: 22px;
+    background: transparent;
+}
+QLabel[role="stat-label"] {
+    color: {{FG_SECONDARY}};
+    font-family: {{FONT_DISPLAY}};
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    background: transparent;
+}
+
+/* ─── ProgressBar 狀態色（FleetCard 電池/鏈路條） ─────────────── */
+QProgressBar[status="critical"]::chunk { background: {{HOSTILE}}; }
+QProgressBar[status="warning"]::chunk  { background: {{WARNING}}; }
+QProgressBar[status="nominal"]::chunk  { background: {{FRIENDLY}}; }
+
+/* ─── Status dot（FleetCard / NavStatePill）────────────────────── */
+QLabel[role="statusdot"] {
+    min-width: 10px;
+    max-width: 10px;
+    min-height: 10px;
+    max-height: 10px;
+    border-radius: 5px;
+    background: {{FG_MUTED}};
+}
+QLabel[role="statusdot"][severity="critical"] { background: {{HOSTILE}}; }
+QLabel[role="statusdot"][severity="warning"]  { background: {{WARNING}}; }
+QLabel[role="statusdot"][severity="success"]  { background: {{FRIENDLY}}; }
+QLabel[role="statusdot"][severity="info"]     { background: {{NEUTRAL}}; }

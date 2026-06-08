@@ -24,6 +24,8 @@ from PyQt6.QtGui import QAction, QKeySequence
 import folium
 from folium import plugins
 
+from ui.resources.aeroplan_theme.widgets import IconButton
+
 # 嘗試導入專案模組
 try:
     from config import get_settings
@@ -170,14 +172,17 @@ class PolygonEditorWidget(QWidget):
         status_layout = QVBoxLayout(status_group)
 
         self.corner_count_label = QLabel(f"角點數量: 0 / {self.max_corners}")
-        self.corner_count_label.setStyleSheet("font-size: 14px; font-weight: bold;")
+        self.corner_count_label.setProperty('role', 'emphasis')
+        self.corner_count_label.style().polish(self.corner_count_label)
         status_layout.addWidget(self.corner_count_label)
 
         self.area_label = QLabel("面積: -- m²")
         status_layout.addWidget(self.area_label)
 
+        # status_label 顏色會在 _update_status 隨角點數量動態變化（friendly/warning/hostile）
         self.status_label = QLabel("點擊地圖添加角點")
-        self.status_label.setStyleSheet("color: #4CAF50;")
+        self.status_label.setProperty('role', 'friendly')
+        self.status_label.style().polish(self.status_label)
         status_layout.addWidget(self.status_label)
 
         layout.addWidget(status_group)
@@ -195,7 +200,7 @@ class PolygonEditorWidget(QWidget):
         list_layout.addWidget(self.corner_table)
 
         # 刪除選中按鈕
-        delete_btn = QPushButton("🗑 刪除選中角點")
+        delete_btn = IconButton('clear', '刪除選中角點', tone='danger')
         delete_btn.clicked.connect(self._on_delete_selected)
         list_layout.addWidget(delete_btn)
 
@@ -206,17 +211,17 @@ class PolygonEditorWidget(QWidget):
         action_layout = QVBoxLayout(action_group)
 
         # 清除全部
-        clear_btn = QPushButton("🧹 清除全部角點")
+        clear_btn = IconButton('clear', '清除全部角點', tone='warn')
         clear_btn.clicked.connect(self.clear_all_corners)
         action_layout.addWidget(clear_btn)
 
-        # 撤銷上一個
-        undo_btn = QPushButton("↩ 撤銷上一個角點")
+        # 撤銷上一個（無精確匹配 icon，用 rtb「返回」象徵）
+        undo_btn = IconButton('rtb', '撤銷上一個角點', tone='ghost')
         undo_btn.clicked.connect(self.undo_last_corner)
         action_layout.addWidget(undo_btn)
 
         # 閉合多邊形
-        close_btn = QPushButton("⬡ 閉合多邊形")
+        close_btn = IconButton('polygon', '閉合多邊形', tone='success')
         close_btn.clicked.connect(self._on_close_polygon)
         action_layout.addWidget(close_btn)
 
@@ -226,11 +231,11 @@ class PolygonEditorWidget(QWidget):
         io_group = QGroupBox("匯入/匯出")
         io_layout = QVBoxLayout(io_group)
 
-        export_btn = QPushButton("📤 匯出角點 (JSON)")
+        export_btn = IconButton('export', '匯出角點 (JSON)', tone='purple')
         export_btn.clicked.connect(self._on_export_corners)
         io_layout.addWidget(export_btn)
 
-        import_btn = QPushButton("📥 匯入角點 (JSON)")
+        import_btn = IconButton('import', '匯入角點 (JSON)', tone='ghost')
         import_btn.clicked.connect(self._on_import_corners)
         io_layout.addWidget(import_btn)
 
@@ -247,7 +252,8 @@ class PolygonEditorWidget(QWidget):
             "• 至少需要 3 個角點形成多邊形\n"
             "• 可使用滾輪縮放地圖"
         )
-        help_label.setStyleSheet("color: #666; font-size: 11px;")
+        help_label.setProperty('role', 'caption')
+        help_label.style().polish(help_label)
         help_label.setWordWrap(True)
         layout.addWidget(help_label)
 
@@ -372,7 +378,7 @@ class PolygonEditorWidget(QWidget):
                         <div style="
                             background-color: #4CAF50;
                             color: white;
-                            border-radius: 50%;
+                            border-radius:0%;
                             width: 24px;
                             height: 24px;
                             display: flex;
@@ -463,7 +469,7 @@ class PolygonEditorWidget(QWidget):
             background: rgba(76, 175, 80, 0.95);
             color: white;
             padding: 10px 20px;
-            border-radius: 5px;
+            border-radius:0;
             font-size: 14px;
             z-index: 1000;
             pointer-events: none;
@@ -681,19 +687,23 @@ class PolygonEditorWidget(QWidget):
         count = len(self.corners)
         self.corner_count_label.setText(f"角點數量: {count} / {self.max_corners}")
 
-        # 更新狀態
+        # 更新狀態：透過 role property 動態切換 friendly/warning/hostile 色
+        def _set_status_role(text: str, role: str) -> None:
+            self.status_label.setText(text)
+            self.status_label.setProperty('role', role)
+            self.status_label.style().polish(self.status_label)
+
         if count == 0:
-            self.status_label.setText("點擊地圖添加角點")
-            self.status_label.setStyleSheet("color: #4CAF50;")
+            _set_status_role("點擊地圖添加角點", 'friendly')
         elif count < MIN_CORNERS_FOR_POLYGON:
-            self.status_label.setText(f"還需要 {MIN_CORNERS_FOR_POLYGON - count} 個角點形成多邊形")
-            self.status_label.setStyleSheet("color: #FF9800;")
+            _set_status_role(
+                f"還需要 {MIN_CORNERS_FOR_POLYGON - count} 個角點形成多邊形",
+                'warning',
+            )
         elif count >= self.max_corners:
-            self.status_label.setText("已達最大角點數量！")
-            self.status_label.setStyleSheet("color: #F44336;")
+            _set_status_role("已達最大角點數量！", 'hostile')
         else:
-            self.status_label.setText("✓ 多邊形已形成")
-            self.status_label.setStyleSheet("color: #4CAF50;")
+            _set_status_role("✓ 多邊形已形成", 'friendly')
 
         # 更新面積
         if count >= MIN_CORNERS_FOR_POLYGON:

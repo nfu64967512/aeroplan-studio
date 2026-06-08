@@ -36,6 +36,8 @@ swarm_strike_out/
 /VTOL_briefing.txt
 /STRIKE_*.waypoints
 /DTOT_*.waypoints
+/STOT_*.waypoints
+/STOT_*briefing.txt
 
 # 大型 3D 模型 (應走 Git LFS 或 release 附件，不放 main branch)
 ui/resources/*.glb
@@ -66,6 +68,14 @@ Thumbs.db
 
 # Data files
 polygon_corners.json
+
+# 執行期/可再生資料 (不入庫)
+data/cache/
+data/exports/
+taiwan_dem.tif
+
+# 本機絕對路徑設定 (執行期由 config/settings.py 產生)
+config/settings.json
 
 # Legacy duplicate folder
 uav_path_planner/

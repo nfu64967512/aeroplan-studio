@@ -57,7 +57,9 @@ class TkinterMapWidget(QWidget):
         if not TKINTERMAPVIEW_AVAILABLE:
             from PyQt6.QtWidgets import QLabel
             label = QLabel("請安裝 tkintermapview:\npip install tkintermapview")
-            label.setStyleSheet("color: red; font-size: 14px; padding: 20px;")
+            # 新版主題透過 role property 取得 hostile 紅色字體
+            label.setProperty('role', 'hostile')
+            label.style().polish(label)
             layout.addWidget(label)
             logger.error("tkintermapview 未安裝")
             return

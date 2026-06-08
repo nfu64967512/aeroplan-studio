@@ -71,7 +71,26 @@ def parse_arguments():
         default='generic_quadcopter',
         help='飛行器配置檔案名稱'
     )
-    
+
+    parser.add_argument(
+        '--shell',
+        type=str,
+        default='legacy',
+        choices=['legacy', 'milstd'],
+        help=(
+            "UI 外殼："
+            "'legacy' 使用既有 MainWindow； "
+            "'milstd' 啟動 MIL-STD-1472H 合規之 AeroPlanMainWindow 框架"
+        ),
+    )
+
+    # AeroPlan Studio Design System 新版主題（預設）vs 舊版 tactical_theme（除錯 fallback）
+    parser.add_argument(
+        '--legacy-theme',
+        action='store_true',
+        help='使用舊版 tactical_theme（新版套用失敗時的 fallback；正常情況不需指定）',
+    )
+
     return parser.parse_args()
 
 
@@ -122,8 +141,15 @@ def initialize_system(args):
     return logger, settings, vehicle_profiles
 
 
-def run_gui_mode(logger, settings, vehicle_profiles):
-    """運行GUI模式"""
+def run_gui_mode(logger, settings, vehicle_profiles, args=None):
+    """運行GUI模式
+
+    Parameters
+    ----------
+    args : argparse.Namespace | None
+        命令列參數；若提供且 args.shell == 'milstd'，啟動新版
+        MIL-STD-1472H 合規主視窗 (AeroPlanMainWindow)，否則沿用既有 MainWindow。
+    """
     try:
         logger.info("啟動 GUI 模式...")
         
@@ -167,23 +193,55 @@ def run_gui_mode(logger, settings, vehicle_profiles):
         app.setApplicationDisplayName("AeroPlan Studio — Collaborative UAV Mission Planning Suite")
         app.setOrganizationName("AeroPlan")
 
-        # ── 套用戰術 HUD 主題 ─────────────────────────────────────
-        # 暗視覺適應色板 + MIL-STD-1472H 色彩語意 + 窄體/等寬字型 stack
-        # 必須在任何 QWidget 建立前呼叫，否則已建立的視窗不會收到全域 QSS
-        try:
-            from ui.resources.tactical_theme import apply_tactical_theme
-            apply_tactical_theme(app)
-            logger.info("戰術主題 (Tactical HUD) 已套用")
-        except Exception as e:
-            logger.warning(f"套用戰術主題失敗，退回系統預設樣式: {e}")
+        # ── 套用 AeroPlan Studio 主題 ─────────────────────────────
+        # 新版設計系統：MIL-STD-1472H 對齊、SVG 圖示替換 emoji、
+        # JetBrains Mono / Rajdhani / Inter 字型 stack、全域 QSS。
+        # 必須在任何 QWidget 建立前呼叫，否則已建立的視窗不會收到全域 QSS。
+        #
+        # 載入順序：
+        #   1. --legacy-theme 旗標 → 直接用舊版 tactical_theme（除錯 / fallback 用）
+        #   2. 預設 → 套新版 aeroplan_theme；失敗自動 fallback 到舊版
+        #   3. 兩者皆失敗 → 用系統預設樣式（不擋啟動）
+        use_legacy = getattr(args, 'legacy_theme', False) if args is not None else False
+        if use_legacy:
+            try:
+                from ui.resources.tactical_theme import apply_tactical_theme
+                apply_tactical_theme(app)
+                logger.info("舊版戰術主題 (legacy tactical_theme) 已套用")
+            except Exception as e:
+                logger.warning(f"套用舊版主題失敗，使用系統預設樣式: {e}")
+        else:
+            try:
+                from ui.resources.aeroplan_theme import apply_theme
+                apply_theme(app)
+                logger.info("AeroPlan Studio 設計系統主題已套用")
+            except Exception as e:
+                logger.warning(
+                    f"套用新版主題失敗，退回舊版 tactical_theme: {e}"
+                )
+                try:
+                    from ui.resources.tactical_theme import apply_tactical_theme
+                    apply_tactical_theme(app)
+                    logger.info("已 fallback 至舊版戰術主題")
+                except Exception as e2:
+                    logger.warning(f"舊版主題亦失敗，使用系統預設樣式: {e2}")
 
         # 導入並創建主視窗
-        from ui.main_window import MainWindow
-        window = MainWindow()
+        # 依 --shell 選擇外殼：
+        #   legacy — 既有 MainWindow（完整業務邏輯）
+        #   milstd — 全新 AeroPlanMainWindow（MIL-STD-1472H 合規骨架）
+        shell = getattr(args, 'shell', 'legacy') if args is not None else 'legacy'
+        if shell == 'milstd':
+            from ui.aeroplan_main_window import AeroPlanMainWindow
+            window = AeroPlanMainWindow()
+            logger.info("啟用 MIL-STD-1472H 合規主視窗 (AeroPlanMainWindow)")
+        else:
+            from ui.main_window import MainWindow
+            window = MainWindow()
         window.show()
-        
+
         logger.info("GUI 啟動成功")
-        
+
         return app.exec()
     
     except Exception as e:
@@ -205,11 +263,45 @@ def run_cli_mode(logger, settings, vehicle_profiles):
     return 0
 
 
+def _run_subcommand(subcmd: str) -> int:
+    """ADOS 風格子指令分派（aeroplan sitl / aeroplan demo）。
+
+    無子指令時 sys.argv 不會走到此分支；本函式只在 argv[1] 為已知子指令時被呼叫。
+    """
+    # 為子指令各建立獨立 argparse；不繼承 root 旗標，避免衝突
+    parser = argparse.ArgumentParser(prog="aeroplan-studio")
+    subparsers = parser.add_subparsers(dest="subcmd", required=True)
+
+    from cli.sitl_cmd import add_subparser as add_sitl
+    from cli.demo_cmd import add_subparser as add_demo
+    add_sitl(subparsers)
+    add_demo(subparsers)
+
+    args = parser.parse_args()
+
+    # 最簡 logger 初始化（不需 full settings stack）
+    import logging
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    try:
+        return int(args.func(args))
+    except KeyboardInterrupt:
+        return 130
+
+
 def main():
-    """主函式"""
+    """主函式。
+
+    若第一個非旗標參數為已知子指令（sitl / demo），分派到 CLI；
+    否則沿用既有 GUI 流程（無破壞性變更）。
+    """
+    # 偵測子指令
+    _SUBCMDS = {"sitl", "demo"}
+    if len(sys.argv) > 1 and sys.argv[1] in _SUBCMDS:
+        return _run_subcommand(sys.argv[1])
+
     # 解析參數
     args = parse_arguments()
-    
+
     # 初始化系統
     try:
         logger, settings, vehicle_profiles = initialize_system(args)
@@ -218,24 +310,24 @@ def main():
         import traceback
         traceback.print_exc()
         return 1
-    
+
     # 選擇運行模式
     try:
         if args.no_ui:
             return run_cli_mode(logger, settings, vehicle_profiles)
         else:
-            return run_gui_mode(logger, settings, vehicle_profiles)
-    
+            return run_gui_mode(logger, settings, vehicle_profiles, args)
+
     except KeyboardInterrupt:
         logger.info("用戶中斷程式")
         return 0
-    
+
     except Exception as e:
         logger.error(f"程式異常終止: {e}")
         import traceback
         traceback.print_exc()
         return 1
-    
+
     finally:
         logger.info("AeroPlan Studio 已退出")
 

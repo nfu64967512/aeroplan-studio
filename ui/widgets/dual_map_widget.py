@@ -15,7 +15,34 @@ from PyQt6.QtCore import pyqtSignal, Qt
 
 from ui.widgets.map_widget import MapWidget
 from ui.widgets.cesium_map_widget import CesiumMapWidget
+from ui.resources.tactical_theme import TacticalColors as TC, TacticalFonts as TF
+from ui.resources.aeroplan_theme.widgets import IconButton
 from utils.logger import get_logger
+
+
+# ── MIL-STD-1472H 工具列按鈕 QSS（單一事實來源）──────────────────────
+def _btn_qss(active: bool = False, accent: str = None) -> str:
+    """
+    工具列按鈕統一 QSS，全直角、TacticalColors，無漸層、無圓角。
+
+    active=True ：使用者選定狀態（NEUTRAL 高亮）
+    accent      ：覆寫文字色（語意：FRIENDLY/HOSTILE/WARNING/NEUTRAL/AMBER）
+    """
+    if active:
+        bg, fg, hov_bg = TC.NEUTRAL, TC.BG_PRIMARY, TC.BORDER_STRONG
+        weight = '600'
+    else:
+        bg = TC.BG_SECONDARY
+        fg = accent or TC.FG_PRIMARY
+        hov_bg = TC.BG_ELEVATED
+        weight = '500'
+    return (
+        f'QPushButton{{background:{bg};color:{fg};border:1px solid {TC.BORDER_DEFAULT};'
+        f'border-radius:0;padding:0 10px;font-size:11px;font-weight:{weight};'
+        f'font-family:{TF.css_condensed()};letter-spacing:1px;}}'
+        f'QPushButton:hover{{background:{hov_bg};color:{TC.FG_PRIMARY};}}'
+        f'QPushButton:disabled{{background:{TC.BG_SUNKEN};color:{TC.FG_MUTED};}}'
+    )
 
 logger = get_logger()
 
@@ -39,9 +66,14 @@ class DualMapWidget(QWidget):
     corner_added      = pyqtSignal(float, float)
     corner_moved      = pyqtSignal(int, float, float)
     circle_defined    = pyqtSignal(float, float, float)
+    fence_built       = pyqtSignal(object)  # 自動建構 Geofence 完成（傳 MissionBundle 或 None）
     nfz_polygon_drawn = pyqtSignal(list)
     nfz_circle_drawn  = pyqtSignal(float, float, float)
     strike_target_added = pyqtSignal(float, float)  # 打擊目標標記
+    # ── Fence Zone 工具列觸發信號（NFZ + 威脅 + 圍籬統一） ──
+    fence_zone_draw_polygon_requested = pyqtSignal()
+    fence_zone_draw_circle_requested  = pyqtSignal()
+    fence_zone_manage_requested       = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -62,22 +94,22 @@ class DualMapWidget(QWidget):
         toolbar = QFrame()
         toolbar.setFixedHeight(34)
         toolbar.setStyleSheet(
-            'QFrame{background:#1a1f2e;border-bottom:1px solid #2a3248;}'
+            f'QFrame{{background:{TC.BG_SECONDARY};'
+            f'border-bottom:1px solid {TC.BORDER_DEFAULT};border-radius:0;}}'
         )
         tb_layout = QHBoxLayout(toolbar)
         tb_layout.setContentsMargins(8, 0, 8, 0)
         tb_layout.setSpacing(6)
 
-        # 模式指示標籤
-        self._mode_label = QLabel('🗺️ 2D 地圖')
-        self._mode_label.setStyleSheet(
-            'color:#90caf9;font-size:12px;font-weight:600;'
-        )
+        # 模式指示標籤（採用 AeroPlan Design System emphasis 角色：琥珀色高亮）
+        self._mode_label = QLabel('2D 地圖')
+        self._mode_label.setProperty('role', 'emphasis')
+        self._mode_label.style().polish(self._mode_label)
         tb_layout.addWidget(self._mode_label)
         tb_layout.addStretch()
 
-        # 2D 按鈕
-        self._btn_2d = QPushButton('🗺️  2D 衛星')
+        # 2D 按鈕（AeroPlan IconButton + 自訂 active 狀態 QSS 覆寫）
+        self._btn_2d = IconButton('map_2d', '2D 衛星', tone='ghost', compact=True)
         self._btn_2d.setCheckable(True)
         self._btn_2d.setChecked(True)
         self._btn_2d.setFixedHeight(24)
@@ -86,7 +118,7 @@ class DualMapWidget(QWidget):
         tb_layout.addWidget(self._btn_2d)
 
         # 3D 按鈕
-        self._btn_3d = QPushButton('🌐  3D Cesium')
+        self._btn_3d = IconButton('map_3d', '3D Cesium', tone='ghost', compact=True)
         self._btn_3d.setCheckable(True)
         self._btn_3d.setChecked(False)
         self._btn_3d.setFixedHeight(24)
@@ -95,14 +127,10 @@ class DualMapWidget(QWidget):
         tb_layout.addWidget(self._btn_3d)
 
         # 飛向路徑捷徑
-        self._btn_fly = QPushButton('🎯 飛向')
+        self._btn_fly = IconButton('fly_to', '飛向', tone='ghost', compact=True)
         self._btn_fly.setFixedHeight(24)
         self._btn_fly.setToolTip('在 3D 模式中飛向目前路徑')
-        self._btn_fly.setStyleSheet(
-            'QPushButton{background:#0d47a1;color:#e3f2fd;border:none;'
-            'border-radius:4px;padding:0 8px;font-size:11px;}'
-            'QPushButton:hover{background:#1565C0;}'
-        )
+        self._btn_fly.setStyleSheet(_btn_qss(accent=TC.FG_EMPHASIS))
         self._btn_fly.clicked.connect(self._on_fly_clicked)
         tb_layout.addWidget(self._btn_fly)
 
@@ -110,26 +138,86 @@ class DualMapWidget(QWidget):
         self._chase_sysid = 0   # 0 = 關閉
         self._fpv_sysid   = 0   # 0 = 關閉
         self._fpv_mode    = 'forward'  # 'forward' | 'down'
-        self._btn_chase = QPushButton('🎥 跟隨')
+        self._btn_chase = IconButton('drone', '跟隨', tone='ghost', compact=True)
         self._btn_chase.setFixedHeight(24)
         self._btn_chase.setToolTip('模擬飛行鏡頭：鎖定飛機後方跟隨（僅 3D 模式）')
-        self._btn_chase.setStyleSheet(
-            'QPushButton{background:#37474F;color:#eceff1;border:none;'
-            'border-radius:4px;padding:0 8px;font-size:11px;}'
-            'QPushButton:hover{background:#455A64;}'
-        )
+        self._btn_chase.setStyleSheet(_btn_qss())
         self._btn_chase.clicked.connect(self._on_chase_clicked)
         tb_layout.addWidget(self._btn_chase)
 
+        # 電子圍籬（Geofence）— 強制飛安政策，路徑生成自動建構
+        self._fence_visible = True   # 預設顯示
+        self._btn_fence = IconButton('polygon', '圍籬', tone='ghost', compact=True)
+        self._btn_fence.setCheckable(True)
+        self._btn_fence.setChecked(True)
+        self._btn_fence.setFixedHeight(24)
+        self._btn_fence.setToolTip(
+            '電子圍籬：每次規劃路徑會自動建立 4 頂點矩形圍籬\n'
+            'FENCE_TYPE=7 (MaxAlt+Circle+Polygon)、FENCE_ACTION=1 (RTL)\n'
+            '點擊切換顯示 / 隱藏'
+        )
+        self._btn_fence.setStyleSheet(_btn_qss(active=True))
+        self._btn_fence.clicked.connect(self._on_fence_toggle)
+        tb_layout.addWidget(self._btn_fence)
+
+        # ── Fence Zone（NFZ + 威脅 + 圍籬）3 個按鈕：地圖永久可見 ──
+        # 主面板 / 各分頁切換時也仍然能直接從這裡新增區域
+        self._btn_fz_poly = IconButton(
+            'polygon', '⊕ NFZ/威脅 多邊形', tone='ghost', compact=True,
+        )
+        self._btn_fz_poly.setFixedHeight(24)
+        self._btn_fz_poly.setToolTip(
+            '在 3D 地圖點擊新增頂點，雙擊或按「完成多邊形」結束\n'
+            '完成後自動開對話框：選分類 (NFZ / 威脅 / 圍籬) + 海拔上下限 + 命名'
+        )
+        self._btn_fz_poly.setStyleSheet(_btn_qss(accent=TC.HOSTILE))
+        self._btn_fz_poly.clicked.connect(
+            self.fence_zone_draw_polygon_requested.emit
+        )
+        tb_layout.addWidget(self._btn_fz_poly)
+
+        self._btn_fz_circ = IconButton(
+            'circle', '⊕ NFZ/威脅 圓形', tone='ghost', compact=True,
+        )
+        self._btn_fz_circ.setFixedHeight(24)
+        self._btn_fz_circ.setToolTip(
+            '按住滑鼠從圓心往外拖曳定義圓形 → 完成後自動開對話框預填'
+        )
+        self._btn_fz_circ.setStyleSheet(_btn_qss(accent=TC.HOSTILE))
+        self._btn_fz_circ.clicked.connect(
+            self.fence_zone_draw_circle_requested.emit
+        )
+        tb_layout.addWidget(self._btn_fz_circ)
+
+        self._btn_fz_manage = IconButton(
+            'settings', '管理 Fence', tone='ghost', compact=True,
+        )
+        self._btn_fz_manage.setFixedHeight(24)
+        self._btn_fz_manage.setToolTip(
+            '開啟統一 Fence 對話框 — 手動輸入頂點 / 圓心、編輯既有區域'
+        )
+        self._btn_fz_manage.setStyleSheet(_btn_qss(accent=TC.WARNING))
+        self._btn_fz_manage.clicked.connect(
+            self.fence_zone_manage_requested.emit
+        )
+        tb_layout.addWidget(self._btn_fz_manage)
+
+        # 地形跟隨（terrain-following at constant AGL）— 解決路徑撞山問題
+        self._btn_tf = IconButton('tool', '地形跟隨', tone='ghost', compact=True)
+        self._btn_tf.setFixedHeight(24)
+        self._btn_tf.setToolTip(
+            '地形跟隨：每個航點高度 = 地形海拔 + AGL\n'
+            '保持固定離地高度，避免撞山（需先載入 DEM）'
+        )
+        self._btn_tf.setStyleSheet(_btn_qss())
+        self._btn_tf.clicked.connect(self._on_tf_clicked)
+        tb_layout.addWidget(self._btn_tf)
+
         # FPV 機上相機（第一人稱 / 雲台偵查）
-        self._btn_fpv = QPushButton('📷 FPV')
+        self._btn_fpv = IconButton('fpv', 'FPV', tone='ghost', compact=True)
         self._btn_fpv.setFixedHeight(24)
         self._btn_fpv.setToolTip('機上相機視角：前視 / 俯視偵查 + 可調 FOV（僅 3D 模式）')
-        self._btn_fpv.setStyleSheet(
-            'QPushButton{background:#37474F;color:#eceff1;border:none;'
-            'border-radius:4px;padding:0 8px;font-size:11px;}'
-            'QPushButton:hover{background:#455A64;}'
-        )
+        self._btn_fpv.setStyleSheet(_btn_qss())
         self._btn_fpv.clicked.connect(self._on_fpv_clicked)
         tb_layout.addWidget(self._btn_fpv)
 
@@ -146,17 +234,7 @@ class DualMapWidget(QWidget):
 
     @staticmethod
     def _btn_style(active: bool) -> str:
-        if active:
-            return (
-                'QPushButton{background:#1565C0;color:#e3f2fd;border:none;'
-                'border-radius:4px;padding:0 10px;font-size:11px;font-weight:600;}'
-                'QPushButton:hover{background:#1976D2;}'
-            )
-        return (
-            'QPushButton{background:#2a3248;color:#8ba3c7;border:1px solid #3a4a60;'
-            'border-radius:4px;padding:0 10px;font-size:11px;}'
-            'QPushButton:hover{background:#37475f;color:#cfd8dc;}'
-        )
+        return _btn_qss(active=active)
 
     # ─────────────────────────────────────────────────────────────────
     # 信號連接
@@ -204,14 +282,14 @@ class DualMapWidget(QWidget):
             # 切到 3D：把 2D 的當前狀態同步過去
             self._sync_to_3d()
             self._stack.setCurrentIndex(_MODE_3D)
-            self._mode_label.setText('🌐 3D Cesium')
+            self._mode_label.setText('3D Cesium')
             self._btn_2d.setChecked(False)
             self._btn_3d.setChecked(True)
             self._btn_2d.setStyleSheet(self._btn_style(active=False))
             self._btn_3d.setStyleSheet(self._btn_style(active=True))
         else:
             self._stack.setCurrentIndex(_MODE_2D)
-            self._mode_label.setText('🗺️ 2D 地圖')
+            self._mode_label.setText('2D 地圖')
             self._btn_2d.setChecked(True)
             self._btn_3d.setChecked(False)
             self._btn_2d.setStyleSheet(self._btn_style(active=True))
@@ -300,10 +378,10 @@ class DualMapWidget(QWidget):
         if self._chase_sysid > 0:
             # 兩模式互斥：chase 啟動就關掉 FPV 的 UI 狀態
             self._fpv_sysid = 0
-            self._set_btn_style(self._btn_fpv, False, '📷 FPV')
-            self._set_btn_style(self._btn_chase, True, f'🎥 跟隨 UAV{self._chase_sysid}')
+            self._set_btn_style(self._btn_fpv, False, 'FPV')
+            self._set_btn_style(self._btn_chase, True, f'跟隨 UAV{self._chase_sysid}')
         else:
-            self._set_btn_style(self._btn_chase, False, '🎥 跟隨')
+            self._set_btn_style(self._btn_chase, False, '跟隨')
 
     # ── FPV 第一人稱相機 ──────────────────────────────────────────
     def _on_fpv_clicked(self):
@@ -387,27 +465,19 @@ class DualMapWidget(QWidget):
         if self._fpv_sysid > 0:
             # 關掉 chase 的 UI（JS 端已自動互斥）
             self._chase_sysid = 0
-            self._set_btn_style(self._btn_chase, False, '🎥 跟隨')
+            self._set_btn_style(self._btn_chase, False, '跟隨')
             tag = '俯視' if self._fpv_mode == 'down' else '前視'
-            self._set_btn_style(self._btn_fpv, True, f'📷 FPV {tag} UAV{self._fpv_sysid}')
+            self._set_btn_style(self._btn_fpv, True, f'FPV {tag} UAV{self._fpv_sysid}')
         else:
-            self._set_btn_style(self._btn_fpv, False, '📷 FPV')
+            self._set_btn_style(self._btn_fpv, False, 'FPV')
 
     @staticmethod
     def _set_btn_style(btn: QPushButton, active: bool, text: str):
         btn.setText(text)
         if active:
-            btn.setStyleSheet(
-                'QPushButton{background:#1565C0;color:#e3f2fd;border:none;'
-                'border-radius:4px;padding:0 8px;font-size:11px;font-weight:600;}'
-                'QPushButton:hover{background:#1976D2;}'
-            )
+            btn.setStyleSheet(_btn_qss(active=True))
         else:
-            btn.setStyleSheet(
-                'QPushButton{background:#37474F;color:#eceff1;border:none;'
-                'border-radius:4px;padding:0 8px;font-size:11px;}'
-                'QPushButton:hover{background:#455A64;}'
-            )
+            btn.setStyleSheet(_btn_qss())
 
     def _known_sysids(self) -> list:
         """回傳目前已出現在 SITL 的 sysid 列表（由 update_uav_position 累積）。"""
@@ -417,18 +487,79 @@ class DualMapWidget(QWidget):
     # 以下全部代理到 2D 和 3D（兩者同時更新，切換瞬間完成）
     # ─────────────────────────────────────────────────────────────────
 
-    # ── 路徑顯示 ─────────────────────────────────────────────────────
+    # ── 路徑顯示（每次自動建構 Geofence —— 強制飛安政策）───────────
     def display_path(self, path, altitude: float = 50.0):
         self.map_2d.display_path(path, altitude)
         self.map_3d.display_path(path, altitude)
+        self._auto_build_fence([path], altitude)
 
     def display_paths(self, paths_list, altitude: float = 50.0):
         self.map_2d.display_paths(paths_list, altitude)
         self.map_3d.display_paths(paths_list, altitude)
+        self._auto_build_fence(paths_list, altitude)
 
     def display_fw_paths(self, takeoff, mission, landing):
         self.map_2d.display_fw_paths(takeoff, mission, landing)
         self.map_3d.display_fw_paths(takeoff, mission, landing)
+        # 三段都要納入圍籬範圍；固定翼建議 buffer ≥ 100m
+        all_paths = []
+        for p in (takeoff, mission, landing):
+            if p:
+                all_paths.append(p)
+        self._auto_build_fence(all_paths, altitude=None, buffer_m=120.0)
+
+    # ── Geofence 自動建構 ─────────────────────────────────────────
+    def _auto_build_fence(self, paths_list, altitude=None, buffer_m: float = 30.0):
+        """
+        強制飛安：將所有航點包進矩形圍籬並上 3D 地圖渲染。
+        失敗（航點 <2 個、shapely 計算錯誤等）僅記錄，不阻斷顯示。
+        """
+        try:
+            from mission.geofence_manager import GeofenceConstraintManager
+        except ImportError:
+            return
+        # 把所有 path 攤平成 (lat, lon[, alt]) 串列
+        flat = []
+        for path in (paths_list or []):
+            for p in (path or []):
+                if len(p) >= 3:
+                    flat.append((float(p[0]), float(p[1]), float(p[2])))
+                elif len(p) >= 2:
+                    a = float(altitude) if altitude is not None else 50.0
+                    flat.append((float(p[0]), float(p[1]), a))
+        if len(flat) < 2:
+            self.map_3d.clear_geofence()
+            self._last_fence_bundle = None
+            self.fence_built.emit(None)
+            return
+        try:
+            mgr = GeofenceConstraintManager(buffer_radius_m=buffer_m)
+            bundle = mgr.build(waypoints=flat)
+        except Exception as e:
+            logger.warning(f'[Geofence] 建構失敗: {e}')
+            self.fence_built.emit(None)
+            return
+        self._last_fence_bundle = bundle
+        if self._fence_visible:
+            self.map_3d.set_geofence(bundle.geofence)
+        logger.info(bundle.summary())
+        self.fence_built.emit(bundle)
+
+    def _on_fence_toggle(self):
+        self._fence_visible = self._btn_fence.isChecked()
+        if self._fence_visible and getattr(self, '_last_fence_bundle', None):
+            self.map_3d.set_geofence(self._last_fence_bundle.geofence)
+            self._btn_fence.setStyleSheet(_btn_qss(active=True))
+            self._btn_fence.setText('圍籬')
+        else:
+            self.map_3d.clear_geofence()
+            self._btn_fence.setStyleSheet(_btn_qss())
+            self._btn_fence.setText('圍籬 (隱藏)')
+
+    @property
+    def last_fence_bundle(self):
+        """供 main_window 取得最近一次自動建構的 MissionBundle（含 fence_params）"""
+        return getattr(self, '_last_fence_bundle', None)
 
     def set_fw_result(self, result: dict):
         """固定翼 3D 高度資訊（只給 3D 地圖用）"""
@@ -517,17 +648,39 @@ class DualMapWidget(QWidget):
     def edit_mode(self) -> bool:
         return self.map_2d.edit_mode
 
-    # ── 模式設定（NFZ 繪製等特殊模式，只在 2D 實作）────────────────
+    # ── 模式設定 ─────────────────────────────────────────────────────
     def set_edit_mode(self, enabled: bool):
         self.map_2d.set_edit_mode(enabled)
 
     def set_nfz_poly_draw_mode(self, enabled: bool):
+        # Legacy 名稱（poly）— 同時啟用 2D + 3D 繪製模式
         if hasattr(self.map_2d, 'set_nfz_poly_draw_mode'):
             self.map_2d.set_nfz_poly_draw_mode(enabled)
+        if hasattr(self.map_3d, 'set_nfz_polygon_draw_mode'):
+            self.map_3d.set_nfz_polygon_draw_mode(enabled)
+
+    def set_nfz_polygon_draw_mode(self, enabled: bool):
+        """NFZ 多邊形繪製：2D + 3D 同時啟用，使用者在哪邊都能畫。"""
+        if hasattr(self.map_2d, 'set_nfz_polygon_draw_mode'):
+            self.map_2d.set_nfz_polygon_draw_mode(enabled)
+        elif hasattr(self.map_2d, 'set_nfz_poly_draw_mode'):
+            self.map_2d.set_nfz_poly_draw_mode(enabled)
+        if hasattr(self.map_3d, 'set_nfz_polygon_draw_mode'):
+            self.map_3d.set_nfz_polygon_draw_mode(enabled)
+
+    def finish_nfz_polygon(self):
+        """完成多邊形：2D + 3D 都呼叫（哪個在 draw 模式就完成哪個）。"""
+        if hasattr(self.map_2d, 'finish_nfz_polygon'):
+            self.map_2d.finish_nfz_polygon()
+        if hasattr(self.map_3d, 'finish_nfz_polygon'):
+            self.map_3d.finish_nfz_polygon()
 
     def set_nfz_circle_draw_mode(self, enabled: bool):
+        """NFZ 圓形拖曳：2D + 3D 同時啟用。"""
         if hasattr(self.map_2d, 'set_nfz_circle_draw_mode'):
             self.map_2d.set_nfz_circle_draw_mode(enabled)
+        if hasattr(self.map_3d, 'set_nfz_circle_draw_mode'):
+            self.map_3d.set_nfz_circle_draw_mode(enabled)
 
     def set_circle_draw_mode(self, enabled: bool):
         if hasattr(self.map_2d, 'set_circle_draw_mode'):
@@ -588,6 +741,72 @@ class DualMapWidget(QWidget):
         """公開 API：歸零跟隨鏡頭視角回飛機正後方。"""
         self.map_3d.reset_chase_view()
 
+    # ─────────────────────────────────────────────────────────────
+    # 地形跟隨（Terrain-Following at constant AGL）
+    # ─────────────────────────────────────────────────────────────
+    def _on_tf_clicked(self):
+        """彈出選單選擇 AGL 高度，啟用地形跟隨。"""
+        if self._mode != _MODE_3D:
+            self._switch_mode(_MODE_3D)
+
+        # 先檢查 DEM 是否載入
+        dem_loaded = (getattr(self.map_3d, '_dem_manager', None) is not None
+                      and getattr(self.map_3d._dem_manager, '_loaded', False))
+
+        menu = QMenu(self._btn_tf)
+        if not dem_loaded:
+            from PyQt6.QtGui import QAction as _QA
+            warn = _QA('⚠ 尚未載入 DEM — 請先載入地形檔', self)
+            warn.setEnabled(False)
+            menu.addAction(warn)
+            pos = self._btn_tf.mapToGlobal(self._btn_tf.rect().bottomLeft())
+            menu.exec(pos)
+            return
+
+        active = float(getattr(self.map_3d, 'terrain_following_agl', 0.0))
+
+        if active > 0:
+            act_off = QAction(f'🛑 關閉地形跟隨（當前 AGL={active:.0f}m）', self)
+            act_off.triggered.connect(lambda: self._apply_tf(0))
+            menu.addAction(act_off)
+            menu.addSeparator()
+
+        for label, agl in [
+            ('30 m AGL（低空巡查）',  30),
+            ('50 m AGL（標準掃描）',  50),
+            ('80 m AGL（一般測繪）',  80),
+            ('100 m AGL（高空覆蓋）', 100),
+            ('150 m AGL',           150),
+            ('200 m AGL',           200),
+        ]:
+            mark = '✓ ' if abs(active - agl) < 0.5 else '   '
+            act = QAction(f'{mark}{label}', self)
+            act.triggered.connect(lambda _, a=agl: self._apply_tf(a))
+            menu.addAction(act)
+
+        pos = self._btn_tf.mapToGlobal(self._btn_tf.rect().bottomLeft())
+        menu.exec(pos)
+
+    def _apply_tf(self, agl: float):
+        """套用地形跟隨 AGL 設定。agl<=0 為關閉。"""
+        agl = max(0.0, float(agl))
+        if agl > 0:
+            self.map_3d.set_terrain_following(agl)
+            self._btn_tf.setText(f'跟隨 AGL={agl:.0f}m')
+            self._btn_tf.setStyleSheet(_btn_qss(active=True))
+        else:
+            self.map_3d.clear_terrain_following()
+            self._btn_tf.setText('地形跟隨')
+            self._btn_tf.setStyleSheet(_btn_qss())
+
+    def set_terrain_following(self, agl: float):
+        """公開 API：程式化啟用 / 關閉地形跟隨。"""
+        self._apply_tf(agl)
+
+    def set_dem_manager(self, dem_manager):
+        """公開 API：注入 DEMTerrainManager（main_window 在 DEM 載入後呼叫）。"""
+        self.map_3d.set_dem_manager(dem_manager)
+
     def set_fpv_camera(self, sysid: int, mode: str = 'forward'):
         """公開 API：程式化啟用 FPV。mode='forward' 平視 / 'down' 俯視偵查。"""
         self._apply_fpv(sysid, mode=mode)
@@ -616,20 +835,35 @@ class DualMapWidget(QWidget):
         self.map_3d.clear_elevation_slicer()
 
     def update_fov_cone(self, lat, lon, alt, fov_radius=50.0,
-                        heading_deg=0.0, pitch_deg=0.0, roll_deg=0.0):
-        self.map_3d.update_fov_cone(lat, lon, alt, fov_radius,
-                                     heading_deg, pitch_deg, roll_deg)
+                        heading_deg=0.0, pitch_deg=0.0, roll_deg=0.0,
+                        sysid: int = 1,
+                        hfov_deg: float = 0.0,
+                        vfov_deg: float = 0.0,
+                        mount_angle_deg: float = 0.0):
+        """更新指定 UAV 的 FOV 光錐（多機支援）
 
-    def clear_fov_cone(self):
-        self.map_3d.clear_fov_cone()
+        傳入 hfov_deg/vfov_deg/mount_angle_deg（皆 > 0）時，3D 地圖切換為
+        梯形角錐 frustum 模式；否則保持 legacy 圓錐視覺。
+        """
+        self.map_3d.update_fov_cone(lat, lon, alt, fov_radius,
+                                     heading_deg, pitch_deg, roll_deg,
+                                     sysid=sysid,
+                                     hfov_deg=hfov_deg,
+                                     vfov_deg=vfov_deg,
+                                     mount_angle_deg=mount_angle_deg)
+
+    def clear_fov_cone(self, sysid: int = None):
+        """清除 FOV 光錐 (sysid=None 清全部)"""
+        self.map_3d.clear_fov_cone(sysid=sysid)
 
     def init_sar_heatmap(self, lat_min, lat_max, lon_min, lon_max,
                          rows=20, cols=20, sweep_width=50.0, quality=0.8):
         self.map_3d.init_sar_heatmap(lat_min, lat_max, lon_min, lon_max,
                                       rows, cols, sweep_width, quality)
 
-    def update_heatmap(self, uav_lat, uav_lon, fov_radius=50.0):
-        self.map_3d.update_heatmap(uav_lat, uav_lon, fov_radius)
+    def update_heatmap(self, uav_lat, uav_lon, fov_radius=50.0, sysid: int = 0):
+        """sysid > 0 → 改用 frustum 梯形覆蓋（隨 HFOV/VFOV/掛載角即時變化）"""
+        self.map_3d.update_heatmap(uav_lat, uav_lon, fov_radius, sysid=sysid)
 
     def clear_sar_heatmap(self):
         self.map_3d.clear_sar_heatmap()
@@ -653,3 +887,15 @@ class DualMapWidget(QWidget):
 
     def animate_radar_scan(self, radar_idx=0, duration_ms=2000):
         self.map_3d.animate_radar_scan(radar_idx, duration_ms)
+
+    # ── Fence Zone (unified NFZ / Threat / Geofence) ────────────────
+    def add_fence_zone(self, zone_id, vertices, alt_min, alt_max,
+                       name, color_hex, category, inclusion):
+        self.map_3d.add_fence_zone(zone_id, vertices, alt_min, alt_max,
+                                   name, color_hex, category, inclusion)
+
+    def remove_fence_zone(self, zone_id):
+        self.map_3d.remove_fence_zone(zone_id)
+
+    def clear_fence_zones(self):
+        self.map_3d.clear_fence_zones()

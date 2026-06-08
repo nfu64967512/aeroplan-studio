@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 
+from ui.resources.aeroplan_theme.widgets import IconButton
 from utils.logger import get_logger
 
 logger = get_logger()
@@ -130,9 +131,8 @@ class ObstacleManagerDialog(QDialog):
         self.alt_spin.setSuffix(" m")
         add_layout.addRow("障礙物高度:", self.alt_spin)
 
-        # 新增按鈕
-        self.add_btn = QPushButton("➕ 新增障礙物")
-        self.add_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+        # 新增按鈕（用 IconButton + success tone 取代 emoji + inline bg）
+        self.add_btn = IconButton('confirm', '新增障礙物', tone='success')
         self.add_btn.clicked.connect(self.on_add_obstacle)
         add_layout.addRow("", self.add_btn)
 

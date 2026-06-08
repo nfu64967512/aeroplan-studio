@@ -3882,6 +3882,17 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
                     while j < n and _pt_in_any_poly(metric_wps[j]):
                         j += 1
                     if j >= n:
+                        # 尾段航點全部落在 NFZ buffer 內 → 不可靜默 break 丟棄，
+                        # 否則會弄丟 LANDING 等尾段，匯出時就沒有降落點。
+                        # 原樣保留剩餘航點（含 LANDING）並記錄警告。
+                        logger.warning(
+                            '[DCCPP-Fence] OPERATION 尾段全在 NFZ buffer 內，'
+                            '無法繞行 → 原樣保留尾段（含 LANDING），'
+                            '請檢查降落點是否過於接近禁區'
+                        )
+                        for _jj in range(i, n):
+                            out_xy.append(metric_wps[_jj])
+                            out_refs.append(_jj)
                         break
                     try:
                         result = planner.correct_path(
@@ -3966,6 +3977,17 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
                 while j < n and _pt_in_any_poly(metric_wps[j]):
                     j += 1
                 if j >= n:
+                    # 非 OPERATION 尾段（TRANSFER/LANDING…）全在 NFZ buffer 內 →
+                    # 不可靜默 break 丟棄，否則匯出會少掉降落 waypoint。
+                    # 原樣保留剩餘航點（含 LANDING）並記錄警告。
+                    logger.warning(
+                        '[DCCPP-Fence] 非 OPERATION 尾段全在 NFZ buffer 內，'
+                        '無法繞行 → 原樣保留尾段（含 LANDING），'
+                        '請檢查降落點是否過於接近禁區'
+                    )
+                    for _jj in range(i, n):
+                        out_xy.append(metric_wps[_jj])
+                        out_refs.append(_jj)
                     break
                 try:
                     result = planner.correct_path([last_xy, metric_wps[j]])

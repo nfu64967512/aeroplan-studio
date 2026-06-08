@@ -58,8 +58,20 @@ pip install -r requirements.txt
 | `shapely` / `pyproj` | 幾何與座標投影 |
 | `PyYAML` | 配置檔讀取 |
 | `pymavlink` | MAVLink 航點匯出 + SITL 即時遙測接收 |
-| `Cesium.js`（內建於 `assets/cesium/`） | 3D 地圖渲染（離線可用） |
-| `Leaflet`（內建於 `assets/leaflet/`） | 2D 地圖渲染（離線可用） |
+| `rasterio` | 讀取 GeoTIFF DEM（地形跟隨 / 3D 高度規劃；缺少時自動降級為常數海拔） |
+| `Cesium.js` | 3D 地圖渲染（本機 `assets/cesium/` 優先，缺少時自動改用線上 CDN） |
+| `Leaflet` | 2D 地圖渲染（本機 `assets/leaflet/` 優先，缺少時自動改用線上 CDN） |
+
+#### 選用 / 外部資源（未隨 repo 發佈，缺少時自動降級，不影響核心啟動）
+
+以下檔案因體積過大或屬可再生資料，**未納入版本控制**，全新 clone 不會有；程式偵測不到時會自動 fallback：
+
+| 資源 | 取得方式 | 缺少時的行為 |
+|------|----------|--------------|
+| 3D 模型 `ui/resources/P25-ID.glb`、`copter.glb`（各 ~100 MB，超過 GitHub 100 MB 上限） | 另從 GitHub Release 附件 / Git LFS 取得，放回 `ui/resources/` | 3D 地圖改用內建 fallback 幾何，仍可正常顯示載具位置 |
+| DEM 地形 `taiwan_dem.tif` | 執行 `python download_taiwan_dem.py`（需先 `pip install rasterio`） | 地形跟隨 / 3D 高度規劃改用常數海拔 |
+| 離線地圖資源 `assets/cesium/`、`assets/leaflet/` | 由 setup 腳本下載 | 自動改用線上 CDN（需連網） |
+| SITL 執行檔 `sitl/ArduPlane.exe` 等 | 見下方「SITL 模擬連線」說明 | 無法啟動本機 SITL 模擬 |
 
 ### 2. 啟動程式
 

@@ -41,6 +41,7 @@ from core.strike.swarm_strike_planner import (
     _MAV_FRAME_REL, _R_EARTH,
 )
 from core.strike.geometry import assign_omnidirectional_slots  # 0-5 去重共用函式
+from core.strike.mission_export import export_missions_qgc      # 0-4 去重共用匯出
 from utils.file_io import create_waypoint_line, write_waypoints
 from utils.logger import get_logger
 
@@ -427,18 +428,8 @@ class VTOLSwarmStrikePlanner:
             fname = fname.replace('/', '-').replace('\\', '-')
             fpath = os.path.join(export_dir, fname)
 
-            lines = ['QGC WPL 110']
-            for seq, item in enumerate(p.mission):
-                current = 1 if seq == 0 and item.cmd == VTOLMAVCmd.DO_SET_HOME else 0
-                lines.append(create_waypoint_line(
-                    seq=seq, command=item.cmd,
-                    lat=item.lat, lon=item.lon, alt=item.alt,
-                    param1=item.param1, param2=item.param2,
-                    param3=item.param3, param4=item.param4,
-                    frame=_MAV_FRAME_REL,
-                    current=current, autocontinue=1,
-                ))
-            if write_waypoints(fpath, lines):
+            if export_missions_qgc(p.mission, fpath,
+                                   home_cmd=VTOLMAVCmd.DO_SET_HOME, frame=_MAV_FRAME_REL):
                 files.append(fpath)
         self._write_briefing(export_dir)
         return files

@@ -105,18 +105,10 @@ class Target:
     name: str = 'TGT'
 
 
-@dataclass
-class MissionItem:
-    """MAVLink 任務項 (對應 QGC WPL 110 單行)"""
-    cmd: int
-    lat: float = 0.0
-    lon: float = 0.0
-    alt: float = 0.0
-    param1: float = 0.0
-    param2: float = 0.0
-    param3: float = 0.0
-    param4: float = 0.0
-    comment: str = ''
+# (0-4 去重) MissionItem 已遷移至 core.strike.mission_export；此處 re-export 以維持
+# 既有 `from core.strike.swarm_strike_planner import MissionItem` 的相容性，並一併
+# 引入共用匯出函式 export_missions_qgc。
+from core.strike.mission_export import MissionItem, export_missions_qgc  # noqa: F401
 
 
 class FeasibilityStatus(str, Enum):
@@ -312,19 +304,8 @@ class SwarmStrikePlanner:
             fname = fname.replace('/', '-').replace('\\', '-')
             fpath = os.path.join(export_dir, fname)
 
-            lines = ['QGC WPL 110']
-            for seq, item in enumerate(p.mission):
-                # 前面 DO_SET_HOME 的 current=1，其餘 current=0
-                current = 1 if seq == 0 and item.cmd == MAVCmd.DO_SET_HOME else 0
-                lines.append(create_waypoint_line(
-                    seq=seq, command=item.cmd,
-                    lat=item.lat, lon=item.lon, alt=item.alt,
-                    param1=item.param1, param2=item.param2,
-                    param3=item.param3, param4=item.param4,
-                    frame=_MAV_FRAME_REL,
-                    current=current, autocontinue=1,
-                ))
-            if write_waypoints(fpath, lines):
+            if export_missions_qgc(p.mission, fpath,
+                                   home_cmd=MAVCmd.DO_SET_HOME, frame=_MAV_FRAME_REL):
                 files.append(fpath)
                 logger.info(
                     f'[SwarmStrike] 匯出 {p.uav.name}: {fpath} '

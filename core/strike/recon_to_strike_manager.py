@@ -60,6 +60,7 @@ from core.strike.geometry import (
     v3_scale as _vec3_scale,
     assign_omnidirectional_slots,  # 0-5 去重共用函式
 )
+from core.strike.mission_export import export_missions_qgc  # 0-4 去重共用匯出
 from utils.file_io import create_waypoint_line, write_waypoints
 from utils.logger import get_logger
 
@@ -777,18 +778,8 @@ class ReconToStrikeManager:
                      f'_alt{a.transition_alt_m:04.0f}'
                      f'_t{a.t_arrive_ip_sec:04.0f}s.waypoints')
             fpath = os.path.join(export_dir, fname)
-            lines = ['QGC WPL 110']
-            for seq, item in enumerate(a.mission):
-                current = 1 if seq == 0 and item.cmd == MAVCmd.DO_SET_HOME else 0
-                lines.append(create_waypoint_line(
-                    seq=seq, command=item.cmd,
-                    lat=item.lat, lon=item.lon, alt=item.alt,
-                    param1=item.param1, param2=item.param2,
-                    param3=item.param3, param4=item.param4,
-                    frame=_MAV_FRAME_REL,
-                    current=current, autocontinue=1,
-                ))
-            if write_waypoints(fpath, lines):
+            if export_missions_qgc(a.mission, fpath,
+                                   home_cmd=MAVCmd.DO_SET_HOME, frame=_MAV_FRAME_REL):
                 files.append(fpath)
         return files
 

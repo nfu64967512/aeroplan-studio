@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from pathlib import Path
 
+from ui.resources.aeroplan_theme.widgets import IconButton
 from utils.file_io import read_yaml
 from utils.logger import get_logger
 
@@ -87,11 +88,11 @@ class VehicleConfigDialog(QDialog):
         # 按鈕
         button_layout = QHBoxLayout()
         
-        apply_btn = QPushButton("✓ 應用設定")
+        apply_btn = IconButton('confirm', '應用設定', tone='primary')
         apply_btn.clicked.connect(self.apply_settings)
         button_layout.addWidget(apply_btn)
-        
-        reset_btn = QPushButton("↻ 重置")
+
+        reset_btn = IconButton('rtb', '重置', tone='ghost')
         reset_btn.clicked.connect(self.reset_to_default)
         button_layout.addWidget(reset_btn)
         

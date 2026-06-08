@@ -147,22 +147,35 @@ class SetStrikeLaunchBaseCommand(QUndoCommand):
         self._new = new_base
         self._old: Optional[Tuple[float, float]] = None
 
+    def _apply(self, base):
+        """套用基地座標：更新 state + 面板 label + 3D 地圖標記"""
+        self.win._strike_launch_base = base
+        if hasattr(self.win, 'parameter_panel'):
+            if base:
+                self.win.parameter_panel.update_strike_base_label(*base)
+                # 同步 ⓿ 區基地座標欄位（若存在）— 不影響目標欄位
+                # 也同步面板上「Lat/Lon」spinbox 是目標座標，不是基地，所以不寫
+            else:
+                self.win.parameter_panel.update_strike_base_label(None, None)
+        # 在 3D 地圖上繪製 / 清除基地標記（綠色 home pin）
+        try:
+            mw = getattr(self.win, 'map_widget', None)
+            if mw is not None:
+                if base:
+                    if hasattr(mw, 'set_home_point_overlay'):
+                        mw.set_home_point_overlay(base[0], base[1])
+                else:
+                    if hasattr(mw, 'clear_home_point_overlay'):
+                        mw.clear_home_point_overlay()
+        except Exception:
+            pass
+
     def redo(self) -> None:
         self._old = getattr(self.win, '_strike_launch_base', None)
-        self.win._strike_launch_base = self._new
-        if hasattr(self.win, 'parameter_panel'):
-            if self._new:
-                self.win.parameter_panel.update_strike_base_label(*self._new)
-            else:
-                self.win.parameter_panel.update_strike_base_label(None, None)
+        self._apply(self._new)
 
     def undo(self) -> None:
-        self.win._strike_launch_base = self._old
-        if hasattr(self.win, 'parameter_panel'):
-            if self._old:
-                self.win.parameter_panel.update_strike_base_label(*self._old)
-            else:
-                self.win.parameter_panel.update_strike_base_label(None, None)
+        self._apply(self._old)
 
 
 # ═══════════════════════════════════════════════════════════════════════

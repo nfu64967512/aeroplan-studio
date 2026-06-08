@@ -1,16 +1,33 @@
 """
 AeroPlan Studio — 戰術 UI 主題系統
 
-依循 MIL-STD-1472H 人機工程標準 + STANAG APP-6 戰術符號色彩語意。
-單一事實來源（Single Source of Truth）：所有 QSS 與 Widget 共用此處定義的色彩常數與字型，
-由 apply_tactical_theme() 在啟動時載入並注入至 QApplication。
+依循 MIL-STD-1472H §5.17.25 + TABLE XL（Common color association meanings）
+與 STANAG APP-6 戰術符號色彩語意。
 
-色彩語意規範（嚴禁濫用）：
-    HOSTILE   紅  — 敵方／失效／嚴重告警
-    WARNING   黃  — 警告／未知／數值接近閾值
-    FRIENDLY  綠  — 友軍／正常／就緒
-    NEUTRAL   青  — 中立單位／一般資訊
-    AMBER     琥珀 — 重點數字（非告警）
+單一事實來源（Single Source of Truth）：所有 QSS 與 Widget 共用此處定義的
+色彩常數與字型，由 apply_tactical_theme() 在啟動時載入並注入至 QApplication。
+
+色彩語意規範（依 TABLE XL — 嚴禁濫用）：
+
+    HOSTILE   紅 (#FF003C) — Equipment: malfunction/critical/OFF/stop；
+                              Tactical: hostile target identification
+    WARNING   黃 (#FFB703) — Equipment: caution/check/abnormal/oil；
+                              Tactical: unknown affiliation, CBRNE area
+    FRIENDLY  綠 (#00E676) — Equipment: normal/in-tolerance/ready/ON/OPEN；
+                              Tactical: NEUTRAL target affiliation（注意：戰術上
+                              「friendly」其實對應 BLUE/CYAN — 命名僅延續舊版專案）
+    NEUTRAL   青 (#00B4D8) — Equipment: advisory；
+                              Tactical: friendly affiliation (cyan)
+    AMBER/FG_EMPHASIS 琥珀 — 重點數字 (HUD boxed values, 經典 amber HUD 色)
+
+    注意：本專案中所有 UAV 為己方無人機，因此 UAV_PALETTE 屬「discriminator
+    color」(§5.17.25.6) — 用於區分多目標的辨識色板，並非 tactical affiliation 色。
+
+字型規範（依 §5.17.18.7）：
+    §5.17.18.7.1 標準字型 shall use Arial/Times/Courier/Verdana 等常見字型
+    §5.17.18.7.2 不利條件下 shall use sans-serif (Arial/Verdana/Helvetica)
+    本系統選用 Segoe UI / Inter / Roboto Condensed / Rajdhani / JetBrains Mono
+    等於規範語意上同類，皆為合規字型。
 """
 
 from __future__ import annotations
@@ -57,6 +74,42 @@ class TacticalColors:
     # ─── Overlay（半透明 HUD 面板） ─────────────────────────────
     OVERLAY_BG: Final[str] = "rgba(13, 27, 42, 0.85)"   # 85% 不透明
     OVERLAY_BG_LIGHT: Final[str] = "rgba(13, 27, 42, 0.65)"
+
+    # ─── 多機/多區域識別色板 (Discriminator Colors) ───────────────
+    # MIL-STD-1472H 5.8.5 允許在「區分多個同類目標」時使用色相識別色板。
+    # 必須通過 ISO/IEC 9241-3 色覺對比測試（避免紅綠色盲混淆）。
+    # 此處挑選 8 色：明亮且高飽和，於 BG_PRIMARY (#0A0F14) 上對比度均 ≥ 4.5:1。
+    UAV_PALETTE: Final[tuple[str, ...]] = (
+        "#FFB703",  # 1. AMBER     ← 主機（與 FG_EMPHASIS 同）
+        "#FF003C",  # 2. HOSTILE 紅
+        "#00E676",  # 3. FRIENDLY 綠
+        "#00B4D8",  # 4. NEUTRAL 青
+        "#C77DFF",  # 5. 紫（電子戰）
+        "#80FFDB",  # 6. 薄荷青
+        "#FF8500",  # 7. 橘
+        "#7CB9E8",  # 8. 淡藍
+    )
+    # 區域/任務區塊用色板（與 UAV 同階序但色相略偏移避免混淆）
+    REGION_PALETTE: Final[tuple[str, ...]] = (
+        "#08EC91",  # 1. 任務綠
+        "#FFB703",  # 2. 琥珀
+        "#00B4D8",  # 3. 中性青
+        "#FF003C",  # 4. 危險紅
+        "#C77DFF",  # 5. 紫
+        "#FF8500",  # 6. 橘
+    )
+
+    @classmethod
+    def uav_color(cls, sysid: int) -> str:
+        """依 sysid (1-N) 回傳 UAV 識別色（循環取用）。"""
+        if sysid < 1:
+            sysid = 1
+        return cls.UAV_PALETTE[(sysid - 1) % len(cls.UAV_PALETTE)]
+
+    @classmethod
+    def region_color(cls, idx: int) -> str:
+        """依區域索引（0-based）回傳識別色（循環取用）。"""
+        return cls.REGION_PALETTE[max(0, idx) % len(cls.REGION_PALETTE)]
 
     @staticmethod
     def q(hex_or_rgba: str, alpha: int | None = None) -> QColor:
@@ -172,12 +225,23 @@ THRESHOLDS = TacticalThresholds()
 # ══════════════════════════════════════════════════════════════════════
 #  apply_tactical_theme — 啟動時注入主題
 # ══════════════════════════════════════════════════════════════════════
-_QSS_PATH = Path(__file__).parent / "styles" / "tactical_theme.qss"
+# 2026-04 起，主 QSS 改為 Global_MIL_STD.qss（嚴格對應 MIL-STD-1472H 章節）。
+# 若檔案不存在則回退至 tactical_theme.qss，以維持向後相容。
+_STYLES_DIR = Path(__file__).parent / "styles"
+_QSS_PRIMARY = _STYLES_DIR / "Global_MIL_STD.qss"
+_QSS_LEGACY = _STYLES_DIR / "tactical_theme.qss"
+
+
+def _resolve_qss_path() -> Path:
+    """回傳實際使用的 QSS 檔案路徑（主檔優先，失敗則 legacy）。"""
+    if _QSS_PRIMARY.exists():
+        return _QSS_PRIMARY
+    return _QSS_LEGACY
 
 
 def _render_qss() -> str:
     """讀取 QSS 模板並以 TacticalColors/Fonts 變數做字串替換。"""
-    template = _QSS_PATH.read_text(encoding="utf-8")
+    template = _resolve_qss_path().read_text(encoding="utf-8")
     replacements: dict[str, str] = {
         # 色彩
         "{{BG_PRIMARY}}": TacticalColors.BG_PRIMARY,

@@ -27,6 +27,7 @@ Mixin 不持有自身狀態，所有 self.* 屬性皆由 MainWindow.__init__ 設
 """
 from __future__ import annotations
 
+import json
 import math
 from PyQt6.QtWidgets import QMessageBox, QFileDialog
 
@@ -83,9 +84,14 @@ class StrikeControllerMixin:
                 else:
                     cmd.redo()
             except Exception:
-                # fallback: 直接設定
+                # fallback: 直接設定 + 在 3D 地圖打基地標記
                 self._strike_launch_base = (lat, lon)
                 self.parameter_panel.update_strike_base_label(lat, lon)
+                try:
+                    if hasattr(self.map_widget, 'set_home_point_overlay'):
+                        self.map_widget.set_home_point_overlay(lat, lon)
+                except Exception:
+                    pass
 
             self._toggle_strike_base_marking(False)
             self.statusBar().showMessage(
@@ -112,6 +118,9 @@ class StrikeControllerMixin:
             self.parameter_panel.update_strike_target_count(len(self._strike_targets))
 
         idx = len(self._strike_targets)
+        # 把最新點擊的座標同步回 ⓿ 區 lat/lon spinbox（單目標模式）
+        if hasattr(self.parameter_panel, 'set_strike_target_coord'):
+            self.parameter_panel.set_strike_target_coord(lat, lon)
         self.statusBar().showMessage(
             f'🎯 TGT-{idx} 已標記: ({lat:.6f}, {lon:.6f}) (Ctrl+Z 可撤銷)', 3000
         )
@@ -170,14 +179,31 @@ class StrikeControllerMixin:
                 pass
 
     def _on_strike_execute(self, params: dict):
-        """執行蜂群打擊 — 依發射位置 + 載具類型分流
+        """執行蜂群打擊 — Diamond 4 機菱形編隊 + STOT 飽和打擊（唯一流程）。
 
-        分流邏輯：
-          - VTOL 模式啟用 → 呼叫 _on_strike_execute_vtol() 使用 VTOLSwarmStrikePlanner
-          - 固定翼模式：按發射位置走 plan_auto (異地) / plan_stot (同地)
-
-        兩種路徑都會接著執行 STOT/DTOT 時空協同。
+        2026 重構：移除舊的 TerminalStrikePlanner / VTOL 分支
+                 與其產生的垂直螺旋俯衝視覺。所有蜂群打擊統一走
+                 DiamondSwarmStrikePlanner（直線爬升、平緩水平巡航、
+                 4 向同時俯衝）。
         """
+        # ── 前置檢查：必須有 1 個目標 + 已標基地 ─────────────────
+        if len(self._strike_targets) != 1:
+            QMessageBox.warning(
+                self, '蜂群打擊 — 目標未設定',
+                '菱形 STOT 飽和打擊需要恰好 1 個目標。\n'
+                '請於 ⓿ 區直接輸入目標座標，或啟用「在 3D 地圖上點選目標」後左鍵點擊地圖。'
+            )
+            return
+        if self._strike_launch_base is None:
+            QMessageBox.warning(
+                self, '蜂群打擊 — 發射基地未設定',
+                '需先標記共用發射基地（4 機都從此點起飛）。\n'
+                '請於 ① 區點擊「📍 從 3D 地圖標記發射基地」，再回地圖左鍵點擊位置。'
+            )
+            return
+        self._on_diamond_strike_execute(params)
+        return  # ★ 不再 fallthrough 到舊 TerminalStrikePlanner（避免螺旋俯衝視覺殘留）
+
         # ── Schema 驗證：在進入規劃邏輯前先確認參數合法 ────────
         # (2026 重構：以 config.schemas 做 fail-fast 驗證，取代散落的 if 檢查)
         try:
@@ -383,6 +409,723 @@ class StrikeControllerMixin:
         logger.info('\n'.join(summary_lines))
 
     # ═════════════════════════════════════════════════════════════════
+    #  Diamond Swarm Strike — 4 機菱形編隊 + STOT 飽和打擊
+    # ═════════════════════════════════════════════════════════════════
+    def _on_diamond_strike_execute(self, params: dict):
+        """
+        執行菱形編隊蜂群打擊（單一目標、4 機 4 方位同時俯衝）。
+        參考 core.strike.diamond_swarm_planner.DiamondSwarmStrikePlanner。
+        """
+        from core.strike.diamond_swarm_planner import (
+            DiamondSwarmStrikePlanner, FormationConfig, Target,
+        )
+
+        # 關閉進行中的標記模式
+        if self._strike_marking_mode:
+            self._on_strike_mark_targets()
+        if self._strike_base_marking_mode:
+            self._toggle_strike_base_marking(False)
+
+        tgt_lat, tgt_lon = self._strike_targets[0]
+        target = Target(lat=tgt_lat, lon=tgt_lon, alt=0.0, name='TGT')
+
+        cruise_speed = float(params.get('cruise_speed', 60.0))
+        # 固定翼最小轉彎半徑：依 30° 滾轉角推導 R = V² / (g·tan φ)
+        turn_r_default = max(cruise_speed**2 / (9.81 * math.tan(math.radians(30.0))), 80.0)
+
+        # 從面板讀新增的編隊與四散參數（N、縱向/橫向間距、決斷圈、攻擊方位）
+        fp = self.parameter_panel.get_strike_formation_params()
+        n_uavs  = max(2, min(int(fp.get('n_uavs', 4)), 12))
+        long_m  = max(fp.get('longitudinal_m', 300.0), 100.0)
+        lat_m   = max(fp.get('lateral_m', 400.0), 100.0)   # 總跨距 → 半跨距 = lat_m/2
+        disp_r  = max(fp.get('dispersion_radius_m', 3000.0), 500.0)
+
+        # 攻擊方位處理：
+        # 一律傳 None 讓 planner 用「同側半圈扇面均分」自動公式：
+        #   bearings[i] = back_bearing - 90° + i × 180°/(N-1)
+        # 不論基地朝目標是哪個方向，都會自動以 cruise_heading 為基準軸
+        # 將 N 個方位平均分布在 base 那一側 180° 半圈內（端點含 ±90°）。
+        # 這比舊版「N=4 用 UI 上 [0,90,180,270] 全方位包圍」戰術更佳：
+        #   ① 不繞過目標、不在目標上空交會 ② 飛行距離最短 ③ STOT 補時更小
+        # 若需自訂方位，可改成讀 UI 上的非預設值（保留註解的 user_bearings 邏輯）。
+        bearings = None
+        # （保留：若使用者明確改過 UI 4 個方位 spinbox 為非預設值，可自訂）
+        # if n_uavs == 4:
+        #     user_bearings = fp.get('attack_bearings', [0.0, 90.0, 180.0, 270.0])
+        #     # 偵測：若 4 值仍為預設 [0, 90, 180, 270]，視為「未自訂」用自動公式
+        #     defaults = [0.0, 90.0, 180.0, 270.0]
+        #     if any(abs(float(b) - d) > 0.5 for b, d in zip(user_bearings[:4], defaults)):
+        #         bearings = tuple(float(b) % 360.0 for b in user_bearings[:4])
+
+        # 機間錯開參數（避免空中碰撞 + 波次攻擊）
+        # timing_mode: 'STOT' (同秒命中) / 'DTOT' (依方位順序間隔命中)
+        # altitude_step: 各機巡航高度差 (m)；建議 ≥ 50m
+        # interval_sec : DTOT 模式機間命中時間間隔 (s)
+        timing_mode_raw = str(params.get('timing_mode', 'STOT')).upper()
+        cfg = FormationConfig(
+            n_uavs               = n_uavs,
+            front_back_spacing_m = long_m,
+            left_right_half_m    = lat_m / 2.0,
+            cruise_alt_m         = float(params.get('cruise_alt', 500.0)),
+            takeoff_alt_m        = float(params.get('takeoff_alt', 80.0)),
+            takeoff_pitch_deg    = float(params.get('takeoff_pitch', 12.0)),
+            cruise_speed_mps     = cruise_speed,
+            decision_ring_m      = disp_r,
+            pre_strike_radius_m  = max(disp_r * 0.5, 800.0),
+            loiter_radius_m      = 120.0,
+            dive_initiation_m    = float(params.get('dive_initiation_dist', 800.0)),
+            max_dive_angle_deg   = float(params.get('max_dive_angle', 45.0)),
+            min_turn_radius_m    = float(params.get('min_turn_radius', turn_r_default)),
+            altitude_step_m      = float(params.get('altitude_step', 0.0)),
+            timing_mode          = timing_mode_raw if timing_mode_raw in ('STOT', 'DTOT') else 'STOT',
+            time_interval_s      = float(params.get('interval_sec', 0.0)),
+            attack_bearings_deg  = bearings,
+        )
+
+        planner = DiamondSwarmStrikePlanner(cfg)
+        try:
+            plans = planner.plan(target=target, base_latlon=self._strike_launch_base)
+        except Exception as e:
+            logger.error(f'[DiamondStrike] 規劃失敗: {e}', exc_info=True)
+            QMessageBox.warning(self, '蜂群打擊失敗',
+                f'菱形編隊規劃發生錯誤:\n{e}')
+            return
+
+        # 快取結果供匯出 / SITL 上傳使用
+        self._diamond_plans = plans
+        self._diamond_target = target
+        self._diamond_cfg = cfg
+
+        # ── 更新底部 STOT TIME-ON-TARGET 同步狀態儀表板 ─────────
+        # 顯示 N 張 UAV 卡片：TTT / Loiter / Delay 補償 / 距離 / 方位 / 高度
+        # 4 機 TTT 應顯示為一致數字（STOT 命中時刻同步證明）
+        try:
+            dash = getattr(self, 'strike_ttt_dashboard', None)
+            if dash is not None:
+                dash.set_plans(
+                    plans=plans,
+                    target_lat=target.lat, target_lon=target.lon,
+                    timing_mode=cfg.timing_mode,
+                    delay_strategy=cfg.delay_strategy,
+                )
+                dash.setVisible(True)
+        except Exception as e:
+            logger.warning(f'[TTT Dashboard] 更新失敗: {e}', exc_info=True)
+
+        # ── 3D 地圖視覺化：每架 UAV 一條完整連續軌跡（不同顏色）──
+        # 為避免「N 機編隊段在 km 級地圖上重疊看起來像 1 條線」的視覺問題，
+        # 改成「每機一條從基地→目標的連續 polyline」用 UAV_PALETTE 不同色繪製，
+        # 再額外疊加：決斷圈、盤旋圓、俯衝段（紅色發光線）強調戰術元素。
+        try:
+            from ui.resources.tactical_theme import TacticalColors as TC
+            uav_palette = list(TC.UAV_PALETTE) + list(TC.REGION_PALETTE)
+        except Exception:
+            uav_palette = ['#FFB703', '#FF003C', '#00E676', '#00B4D8',
+                            '#C77DFF', '#80FFDB', '#FF8500', '#7CB9E8',
+                            '#08EC91', '#FFB703', '#00B4D8', '#FF003C']
+
+        if hasattr(self.map_widget, 'map_3d'):
+            cm = self.map_widget.map_3d
+            cm._js('clearPaths()')
+            cm._js('clearTacticalOverlay()')
+            # 清除舊版（TerminalStrikePlanner / VTOL）視覺殘留
+            cm._js('if (typeof strikeClearAll === "function") strikeClearAll();')
+            cm._js('if (typeof clearAllTerminalDives === "function") clearAllTerminalDives();')
+
+            # ── 蜂群打擊不使用 Geofence ────────────────────────
+            # 蜂群末端飽和打擊 = 自殺撞擊任務，不能讓 fence 攔截俯衝。
+            # 清除 3D 地圖上的 fence 視覺、清除 dual_map_widget 的 fence
+            # bundle 快取，並避免 SITL 上傳階段被 fence 干擾。
+            try:
+                cm.clear_geofence()
+            except Exception:
+                pass
+            try:
+                # 清除 dual_map_widget 內部 fence bundle 快取
+                if hasattr(self.map_widget, '_last_fence_bundle'):
+                    self.map_widget._last_fence_bundle = None
+                # 通知 fence_built 信號清空（若有 listener）
+                if hasattr(self.map_widget, 'fence_built'):
+                    self.map_widget.fence_built.emit(None)
+            except Exception:
+                pass
+
+            # 1) 每架 UAV 一條完整 polyline（formation + dispersion + dive 串接）
+            for idx, plan in enumerate(plans):
+                color = uav_palette[idx % len(uav_palette)]
+                # 拼接全程路徑，避免重複起終點
+                full_path = list(plan.formation_path)
+                if plan.dispersion_path:
+                    # 跳過第一點（與 formation_path 末端重複）
+                    full_path.extend(plan.dispersion_path[1:])
+                if plan.dive_path:
+                    # 注意：dive 第一點 = pre_strike 的延伸；若與前段末端重複就跳過
+                    if (full_path and len(plan.dive_path) >= 1
+                            and abs(full_path[-1][0] - plan.dive_path[0][0]) < 1e-6
+                            and abs(full_path[-1][1] - plan.dive_path[0][1]) < 1e-6):
+                        full_path.extend(plan.dive_path[1:])
+                    else:
+                        full_path.extend(plan.dive_path)
+
+                if len(full_path) >= 2:
+                    pts_json = cm._pts_to_json(full_path,
+                                                default_alt=cfg.cruise_alt_m)
+                    label = (f'UAV{plan.sysid} {plan.role} '
+                             f'@{plan.attack_bearing_deg:.0f}° '
+                             f'(loiter {plan.loiter_time_s:.0f}s)')
+                    cm._js(
+                        f'addPath({json.dumps(pts_json)},'
+                        f'{json.dumps(color)},5,'
+                        f'{json.dumps(label)},false,"off")'
+                    )
+
+                # 預備點盤旋圓 — 用該 UAV 的色，標示 STOT 補時位置
+                cm._js(
+                    f'addLoiterCircle({plan.pre_strike_lat},{plan.pre_strike_lon},'
+                    f'{cfg.loiter_radius_m},{cfg.cruise_alt_m},'
+                    f'{json.dumps(color)})'
+                )
+                # Phase 3 俯衝紅線（醒目，與 UAV 色獨立 — 強調戰術終端）
+                cm._js(
+                    f'addDiveLine({plan.dive_lat},{plan.dive_lon},{cfg.cruise_alt_m},'
+                    f'{tgt_lat},{tgt_lon},{target.alt})'
+                )
+
+            # 2) 決斷圈（琥珀虛線圓，目標為圓心）
+            cm._js(
+                f'setDispersionRing({tgt_lat},{tgt_lon},{cfg.decision_ring_m})'
+            )
+            # 3) 紅色目標標記
+            cm._js(f'strikeAddTarget({tgt_lat},{tgt_lon},1)')
+
+        # 啟用匯出 / 上傳按鈕（用 N 替換固定的 1）
+        self.parameter_panel.set_strike_export_enabled(True)
+        self.parameter_panel.update_strike_target_count(1)
+
+        # 狀態列摘要 — 改成依實際 N 顯示
+        arrivals = [p.final_leg_time_s + p.loiter_time_s for p in plans]
+        spread_ms = (max(arrivals) - min(arrivals)) * 1000.0
+        msg = (f'🎯 菱形 STOT 規劃完成: {len(plans)} 機 → '
+               f'同秒命中誤差 {spread_ms:.0f} ms '
+               f'| 巡航 {cfg.cruise_speed_mps:.0f}m/s | '
+               f'最大俯衝 {cfg.max_dive_angle_deg:.0f}°')
+        self.statusBar().showMessage(msg, 8000)
+        logger.info(msg)
+        for p in plans:
+            logger.info(
+                f'  UAV{p.sysid} [{p.role}] '
+                f'attack@{p.attack_bearing_deg:.0f}° '
+                f'leg={p.final_leg_length_m:.0f}m '
+                f't={p.final_leg_time_s:.1f}s '
+                f'loiter={p.loiter_time_s:.1f}s '
+                f'WPs={len(p.mission)}'
+            )
+
+    def _on_param_tab_changed(self, tab_name: str):
+        """
+        參數面板分頁切換 → 調整地圖點擊路由。
+        進入「蜂群打擊」自動啟用目標標記模式；離開時關閉。
+        這樣使用者切到蜂群打擊分頁後，左鍵點擊地圖立即新增 / 設定打擊目標，
+        而不會誤觸成「新增邊界角點」。
+        """
+        is_strike = ('蜂群' in (tab_name or '') or 'Strike' in (tab_name or ''))
+        # 進入打擊頁 → 啟用 marking（若尚未啟用）
+        if is_strike and not self._strike_marking_mode:
+            self._on_strike_mark_targets()
+        # 離開打擊頁 → 關閉所有 strike 標記模式（避免到別的頁面誤點）
+        elif not is_strike:
+            if self._strike_marking_mode:
+                self._on_strike_mark_targets()
+            if self._strike_base_marking_mode:
+                self._toggle_strike_base_marking(False)
+
+    def _on_strike_target_coord_input(self, lat: float, lon: float):
+        """使用者在 ⓿ 區手動輸入目標經緯 → 同步到 _strike_targets + 3D marker。"""
+        self._strike_targets = [(float(lat), float(lon))]
+        self.parameter_panel.update_strike_target_count(1)
+        # 同步在 3D 地圖打紅色目標標記
+        if hasattr(self.map_widget, 'map_3d'):
+            try:
+                self.map_widget.map_3d._js(
+                    f'strikeClearTargets(); strikeAddTarget({lat},{lon},1);'
+                )
+            except Exception:
+                pass
+
+    # ─────────────────────────────────────────────────────────────────
+    #  ArduPlane SITL — 蜂群末端飽和打擊「KAMIKAZE 全限制解除」參數
+    # ─────────────────────────────────────────────────────────────────
+    # ⚠️  警告：此參數組僅供 SITL 自殺攻擊模擬使用，**禁止部署到實機**。
+    #     所有 fence / failsafe / 角度 / 速度 / 電量 / 墜機偵測等限制
+    #     均已解除，目的是讓 4 機能完整執行「並排起飛 → 12° 斜爬升 →
+    #     菱形編隊 → 解散 → 同秒命中」全流程，不被任何安全機制中斷。
+    #
+    # 解除類別：
+    #   ① Pre-arm / Arming check：完全跳過
+    #   ② Failsafe：油門/GCS/電池/EKF/長短失聯 全關
+    #   ③ Geofence：FENCE_ENABLE=0 + FENCE_TYPE=0 + FENCE_ACTION=0
+    #   ④ 角度極限：俯仰 -90°~+45°、滾轉 ±85°
+    #   ⑤ 空速：5 ~ 120 m/s（自由俯衝衝刺）
+    #   ⑥ TECS：爬升 15 m/s、下沉 80 m/s
+    #   ⑦ 節流：0~100% / slewrate 200%/s
+    #   ⑧ 墜機偵測：完全關閉（避免命中時被識為墜毀觸發 disarm）
+    #   ⑨ 起飛 / 速度 / GPS HDOP / RC failsafe 全部跳過
+    # ─────────────────────────────────────────────────────────────────
+    DIAMOND_SITL_PRESET_PARAMS = [
+        # ── ① ARM / Pre-arm 全部跳過 ──────────────────────────
+        ('ARMING_CHECK',     0,    'INT32'),  # bitmask 0 = 不檢查任何項
+        ('ARMING_REQUIRE',   0,    'INT8'),   # 0 = 不需要 arm 即可動作
+
+        # ── ② Failsafe 全部關閉 ───────────────────────────────
+        ('FS_THR_ENABLE',    0,    'INT32'),
+        ('FS_GCS_ENABLE',    0,    'INT32'),
+        ('FS_BATT_ENABLE',   0,    'INT32'),
+        ('FS_EKF_ACTION',    1,    'INT32'),  # 1 = 僅報警不動作（0 會 disable EKF）
+        ('FS_EKF_THRESH',    1.0,  'REAL32'), # EKF innovation 容忍度放寬
+        ('FS_LONG_ACTN',     0,    'INT8'),
+        ('FS_SHORT_ACTN',    0,    'INT8'),
+        ('FS_LONG_TIMEOUT',  300.0,'REAL32'), # 5 分鐘才觸發長失聯
+        ('FS_SHORT_TIMEOUT', 60.0, 'REAL32'),
+        ('THR_FAILSAFE',     0,    'INT8'),
+
+        # ── ③ 電池 failsafe 全部關（自殺機不會回家） ─────────
+        ('BATT_LOW_VOLT',    0.0,  'REAL32'),
+        ('BATT_CRT_VOLT',    0.0,  'REAL32'),
+        ('BATT_LOW_MAH',     0,    'INT32'),
+        ('BATT_CRT_MAH',     0,    'INT32'),
+        ('BATT_FS_LOW_ACT',  0,    'INT8'),
+        ('BATT_FS_CRT_ACT',  0,    'INT8'),
+
+        # ── ④ Geofence 全部關（允許飛任何高度任何位置）────────
+        # 蜂群打擊就是要俯衝撞地，不能讓 fence 攔截
+        ('FENCE_ENABLE',     0,    'INT8'),
+        ('FENCE_AUTOENABLE', 0,    'INT8'),
+        ('FENCE_ACTION',     0,    'INT8'),
+        ('FENCE_TYPE',       0,    'INT8'),    # bitmask 0 = 不啟用任何 fence 類型
+        ('FENCE_ALT_MAX',    99999.0, 'REAL32'),
+        ('FENCE_ALT_MIN',    -1000.0, 'REAL32'),
+        ('FENCE_RADIUS',     999999.0,'REAL32'),
+        ('FENCE_MARGIN',     0.0,  'REAL32'),
+        ('FENCE_TOTAL',      0,    'INT8'),    # 清空 polygon fence
+
+        # ── ⑤ GPS / EKF / 感測器健康檢查放寬 ──────────────────
+        ('GPS_HDOP_GOOD',    900,  'INT16'),   # HDOP=9.0 也視為可用
+        ('EK3_GLITCH_RAD',   1000, 'INT16'),   # GPS glitch 容忍 1000m
+        ('EK3_CHECK_SCALE',  500,  'INT16'),   # EKF 健康檢查門檻放寬
+
+        # ── ⑥ 起飛立即點火，跳過所有起飛條件檢查 ─────────────
+        ('TKOFF_THR_MINACC', 0.0,  'REAL32'),
+        ('TKOFF_THR_MINSPD', 0.0,  'REAL32'),
+        ('TKOFF_THR_MAX',    100,  'INT16'),
+        ('TKOFF_THR_DELAY',  0,    'INT8'),
+        ('TKOFF_LVL_PITCH',  10.0, 'REAL32'),
+        ('TKOFF_TDRAG_ELEV', 0,    'INT8'),
+        ('TKOFF_TDRAG_SPD1', 0.0,  'REAL32'),
+        ('TKOFF_ROTATE_SPD', 0.0,  'REAL32'),
+        ('TKOFF_FLAP_PCNT',  0,    'INT8'),
+        ('GROUND_STEER_ALT', -1.0, 'REAL32'),
+
+        # ── ⑦ 空速完全放開（5 ~ 120 m/s） ─────────────────────
+        ('AIRSPEED_MIN',     5,    'INT8'),    # 從 8 降到 5
+        ('AIRSPEED_CRUISE',  18,   'INT8'),
+        ('AIRSPEED_MAX',     120,  'INT8'),    # 從 60 提到 120 m/s（俯衝衝刺極限）
+        ('STALL_PREVENTION', 0,    'INT8'),    # 完全關失速保護
+
+        # ── ⑧ 俯仰角度完全解除（-90° ~ +45°） ──────────────────
+        # 允許接近垂直俯衝撞擊；centidegrees 單位
+        ('LIM_PITCH_MIN',   -9000, 'INT16'),   # -90° 完全垂直俯衝
+        ('LIM_PITCH_MAX',    4500, 'INT16'),   # +45° 急上仰
+        ('TECS_PITCH_MIN',  -89.0, 'REAL32'),  # 接近垂直
+        ('TECS_PITCH_MAX',   45.0, 'REAL32'),
+
+        # ── ⑨ 滾轉角放寬（±85°） ──────────────────────────────
+        ('LIM_ROLL_CD',      8500, 'INT16'),   # 85° 急轉彎
+        ('ACRO_PITCH_RATE',   720, 'INT16'),
+        ('ACRO_ROLL_RATE',    720, 'INT16'),
+
+        # ── ⑩ TECS 完全鬆綁 ───────────────────────────────────
+        ('TECS_CLMB_MAX',    15.0, 'REAL32'),  # 從 8 提到 15 m/s
+        ('TECS_SINK_MAX',    80.0, 'REAL32'),  # 從 50 提到 80 m/s
+        ('TECS_SPDWEIGHT',    0.0, 'REAL32'),  # 0 = 完全用高度，不顧空速
+        ('TECS_LAND_SPDWGT',  0.0, 'REAL32'),
+
+        # ── ⑪ 節流完全放開（0 ~ 100% / 200%/s） ───────────────
+        ('THR_MAX',          100,  'INT8'),
+        ('THR_MIN',            0,  'INT8'),
+        ('THR_SLEWRATE',     200,  'INT8'),    # 從 100 提到 200%/s（俯衝瞬間響應）
+        ('THR_PASS_STAB',      0,  'INT8'),
+
+        # ── ⑫ 墜機偵測完全關閉 ────────────────────────────────
+        # 自殺撞擊時 ArduPlane 會偵測到 G 力過大「以為墜毀」自動 disarm
+        # 馬達 → 飛機在最後關頭失去控制力。必須關閉。
+        ('CRASH_ACC_THRESH', 0.0,  'REAL32'),
+        ('CRASH_DETECT',     0,    'INT8'),
+
+        # ── ⑬ Mission 行為 ────────────────────────────────────
+        ('MIS_DONE_BEHAVE',  0,    'INT8'),    # 0=HOLD（不 RTL）
+        ('MIS_RESTART',      0,    'INT8'),    # 不要重啟 mission
+        ('LAND_DISARMDELAY', 0,    'INT8'),
+        # ── ⑬b RTL 完全失效 — 即便被觸發 RTL 也不要返航 ──────
+        # mission 已加 NAV_LOITER_UNLIM 防止「mission done」進 RTL，
+        # 但仍可能被 fence breach / failsafe 觸發 RTL。把 RTL 設成
+        # 「就地停留 + 不爬升 + 不降落」確保即便進 RTL 也不離開目標區。
+        ('RTL_ALT',           0,   'INT16'),   # RTL 不爬升
+        ('RTL_AUTOLAND',      0,   'INT8'),    # RTL 不自動降落
+        ('RTL_RADIUS',        0,   'INT16'),
+        ('RTL_CLIMB_MIN',     0,   'INT16'),
+        ('AFS_ENABLE',        0,   'INT8'),    # Advanced Failsafe 完全關閉
+
+        # ── ⑭ Waypoint approach 半徑（避免鋸齒軌跡） ─────────
+        # 固定翼 min_turn_radius ≈ 150m，若 WP_RADIUS 太小（如 10m）飛機會
+        # 「飛到 wp 才開始轉」 → overshoot → U-turn 回頭 → 鋸齒之字形軌跡。
+        # WP_RADIUS = 80m 讓飛機在 wp 前 80m 就 advance，預留轉彎空間。
+        # 但 mission 內 TARGET / OVERSHOOT 用 param2 個別覆蓋為 3-5m 確保精準命中。
+        ('WP_RADIUS',         80,  'INT16'),   # approach radius (m) — 全局
+        ('WP_LOITER_RAD',    150,  'INT16'),   # 盤旋半徑與 cfg.loiter_radius 一致
+        ('WP_MAX_RADIUS',    100,  'INT16'),   # 大角度轉彎時最大 advance 半徑
+
+        # ── ⑭b L1 路徑追蹤控制器（解決「不按路線飛」）─────────
+        # ArduPlane 用 L1 演算法追蹤 wp-to-wp 直線。預設 NAV_L1_PERIOD=20s
+        # 在 60 m/s 巡航下 = 1200m 追蹤距離 → 飛機可大幅偏離規劃路線。
+        # 降到 12s = 720m，飛機緊貼路線飛，但會略增滾轉率。
+        ('NAV_L1_PERIOD',    12.0, 'REAL32'),  # 從 20 降到 12（緊跟路線）
+        ('NAV_L1_DAMPING',   0.75, 'REAL32'),  # 阻尼比（0.75 略震盪、追隨快）
+        ('NAV_L1_XTRACK_I',  0.05, 'REAL32'),  # cross-track 積分項（消除穩態誤差）
+        ('PTCH2SRV_RLL',      1.0, 'REAL32'),  # 滾轉時自動補俯仰（保高度）
+        # ── ⑭c TECS 響應加快（速度/高度同步控制） ────────────
+        ('TECS_TIME_CONST',   4.0, 'REAL32'),  # 從預設 5 降到 4（更積極）
+        ('TECS_THR_DAMP',     0.5, 'REAL32'),  # 節流阻尼
+        ('TECS_INTEG_GAIN',   0.5, 'REAL32'),  # TECS 積分增益
+        ('TECS_PTCH_DAMP',    0.5, 'REAL32'),  # 俯仰阻尼
+
+        # ── ⑮ MAVLink 串流 ────────────────────────────────────
+        ('SR0_POSITION',     5,    'INT16'),
+        ('SR0_EXTRA1',       5,    'INT16'),
+        ('SR0_EXTRA2',       5,    'INT16'),
+        ('SR0_EXTRA3',       2,    'INT16'),
+    ]
+
+    def _on_diamond_strike_sitl_upload(self):
+        """
+        將菱形 STOT 任務上傳到所有 SITL：
+          UAV1 → links[0],  UAV2 → links[1],  UAV3 → links[2],  UAV4 → links[3]
+        若 SITL 實例少於 4 台 → 重複使用最後一個 link（並警告）
+        每個 link 收到：
+          1) DIAMOND_SITL_PRESET_PARAMS（友善起飛 + 終端俯衝參數）
+          2) 自己 UAV 的完整 MissionItem 序列
+        """
+        plans = self._diamond_plans
+        n_links = len(self._sitl_links)
+        if n_links < len(plans):
+            self.statusBar().showMessage(
+                f'⚠ SITL 連線數 ({n_links}) 少於 UAV 數 ({len(plans)})，'
+                f'多餘 UAV 會與最後一台共用 link', 6000
+            )
+
+        upload_count = 0
+        for i, plan in enumerate(plans):
+            link = self._sitl_links[min(i, n_links - 1)]
+            # 0) 蜂群打擊不使用 fence — 主動清除飛控 EEPROM 中任何殘留 polygon
+            #    fence 與 FENCE_ENABLE=0，避免上次任務的 fence 攔截俯衝。
+            try:
+                link.clear_fence()
+            except Exception as e:
+                logger.warning(f'[DiamondStrike] UAV{plan.sysid} 清除 fence 失敗: {e}')
+
+            # 1) 先寫入起飛 + 終端俯衝友善參數（每架都需要）
+            try:
+                link.set_params(self.DIAMOND_SITL_PRESET_PARAMS)
+            except Exception as e:
+                logger.warning(f'[DiamondStrike] UAV{plan.sysid} 參數寫入失敗: {e}')
+
+            # 2) 上傳任務 — MissionItem → (lat, lon, alt, cmd, p1, p2, p3, p4)
+            #    跳過 plan.mission[0]（HOME） — sitl_link._send_mission 會自動
+            #    在 seq=0 補一份 HOME。若不跳過會出現雙 HOME，使 mission 第一個
+            #    NAV 命令變成 NAV_WAYPOINT @ alt=0 → AUTO 模式卡在地面不起飛。
+            wps = []
+            mission_for_upload = plan.mission[1:] if plan.mission else []
+            for it in mission_for_upload:
+                wps.append((it.lat, it.lon, it.alt, it.cmd,
+                             it.param1, it.param2, it.param3, it.param4))
+            try:
+                link.upload_mission(wps)
+                upload_count += 1
+            except Exception as e:
+                logger.error(
+                    f'[DiamondStrike] UAV{plan.sysid} 上傳失敗: {e}', exc_info=True
+                )
+
+        # 顯示「上傳完成」對話框，包含啟動策略說明
+        delay_summary = ', '.join(
+            f'UAV{p.sysid}={p.takeoff_delay_s:.0f}s'
+            for p in plans if p.takeoff_delay_s > 0.5
+        ) or '無'
+        loiter_summary = ', '.join(
+            f'UAV{p.sysid}={p.loiter_time_s:.0f}s'
+            for p in plans if p.loiter_time_s > 0.5
+        ) or '無'
+        QMessageBox.information(
+            self, '✅ 菱形 STOT 任務上傳完成',
+            f'已將 {len(plans)} 機任務送出到 {upload_count} 條 SITL 連線。\n\n'
+            f'⚠ 重要：請按 [KAMIKAZE LAUNCH] 按鈕同步啟動，\n'
+            f'   而非手動逐一切 AUTO（GCS 端會依規劃延遲送命令給較近的 UAV）。\n\n'
+            f'各機地面延遲: {delay_summary}\n'
+            f'各機空中盤旋: {loiter_summary}'
+        )
+        self.statusBar().showMessage(
+            f'🚀 菱形 STOT 上傳完成 → {upload_count} 台 SITL，'
+            f'請按 KAMIKAZE LAUNCH 同步啟動', 8000
+        )
+
+    # ─────────────────────────────────────────────────────────────────
+    #  GCS 端排程啟動 — 解決 ArduPlane NAV_DELAY 在地面不生效問題
+    # ─────────────────────────────────────────────────────────────────
+    def launch_kamikaze_synchronized(self):
+        """同步啟動所有 SITL 蜂群打擊任務，依 plan.takeoff_delay_s 在 GCS 端錯開。
+
+        為什麼用 GCS 端排程而非 mission 內 NAV_DELAY？
+            ArduPlane 在 NAV_TAKEOFF 之前的 NAV_DELAY 會被忽略
+            （官方文件：「飛機需在空中才會 wait at current location」）。
+            因此改在 GCS 端用 QTimer 對「較近的 UAV」延後送 AUTO+ARM 命令，
+            飛機會停在跑道上直到收到 mode 切換指令才解鎖起飛。
+
+        排程策略 (假設 STOT, 各機 takeoff_delay_s 為 0/8.8/17.6/66s)：
+            t=0s    UAV3 (基準機 delay=0) 立即收到 AUTO+ARM
+            t=8.8s  UAV2 收到 AUTO+ARM
+            t=17.6s UAV4 收到 AUTO+ARM
+            t=66s   UAV1 收到 AUTO+ARM
+
+        呼叫時機：
+            蜂群打擊規劃 + 上傳 SITL 完成後，由 TTT Dashboard
+            「KAMIKAZE LAUNCH」按鈕觸發。
+        """
+        from PyQt6.QtCore import QTimer
+
+        plans = getattr(self, '_diamond_plans', None)
+        if not plans:
+            QMessageBox.information(
+                self, '無蜂群打擊任務',
+                '尚未規劃蜂群打擊或已被清除，請先按「執行打擊」生成計畫'
+            )
+            return
+
+        n_links = len(self._sitl_links)
+        if n_links == 0:
+            QMessageBox.warning(
+                self, 'SITL 未連線',
+                '尚未連線任何 SITL，請先在 SITL 分頁啟動 + 連線'
+            )
+            return
+
+        scheduled = []
+        for i, plan in enumerate(plans):
+            if i >= n_links:
+                break  # link 數少於 UAV 數時，超出的 plan 不啟動
+            link = self._sitl_links[i]
+            delay_s = max(float(plan.takeoff_delay_s), 0.0)
+            delay_ms = int(round(delay_s * 1000.0))
+
+            # 用 default 參數綁定 link 避免 lambda late-binding bug
+            def _launch(L=link, sid=plan.sysid, ds=delay_s):
+                try:
+                    L.auto_start()  # AUTO + ARM + MISSION_START 三步驟
+                    logger.info(
+                        f'[KAMIKAZE] UAV{sid} 已送出 AUTO+ARM (delay={ds:.1f}s)'
+                    )
+                except Exception as e:
+                    logger.error(f'[KAMIKAZE] UAV{sid} 啟動失敗: {e}', exc_info=True)
+
+            if delay_ms <= 0:
+                _launch()
+            else:
+                QTimer.singleShot(delay_ms, _launch)
+            scheduled.append((plan.sysid, delay_s))
+
+        # 同步啟動 TTT Dashboard 倒數
+        try:
+            dash = getattr(self, 'strike_ttt_dashboard', None)
+            if dash is not None:
+                dash.start_countdown()
+        except Exception:
+            pass
+
+        sched_text = ', '.join(
+            f'UAV{sid}@+{ds:.1f}s' for sid, ds in scheduled
+        )
+        self.statusBar().showMessage(
+            f'🚀 KAMIKAZE LAUNCH ⚠ 已排程 {len(scheduled)} 機: {sched_text}',
+            10000,
+        )
+        logger.info(f'[KAMIKAZE] 同步啟動排程: {sched_text}')
+
+        # ─────────────────────────────────────────────────────────────
+        #  Strike Visual Overlay — 啟動即時視覺化 + 訂閱 telemetry
+        # ─────────────────────────────────────────────────────────────
+        self._start_strike_visualization(plans, scheduled)
+
+    def _start_strike_visualization(self, plans, scheduled):
+        """KAMIKAZE LAUNCH 後啟動 3D 攻擊視覺化（軌跡 / HUD / 爆炸 / BDA）。
+
+        流程：
+            1) strike_viz_begin(target_lat, target_lon) 重置 JS 端 overlay
+            2) 訂閱 FleetRegistry.telemetry_updated → _on_strike_viz_telemetry
+            3) 每筆 telemetry 投到 strike_viz_update_uav
+            4) 全機 IMPACT 或 timeout 600s → 拆除 + 開 BDA 對話框
+        """
+        if not self._strike_targets:
+            return
+        cesium = self._get_cesium_widget()
+        if cesium is None or not hasattr(cesium, 'strike_viz_begin'):
+            return
+
+        tgt_lat, tgt_lon = self._strike_targets[0]
+
+        # 預建 sysid → 計畫 / ETA / loiter / callsign 對照表
+        from mission.fleet_registry import FleetRegistry
+        reg = FleetRegistry.instance()
+        viz_state = {
+            'plans_by_sysid': {},
+            'sysid_to_callsign': {},
+            'impacted': set(),
+            'target_lat': tgt_lat,
+            'target_lon': tgt_lon,
+            'started_at': None,  # 第一筆 telemetry 進來才設
+            'timeout_timer': None,
+        }
+        for p in plans:
+            eta_s = (float(p.takeoff_delay_s)
+                     + float(p.final_leg_time_s)
+                     + float(p.loiter_time_s))
+            viz_state['plans_by_sysid'][int(p.sysid)] = {
+                'eta_s': eta_s,
+                'loiter_lat': float(p.pre_strike_lat),
+                'loiter_lon': float(p.pre_strike_lon),
+                'loiter_radius_m': 120.0 if p.loiter_time_s > 0 else 0.0,
+            }
+
+        # sysid → callsign mapping（從 FleetRegistry 反查）
+        try:
+            for cs in reg.callsigns():
+                link = reg.get_link(cs)
+                if link is None:
+                    continue
+                sysid_label = int(getattr(link, 'sysid_label', 0) or 0)
+                if sysid_label > 0:
+                    viz_state['sysid_to_callsign'][sysid_label] = cs
+        except Exception:
+            pass
+
+        cesium.strike_viz_begin(tgt_lat, tgt_lon, 0.0)
+        self._strike_viz_state = viz_state
+
+        # 訂閱 telemetry — 用 instance method 才好斷開
+        reg.telemetry_updated.connect(self._on_strike_viz_telemetry)
+        viz_state['_handler'] = self._on_strike_viz_telemetry
+
+        # 600s 安全超時 → 強制收尾（避免某機卡住整個 BDA）
+        from PyQt6.QtCore import QTimer
+        t = QTimer(self)
+        t.setSingleShot(True)
+        t.timeout.connect(self._finalize_strike_visualization)
+        t.start(600_000)
+        viz_state['timeout_timer'] = t
+
+        logger.info(
+            f'[Strike VIZ] 啟動 — target=({tgt_lat:.5f}, {tgt_lon:.5f}), '
+            f'n_uavs={len(viz_state["plans_by_sysid"])}'
+        )
+
+    def _on_strike_viz_telemetry(self, callsign: str, frame):
+        """FleetRegistry.telemetry_updated 訂閱 — 過濾 strike 參與機後送往 3D。"""
+        state = getattr(self, '_strike_viz_state', None)
+        if state is None:
+            return
+        sysid = int(getattr(frame, 'sysid', 0) or 0)
+        plan_info = state['plans_by_sysid'].get(sysid)
+        if plan_info is None:
+            return  # 非 strike 參與機
+
+        cesium = self._get_cesium_widget()
+        if cesium is None:
+            return
+
+        # 第一筆 telemetry → 標記實際 t0
+        if state['started_at'] is None:
+            import time as _t
+            state['started_at'] = _t.monotonic()
+
+        # 推 JS：階段判定 + 軌跡 + label
+        cs = state['sysid_to_callsign'].get(sysid, f'UAV-{sysid}')
+        cesium.strike_viz_update_uav(
+            sysid=sysid,
+            lat=float(frame.lat),
+            lon=float(frame.lon),
+            alt=float(frame.alt_rel),
+            heading_deg=float(frame.heading),
+            callsign=cs,
+            planned_eta_s=plan_info['eta_s'],
+            loiter_lat=plan_info['loiter_lat'],
+            loiter_lon=plan_info['loiter_lon'],
+            loiter_radius_m=plan_info['loiter_radius_m'],
+        )
+
+        # IMPACT 偵測（與 JS 端閾值對齊：d<60m AND alt<30m）
+        import math as _m
+        try:
+            dx = (float(frame.lat) - state['target_lat'])
+            dy = (float(frame.lon) - state['target_lon'])
+            dist_m = _m.sqrt(
+                (dx * 111320.0) ** 2
+                + (dy * 111320.0 * _m.cos(_m.radians(state['target_lat']))) ** 2
+            )
+        except Exception:
+            dist_m = 1e9
+        if dist_m < 100.0 and float(frame.alt_rel) < 40.0:
+            state['impacted'].add(sysid)
+
+        # 全機 IMPACT → 立刻收尾
+        if state['impacted'] >= set(state['plans_by_sysid'].keys()):
+            self._finalize_strike_visualization()
+
+    def _finalize_strike_visualization(self):
+        """拆除 telemetry 訂閱 + 取 BDA 統計 + 開對話框。"""
+        state = getattr(self, '_strike_viz_state', None)
+        if state is None:
+            return
+
+        # 斷開 telemetry 訂閱（避免事件累積）
+        try:
+            from mission.fleet_registry import FleetRegistry
+            FleetRegistry.instance().telemetry_updated.disconnect(
+                self._on_strike_viz_telemetry
+            )
+        except Exception:
+            pass
+
+        # 停超時計時器
+        t = state.get('timeout_timer')
+        if t is not None:
+            try: t.stop()
+            except Exception: pass
+
+        cesium = self._get_cesium_widget()
+        if cesium is None or not hasattr(cesium, 'strike_viz_end'):
+            self._strike_viz_state = None
+            return
+
+        def _on_stats(stats: dict):
+            try:
+                from ui.dialogs.strike_bda_dialog import StrikeBDADialog
+                dlg = StrikeBDADialog(stats, parent=self)
+                dlg.show()
+            except Exception as e:
+                logger.error(f'[Strike VIZ] BDA dialog 開啟失敗: {e}', exc_info=True)
+
+        cesium.strike_viz_end(callback=_on_stats)
+        self._strike_viz_state = None
+        logger.info('[Strike VIZ] 結束 — BDA 統計已請求')
+
+    # ═════════════════════════════════════════════════════════════════
     #  VTOL 蜂群打擊 — 使用 VTOLSwarmStrikePlanner
     # ═════════════════════════════════════════════════════════════════
     def _on_strike_execute_vtol(self, params: dict, vtol_params: dict):
@@ -555,25 +1298,63 @@ class StrikeControllerMixin:
         self.parameter_panel.set_strike_export_enabled(False)
         self.parameter_panel.update_dtot_preview('')
         self.parameter_panel.update_strike_base_label(None, None)
+        # 清除菱形 STOT 快取
+        self._diamond_plans = None
+        self._diamond_target = None
+        self._diamond_cfg = None
+        # 隱藏底部 TTT Dashboard
+        try:
+            dash = getattr(self, 'strike_ttt_dashboard', None)
+            if dash is not None:
+                dash.clear()
+                dash.setVisible(False)
+        except Exception:
+            pass
         self.statusBar().showMessage('已清除打擊視覺化', 3000)
 
     # ─────────────────────────────────────────────────────────────────
     #  蜂群打擊 — 匯出 QGC WPL 航點（比照 DCCPP 匯出架構）
     # ─────────────────────────────────────────────────────────────────
     def _on_strike_export(self):
-        """匯出當前蜂群打擊路徑為 QGC WPL 110 航點檔案。
+        """匯出當前蜂群打擊路徑為 QGC WPL 110 航點檔案。"""
+        # ── 新流程：菱形編隊 STOT 飽和打擊 ─────────────────────
+        if getattr(self, '_diamond_plans', None):
+            from pathlib import Path
+            from datetime import datetime
+            from core.strike.diamond_swarm_planner import DiamondSwarmStrikePlanner
+            default_dir = Path('data/exports') / f'diamond_strike_{datetime.now():%Y%m%d_%H%M%S}'
+            chosen = QFileDialog.getExistingDirectory(
+                self, '選擇匯出資料夾（4 個 .waypoints + 簡報 .txt）',
+                str(default_dir.parent),
+            )
+            if not chosen:
+                return
+            out_dir = Path(chosen) / default_dir.name
+            files = DiamondSwarmStrikePlanner.export_qgc_wpl(
+                self._diamond_plans, out_dir, prefix='diamond_strike_uav'
+            )
+            QMessageBox.information(
+                self, '✅ 菱形編隊打擊匯出完成',
+                f'匯出資料夾：{out_dir}\n\n共 {len(files)} 個檔案：\n' +
+                '\n'.join(f'  • {f.name}' for f in files)
+            )
+            self.statusBar().showMessage(
+                f'🛡️ 菱形 STOT 任務已匯出 ({len(files)} 個檔案)', 6000
+            )
+            return
 
-        固定翼模式：
-            DO_SET_HOME (179) → DO_CHANGE_SPEED (178) → NAV_TAKEOFF (22)
-            → NAV_WAYPOINT (16, 巡航) × N → NAV_WAYPOINT (16, 俯衝) × M
-
-        VTOL 模式（VTOLSwarmStrikePlanner 自帶 export_qgc_wpl）：
-            DO_SET_HOME → NAV_VTOL_TAKEOFF (84) → DO_VTOL_TRANSITION (3000)
-            → DO_CHANGE_SPEED (Phase 2) → NAV_WAYPOINT (2km 邊界)
-            → DO_CHANGE_SPEED (Phase 3) → IMAGE_START_CAPTURE → NAV_WAYPOINT (IMPACT)
-        """
-        import os, math
-        from PyQt6.QtWidgets import QFileDialog, QMessageBox
+        # ── 舊流程（多目標固定翼 / VTOL） ──────────────────────
+        # （下方原有邏輯保留供其他模式使用）
+        # 固定翼模式：
+        #     DO_SET_HOME (179) → DO_CHANGE_SPEED (178) → NAV_TAKEOFF (22)
+        #     → NAV_WAYPOINT (16, 巡航) × N → NAV_WAYPOINT (16, 俯衝) × M
+        # VTOL 模式（VTOLSwarmStrikePlanner 自帶 export_qgc_wpl）：
+        #     DO_SET_HOME → NAV_VTOL_TAKEOFF (84) → DO_VTOL_TRANSITION (3000)
+        #     → DO_CHANGE_SPEED (Phase 2) → NAV_WAYPOINT (2km 邊界)
+        #     → DO_CHANGE_SPEED (Phase 3) → IMAGE_START_CAPTURE → NAV_WAYPOINT (IMPACT)
+        import os
+        # 不再 re-import QFileDialog/QMessageBox（會把模組層級匯入遮蔽成 local），
+        # 已於檔案頂端 from PyQt6.QtWidgets import QMessageBox, QFileDialog
         from utils.file_io import create_waypoint_line, write_waypoints
 
         if not self._strike_result:
@@ -961,15 +1742,9 @@ class StrikeControllerMixin:
     def _on_strike_sitl_upload(self, use_dtot_speed: bool = True):
         """把當前蜂群打擊任務分派到所有連線中的 SITL 實例。
 
-        每架 UCAV 產生一份獨立的 MAVLink 任務序列：
-            DO_CHANGE_SPEED (178) — 若 use_dtot_speed=True 則用各機專屬 V_i
-            NAV_TAKEOFF      (22) — 爬升至巡航高度
-            NAV_LOITER_TIME  (19) — (可選) S-turn 補時盤旋 (僅 DTOT 協同結果)
-            NAV_WAYPOINT     (16) × 巡航段 (param2 = turn_radius)
-            NAV_WAYPOINT     (16) × 俯衝段 (param2 = 0.25 × turn_radius)
-
-        分派規則同 DCCPP：uav_id 排序後對應 SITL link 0/1/2...；
-        若 SITL 實例少於 UCAV 數，超出者共用最後一份路徑。
+        分流：
+          - 若有快取的 _diamond_plans → 上傳菱形 4 機 STOT 任務
+          - 否則 → 沿用舊版 _strike_result 流程
         """
         # ── 前置檢查 ───────────────────────────────────────────────
         if not self._sitl_links:
@@ -979,6 +1754,10 @@ class StrikeControllerMixin:
                 '請先切換到「🛰 SITL」分頁，啟動 N 台 ArduPlane。'
             )
             return
+
+        # ── 新流程：菱形 STOT 任務 ────────────────────────────
+        if getattr(self, '_diamond_plans', None):
+            return self._on_diamond_strike_sitl_upload()
 
         if not self._strike_result:
             QMessageBox.warning(

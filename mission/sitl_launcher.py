@@ -12,10 +12,11 @@ from __future__ import annotations
 
 import os
 import sys
+import socket
 import subprocess
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 from utils.logger import get_logger
 
@@ -24,6 +25,151 @@ logger = get_logger()
 # 專案根目錄下的 sitl 資料夾
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _SITL_DIR     = _PROJECT_ROOT / 'sitl'
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 網路 / 防火牆 helper（嵌入式 fan-out 用）
+# ──────────────────────────────────────────────────────────────────────
+def _get_lan_ip() -> str:
+    """取得 Windows 主機 outbound LAN IPv4。
+    用 UDP socket 假裝連往外部位址（不真送封包）讓 OS 自動選擇
+    對應的網卡 IP，比列舉 adapter 更可靠。失敗時 fallback 127.0.0.1。
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(('8.8.8.8', 80))
+        return s.getsockname()[0]
+    except Exception:
+        return '127.0.0.1'
+    finally:
+        s.close()
+
+
+def _firewall_rule_exists(rule_name: str) -> bool:
+    """檢查 Windows Firewall 是否已有指定名稱的規則。
+    用 `netsh advfirewall firewall show rule name=...` 的 returncode 判斷
+    （0=存在，1=不存在）。非 Windows / 失敗一律視為「不存在」。
+    """
+    if sys.platform != 'win32':
+        return False
+    try:
+        result = subprocess.run(
+            ['netsh', 'advfirewall', 'firewall', 'show', 'rule', f'name={rule_name}'],
+            capture_output=True, text=True, timeout=5,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _tcp_port_listener_pid(port: int) -> Optional[int]:
+    """回傳目前 LISTEN 該 TCP port 的 PID；無人佔用 → None。
+
+    Windows 用 PowerShell `Get-NetTCPConnection`；非 Windows 一律回 None。
+    """
+    if sys.platform != 'win32':
+        return None
+    try:
+        result = subprocess.run(
+            [
+                'powershell', '-NoProfile', '-Command',
+                f'(Get-NetTCPConnection -LocalPort {int(port)} '
+                f'-State Listen -ErrorAction SilentlyContinue '
+                f'| Select-Object -First 1 -ExpandProperty OwningProcess)',
+            ],
+            capture_output=True, text=True, timeout=4,
+        )
+        out = (result.stdout or '').strip()
+        if not out:
+            return None
+        return int(out.splitlines()[0])
+    except Exception:
+        return None
+
+
+def _process_name_by_pid(pid: int) -> str:
+    """回傳 PID 對應的 process 名稱；失敗回 'unknown'。"""
+    if sys.platform != 'win32':
+        return 'unknown'
+    try:
+        result = subprocess.run(
+            ['powershell', '-NoProfile', '-Command',
+             f'(Get-Process -Id {int(pid)} -ErrorAction SilentlyContinue).Name'],
+            capture_output=True, text=True, timeout=4,
+        )
+        return (result.stdout or '').strip() or 'unknown'
+    except Exception:
+        return 'unknown'
+
+
+def _find_free_sitl_instance(
+    start_instance: int = 0,
+    max_instance: int = 16,
+    reserved: Optional[set] = None,
+) -> int:
+    """從 start_instance 起找第一個 TCP port 沒人 LISTEN 且不在 reserved 內的 instance。
+
+    對應 port 公式：5760 + 10 * instance
+
+    reserved: 由 launcher 自己追蹤的「本次批次已配發過」instance 編號集合。
+              即使該 port 還沒被 SITL bind（race window），也跳過，避免重派。
+
+    全部都被占用時直接回 start_instance（不阻擋啟動，後續 spawn 自然會失敗
+    並由 ArduPilot 印 bind error）。
+    """
+    reserved = reserved or set()
+    for inst in range(start_instance, start_instance + max_instance):
+        if inst in reserved:
+            continue
+        port = 5760 + 10 * inst
+        if _tcp_port_listener_pid(port) is None:
+            return inst
+    return start_instance
+
+
+def _ensure_firewall_rule(port: int, proto: str, rule_name: str) -> bool:
+    """確保 Windows Firewall 入站允許規則存在。
+    若已存在則跳過；不存在則以 UAC 提權執行 netsh 新增規則。
+
+    參數:
+        port: 要開放的埠號
+        proto: 'TCP' 或 'UDP'
+        rule_name: 規則名稱（用來檢查與識別，建議用 AeroPlanStudio_SITL_<PROTO>_<PORT>）
+    回傳:
+        True = 規則已存在或成功建立；False = 新增失敗（log 警告，不擋啟動）
+    """
+    if sys.platform != 'win32':
+        return True  # 非 Windows 平台直接放行
+    if _firewall_rule_exists(rule_name):
+        logger.info(f'[SITL Firewall] 規則已存在，跳過: {rule_name}')
+        return True
+    try:
+        # 用 ShellExecuteW + 'runas' verb 觸發 UAC 提權
+        # 參數一次帶完整 netsh advfirewall firewall add rule ...
+        import ctypes
+        params = (
+            f'advfirewall firewall add rule name="{rule_name}" '
+            f'dir=in action=allow protocol={proto} localport={port} '
+            f'profile=any enable=yes'
+        )
+        # ShellExecuteW returns > 32 on success
+        ret = ctypes.windll.shell32.ShellExecuteW(
+            None, 'runas', 'netsh', params, None, 0,  # 0 = SW_HIDE
+        )
+        if int(ret) > 32:
+            logger.info(f'[SITL Firewall] 已新增規則 {rule_name} ({proto}/{port})')
+            return True
+        logger.warning(
+            f'[SITL Firewall] 新增規則失敗 (ShellExecuteW ret={ret})，'
+            f'請手動執行：netsh {params}'
+        )
+        return False
+    except Exception as e:
+        logger.warning(
+            f'[SITL Firewall] 新增規則例外: {e}\n'
+            f'    若嵌入式連不上 SITL，請手動在 Windows Defender 新增 {proto}/{port} 入站允許'
+        )
+        return False
 
 # 飛行器類型對應 binary
 _VEHICLE_BINARIES = {
@@ -257,6 +403,10 @@ class SITLLauncher:
     def __init__(self):
         self._procs: list = []      # 多實例 [(proc, vehicle, instance_id, conn_str), ...]
         self._vehicle: str = ''
+        # 本 launcher 已派出的 instance 編號（不論 TCP 是否已 bind）。
+        # 用來防止 start_multi 連續呼叫 start() 時，前一台 SITL 還沒完成 bind
+        # 就被下一輪 port-check 誤判為 free，導致兩台搶同一個 port。
+        self._allocated_instances: set[int] = set()
 
     @property
     def _proc(self):
@@ -288,11 +438,23 @@ class SITLLauncher:
               alt: float = 100.0,
               heading: float = 0.0,
               speedup: float = 1.0,
-              instance: int = 0) -> str:
+              instance: int = 0,
+              sysid: Optional[int] = None,
+              extra_outputs: Optional[List[str]] = None,
+              auto_firewall: bool = False) -> str:
         """
         啟動單一 SITL 子行程實例。
         instance N → TCP port 5760+10*N（與 ArduPilot 慣例一致）
-        回傳連線字串，例如 'tcp:127.0.0.1:5760'
+        回傳連線字串，例如 'tcp:127.0.0.1:5760'（給 Windows 端 GCS 用）。
+
+        參數:
+            sysid:         覆寫 SYSID_THISMAV（給嵌入式 MAVROS tgt_system 對齊用）
+                           不指定則沿用舊行為 = instance+1
+            extra_outputs: SERIAL1+ 額外 MAVLink 出口 URI 列表，
+                           例如 ['udpclient:192.168.1.50:14550']
+                           會依序綁到 --serial1 / --serial2 / ...
+            auto_firewall: True 時於 Popen 前嘗試新增 Windows Firewall 入站規則
+                           （TCP SERIAL0 + 所有 udpclient 目標 port 的 UDP）
         """
         vehicle = vehicle.upper()
         if vehicle not in _VEHICLE_BINARIES:
@@ -303,6 +465,36 @@ class SITLLauncher:
                 f'找不到 SITL binary，預期在 {_SITL_DIR}\n'
                 f'請從 Mission Planner sitl 資料夾複製過來'
             )
+
+        # ── Port 衝突 / 同 batch 重派檢查 ──────────────────────────────
+        # 1) Windows 上常見：VS Code 之類已 LISTEN 127.0.0.1:5760，
+        #    SITL bind 0.0.0.0:5760 仍能 listen，但 client 連 127.0.0.1:5760
+        #    會走到佔用者而非 SITL → 收不到 heartbeat。
+        # 2) start_multi 連續呼叫時，前一台 SITL 還沒完成 bind，下一輪
+        #    port-check 可能誤判 free 而重派同一個 instance → bind 撞車。
+        #    用 `_allocated_instances` 防止此種 race。
+        requested_port = 5760 + 10 * instance
+        listener_pid = _tcp_port_listener_pid(requested_port)
+        in_batch_collision = instance in self._allocated_instances
+        if listener_pid is not None or in_batch_collision:
+            if in_batch_collision and listener_pid is None:
+                reason = (
+                    f'本批次已配發 instance {instance}（SITL 尚未完成 bind）'
+                )
+            else:
+                holder = _process_name_by_pid(listener_pid) if listener_pid else 'unknown'
+                reason = f'port {requested_port} 已被 {holder} (PID={listener_pid}) 佔用'
+            new_inst = _find_free_sitl_instance(
+                instance + 1, max_instance=16,
+                reserved=self._allocated_instances,
+            )
+            new_port = 5760 + 10 * new_inst
+            logger.warning(
+                f'[SITL Launcher] {reason}，自動 shift instance '
+                f'{instance} → {new_inst} (port {new_port})。'
+            )
+            instance = new_inst
+        self._allocated_instances.add(instance)
 
         binary = _SITL_DIR / _VEHICLE_BINARIES[vehicle]
         param_file = _SITL_DIR / _DEFAULT_PARAMS[vehicle]
@@ -323,12 +515,14 @@ class SITLLauncher:
 
         # 生成 identity.parm — 與 Mission Planner 內建 SITL 完全一致
         # 關鍵：SIM_DRIFT_SPEED=0 解除 SITL 預設風漂，避免飛機在地面一直往前滑
+        # sysid 若有指定，覆寫 SYSID_THISMAV（嵌入式 MAVROS tgt_system 對齊用）
+        effective_sysid = int(sysid) if sysid is not None else (instance + 1)
         identity_file = work_dir / 'identity.parm'
         try:
             identity_file.write_text(
                 f'SERIAL0_PROTOCOL=2\n'
                 f'SERIAL1_PROTOCOL=2\n'
-                f'SYSID_THISMAV={instance + 1}\n'
+                f'SYSID_THISMAV={effective_sysid}\n'
                 f'SIM_TERRAIN=0\n'
                 f'TERRAIN_ENABLE=0\n'
                 f'SCHED_LOOP_RATE=50\n'
@@ -348,6 +542,10 @@ class SITLLauncher:
             '--speedup', str(speedup),
             '--instance', str(instance),
         ]
+        # sysid 覆寫：--sysid 命令列旗標 + identity.parm 雙保險
+        # （SYSID_THISMAV 是 EEPROM 參數，第一次乾淨 boot 才會吃 identity.parm）
+        if sysid is not None:
+            cmd += ['--sysid', str(int(sysid))]
         # --defaults 用逗號分隔多份檔（與 MP 一致）
         defaults_list = []
         if param_file.exists():
@@ -366,6 +564,23 @@ class SITLLauncher:
         if defaults_list:
             cmd += ['--defaults', ','.join(defaults_list)]
 
+        # 嵌入式 fan-out：SERIAL1+ 額外 MAVLink 出口
+        # SITL 內建 SERIAL0 = tcp:5760+10*instance:wait（Windows GCS 用）
+        # 從 SERIAL1 開始疊加 udpclient/tcpclient/udpin/... URI
+        fanout_udp_ports: List[int] = []
+        if extra_outputs:
+            for idx, uri in enumerate(extra_outputs, start=1):
+                cmd += [f'--serial{idx}', uri]
+                # 解析 udpclient 的目標 port，用來建立防火牆 UDP 入站規則
+                # （SITL udpclient socket 同時收嵌入式回送的封包，本端 source port
+                #  為 ephemeral，但開放目標 port 的入站允許就足夠雙向通訊）
+                if uri.startswith('udpclient:') or uri.startswith('udpin:'):
+                    try:
+                        port_str = uri.rsplit(':', 1)[1]
+                        fanout_udp_ports.append(int(port_str))
+                    except (ValueError, IndexError):
+                        logger.warning(f'[SITL Launcher] 無法解析 fanout URI port: {uri}')
+
         # 清除上次的 eeprom.bin / terrain / log，避免殘留壞參數造成 crash-loop
         for junk in ('eeprom.bin', 'mav.parm', 'terrain'):
             p = work_dir / junk
@@ -382,6 +597,20 @@ class SITLLauncher:
 
         logger.info(f'[SITL Launcher] 啟動 {vehicle}: {" ".join(cmd)}')
         logger.info(f'[SITL Launcher] 工作目錄: {work_dir}')
+
+        # 在 Popen 之前嘗試新增防火牆規則（首次會跳 UAC，之後存在則略過）
+        # 不擋 SITL 啟動：失敗只 log 警告，使用者可手動補規則
+        tcp_port_pre = 5760 + 10 * instance
+        if auto_firewall:
+            _ensure_firewall_rule(
+                tcp_port_pre, 'TCP',
+                f'AeroPlanStudio_SITL_TCP_{tcp_port_pre}',
+            )
+            for udp_port in fanout_udp_ports:
+                _ensure_firewall_rule(
+                    udp_port, 'UDP',
+                    f'AeroPlanStudio_SITL_UDP_{udp_port}',
+                )
 
         # Windows: 為每個 SITL 實例開獨立 console 視窗
         # （與 Mission Planner SITL 行為一致，方便除錯觀察起飛/墜機原因）
@@ -412,18 +641,37 @@ class SITLLauncher:
         tcp_port = 5760 + 10 * instance
         conn_str = f'tcp:127.0.0.1:{tcp_port}'
         self._procs.append((proc, vehicle, instance, conn_str))
-        logger.info(f'[SITL Launcher] {vehicle} 實例 {instance} 已啟動，PID={proc.pid}, {conn_str}')
+        # 主訊息：簡潔一行給 status bar 用
+        logger.info(
+            f'[SITL Launcher] {vehicle} 實例 {instance} 已啟動 '
+            f'(sysid={effective_sysid}, PID={proc.pid}), {conn_str}'
+        )
+        # 詳細端點資訊：方便使用者比對嵌入式 MAVROS apm.launch
+        if extra_outputs:
+            lan_ip = _get_lan_ip()
+            for uri in extra_outputs:
+                logger.info(f'    嵌入式 fan-out: {uri}')
+            logger.info(f'    本機 LAN IP:   {lan_ip}  (apm.launch 對端參考)')
         return conn_str
 
     def start_multi(self, vehicle: str, count: int,
                     lat: float, lon: float,
                     alt: float = 100.0, heading: float = 0.0,
                     spacing_deg: float = 0.0008,
-                    homes: list = None) -> list:
+                    homes: list = None,
+                    instance_configs: Optional[List[dict]] = None,
+                    auto_firewall: bool = False) -> list:
         """啟動多台 SITL，回傳 [(instance, conn_str), ...]
 
-        homes: 可選 [(lat, lon, heading), ...] — 若提供則每架 SITL 依序用
-               該列表指定的座標/航向；否則沿用 lat/lon + spacing_deg 展開
+        參數:
+            homes: 可選 [(lat, lon, heading), ...] — 若提供則每架 SITL 依序用
+                   該列表指定的座標/航向；否則沿用 lat/lon + spacing_deg 展開
+            instance_configs: 來自 SITLLaunchDialog 的每台設定列表，每個 dict 含:
+                   sysid / embedded_port
+                   （embedded_ip 欄位向下相容保留但不再使用 — SITL 改為 udpin
+                    被動模式，嵌入式 MAVROS 為主動 sender）
+                   未提供 → 沿用舊行為，無 sysid 覆寫、無 fan-out
+            auto_firewall: 是否於啟動前自動新增 Windows Firewall 入站規則
         """
         results = []
         for i in range(count):
@@ -436,8 +684,31 @@ class SITLLauncher:
                 ilat = lat + i * spacing_deg
                 ilon = lon
                 ihdg = heading
-            conn = self.start(vehicle=vehicle, lat=ilat, lon=ilon,
-                              alt=alt, heading=ihdg, instance=i)
+
+            # 從 dialog 帶來的 per-instance 設定取出 sysid 與 fan-out port
+            # 架構：Windows SITL 被動 listen（udpin），嵌入式 MAVROS 主動 send。
+            # 這樣 SITL 啟動時不會卡在嵌入式 ARP/連線，TCP SERIAL0 也不會被拖累。
+            sysid_i: Optional[int] = None
+            extra_outputs_i: Optional[List[str]] = None
+            if instance_configs and i < len(instance_configs):
+                cfg = instance_configs[i] or {}
+                if cfg.get('sysid') is not None:
+                    sysid_i = int(cfg['sysid'])
+                port = cfg.get('embedded_port')
+                if port:
+                    # SITL --serial1=udpin:0.0.0.0:<port> 被動監聽
+                    # 對應 MAVROS apm.launch:
+                    #   fcu_url:=udp://:<local_port>@<windows_ip>:<port>
+                    # MAVROS bind local_port，主動送到 Windows:<port>
+                    extra_outputs_i = [f'udpin:0.0.0.0:{int(port)}']
+
+            conn = self.start(
+                vehicle=vehicle, lat=ilat, lon=ilon,
+                alt=alt, heading=ihdg, instance=i,
+                sysid=sysid_i,
+                extra_outputs=extra_outputs_i,
+                auto_firewall=auto_firewall,
+            )
             results.append((i, conn))
             time.sleep(0.5)
         return results
@@ -457,6 +728,8 @@ class SITLLauncher:
                 except Exception as e:
                     logger.error(f'[SITL Launcher] 停止失敗: {e}')
         self._procs = []
+        # 同步清空已配發 instance 紀錄，讓下次 start 重新從 0 起算
+        self._allocated_instances.clear()
 
     def is_running(self) -> bool:
         return any(p.poll() is None for p, *_ in self._procs)

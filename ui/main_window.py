@@ -236,14 +236,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setHandleWidth(6)
         splitter.setChildrenCollapsible(False)
-        splitter.setStyleSheet("""
-            QSplitter::handle {
-                background-color: #37474F; border: 1px solid #263238;
-            }
-            QSplitter::handle:horizontal { width: 6px; }
-            QSplitter::handle:hover      { background-color: #FFB74D; }
-            QSplitter::handle:pressed    { background-color: #FF9800; }
-        """)
+        # 全域 QSS 已涵蓋 QSplitter 樣式（border + hover NEUTRAL cyan）
 
         # 左側：地圖區域
         self.map_widget = self.create_map_widget()
@@ -434,6 +427,53 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         self.parameter_panel.nfz_poly_finish_requested.connect(self.on_nfz_poly_finish)
         self.map_widget.nfz_polygon_drawn.connect(self.on_nfz_polygon_drawn)
         self.map_widget.nfz_circle_drawn.connect(self.on_nfz_circle_drawn)
+        # ── 統一 Fence Zone（NFZ + 威脅 + 圍籬） ──
+        self.parameter_panel.fence_zone_create_requested.connect(
+            self.open_fence_zone_dialog
+        )
+        self.parameter_panel.fence_zone_clear_all_requested.connect(
+            self.clear_all_fence_zones
+        )
+        self.parameter_panel.fence_zone_upload_requested.connect(
+            self.upload_fence_zones_to_fc
+        )
+        # 直接從 3D 地圖繪製 — 完成後自動開對話框預填頂點
+        self.parameter_panel.fence_zone_draw_polygon_requested.connect(
+            self.on_fence_zone_draw_polygon
+        )
+        self.parameter_panel.fence_zone_draw_circle_requested.connect(
+            self.on_fence_zone_draw_circle
+        )
+        # 地圖頂部工具列 — 不論側邊面板在哪個分頁，這 3 個按鈕都看得到
+        if hasattr(self.map_widget, 'fence_zone_draw_polygon_requested'):
+            self.map_widget.fence_zone_draw_polygon_requested.connect(
+                self.on_fence_zone_draw_polygon
+            )
+            self.map_widget.fence_zone_draw_circle_requested.connect(
+                self.on_fence_zone_draw_circle
+            )
+            self.map_widget.fence_zone_manage_requested.connect(
+                self.open_fence_zone_dialog
+            )
+        # 旗標：地圖完成繪製時，由此值決定要路由到原 NFZ 流程或新 Fence 流程
+        #   None     → 原 NFZ 流程（沿用既有行為）
+        #   'polygon'→ 完成多邊形後開 FenceZoneDialog
+        #   'circle' → 完成圓形後開 FenceZoneDialog
+        self._fence_draw_pending: str | None = None
+        # FenceZoneRegistry singleton — 對 add/remove 即時同步 3D 視覺 + 面板計數
+        from mission.fence_zone import FenceZoneRegistry, ZoneCategory
+        _fz_reg = FenceZoneRegistry.instance()
+        _fz_reg.zone_added.connect(self._on_fence_zone_added)
+        _fz_reg.zone_removed.connect(self._on_fence_zone_removed)
+
+        def _on_fz_changed():
+            n_all = _fz_reg.count()
+            # DCCPP 繞行只考慮 NFZ + THREAT（GEOFENCE 是 inclusion 性質，不繞）
+            n_avoid = len(_fz_reg.by_category(ZoneCategory.NFZ)) \
+                    + len(_fz_reg.by_category(ZoneCategory.THREAT))
+            self.parameter_panel.update_fence_zone_count(n_all, n_avoid)
+
+        _fz_reg.zones_changed.connect(_on_fz_changed)
         self.parameter_panel.dccpp_coverage_requested.connect(self._on_dccpp_coverage_requested)
         self.parameter_panel.dccpp_export_requested.connect(self._on_dccpp_export_requested)
         self.parameter_panel.vtol_export_requested.connect(self._on_vtol_export_requested)
@@ -464,14 +504,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         self._right_panel_splitter = QSplitter(Qt.Orientation.Vertical)
         self._right_panel_splitter.setChildrenCollapsible(False)
         self._right_panel_splitter.setHandleWidth(6)
-        self._right_panel_splitter.setStyleSheet("""
-            QSplitter::handle {
-                background-color: #37474F; border: 1px solid #263238;
-            }
-            QSplitter::handle:vertical { height: 6px; }
-            QSplitter::handle:hover    { background-color: #FFB74D; }
-            QSplitter::handle:pressed  { background-color: #FF9800; }
-        """)
+        # 全域 QSS 已涵蓋 QSplitter 樣式
         scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.mission_panel.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
@@ -511,11 +544,23 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         )
 
         # 加到參數面板的 QTabWidget 作為第 4 個分頁
-        sitl_scroll = QScrollArea()
-        sitl_scroll.setWidget(self.sitl_hud)
-        sitl_scroll.setWidgetResizable(True)
-        sitl_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
-        self.parameter_panel._tabs.addTab(sitl_scroll, "🛰 SITL")
+        # SITL 分頁採內部 QTabWidget：
+        #   - "Command"：ADOS 風 FleetRail + DroneDetailPanel（GCS 互動主入口）
+        #   - "HUD / Servo"：既有 SITLHud（保留 SERVO OUTPUT、legacy 按鈕等）
+        from PyQt6.QtWidgets import QTabWidget
+        from ui.widgets.sitl_command_panel import SitlCommandPanel
+
+        sitl_inner_tabs = QTabWidget()
+        self.sitl_command_panel = SitlCommandPanel()
+        sitl_inner_tabs.addTab(self.sitl_command_panel, "Command")
+
+        sitl_hud_scroll = QScrollArea()
+        sitl_hud_scroll.setWidget(self.sitl_hud)
+        sitl_hud_scroll.setWidgetResizable(True)
+        sitl_hud_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        sitl_inner_tabs.addTab(sitl_hud_scroll, "HUD / Servo")
+
+        self.parameter_panel._tabs.addTab(sitl_inner_tabs, "🛰 SITL")
 
         # 任務操作面板隨分頁切換可見元件：只有「基本演算法」分頁才顯示完整預覽/匯出
         self.parameter_panel._tabs.currentChanged.connect(self._on_main_tab_changed)
@@ -538,6 +583,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         self.parameter_panel.sar_heatmap_reset_requested.connect(self._on_sar_heatmap_reset)
         self.parameter_panel.sar_heatmap_clear_requested.connect(self._on_sar_heatmap_clear)
         self.parameter_panel.fov_cone_toggle_requested.connect(self._on_fov_cone_toggle)
+        self.parameter_panel.fov_visual_changed.connect(self._on_fov_visual_changed)
         self.parameter_panel.radar_sim_requested.connect(self._on_radar_sim)
         self.parameter_panel.radar_clear_requested.connect(self._on_radar_clear)
         self.parameter_panel.rcs_toggle_requested.connect(self._on_rcs_toggle)
@@ -545,6 +591,9 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         # 戰術模組內部狀態
         self._fov_cone_enabled = False   # FOV 光錐是否啟用
         self._rcs_enabled = False        # RCS 渲染是否啟用
+        # 各 sysid 最近一筆 UAV 姿態快取（給 FOV 視覺參數變更時即時重投影用）
+        #   {sysid: (lat, lon, alt, heading_deg, pitch_deg, roll_deg)}
+        self._last_uav_pose_for_fov: dict[int, tuple] = {}
 
         # ── 蜂群打擊模組信號連接 ──────────────────────────────────────
         self.parameter_panel.strike_mark_targets_requested.connect(self._on_strike_mark_targets)
@@ -2280,9 +2329,17 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         self.statusBar().showMessage("🚫 NFZ 圓形模式：按住滑鼠拖曳定義圓形禁航區")
 
     def on_nfz_polygon_drawn(self, vertices: list):
-        """接收地圖繪製完成的 NFZ 多邊形"""
+        """接收地圖繪製完成的多邊形 — 依 _fence_draw_pending 路由到對應流程。"""
         if hasattr(self.parameter_panel, 'nfz_finish_poly_btn'):
             self.parameter_panel.nfz_finish_poly_btn.setVisible(False)
+
+        # ── Fence Zone 統一流程 ──
+        if self._fence_draw_pending == 'polygon':
+            self._fence_draw_pending = None
+            self._open_fence_dialog_with_polygon(vertices)
+            return
+
+        # ── 原 NFZ 流程 ──
         name = f"NFZ_Poly_{len(self.nfz_zones) + 1}"
         zone = {'type': 'polygon', 'vertices': vertices, 'name': name}
         self.nfz_zones.append(zone)
@@ -2290,12 +2347,92 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         self.statusBar().showMessage(f"✅ 已新增 NFZ 多邊形「{name}」({len(vertices)} 頂點)")
 
     def on_nfz_circle_drawn(self, lat: float, lon: float, radius_m: float):
-        """接收地圖拖曳完成的 NFZ 圓形"""
+        """接收地圖拖曳完成的圓形 — 依 _fence_draw_pending 路由到對應流程。"""
+        # ── Fence Zone 統一流程 ──
+        if self._fence_draw_pending == 'circle':
+            self._fence_draw_pending = None
+            self._open_fence_dialog_with_circle(lat, lon, radius_m)
+            return
+
+        # ── 原 NFZ 流程 ──
         name = f"NFZ_Circle_{len(self.nfz_zones) + 1}"
         zone = {'type': 'circle', 'center': (lat, lon), 'radius': radius_m, 'name': name}
         self.nfz_zones.append(zone)
         self.on_nfz_changed(self.nfz_zones)
         self.statusBar().showMessage(f"✅ 已新增 NFZ 圓形「{name}」(r={radius_m:.0f}m)")
+
+    # ──────────────────────────────────────────────────────────────
+    #  Fence Zone — 直接從 3D 地圖繪製
+    # ──────────────────────────────────────────────────────────────
+    def on_fence_zone_draw_polygon(self):
+        """進入地圖多邊形繪製模式（fence 流程）— 完成後自動開對話框預填。"""
+        self._fence_draw_pending = 'polygon'
+        # 重用既有 NFZ polygon 繪製機制
+        self.map_widget.set_nfz_polygon_draw_mode(True)
+        if hasattr(self.parameter_panel, 'nfz_finish_poly_btn'):
+            self.parameter_panel.nfz_finish_poly_btn.setVisible(True)
+        self.statusBar().showMessage(
+            "⊕ Fence 多邊形繪製：點擊地圖新增頂點，雙擊或按「完成多邊形」結束 "
+            "→ 完成後自動開對話框",
+            0,
+        )
+
+    def on_fence_zone_draw_circle(self):
+        """進入地圖圓形拖曳模式（fence 流程）— 完成後自動開對話框預填。"""
+        self._fence_draw_pending = 'circle'
+        self.map_widget.set_nfz_circle_draw_mode(True)
+        self.statusBar().showMessage(
+            "⊕ Fence 圓形拖曳：按住滑鼠從圓心往外拖曳，放開完成 "
+            "→ 完成後自動開對話框",
+            0,
+        )
+
+    def _open_fence_dialog_with_polygon(self, vertices: list) -> None:
+        """地圖完成多邊形繪製後呼叫 — 開對話框並預填頂點。"""
+        if not vertices or len(vertices) < 3:
+            self.statusBar().showMessage(
+                '⚠ Fence 多邊形頂點不足（< 3 點），已取消', 4000
+            )
+            return
+        from ui.dialogs.fence_zone_dialog import FenceZoneDialog
+        from mission.fence_zone import FenceZoneRegistry
+        dialog = FenceZoneDialog(self)
+        dialog.set_vertices(vertices)
+
+        def _accepted(zone):
+            FenceZoneRegistry.instance().add(zone)
+            self.statusBar().showMessage(
+                f'[Fence] 已新增 {zone.name} '
+                f'({zone.category.value}, polygon, {len(vertices)} 頂點)',
+                4000,
+            )
+
+        dialog.zone_accepted.connect(_accepted)
+        dialog.exec()
+
+    def _open_fence_dialog_with_circle(self, lat: float, lon: float,
+                                       radius_m: float) -> None:
+        """地圖完成圓形拖曳後呼叫 — 開對話框並預填圓心 / 半徑。"""
+        if radius_m <= 0:
+            self.statusBar().showMessage(
+                '⚠ Fence 圓形半徑無效，已取消', 4000
+            )
+            return
+        from ui.dialogs.fence_zone_dialog import FenceZoneDialog
+        from mission.fence_zone import FenceZoneRegistry
+        dialog = FenceZoneDialog(self)
+        dialog.set_circle(lat, lon, radius_m)
+
+        def _accepted(zone):
+            FenceZoneRegistry.instance().add(zone)
+            self.statusBar().showMessage(
+                f'[Fence] 已新增 {zone.name} '
+                f'({zone.category.value}, circle, r={radius_m:.0f}m)',
+                4000,
+            )
+
+        dialog.zone_accepted.connect(_accepted)
+        dialog.exec()
 
     def open_nfz_dialog(self):
         """開啟禁航區管理對話框"""
@@ -2303,6 +2440,103 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         dialog = NFZManagerDialog(self, self.nfz_zones)
         dialog.nfz_changed.connect(self.on_nfz_changed)
         dialog.exec()
+
+    # ──────────────────────────────────────────────────────────────
+    #  統一 Fence Zone（NFZ + 威脅 + 圍籬整合）
+    # ──────────────────────────────────────────────────────────────
+    def open_fence_zone_dialog(self):
+        """開啟統一 Fence Zone 設定對話框（fence-style 新增）。"""
+        from ui.dialogs.fence_zone_dialog import FenceZoneDialog
+        from mission.fence_zone import FenceZoneRegistry
+        dialog = FenceZoneDialog(self)
+
+        def _on_accepted(zone):
+            FenceZoneRegistry.instance().add(zone)
+            self.statusBar().showMessage(
+                f'[Fence] 已新增區域 {zone.name} ({zone.category.value}, '
+                f'{zone.shape.value})', 4000
+            )
+
+        dialog.zone_accepted.connect(_on_accepted)
+        dialog.exec()
+
+    def _on_fence_zone_added(self, zone):
+        """FenceZoneRegistry → Cesium：把新增的區送進 3D 視覺。"""
+        cesium = self._get_cesium_widget()
+        if cesium is None or not hasattr(cesium, 'add_fence_zone'):
+            return
+        # 取頂點：POLYGON 直接、CIRCLE 展開為 N 邊形
+        verts = zone.polygon_vertices(circle_segments=16)
+        cesium.add_fence_zone(
+            zone_id=zone.id,
+            vertices=verts,
+            alt_min=zone.alt_min_m,
+            alt_max=zone.alt_max_m,
+            name=zone.name,
+            color_hex=zone.color_hex,
+            category=zone.category.value,
+            inclusion=bool(zone.inclusion),
+        )
+
+    def _on_fence_zone_removed(self, zone_id: str):
+        cesium = self._get_cesium_widget()
+        if cesium is None or not hasattr(cesium, 'remove_fence_zone'):
+            return
+        cesium.remove_fence_zone(zone_id)
+
+    def clear_all_fence_zones(self):
+        """清除所有 fence zones（registry + 視覺）。"""
+        from mission.fence_zone import FenceZoneRegistry
+        FenceZoneRegistry.instance().clear()
+        cesium = self._get_cesium_widget()
+        if cesium is not None and hasattr(cesium, 'clear_fence_zones'):
+            cesium.clear_fence_zones()
+        self.statusBar().showMessage('[Fence] 已清除所有區域', 3000)
+
+    def upload_fence_zones_to_fc(self):
+        """把所有 fence zones 以 ArduPilot Polygon Fence 協定上傳到各連線飛控。
+
+        ArduPilot 4.2+ 支援多區 fence：
+            POLYGON inclusion → MAV_CMD_NAV_FENCE_POLYGON_VERTEX_INCLUSION (5001)
+            POLYGON exclusion → MAV_CMD_NAV_FENCE_POLYGON_VERTEX_EXCLUSION (5002)
+            CIRCLE  inclusion → MAV_CMD_NAV_FENCE_CIRCLE_INCLUSION         (5003)
+            CIRCLE  exclusion → MAV_CMD_NAV_FENCE_CIRCLE_EXCLUSION         (5004)
+        """
+        from mission.fence_zone import FenceZoneRegistry
+        reg = FenceZoneRegistry.instance()
+        zones = reg.all()
+        if not zones:
+            self.statusBar().showMessage('[Fence] 沒有 fence 區域可上傳', 4000)
+            return
+
+        # 上傳到所有 SITL 連線
+        links = getattr(self, '_sitl_links', None) or []
+        if not links:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self, 'SITL 未連線',
+                '尚未連線任何 SITL，無法上傳 fence。\n請先在 SITL 分頁啟動 + 連線。'
+            )
+            return
+
+        ok_count = 0
+        for link in links:
+            try:
+                if hasattr(link, 'upload_fence_zones'):
+                    link.upload_fence_zones(
+                        zones,
+                        fence_type_bits=reg.fence_type_bits(),
+                        alt_max_m=reg.max_altitude_m(default=200.0),
+                        alt_min_m=reg.min_altitude_m(default=-10.0),
+                    )
+                    ok_count += 1
+            except Exception as e:
+                logger.error(f'[Fence] 上傳到 link 失敗: {e}', exc_info=True)
+        self.statusBar().showMessage(
+            f'[Fence] 已送出上傳指令至 {ok_count}/{len(links)} 個飛控 '
+            f'({len(zones)} 個區域)',
+            6000,
+        )
 
     def on_nfz_changed(self, nfz_zones: list):
         """更新禁航區清單，更新地圖顯示，並重新生成路徑"""
@@ -3149,8 +3383,10 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         self.picking_circle_center = False
         if hasattr(self, 'parameter_panel') and hasattr(self.parameter_panel, 'circle_center_label'):
             self.parameter_panel.circle_center_label.setText("圓心：尚未設定")
-            self.parameter_panel.circle_center_label.setStyleSheet(
-                "color: #888; font-size: 11px; font-style: italic;"
+            # 重置為 caption 灰色，呼應未設定狀態
+            self.parameter_panel.circle_center_label.setProperty('role', 'caption')
+            self.parameter_panel.circle_center_label.style().polish(
+                self.parameter_panel.circle_center_label
             )
         if hasattr(self.map_widget, 'clear_circle_overlay'):
             self.map_widget.clear_circle_overlay()
@@ -3385,6 +3621,749 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         if self.corners:
             self.statusBar().showMessage(f"邊界點: {len(self.corners)} 個", 2000)
     
+    @staticmethod
+    def _repair_path_kinks(
+        path: list, planner, max_iters: int = 12,
+        kink_angle_deg: float = 40.0,
+    ) -> tuple:
+        """閉迴圈：偵測並修復路徑中「不連貫轉角」（往回折尖刺）。
+
+        相比舊版 _remove_path_spikes 的關鍵升級：
+          • 閉迴圈 — 每輪重新偵測全路徑，修一個改一個，直到完全乾淨或卡住
+          • detour 取代 — 尖刺點移除後若 A→C 穿 NFZ，改用 correct_path 在
+            A、C 之間補繞行（而非放棄，這正是舊版漏掉尖刺的原因）
+
+        kink 定義：連續三點 A-B-C，B 處入向 (B→A) 與出向 (B→C) 夾角過小
+        （unit(B→A)·unit(B→C) > cos(kink_angle) → 兩邊近同向 → 路徑折返）。
+
+        修復策略（每個 kink）：
+          1. 若移除 B 後 A→C 不穿 NFZ → 直接移除 B（最乾淨）
+          2. 否則 → correct_path([A, C]) 補繞行，用 detour 中間點取代 B
+          3. 兩者都失敗 → 保留 B（極少數，下輪不再重試同一個）
+
+        Args:
+            path           : [(x, y), ...] metric 座標
+            planner        : FixedWingNFZPlanner
+            max_iters      : 閉迴圈最大輪數
+            kink_angle_deg : 判定折返的夾角閾值（越大抓越多）
+
+        Returns:
+            (repaired_path, is_clean)
+                repaired_path : 修復後路徑（端點保留）
+                is_clean      : True = 已無 kink；False = 達上限仍有殘留
+        """
+        import math as _m
+        from shapely.geometry import LineString as _LS
+        if len(path) < 3:
+            return list(path), True
+
+        planner._rebuild_merged()
+        merged = planner._merged_buffered
+        polys = []
+        if merged is not None and not merged.is_empty:
+            polys = (list(merged.geoms) if merged.geom_type == 'MultiPolygon'
+                     else [merged])
+
+        def _crosses(a, b):
+            if not polys:
+                return False
+            seg = _LS([a, b])
+            for p in polys:
+                if not seg.intersects(p):
+                    continue
+                inter = seg.intersection(p)
+                if inter.is_empty:
+                    continue
+                if inter.geom_type in ('Point', 'MultiPoint'):
+                    continue
+                if hasattr(inter, 'length') and inter.length > 0.5:
+                    return True
+            return False
+
+        cos_th = _m.cos(_m.radians(kink_angle_deg))
+
+        def _first_kink(p):
+            """回傳第一個 kink 的 index（B 點），無則 None。"""
+            for k in range(1, len(p) - 1):
+                A, B, C = p[k - 1], p[k], p[k + 1]
+                bax = A[0] - B[0]; bay = A[1] - B[1]
+                bcx = C[0] - B[0]; bcy = C[1] - B[1]
+                la = _m.hypot(bax, bay)
+                lc = _m.hypot(bcx, bcy)
+                if la < 1e-6 or lc < 1e-6:
+                    continue
+                dot = (bax * bcx + bay * bcy) / (la * lc)
+                if dot > cos_th:
+                    return k
+            return None
+
+        cur = list(path)
+        skip_indices: set = set()   # 修不掉的 kink（避免無限重試）
+        for _ in range(max_iters):
+            # 找第一個「非 skip」的 kink
+            k = None
+            kk = _first_kink(cur)
+            while kk is not None:
+                # 用座標當 key 判斷是否已標記為修不掉
+                key = (round(cur[kk][0], 1), round(cur[kk][1], 1))
+                if key in skip_indices:
+                    # 跳過這個，往後找下一個 kink
+                    found_next = None
+                    for k2 in range(kk + 1, len(cur) - 1):
+                        A, B, C = cur[k2 - 1], cur[k2], cur[k2 + 1]
+                        bax = A[0]-B[0]; bay = A[1]-B[1]
+                        bcx = C[0]-B[0]; bcy = C[1]-B[1]
+                        la = _m.hypot(bax, bay); lc = _m.hypot(bcx, bcy)
+                        if la < 1e-6 or lc < 1e-6:
+                            continue
+                        if (bax*bcx + bay*bcy)/(la*lc) > cos_th:
+                            found_next = k2
+                            break
+                    kk = found_next
+                else:
+                    k = kk
+                    break
+            if k is None:
+                return cur, True   # 全部乾淨（或剩下的都標記為修不掉）
+
+            A, B, C = cur[k - 1], cur[k], cur[k + 1]
+            # 策略 1：移除 B 後 A→C 不穿 NFZ → 直接移除
+            if not _crosses(A, C):
+                cur = cur[:k] + cur[k + 1:]
+                continue
+            # 策略 2：A→C 穿 NFZ → correct_path 補繞行取代 B
+            try:
+                rr = planner.correct_path([A, C])
+                if rr.is_modified and rr.corrected_path and len(rr.corrected_path) >= 2:
+                    cur = cur[:k] + list(rr.corrected_path[1:-1]) + cur[k + 1:]
+                    continue
+            except Exception:
+                pass
+            # 策略 3：都失敗 → 標記跳過，下輪不再重試
+            skip_indices.add((round(B[0], 1), round(B[1], 1)))
+
+        # 達上限 — 回報是否還有殘留
+        return cur, (_first_kink(cur) is None)
+
+    @staticmethod
+    def _segment_aware_fence_avoidance(
+        wps: list,
+        metric_wps: list,
+        planner,
+    ) -> tuple:
+        """Segment-type 差異化避讓 — 取代 ``planner.correct_path`` 用於 DCCPP。
+
+        為何不直接用 correct_path？
+            correct_path 是「點對點繞行」演算法，遇到 NFZ 內 waypoint 會
+            「skip 到下個 NFZ 外 waypoint」。對 DCCPP boustrophedon scan 來說：
+            多條 scan strip 的中段若全在 NFZ 內 → 被整批 skip → 大量偵蒐
+            覆蓋被丟掉，NFZ 周圍出現大空洞，且所有繞行收斂到同一個 VG 頂點。
+
+        Segment-type 差異化策略：
+            • OPERATION 段（scan strip 本身）→ **截斷在 NFZ buffered 邊界**
+              保留 NFZ 外的偵蒐覆蓋，僅 NFZ 內那段被放棄（這是 NFZ 的本意）
+            • TAKEOFF / ENTRY / TRANSFER / LANDING 段 → VG 繞行 NFZ 外圍
+              這些段本來就是 dead heading，繞外圈不會損失任何偵蒐
+
+        Returns:
+            (new_metric_xy, new_wp_refs)
+                new_metric_xy : list[(x, y)] 修正後的 metric 航點
+                new_wp_refs   : list[int] 每個新點對應到原 wps 的索引
+                                （用於屬性繼承 — alt / heading / segment_type）
+        """
+        import math as _m
+        from shapely.geometry import LineString, Point
+
+        if len(wps) < 2:
+            return list(metric_wps), list(range(len(metric_wps)))
+
+        # 從 planner 取已合併且 buffered 的禁區 MultiPolygon
+        planner._rebuild_merged()
+        merged = planner._merged_buffered
+        if merged is None or merged.is_empty:
+            return list(metric_wps), list(range(len(metric_wps)))
+
+        # 兼容 Polygon / MultiPolygon — 統一成 list of polygons
+        polys = list(merged.geoms) if merged.geom_type == 'MultiPolygon' else [merged]
+
+        def _is_op(wp) -> bool:
+            """判斷 wp 是否為 OPERATION segment（scan strip 本身）"""
+            seg = getattr(wp, 'segment_type', None)
+            if seg is None:
+                return False
+            return getattr(seg, 'name', '') == 'OPERATION'
+
+        def _pt_in_any_poly(xy) -> bool:
+            p = Point(xy)
+            return any(poly.contains(p) for poly in polys)
+
+        def _seg_crosses_any(a, b) -> bool:
+            """線段是否穿入任一 buffered 內部（沿邊滑行不算）"""
+            seg = LineString([a, b])
+            if seg.length < 1e-9:
+                return False
+            for poly in polys:
+                if not seg.intersects(poly):
+                    continue
+                # 用中點 + 多點檢查穿入
+                inter = seg.intersection(poly)
+                if inter.is_empty:
+                    continue
+                if inter.geom_type in ('Point', 'MultiPoint'):
+                    continue
+                if hasattr(inter, 'length') and inter.length > 0.5:
+                    return True
+            return False
+
+        def _find_all_crossings(a, b):
+            """找出線段 [a, b] 與所有 NFZ 邊界的所有交點，依與 a 的距離排序。
+
+            對單一凸 NFZ：通常回傳 0 或 2 點（in / out 配對）
+            對多 NFZ 或非凸：可能 4 點、6 點等（多組 in / out 配對）
+            """
+            seg = LineString([a, b])
+            points = []
+            for poly in polys:
+                inter = seg.intersection(poly.exterior)
+                if inter.is_empty:
+                    continue
+                if inter.geom_type == 'Point':
+                    points.append((inter.x, inter.y))
+                elif inter.geom_type == 'MultiPoint':
+                    for pt in inter.geoms:
+                        points.append((pt.x, pt.y))
+            # 依與 a 距離排序 → 第 0, 2, 4... 是 entry，第 1, 3, 5... 是 exit
+            points.sort(key=lambda p: _m.hypot(p[0] - a[0], p[1] - a[1]))
+            return points
+
+        # 主迴圈
+        out_xy: list = [metric_wps[0]]
+        out_refs: list = [0]
+        n = len(metric_wps)
+        i = 1
+
+        while i < n:
+            last_xy = out_xy[-1]
+            last_ref = out_refs[-1]
+            cur_xy = metric_wps[i]
+
+            # 安全段 → 直接保留
+            if not _seg_crosses_any(last_xy, cur_xy):
+                out_xy.append(cur_xy)
+                out_refs.append(i)
+                i += 1
+                continue
+
+            # 穿越 NFZ — 判斷處理方式
+            is_scan_strip = _is_op(wps[last_ref]) and _is_op(wps[i])
+
+            if is_scan_strip:
+                # ── OPERATION 段：找出所有 NFZ 邊界交點，配對 in / out 處理 ──
+                # 對每對 [in_pt, out_pt]：
+                #   1. 加 in_pt（保留 NFZ 邊緣 scan 覆蓋）
+                #   2. 用 VG 從 in_pt 繞到 out_pt（detour 中間點）
+                #   3. 加 out_pt（恢復 scan 方向）
+                #   4. 繼續到原 cur（保留 NFZ 出口後的 scan 覆蓋）
+                crossings = _find_all_crossings(last_xy, cur_xy)
+
+                # 兩種情況：
+                #   (A) cur_xy 也在 NFZ 內 → 交點數為奇數，最後一個是 entry
+                #       退化為「entry + skip 到下個 outside wp + detour」
+                #   (B) cur_xy 在 NFZ 外 → 交點數為偶數，可配對處理
+                cur_inside = _pt_in_any_poly(cur_xy)
+
+                if cur_inside or len(crossings) < 2 or len(crossings) % 2 != 0:
+                    # Case A：用原邏輯
+                    if crossings:
+                        out_xy.append(crossings[0])  # 第一個 entry
+                        out_refs.append(last_ref)
+                    j = i
+                    while j < n and _pt_in_any_poly(metric_wps[j]):
+                        j += 1
+                    if j >= n:
+                        break
+                    try:
+                        result = planner.correct_path(
+                            [out_xy[-1] if crossings else last_xy, metric_wps[j]]
+                        )
+                        if result.is_modified and result.corrected_path:
+                            for dpt in result.corrected_path[1:]:
+                                out_xy.append(dpt)
+                                out_refs.append(j)
+                        else:
+                            out_xy.append(metric_wps[j])
+                            out_refs.append(j)
+                    except Exception:
+                        out_xy.append(metric_wps[j])
+                        out_refs.append(j)
+                    i = j + 1
+                else:
+                    # Case B：成對處理，scan strip 兩端都保留
+                    # 沿原 scan 方向算單位向量（給「nudge 點」用）
+                    seg_dx = cur_xy[0] - last_xy[0]
+                    seg_dy = cur_xy[1] - last_xy[1]
+                    seg_len = _m.hypot(seg_dx, seg_dy)
+                    if seg_len > 1e-6:
+                        ux, uy = seg_dx / seg_len, seg_dy / seg_len
+                    else:
+                        ux = uy = 0.0
+                    # Nudge 距離 — 把 in/out 推離 NFZ buffered 邊界，避免
+                    # 「端點 on boundary」造成 VG 數值不穩定 → detour 失敗
+                    nudge_m = 5.0
+
+                    fallback_used = False
+                    for k in range(0, len(crossings), 2):
+                        in_pt_raw = crossings[k]
+                        out_pt_raw = crossings[k + 1]
+                        # in_pt 往「來向」推（last_xy 方向），out_pt 往「去向」推
+                        in_pt = (
+                            in_pt_raw[0] - ux * nudge_m,
+                            in_pt_raw[1] - uy * nudge_m,
+                        )
+                        out_pt = (
+                            out_pt_raw[0] + ux * nudge_m,
+                            out_pt_raw[1] + uy * nudge_m,
+                        )
+
+                        # 嘗試從 in_pt 繞到 out_pt
+                        detour_ok = False
+                        try:
+                            r = planner.correct_path([in_pt, out_pt])
+                            if r.is_modified and r.corrected_path:
+                                out_xy.append(in_pt)
+                                out_refs.append(last_ref)
+                                for dpt in r.corrected_path[1:-1]:
+                                    out_xy.append(dpt)
+                                    out_refs.append(last_ref)
+                                out_xy.append(out_pt)
+                                out_refs.append(i)
+                                detour_ok = True
+                        except Exception:
+                            pass
+
+                        if not detour_ok:
+                            # ★ Fallback：in/out 配對 VG 失敗 → 整段退回原
+                            # correct_path 處理（避免「直線穿越 NFZ」bug）
+                            fallback_used = True
+                            break
+
+                    if fallback_used:
+                        # nudge 後 detour 失敗（極少數）：接受該段原樣
+                        # （from out_xy[-1] to cur_xy 可能在 NFZ 邊緣略微擦過，
+                        # 但不會出現 safe-skip 造成的長對角擺盪）。
+                        out_xy.append(cur_xy)
+                        out_refs.append(i)
+                        i += 1
+                    else:
+                        # 加上原 cur，保留 NFZ 出口後的 scan 覆蓋
+                        out_xy.append(cur_xy)
+                        out_refs.append(i)
+                        i += 1
+            else:
+                # ── 非 OPERATION 段（TRANSFER/ENTRY/TAKEOFF/LANDING）：VG 繞行 ──
+                j = i
+                while j < n and _pt_in_any_poly(metric_wps[j]):
+                    j += 1
+                if j >= n:
+                    break
+                try:
+                    result = planner.correct_path([last_xy, metric_wps[j]])
+                    if result.is_modified and result.corrected_path:
+                        for dpt in result.corrected_path[1:]:
+                            out_xy.append(dpt)
+                            out_refs.append(j)
+                    else:
+                        out_xy.append(metric_wps[j])
+                        out_refs.append(j)
+                except Exception:
+                    out_xy.append(metric_wps[j])
+                    out_refs.append(j)
+                i = j + 1
+
+        return out_xy, out_refs
+
+    def _apply_fence_avoidance_to_dccpp_result(
+        self,
+        dccpp_result: dict,
+        centroid_lat: float,
+        centroid_lon: float,
+        turn_radius: float,
+    ) -> None:
+        """DCCPP 規劃完成後，把所有 NFZ + THREAT 分類的 fence 區域當作禁區，
+        對每架 UAV 的 assembled 航點做 segment-type 差異化避讓修正。
+
+        策略（_segment_aware_fence_avoidance）：
+          • OPERATION 段（scan strip）：截斷在 NFZ 邊界，保留 NFZ 外的覆蓋
+          • 其它段（TAKEOFF/TRANSFER 等）：VG 繞 NFZ 外圍
+
+        診斷策略：所有失敗都會明確 log + 把摘要彈到 statusBar，避免「靜默失敗」。
+        當有區域卻 0 機繞行 → 彈 QMessageBox 確保使用者一定知道。
+        """
+        try:
+            from mission.fence_zone import FenceZoneRegistry, ZoneCategory
+        except Exception as e:
+            logger.warning(f'[DCCPP-Fence] FenceZoneRegistry 載入失敗: {e}')
+            return
+        reg = FenceZoneRegistry.instance()
+        total_zones = reg.count()
+        avoid_zones = (reg.by_category(ZoneCategory.NFZ)
+                       + reg.by_category(ZoneCategory.THREAT))
+
+        # ── 診斷起點 — 永遠 log 一次 ──
+        logger.info(
+            f'[DCCPP-Fence] 後處理開始 — registry 共 {total_zones} 區域，'
+            f'其中 NFZ+THREAT = {len(avoid_zones)} 個'
+        )
+        if not avoid_zones:
+            logger.info(
+                '[DCCPP-Fence] 無 NFZ / THREAT 分類區域 → 跳過繞行 '
+                '(GEOFENCE 不在此處處理)'
+            )
+            return
+
+        assembled = dccpp_result.get('assembled_paths') or {}
+        if not assembled:
+            logger.warning(
+                '[DCCPP-Fence] dccpp_result 中無 assembled_paths → 無路徑可修正'
+            )
+            return
+
+        import math as _m
+        import copy as _copy
+        try:
+            from core.global_planner.nfz_planner import FixedWingNFZPlanner
+            from core.base.fixed_wing_constraints import FixedWingConstraints
+        except Exception as e:
+            logger.warning(f'[DCCPP-Fence] 模組載入失敗，跳過繞行: {e}')
+            return
+
+        # ── 本地 equirect 投影（centroid 為原點）──
+        cos_lat = max(_m.cos(_m.radians(centroid_lat)), 1e-6)
+
+        def to_metric(lat: float, lon: float) -> tuple:
+            x = (lon - centroid_lon) * 111320.0 * cos_lat
+            y = (lat - centroid_lat) * 111320.0
+            return (x, y)
+
+        def to_latlon(x: float, y: float) -> tuple:
+            lat = centroid_lat + y / 111320.0
+            lon = centroid_lon + x / (111320.0 * cos_lat)
+            return (lat, lon)
+
+        # ── 構造 FixedWingConstraints + 動態 buffer_factor ──
+        # Buffer 大小依機型差異化（讓繞行更貼近 NFZ，減少偵蒐死區）：
+        #   • 固定翼：R_min × 1.5 ≥ ~90m（物理硬約束，無法再縮）
+        #   • 多旋翼：可懸停急轉，buffer 僅需 WP_RADIUS + GPS 容差 ≈ 10m
+        # 原本對兩者都用 30m 下限對多旋翼過度保守，造成 NFZ 周圍 20m 偵蒐空檔。
+        is_fixed_wing = turn_radius and turn_radius > 0
+        r_min = float(turn_radius) if is_fixed_wing else 5.0
+        if is_fixed_wing:
+            # 固定翼：R_min 是物理硬約束（飛機飛不過更小的圈），buffer 必須容納
+            min_buffer_m = max(20.0, r_min * 1.1)  # 至少 R_min + 10% 餘裕
+        else:
+            # 多旋翼：可懸停、零轉彎半徑；buffer 主要為 GPS 漂移 + WP advance
+            #   取 10m（≈ WP_RADIUS 一半 + GPS 5m），讓掃描貼近 NFZ
+            min_buffer_m = 10.0
+        buffer_factor = max(1.5, min_buffer_m / max(r_min, 1.0))
+        cruise_v = max(_m.sqrt(r_min * 9.81), 1.5)
+        stall_v = max(cruise_v * 0.5, 0.5)
+        try:
+            constraints = FixedWingConstraints(
+                cruise_airspeed_mps=cruise_v,
+                max_bank_angle_deg=45.0,
+                stall_speed_mps=stall_v,
+                max_speed_mps=cruise_v * 1.5,
+                safety_factor=1.0,
+            )
+        except Exception as e:
+            logger.warning(f'[DCCPP-Fence] 約束建立失敗: {e}')
+            return
+
+        # ★★★ 修正一：per-UAV 索引偏置「扇形展開」 ★★★
+        # 原本所有 UAV 共用同一個 planner（同一個 buffered NFZ），個別跑
+        # Visibility Graph 都找「最短繞行」→ 都會選同一個最近 corner →
+        # N 架機全部擠在窄走廊。
+        # 修法：UAV_i 用 base buffer + i × spread_m 的擴大版 buffer，
+        # 每架 UAV 的繞行向 NFZ 外推一段，自然形成「扇形分散」。
+        # spread_m = 12m → 3 機分別 0/12/24m 額外推遠（緊湊扇形，
+        # 減少 NFZ 周圍偵蒐死區，多機仍能避免擠成一團）
+        spread_per_uav_m = 12.0
+
+        # 計算「可加入的區域數」與「基準 buffer」（給最終摘要 / 警告用）
+        added_count = sum(
+            1 for z in avoid_zones
+            if len(z.polygon_vertices(circle_segments=16)) >= 3
+        )
+        if added_count == 0:
+            logger.warning('[DCCPP-Fence] 沒有有效區域可加入 — 跳過繞行')
+            return
+        actual_buffer = r_min * buffer_factor   # 基準 buffer（UAV idx=0）
+
+        # ★★★ 修正二：Dubins fillet 倒角驗證（避免 90° 直角）★★★
+        # correct_path 回傳的折線在 NFZ buffered 多邊形「頂點」處轉彎，
+        # 對 4 角矩形 NFZ 是直角。固定翼 L1 飛不過 90° 急彎。
+        # 用 _ArduPilotDubinsPlanner._apply_fillets() 後處理：
+        #   每個轉角用 R_min 圓弧倒角、自動計算離散段數使 chord ≥ 2·WP_R
+        try:
+            from core.global_planner.dccpp_heterogeneous_nfz_manager import (
+                _ArduPilotDubinsPlanner, ArduPilotParams,
+            )
+            from core.global_planner.heterogeneous_nfz_planner import (
+                PlannerConfig as _FilletCfg,
+            )
+            # WP_RADIUS 預設 20m（多數機型常用值），未來可從 FCU 讀取
+            _ap_for_fillet = ArduPilotParams(
+                wp_radius=20.0,
+                level_roll_limit_deg=35.0,
+                airspeed_cruise=max(cruise_v, 1.0),
+            )
+            _fillet_planner = _ArduPilotDubinsPlanner(
+                _FilletCfg(r_min=r_min, arc_segments=_ap_for_fillet.arc_segments_cap),
+                _ap_for_fillet,
+            )
+            _fillet_enabled = True
+        except Exception as e:
+            logger.warning(f'[DCCPP-Fence] Dubins fillet 模組載入失敗: {e}')
+            _fillet_planner = None
+            _fillet_enabled = False
+
+        # ── 逐機跑 segment-aware avoidance（每架用獨立 planner 實現扇形展開）──
+        sorted_uav_ids = sorted(assembled.keys())
+        n_rerouted = 0
+        for uav_idx, uav_id in enumerate(sorted_uav_ids):
+            apath = assembled[uav_id]
+            wps = apath.waypoints
+            if not wps or len(wps) < 2:
+                continue
+
+            # 此架 UAV 的擴大 buffer — buffer_factor 動態加 spread
+            this_buffer_m = (r_min * buffer_factor) + uav_idx * spread_per_uav_m
+            this_factor = this_buffer_m / max(r_min, 1.0)
+            per_uav_planner = FixedWingNFZPlanner(
+                constraints, buffer_factor=this_factor,
+            )
+            for z in avoid_zones:
+                verts_ll = z.polygon_vertices(circle_segments=16)
+                if len(verts_ll) < 3:
+                    continue
+                verts_xy = [to_metric(lat, lon) for lat, lon in verts_ll]
+                try:
+                    per_uav_planner.add_polygon_nfz(
+                        verts_xy, name=z.name, coord_type='metric',
+                    )
+                except Exception:
+                    pass
+
+            metric_wps = [to_metric(wp.lat, wp.lon) for wp in wps]
+
+            # ★★★ Segment-aware avoidance（OPERATION 段截斷在 NFZ 邊緣）★★★
+            # 讓掃描線「貼著 NFZ 牆邊」結束，保留 NFZ 周圍最大覆蓋。
+            # 對 in/out 配對的端點做 5m nudge，避免 VG 在邊界上失敗。
+            # 註：移除 safe-skip fallback（會產生長對角擺盪）；若 nudge 後
+            # detour 仍失敗，接受該段直接連接（極少數情況，視覺不嚴重）。
+            try:
+                corrected_path, ref_indices = self._segment_aware_fence_avoidance(
+                    wps, metric_wps, per_uav_planner,
+                )
+            except Exception as e:
+                logger.warning(
+                    f'[DCCPP-Fence] UAV {uav_id} segment-aware 失敗: {e}'
+                )
+                continue
+
+            # 偵測是否有修改
+            is_modified = (
+                len(corrected_path) != len(metric_wps)
+                or any(
+                    abs(a[0]-b[0]) > 1e-6 or abs(a[1]-b[1]) > 1e-6
+                    for a, b in zip(corrected_path, metric_wps)
+                )
+            )
+
+            logger.info(
+                f'[DCCPP-Fence] UAV {uav_id} (idx={uav_idx}, '
+                f'buf={per_uav_planner.buffer_distance:.0f}m): '
+                f'orig_wp={len(wps)}, '
+                f'segment-aware={len(corrected_path)} pts, '
+                f'modified={is_modified}'
+            )
+
+            if not is_modified:
+                continue
+
+            # ★★★ Safety net：walk 最終 path、抓出任何漏網的穿越段 ★★★
+            # 對每對相鄰 (a, b)，若仍穿越 NFZ 內部 → 用 correct_path 局部
+            # 補一次 detour（只影響該對，不破壞前面截斷邏輯）。
+            # 這保證即使 segment-aware 有遺漏（如端點在 NFZ 邊界、奇數
+            # crossings 等 edge case），最終輸出絕無 NFZ 穿越。
+            per_uav_planner._rebuild_merged()
+            _merged = per_uav_planner._merged_buffered
+            if _merged is not None and not _merged.is_empty:
+                from shapely.geometry import LineString as _LS, Point as _Pt
+                _polys = (list(_merged.geoms) if _merged.geom_type == 'MultiPolygon'
+                          else [_merged])
+                repaired_path = [corrected_path[0]]
+                n_repairs = 0
+                for k in range(1, len(corrected_path)):
+                    a = repaired_path[-1]
+                    b = corrected_path[k]
+                    seg = _LS([a, b])
+                    # 是否穿入 polygon 內部（> 0.5m 才算）
+                    cross = False
+                    for p in _polys:
+                        if not seg.intersects(p): continue
+                        inter = seg.intersection(p)
+                        if inter.is_empty: continue
+                        if inter.geom_type in ('Point', 'MultiPoint'): continue
+                        if hasattr(inter, 'length') and inter.length > 0.5:
+                            cross = True; break
+                    if not cross:
+                        repaired_path.append(b)
+                        continue
+                    # 漏網穿越 → 用 correct_path 局部補
+                    try:
+                        rr = per_uav_planner.correct_path([a, b])
+                        if rr.is_modified and rr.corrected_path and len(rr.corrected_path) > 2:
+                            for dpt in rr.corrected_path[1:]:
+                                repaired_path.append(dpt)
+                            n_repairs += 1
+                            continue
+                    except Exception:
+                        pass
+                    # 補不出來 — 退而求其次，加 b（可能仍穿越，但至少不更糟）
+                    repaired_path.append(b)
+                if n_repairs > 0:
+                    logger.info(
+                        f'[DCCPP-Fence] UAV {uav_id} safety-net: '
+                        f'修補 {n_repairs} 段漏網穿越，最終 {len(repaired_path)} 點'
+                    )
+                    corrected_path = repaired_path
+                    ref_indices = None   # safety-net 後 ref 對不上，走 fallback
+
+            # ★ 閉迴圈 kink 修復（pass 1，fillet 前）：清折線往回折尖刺 ★
+            # 起飛段穿越 NFZ 時 VG 繞行常產生閃電狀折返；fillet 對 α<1° 的
+            # 折返會「直接保留 B 不倒角」，所以尖刺必須在 fillet 前先修掉。
+            if len(corrected_path) >= 3:
+                try:
+                    fixed, clean = self._repair_path_kinks(
+                        corrected_path, per_uav_planner,
+                    )
+                    if len(fixed) != len(corrected_path):
+                        logger.info(
+                            f'[DCCPP-Fence] UAV {uav_id} kink-repair(前): '
+                            f'{len(corrected_path)} → {len(fixed)} 點, '
+                            f'clean={clean}'
+                        )
+                        corrected_path = fixed
+                        ref_indices = None
+                except Exception as e:
+                    logger.warning(
+                        f'[DCCPP-Fence] UAV {uav_id} kink-repair(前) 失敗: {e}'
+                    )
+
+            # ★ Dubins fillet 倒角：把折線轉角換成 R_min 圓弧 ★
+            if _fillet_enabled and len(corrected_path) >= 3:
+                try:
+                    smoothed = _fillet_planner._apply_fillets(corrected_path)
+                    logger.info(
+                        f'[DCCPP-Fence] UAV {uav_id} fillet: '
+                        f'{len(corrected_path)} → {len(smoothed)} 點 '
+                        f'(轉角已用 R_min={r_min:.0f}m 圓弧倒角)'
+                    )
+                    # fillet 後 ref_indices 對不上長度，用「最近原始 wp」邏輯
+                    corrected_path = smoothed
+                    ref_indices = None
+                except Exception as e:
+                    logger.warning(
+                        f'[DCCPP-Fence] UAV {uav_id} fillet 失敗（保留原折線）: {e}'
+                    )
+
+            # ★ 閉迴圈 kink 修復（pass 2，fillet 後）：最終 gate ★
+            # fillet 對極銳角會保留原 B（不倒角），或在 R 縮減處留下殘餘
+            # 折返；這裡再跑一次閉迴圈把它們徹底清掉。
+            if len(corrected_path) >= 3:
+                try:
+                    fixed2, clean2 = self._repair_path_kinks(
+                        corrected_path, per_uav_planner,
+                    )
+                    if len(fixed2) != len(corrected_path):
+                        logger.info(
+                            f'[DCCPP-Fence] UAV {uav_id} kink-repair(後): '
+                            f'{len(corrected_path)} → {len(fixed2)} 點, '
+                            f'clean={clean2}'
+                        )
+                        corrected_path = fixed2
+                        ref_indices = None
+                    if not clean2:
+                        logger.warning(
+                            f'[DCCPP-Fence] UAV {uav_id} 仍有殘餘 kink '
+                            f'(閉迴圈達上限) — 視覺可能仍有小折返'
+                        )
+                except Exception as e:
+                    logger.warning(
+                        f'[DCCPP-Fence] UAV {uav_id} kink-repair(後) 失敗: {e}'
+                    )
+
+            # 為每個新 metric 點找出「對應的原 waypoint」
+            #   有 ref_indices → 直接使用（segment_type 等屬性更準確）
+            #   否則（fillet 後）→ 用「最近原始 wp」fallback
+            new_wps: list = []
+            oi = 0
+            for k, (nx, ny) in enumerate(corrected_path):
+                if ref_indices is not None and k < len(ref_indices):
+                    ref = wps[ref_indices[k]]
+                else:
+                    while oi < len(metric_wps) - 1:
+                        dx0 = metric_wps[oi][0] - nx
+                        dy0 = metric_wps[oi][1] - ny
+                        dx1 = metric_wps[oi + 1][0] - nx
+                        dy1 = metric_wps[oi + 1][1] - ny
+                        if (dx1 * dx1 + dy1 * dy1) < (dx0 * dx0 + dy0 * dy0):
+                            oi += 1
+                        else:
+                            break
+                    ref = wps[oi]
+                lat, lon = to_latlon(nx, ny)
+                # 複製原 wp，只覆寫 lat / lon — 不論底下是 BuiltWaypoint
+                # 或 AssembledWaypoint 或其他型別都通用
+                new_wp = _copy.copy(ref)
+                try:
+                    new_wp.lat = lat
+                    new_wp.lon = lon
+                except AttributeError:
+                    # 萬一是 frozen dataclass，退回 dataclasses.replace
+                    import dataclasses as _dc
+                    new_wp = _dc.replace(ref, lat=lat, lon=lon)
+                new_wps.append(new_wp)
+            apath.waypoints = new_wps
+            n_rerouted += 1
+
+        # ── 統一摘要 ──
+        logger.info(
+            f'[DCCPP-Fence] 完成 — {n_rerouted}/{len(assembled)} 機已繞行 '
+            f'{added_count} 區 (per-UAV 扇形展開 + Dubins fillet 平滑)'
+        )
+
+        if n_rerouted > 0:
+            self.statusBar().showMessage(
+                f'[DCCPP] {n_rerouted}/{len(assembled)} 機已繞行 '
+                f'{added_count} 個禁區 (buffer={actual_buffer:.0f}m, '
+                f'扇形 +{spread_per_uav_m:.0f}m/機, fillet)',
+                6000,
+            )
+        else:
+            # 有區域卻沒繞 → 強制彈警告
+            from PyQt6.QtWidgets import QMessageBox
+            msg = (
+                f'⚠ DCCPP 規劃完成，但 {added_count} 個 fence 禁區都沒影響到路徑。\n\n'
+                f'可能原因：\n'
+                f'  • 路徑沒有真的穿越禁區（規劃結果剛好都在禁區外）\n'
+                f'  • 規劃覆蓋區與禁區完全不重疊\n'
+                f'  • Segment-aware avoidance 偵測不到穿越（buffer 過小？）\n'
+            )
+            msg += '請檢查 log 取得詳細診斷。'
+            QMessageBox.warning(self, 'Fence 繞行未生效', msg)
+
     def _on_dccpp_coverage_requested(self, params: dict):
         """
         處理 DCCPP 最佳化覆蓋請求
@@ -3490,6 +4469,10 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
                 landing_rollout_m=user_landing_rollout,
             )
 
+            # 註：fence-zone 避讓延後到「起降航段組裝完成後」才執行，
+            # 否則 takeoff/landing 加上去的 home ↔ scan-area 連線會繞過避讓
+            # 檢查（穿越 NFZ）。見下方 auto_landing 區塊之後的呼叫。
+
             # 儲存 DCCPP 參數供匯出時使用
             self.flight_params.update({
                 'vehicle_type': vehicle_type,
@@ -3545,6 +4528,16 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
                         pattern_alt_m=user_pattern_alt,
                         landing_rollout_m=user_landing_rollout,
                     )
+
+            # ── Fence-zone 後處理 — 繞行所有 NFZ + 威脅區 ──
+            # 關鍵：必須在「起降航段組裝完成後」執行。否則 home ↔ 進場/離場
+            # 連線（剛剛 prepend/append 加上去的）會跳過避讓檢查，造成
+            # 「fence avoidance 跑了但飛機還是穿越 NFZ」的 bug。
+            # 多旋翼 / VTOL 不走上方 auto_landing 分支，但此處仍會處理它們的
+            # operation 航段繞行。
+            self._apply_fence_avoidance_to_dccpp_result(
+                dccpp_result, centroid_lat, centroid_lon, turn_radius,
+            )
 
             # ── 避撞偵測與解衝突 ──
             _collision_enabled = bool(params.get('collision_avoidance', False))
@@ -4108,10 +5101,32 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         self._sitl_links.append(link)
         if self._sitl_link is None:
             self._sitl_link = link
+
+        # ── 註冊到 FleetRegistry：讓 ADOS 風 SitlCommandPanel 看見此 UAV ──
+        # callsign 規則：sysid 1 → "UAV-1"…等，與既有 status bar 一致。
+        try:
+            from mission.fleet_registry import FleetRegistry
+            callsign = f'UAV-{int(sysid_label)}'
+            FleetRegistry.instance().register(callsign, link, int(sysid_label))
+        except Exception as e:
+            logger.warning(f'[SITL] 註冊 FleetRegistry 失敗: {e}')
+
         logger.info(f'[SITL] 啟動連線執行緒: {conn_str} (sysid={sysid_label})')
 
     def on_sitl_disconnect(self):
         """斷開所有 SITL 連線"""
+        # 先把 FleetRegistry 內對應 callsign 反註冊（不擋停止流程）
+        try:
+            from mission.fleet_registry import FleetRegistry
+            reg = FleetRegistry.instance()
+            for link in self._sitl_links:
+                try:
+                    cs = f'UAV-{int(getattr(link, "sysid_label", 1))}'
+                    reg.unregister(cs)
+                except Exception:
+                    pass
+        except Exception:
+            pass
         for link in self._sitl_links:
             try:
                 link.stop()
@@ -4673,21 +5688,48 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
                     )
                 count = len(per_uav_homes)
 
+            # 彈出 SITL 啟動設定對話框（per-instance sysid + 嵌入式 fan-out IP/port）
+            # 在這裡彈而不是在 sitl_hud._on_launch_clicked() 是因為 count 可能被
+            # DCCPP/Diamond 自動展開，需先收斂到實際 instance 數量才能組對話框列數。
+            from ui.dialogs.sitl_launch_dialog import SITLLaunchDialog
+            dlg_result = SITLLaunchDialog.get_config(
+                vehicle=vehicle, count=count, parent=self,
+            )
+            if dlg_result is None:
+                # 使用者取消 → 不啟動 SITL，重置 HUD 按鈕狀態
+                logger.info('[SITL] 使用者取消啟動')
+                self.sitl_hud.on_sitl_stopped()
+                return
+
+            # 從 dialog 取出 fan-out 與防火牆設定（停用 fan-out 時 instance_configs=None）
+            enable_fanout = bool(dlg_result.get('enable_fanout'))
+            instance_configs = (
+                list(dlg_result.get('instances') or []) if enable_fanout else None
+            )
+            auto_firewall = bool(dlg_result.get('auto_firewall')) if enable_fanout else False
+
             results = self._sitl_launcher.start_multi(
                 vehicle=vehicle, count=count,
                 lat=lat, lon=lon, alt=0.0, heading=spawn_heading,
                 spacing_deg=0.0008,
                 homes=per_uav_homes if per_uav_homes else None,
+                instance_configs=instance_configs,
+                auto_firewall=auto_firewall,
             )
             first_conn = results[0][1]
             self.sitl_hud.on_sitl_launched(f'{vehicle} x{count}', first_conn)
             logger.info(f'[SITL] 內建 {vehicle} x{count} 已啟動')
 
-            # 對每台啟動 MAVLink 連線（sysid_label = instance+1）
+            # 對每台啟動 MAVLink 連線（sysid_label 優先用 dialog 指定的 sysid，否則 instance+1）
             QApplication.processEvents()
             import time as _t; _t.sleep(0.5)
             for instance, conn in results:
-                self.on_sitl_connect(conn, sysid_label=instance + 1,
+                sysid_label = instance + 1
+                if instance_configs and instance < len(instance_configs):
+                    cfg = instance_configs[instance] or {}
+                    if cfg.get('sysid') is not None:
+                        sysid_label = int(cfg['sysid'])
+                self.on_sitl_connect(conn, sysid_label=sysid_label,
                                      vehicle_hint=vehicle)
         except Exception as e:
             logger.error(f'[SITL] 啟動失敗: {e}', exc_info=True)
@@ -4763,9 +5805,32 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         self._fov_cone_enabled = enabled
         if not enabled:
             self.map_widget.clear_fov_cone()
+            self._last_uav_pose_for_fov.clear()
         self.statusBar().showMessage(
             f'[SAR] FOV 光錐 {"啟用" if enabled else "關閉"}', 3000
         )
+
+    def _on_fov_visual_changed(self, mount_deg: float,
+                                hfov_deg: float, vfov_deg: float):
+        """掛載角 / HFOV / VFOV spinbox 變更 → 用快取的最新 UAV 姿態
+        立即重新投影 3D 光錐（不需等下一筆遙測進來）。
+        """
+        if not self._fov_cone_enabled:
+            return
+        if not self._last_uav_pose_for_fov:
+            # 尚未收到任何 UAV 姿態 → 留待下一筆遙測時自動帶入新參數
+            return
+        fov_r = self.parameter_panel.get_fov_radius()
+        for sysid, pose in self._last_uav_pose_for_fov.items():
+            lat, lon, alt, heading, pitch, roll = pose
+            self.map_widget.update_fov_cone(
+                lat, lon, alt, fov_r,
+                heading, pitch, roll,
+                sysid=sysid,
+                hfov_deg=hfov_deg,
+                vfov_deg=vfov_deg,
+                mount_angle_deg=mount_deg,
+            )
 
     def _on_radar_sim(self, params: dict):
         """模擬雷達威脅掃描：建立穹頂 + 播放脈衝動畫"""
@@ -4814,15 +5879,28 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         """
         if self._fov_cone_enabled:
             fov_r = self.parameter_panel.get_fov_radius()
+            mount_deg, hfov_deg, vfov_deg = (
+                self.parameter_panel.get_fov_visual_params()
+            )
+            # 快取最新姿態 → 拖動掛載角 / HFOV / VFOV 時可即時重投影
+            self._last_uav_pose_for_fov[int(sysid)] = (
+                lat, lon, alt, heading_deg, pitch_deg, roll_deg
+            )
             # ★ 傳入 sysid → 每架 UAV 各自獨立的 FOV entity，
             #   不再互相覆寫造成「跳到誰那就顯示誰」閃爍。
+            # HFOV/VFOV > 0 時自動切換為梯形角錐 frustum（含掛載角斜投影）
             self.map_widget.update_fov_cone(
                 lat, lon, alt, fov_r,
                 heading_deg, pitch_deg, roll_deg,
                 sysid=sysid,
+                hfov_deg=hfov_deg,
+                vfov_deg=vfov_deg,
+                mount_angle_deg=mount_deg,
             )
             # 同時更新熱力圖（光錐掃過的區域）
-            self.map_widget.update_heatmap(lat, lon, fov_r)
+            # 傳 sysid → 熱力圖採用該機 frustum 真實梯形覆蓋判定
+            # （HFOV/VFOV/掛載角拖滑桿改變時，掃描範圍即時跟著變）
+            self.map_widget.update_heatmap(lat, lon, fov_r, sysid=int(sysid))
 
         if self._rcs_enabled:
             self.map_widget.update_rcs_sensitivity(

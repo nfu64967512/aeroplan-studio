@@ -349,3 +349,168 @@ def _dubins_tuple_wrapper(pair: _PairPose) -> float:
     return dubins_shortest_length(
         pair[0], pair[1], pair[2], pair[3], pair[4], pair[5], pair[6]
     )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Dubins 路徑採樣 — 視覺化用
+# ═══════════════════════════════════════════════════════════════════════
+# 既有 dubins_shortest_length 只回傳長度供時間/距離計算；polyline 視覺化
+# 則需要實際走過的 (lat, lon) 採樣點。下面的函式回傳完整 Dubins 軌跡。
+#
+# 6 種 Dubins path：CSC = LSL/RSR/LSR/RSL (Curve-Straight-Curve)
+#                  CCC = RLR/LRL（兩端距離 < 4R 時才可能最短，本實作省略）
+# 對固定翼蜂群場景距離通常 ≫ 4R，CSC 已涵蓋實用情況。
+# ═══════════════════════════════════════════════════════════════════════
+
+def _dubins_seg_LSL(alpha: float, beta: float, d: float):
+    tmp0 = d + math.sin(alpha) - math.sin(beta)
+    p_sqr = (2 + d * d - 2 * math.cos(alpha - beta)
+             + 2 * d * (math.sin(alpha) - math.sin(beta)))
+    if p_sqr < 0:
+        return None
+    tmp1 = math.atan2(math.cos(beta) - math.cos(alpha), tmp0)
+    t = _mod2pi(-alpha + tmp1)
+    p = math.sqrt(p_sqr)
+    q = _mod2pi(beta - tmp1)
+    return ('LSL', t, p, q)
+
+
+def _dubins_seg_RSR(alpha: float, beta: float, d: float):
+    tmp0 = d - math.sin(alpha) + math.sin(beta)
+    p_sqr = (2 + d * d - 2 * math.cos(alpha - beta)
+             + 2 * d * (math.sin(beta) - math.sin(alpha)))
+    if p_sqr < 0:
+        return None
+    tmp1 = math.atan2(math.cos(alpha) - math.cos(beta), tmp0)
+    t = _mod2pi(alpha - tmp1)
+    p = math.sqrt(p_sqr)
+    q = _mod2pi(-beta + tmp1)
+    return ('RSR', t, p, q)
+
+
+def _dubins_seg_LSR(alpha: float, beta: float, d: float):
+    p_sqr = (-2 + d * d + 2 * math.cos(alpha - beta)
+             + 2 * d * (math.sin(alpha) + math.sin(beta)))
+    if p_sqr < 0:
+        return None
+    p = math.sqrt(p_sqr)
+    tmp1 = math.atan2(-math.cos(alpha) - math.cos(beta),
+                      d + math.sin(alpha) + math.sin(beta)) - math.atan2(-2.0, p)
+    t = _mod2pi(-alpha + tmp1)
+    q = _mod2pi(-_mod2pi(beta) + tmp1)
+    return ('LSR', t, p, q)
+
+
+def _dubins_seg_RSL(alpha: float, beta: float, d: float):
+    p_sqr = (d * d - 2 + 2 * math.cos(alpha - beta)
+             - 2 * d * (math.sin(alpha) + math.sin(beta)))
+    if p_sqr < 0:
+        return None
+    p = math.sqrt(p_sqr)
+    tmp1 = math.atan2(math.cos(alpha) + math.cos(beta),
+                      d - math.sin(alpha) - math.sin(beta)) - math.atan2(2.0, p)
+    t = _mod2pi(alpha - tmp1)
+    q = _mod2pi(beta - tmp1)
+    return ('RSL', t, p, q)
+
+
+def _dubins_step(x: float, y: float, theta: float,
+                  ch: str, length: float, R: float):
+    """從 (x, y, theta) 在 math 座標系下走 ch 段 length×R 公尺，回傳新 pose。
+    ch ∈ {'L', 'S', 'R'}；length 為「弧度/R」無單位，乘 R 即實際距離。
+    """
+    if ch == 'L':
+        new_theta = theta + length
+        nx = x + R * (math.sin(new_theta) - math.sin(theta))
+        ny = y - R * (math.cos(new_theta) - math.cos(theta))
+    elif ch == 'R':
+        new_theta = theta - length
+        nx = x - R * (math.sin(new_theta) - math.sin(theta))
+        ny = y + R * (math.cos(new_theta) - math.cos(theta))
+    else:  # 'S'
+        nx = x + R * length * math.cos(theta)
+        ny = y + R * length * math.sin(theta)
+        new_theta = theta
+    return nx, ny, new_theta
+
+
+def dubins_path_samples(start_lat: float, start_lon: float, start_heading_deg: float,
+                         end_lat: float, end_lon: float, end_heading_deg: float,
+                         turn_radius_m: float, n_samples: int = 30
+                         ) -> List[Tuple[float, float]]:
+    """
+    生成 Dubins 最短路徑的 (lat, lon) 採樣點列表，供 polyline 視覺化。
+
+    Parameters
+    ----------
+    start_*, end_* : 起終點位姿（compass 航向：0°=N, 順時針）
+    turn_radius_m  : 最小轉彎半徑 (m)
+    n_samples      : 採樣段數（總點數 = n_samples + 1，含起終點）
+
+    Returns
+    -------
+    List[(lat, lon)] — 從起點到終點的平滑 Dubins 軌跡；
+    若距離過短或 dubins 無解，退化為直線兩點。
+    """
+    R = max(turn_radius_m, 0.01)
+    dist = haversine(start_lat, start_lon, end_lat, end_lon)
+    if dist < 0.1:
+        return [(start_lat, start_lon), (end_lat, end_lon)]
+
+    # 把座標轉為以起點為原點的本地 ENU；math 系統 x=East, y=North
+    brg_compass = bearing_deg(start_lat, start_lon, end_lat, end_lon)
+    dx = dist * math.sin(math.radians(brg_compass))
+    dy = dist * math.cos(math.radians(brg_compass))
+
+    def _to_math_rad(c: float) -> float:
+        return math.radians((90.0 - c) % 360.0)
+
+    h_s = _to_math_rad(start_heading_deg)
+    h_e = _to_math_rad(end_heading_deg)
+    theta = math.atan2(dy, dx)
+    d = dist / R
+    alpha = _mod2pi(h_s - theta)
+    beta = _mod2pi(h_e - theta)
+
+    # 列舉 4 種 CSC 候選，取最短
+    candidates = []
+    for fn in (_dubins_seg_LSL, _dubins_seg_RSR,
+               _dubins_seg_LSR, _dubins_seg_RSL):
+        seg = fn(alpha, beta, d)
+        if seg is None:
+            continue
+        kind, t, p, q = seg
+        if not (math.isfinite(t) and math.isfinite(p) and math.isfinite(q)):
+            continue
+        candidates.append((t + p + q, kind, t, p, q))
+    if not candidates:
+        # 無解 → 退化直線
+        return [(start_lat, start_lon), (end_lat, end_lon)]
+
+    _, kind, t, p, q = min(candidates, key=lambda c: c[0])
+    L_total = t + p + q
+
+    # 沿 path 等弧長採樣 (math 座標系下)
+    pts_xy: List[Tuple[float, float]] = []
+    for i in range(n_samples + 1):
+        s = (i / float(n_samples)) * L_total
+        # 確定 s 落在哪一段、走多少
+        if s <= t:
+            x, y, _ = _dubins_step(0.0, 0.0, h_s, kind[0], s, R)
+        elif s <= t + p:
+            x_t, y_t, theta_t = _dubins_step(0.0, 0.0, h_s, kind[0], t, R)
+            x, y, _ = _dubins_step(x_t, y_t, theta_t, kind[1], s - t, R)
+        else:
+            x_t, y_t, theta_t = _dubins_step(0.0, 0.0, h_s, kind[0], t, R)
+            x_p, y_p, theta_p = _dubins_step(x_t, y_t, theta_t, kind[1], p, R)
+            x, y, _ = _dubins_step(x_p, y_p, theta_p, kind[2], s - t - p, R)
+        pts_xy.append((x, y))
+
+    # 把 ENU (xi=East, yi=North) 轉回 (lat, lon)
+    coslat = math.cos(math.radians(start_lat))
+    pts: List[Tuple[float, float]] = []
+    for (xi, yi) in pts_xy:
+        new_lat = start_lat + math.degrees(yi / R_EARTH)
+        new_lon = start_lon + math.degrees(xi / (R_EARTH * max(coslat, 1e-9)))
+        pts.append((new_lat, new_lon))
+    return pts

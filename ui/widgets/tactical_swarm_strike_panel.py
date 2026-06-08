@@ -881,8 +881,8 @@ class TacticalSwarmStrikePanel(QWidget):
         wps = self._generator.generate(p)
         wpl = self._generator.to_qgc_wpl(wps)
 
-        # 預覽：純 WPL 後附帶註解區塊
-        note_lines = [f"// [{w.seq:02d}] {w.note}" for w in wps if w.note]
+        # 預覽：純 WPL 後附帶註解區塊（§5.17.18.10.6 — 不使用前導零）
+        note_lines = [f"// [{w.seq:>2d}] {w.note}" for w in wps if w.note]
         preview_text = wpl + "\n" + "\n".join(note_lines)
         self.preview.setPlainText(preview_text)
 

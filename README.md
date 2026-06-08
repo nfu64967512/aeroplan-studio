@@ -2,7 +2,7 @@
 
 > 舊名：UAV Path Planner / DWA_path_planner
 
-**版本**: 2.6.0
+**版本**: 2.7.0
 **授權**: MIT
 **Python**: >= 3.10
 
@@ -24,6 +24,8 @@
 - **DCCPP 深度整合**: 基於論文《Multiple fixed-wing UAVs collaborative coverage 3D path planning method for complex areas》（Defence Technology 47, 2025），整合 GreedyAllocator 多區域分配、IDP 路徑序列最佳化、Dubins 曲線連接、梯形 FOV 模型、DEM 地形雙線性插值、GDA 高度平滑、協調/非協調進入模式
 - **DCCPP 多機防撞**: `core/dccpp/collision_avoidance.py` — 多架 UAV 路徑時空衝突檢測與迴避
 - **🎯 蜂群末端打擊（Swarm Strike）**: N 目標 → 自動生成 N 架 UCAV，三段軌跡（起飛爬升 8° → Dubins 巡航 → 末端俯衝 θ_max）+ 高度錯層防撞；Cesium 視覺化含速度向量姿態、戰術色變、雷射鎖定、命中衝擊波；匯出每機獨立 QGC WPL 110 任務
+- **🛡 軍規 UI（MIL-STD-1472H）**: 全域 `Global_MIL_STD.qss` 嚴格遵循美國國防部人機工程設計標準 — 暗適應深底色（深藏青 `#0A0F14`，非純黑）、語意色管制（紅=敵危失 / 黃=警 / 綠=正常 / 琥珀=重點數字）、無襯線 + 等寬數字字型強制、`AeroPlanMainWindow` 五分區骨架（頂狀態列 / 左導航 / 中央視覺 / 右遙測 + 主告警 / 底狀態訊息）、獨立 `MasterWarningPanel`（§5.7.3.8 永遠可見、2 Hz 閃爍）、`MilStdMessageBox`（§5.17.10.7.3 三欄式建設性錯誤對話框）
+- **🚨 強制電子圍籬（Mandatory Geofence）**: 任何路徑生成皆**自動**綁定 4 頂點矩形包絡圍籬，圍籬不可選配；`GeofenceConstraintManager` 採 pyproj AEQD 投影 + Shapely `.envelope` / `.minimum_rotated_rectangle` + 公尺級 `buffer_radius_m` 外擴；輸出 `MissionBundle`（航點 + 圍籬 + ArduPilot FENCE_* 參數一體封裝）；`@enforce_geofence` 裝飾器強制攔截任何航點生成函式；自動匯出 QGC `.plan` JSON 與 Mission Planner `.fen` 純文字格式
 - **障礙物避讓**: 碰撞檢測與智能避障
 - **MAVLink 匯出**: QGC WPL 110 航點檔案匯出（Mission Planner / QGroundControl 相容）；群飛 / 蜂群打擊模式可逐機匯出獨立任務檔
 - **即時路徑預覽**: 參數調整後自動重新生成路徑
@@ -286,7 +288,8 @@ aeroplan-studio/
 │   ├── coverage_path.py             # 結構化覆蓋路徑（OperationSegment / CoveragePath）
 │   ├── mavlink_exporter.py          # MAVLink / QGC WPL 110 匯出（QGC / JSON / KML / GPX）
 │   ├── swarm_coordinator.py         # 群飛協調（SwarmCoordinator / SwarmMission）+ landing_rollout 傳遞
-│   └── vtol_mission_exporter.py     # VTOL 專用匯出（NAV_VTOL_TAKEOFF / 過渡序列 / 垂直降落）
+│   ├── vtol_mission_exporter.py     # VTOL 專用匯出（NAV_VTOL_TAKEOFF / 過渡序列 / 垂直降落）
+│   └── geofence_manager.py          # 🚨 強制矩形電子圍籬（GeofenceConstraintManager / MissionBundle / @enforce_geofence / QGC .plan + MP .fen 匯出）
 │
 ├── sensors/                         # 感測器模組
 │   ├── camera_model.py              # 相機模型（GSD / 覆蓋率計算）
@@ -297,11 +300,16 @@ aeroplan-studio/
 │
 ├── ui/                              # PyQt6 GUI
 │   ├── main_window.py               # 主視窗（路徑生成協調 + SITL 整合）
+│   ├── aeroplan_main_window.py      # 🛡 MIL-STD-1472H 合規骨架（5 分區佈局 + 頂部狀態 + 左導航 + 主告警 + 遙測 + 武裝/通訊）
 │   ├── widgets/
 │   │   ├── map_widget.py            # 2D 地圖（Folium + WebEngine + JS 事件 + 視角同步）
-│   │   ├── cesium_map_widget.py     # 3D 地圖（Cesium.js + 高度視覺化 + UAV 即時追蹤）
+│   │   ├── cesium_map_widget.py     # 3D 地圖（Cesium.js + 高度視覺化 + UAV 即時追蹤 + chase/FPV 相機）
 │   │   ├── dual_map_widget.py       # 2D/3D 雙模式容器（QStackedWidget + 信號轉發）
 │   │   ├── sitl_hud.py              # Mission Planner 風格 SITL HUD 面板
+│   │   ├── tactical_uav_card.py     # 戰術 UAV 狀態卡（深色 HUD 風 + 姿態指示燈）
+│   │   ├── tactical_swarm_strike_panel.py  # 蜂群打擊戰術面板（VTOL 全任務生命週期）
+│   │   ├── master_warning_panel.py  # 🚨 主告警面板（MIL-STD §5.7.3.8 獨立可見 + 2 Hz 閃爍 + 三級嚴重度）
+│   │   ├── mil_std_message.py       # 軍規錯誤對話框（MIL-STD §5.17.10.7.3 三欄式：現象/資訊/建設性建議）
 │   │   ├── parameter_panel.py       # 參數面板（基本演算法 / 協同覆蓋 / DCCPP / SITL 4 分頁）
 │   │   ├── mission_panel.py         # 任務面板
 │   │   └── polygon_editor.py        # 多邊形編輯器
@@ -312,7 +320,12 @@ aeroplan-studio/
 │   │   ├── obstacle_manager.py      # 障礙物管理
 │   │   └── nfz_manager_dialog.py    # 禁航區管理
 │   └── resources/
-│       └── styles/                  # QSS 主題樣式（modern / light）
+│       ├── tactical_theme.py        # 主題載入器（TacticalColors / TacticalFonts 常數 + apply_tactical_theme）
+│       └── styles/
+│           ├── Global_MIL_STD.qss   # 🛡 全域軍規 QSS（19 節，顯式對應 MIL-STD-1472H 章節）
+│           ├── tactical_theme.qss   # 舊版戰術主題（fallback）
+│           ├── modern_theme.qss     # 現代風主題（legacy）
+│           └── light_theme.qss      # 淺色主題（legacy）
 │
 ├── utils/                           # 工具模組
 │   ├── logger.py                    # 日誌系統
@@ -442,6 +455,30 @@ aeroplan-studio/
 | 配置 | PyYAML |
 
 ## 版本紀錄
+
+### v2.7.0 (Apr 2026)
+
+- 🛡 **MIL-STD-1472H 合規 UI 全面改版**
+  - 新增 `ui/resources/styles/Global_MIL_STD.qss` — 全域軍規樣式表，19 節並顯式對應 MIL-STD 章節（§5.1.2.2.1 功能分組 / §5.7.3 告警 / §5.17.10 錯誤訊息 / §5.17.18.7 字型 / §5.17.25 色彩語意 / §5.17.25.16 暗適應）
+  - 新增 `ui/aeroplan_main_window.py` — `AeroPlanMainWindow` 五分區骨架：① 頂部狀態列（Mode/GPS/Link/Mission Time/UTC）② 左側功能導航 ③ 右上主告警面板 ④ 中央顯示區（地圖/視訊/3D）⑤ 右側遙測 + 武裝 + 通訊 + ⑥ 底部系統訊息列
+  - 新增 `ui/widgets/master_warning_panel.py` — `MasterWarningPanel`（§5.7.3.8 獨立永遠可見、依 MIL-STD-411E 2 Hz 閃爍、三級嚴重度 ADVISORY/CAUTION/WARNING、ACK/CLEAR 操作）
+  - 新增 `ui/widgets/mil_std_message.py` — `MilStdMessageBox`（§5.17.10.7.3 三欄式：現象 / 具體資訊 / 建設性建議；嚴禁指責性語氣）
+  - 啟動方式：`python main.py --shell milstd` 啟動新骨架；`--shell legacy`（預設）沿用既有 MainWindow，但同樣套用新版 Global_MIL_STD.qss 全域樣式
+  - 設計鐵則：全直角（border-radius=0）／無漸層（flat）／極薄 1px 邊線／hover 僅變邊框與文字色／遙測數字強制等寬字型（避免抖動）
+
+- 🚨 **強制電子圍籬（Mandatory Geofence）— 飛安最高原則**
+  - 新增 `mission/geofence_manager.py` — `GeofenceConstraintManager`：依 pyproj AEQD 投影 + Shapely `.envelope` / `.minimum_rotated_rectangle` 產出 4 頂點矩形包絡圍籬，於投影平面外擴 `buffer_radius_m` 公尺後反投影回 WGS84
+  - **圍籬不可選配**：`@enforce_geofence` 裝飾器強制攔截任何航點生成函式，自動回傳 `MissionBundle`（航點 + 圍籬 + 飛控參數一體封裝）
+  - **頂點數鎖定為 4**：即便輸入單點或共線退化亦自動補成 4 頂點；envelope（軸對齊）與 MRR（最小旋轉矩形）雙模可選
+  - **ArduPilot FENCE 參數自動產出**：`FENCE_ENABLE=1` / `FENCE_TYPE=7`（MaxAlt+Circle+Polygon）/ `FENCE_ACTION=1` (RTL/QRTL) / `FENCE_ALT_MAX/MIN`（含 `alt_margin_m` 安全容裕）/ `FENCE_RADIUS` / `FENCE_TOTAL=4` / `FENCE_MARGIN`
+  - **格式匯出**：QGroundControl `.plan` JSON（含 `geoFence.polygons[].inclusion=true`）+ Mission Planner `.fen` 純文字（含 breach point 與閉合環）
+  - 建設性錯誤訊息：所有 `GeofenceError` 訊息含可直接套用之排除步驟，符合 MIL-STD-1472H §5.17.10.7.3
+  - 順時針環向輸出，匹配 ArduPilot `AC_PolyFence_loader` inclusion 慣例
+  - 測試：12 航點隨機散佈於 2 km × 2 km 範圍 → 最小邊距 = 50.0 m（與 `buffer_radius_m=50` 精確吻合）；既有 78 pytest 測試全數通過
+
+- ✨ **3D Cesium 模型方位校正**
+  - GLB 模型方位偏移常數系統化：新增 `_PLANE_ROLL_OFFSET / _COPTER_ROLL_OFFSET` 至 `ui/widgets/cesium_templates/main.html`
+  - 統一 HPR (Heading/Pitch/Roll) 偏移管線，支援逐軸獨立微調（避免 GLB 出廠座標系與 Cesium 慣例不一致時翻倒/朝天）
 
 ### v2.6.0 (Apr 2026)
 - 🎯 **蜂群末端打擊規劃 (Swarm Strike)**：新增 `core/strike/terminal_strike_planner.py`，N 目標自動分配 N 架 UCAV

@@ -23,6 +23,14 @@ from .waypoint import (
     create_change_speed_command,
 )
 
+from .geofence_manager import (
+    GeofenceConstraintManager,
+    Geofence,
+    MissionBundle,
+    GeofenceError,
+    enforce_geofence,
+)
+
 __all__ = [
     # 任務管理
     'MissionManager',
@@ -40,4 +48,10 @@ __all__ = [
     'create_takeoff_waypoint',
     'create_rtl_waypoint',
     'create_change_speed_command',
+    # 強制電子圍籬 — 飛安最高原則
+    'GeofenceConstraintManager',
+    'Geofence',
+    'MissionBundle',
+    'GeofenceError',
+    'enforce_geofence',
 ]

@@ -213,6 +213,35 @@ class SITLLink(QThread):
         """waypoints: [(lat, lon, alt_rel), ...]"""
         self._cmd_queue.put(('upload_mission', list(waypoints)))
 
+    def upload_fence_zones(self, zones, fence_type_bits=4,
+                           alt_max_m=200.0, alt_min_m=-10.0,
+                           fence_action=1):
+        """上傳多區 Fence (NFZ + 威脅 + 圍籬整合) 至飛控 EEPROM。
+
+        使用 ArduPilot 4.2+ 多區 Polygon Fence 協定：
+            MAV_MISSION_TYPE_FENCE 內可同時包含：
+              • POLYGON inclusion 群組（同 polygon 所有頂點 param1 = 該 poly 點數）
+              • POLYGON exclusion 群組（同上但用 CMD 5002）
+              • CIRCLE inclusion / exclusion 各為一個單點 mission item
+
+        Args:
+            zones            : List[FenceZone]
+            fence_type_bits  : FENCE_TYPE bitmask (1=alt, 2=circle, 4=poly, 8=min_alt)
+            alt_max_m        : FENCE_ALT_MAX
+            alt_min_m        : FENCE_ALT_MIN（ArduCopter 4.0+ 有效）
+            fence_action     : FENCE_ACTION (0=Report, 1=RTL/Land, 2=Land, 4=Brake)
+        """
+        self._cmd_queue.put((
+            'upload_fence_zones',
+            {
+                'zones': list(zones),
+                'fence_type_bits': int(fence_type_bits),
+                'alt_max_m': float(alt_max_m),
+                'alt_min_m': float(alt_min_m),
+                'fence_action': int(fence_action),
+            },
+        ))
+
     def upload_fence(self, bundle):
         """
         上傳電子圍籬。
@@ -562,6 +591,8 @@ class SITLLink(QThread):
                     self._send_vtol_transition(int(arg))
                 elif cmd == 'upload_fence':
                     self._send_fence(arg)
+                elif cmd == 'upload_fence_zones':
+                    self._send_fence_zones(arg)
                 elif cmd == 'clear_fence':
                     self._send_clear_fence()
                 logger.info(f'[SITL] 已發送命令: {cmd} {arg if cmd != "upload_mission" else f"{len(arg)} 點"}')
@@ -830,6 +861,148 @@ class SITLLink(QThread):
         self.status_text.emit(6,
             f'🛡️ 圍籬已上傳: {len(g.vertices)} 頂點, '
             f'alt=[{g.alt_min_m:.0f},{g.alt_max_m:.0f}]m')
+
+    def _send_fence_zones(self, args: dict):
+        """上傳「多區 fence（NFZ + 威脅 + 圍籬整合）」至飛控 EEPROM。
+
+        實作策略：
+            1) FENCE_ENABLE=0 暫停（避免上傳半成品觸發 RTL）
+            2) 統計所有 mission item 總數：
+                 polygon: N 頂點各一個 item（同 polygon 共用 param1=該 poly 點數）
+                 circle:  1 個 item
+            3) MISSION_COUNT + 依序回應 MISSION_REQUEST → MISSION_ITEM_INT
+            4) MISSION_ACK 確認
+            5) 寫 FENCE_TYPE / FENCE_ACTION / FENCE_ALT_MAX / FENCE_ALT_MIN
+            6) FENCE_ENABLE=1 啟用
+        """
+        from pymavlink import mavutil
+        if self._mav is None:
+            return
+        zones = args.get('zones') or []
+        if not zones:
+            return
+
+        # ── 把所有 zone 展開成「待上傳的 mission item 描述」陣列 ──
+        # 每個元素：(cmd_id, param1, lat_deg, lon_deg)
+        # 其中 cmd_id ∈ {5001, 5002, 5003, 5004}
+        items = []
+        for z in zones:
+            cmd_id = z.mavlink_cmd_id  # 5001/5002/5003/5004
+            if cmd_id in (5001, 5002):
+                # Polygon：把所有頂點（含 CIRCLE 展開後的近似多邊形）依序送
+                verts = z.polygon_vertices(circle_segments=16)
+                if len(verts) < 3:
+                    continue
+                n = len(verts)
+                for lat, lon in verts:
+                    items.append((cmd_id, float(n), float(lat), float(lon)))
+            elif cmd_id in (5003, 5004):
+                # Circle：lat/lon = 中心，param1 = 半徑
+                if z.center is None or z.radius_m <= 0:
+                    continue
+                lat, lon = z.center
+                items.append((cmd_id, float(z.radius_m), float(lat), float(lon)))
+
+        if not items:
+            logger.warning('[Fence] 沒有有效 fence item 可上傳')
+            return
+
+        # 1) 先 disable fence 避免半成品觸發 action
+        try:
+            self._send_param_set('FENCE_ENABLE', 0, 'INT8')
+            time.sleep(0.05)
+        except Exception:
+            pass
+
+        # 2) 清除舊 fence（避免新舊混雜）
+        try:
+            self._mav.mav.mission_clear_all_send(
+                self._mav.target_system, self._mav.target_component,
+                mavutil.mavlink.MAV_MISSION_TYPE_FENCE,
+            )
+            time.sleep(0.1)
+        except Exception:
+            pass
+
+        # 3) MISSION_COUNT
+        try:
+            self._mav.mav.mission_count_send(
+                self._mav.target_system, self._mav.target_component,
+                len(items),
+                mavutil.mavlink.MAV_MISSION_TYPE_FENCE,
+            )
+        except Exception as e:
+            logger.error(f'[Fence] mission_count_send 失敗: {e}')
+            return
+
+        # 4) 依序回應 MISSION_REQUEST(_INT) → mission_item_int_send
+        try:
+            for seq, (cmd_id, p1, lat, lon) in enumerate(items):
+                msg = self._mav.recv_match(
+                    type=['MISSION_REQUEST', 'MISSION_REQUEST_INT'],
+                    blocking=True, timeout=2,
+                )
+                if msg is None:
+                    logger.warning(f'[Fence] 上傳超時 seq={seq} cmd={cmd_id}')
+                    break
+                self._mav.mav.mission_item_int_send(
+                    self._mav.target_system, self._mav.target_component,
+                    seq,
+                    mavutil.mavlink.MAV_FRAME_GLOBAL,
+                    cmd_id,
+                    0,    # current
+                    1,    # autocontinue
+                    p1,   # param1 = (polygon 點數) 或 (circle 半徑 m)
+                    0, 0, 0,
+                    int(round(lat * 1e7)),
+                    int(round(lon * 1e7)),
+                    0.0,
+                    mavutil.mavlink.MAV_MISSION_TYPE_FENCE,
+                )
+            ack = self._mav.recv_match(
+                type='MISSION_ACK', blocking=True, timeout=3
+            )
+            if ack is None:
+                logger.warning('[Fence] 多區 fence 未收到 MISSION_ACK')
+        except Exception as e:
+            logger.error(f'[Fence] 多區 fence 上傳失敗: {e}', exc_info=True)
+
+        # 5) 寫 FENCE_* 參數
+        try:
+            self._send_param_set('FENCE_TYPE', int(args['fence_type_bits']), 'INT8')
+            time.sleep(0.04)
+            self._send_param_set('FENCE_ACTION', int(args['fence_action']), 'INT8')
+            time.sleep(0.04)
+            self._send_param_set('FENCE_ALT_MAX', float(args['alt_max_m']), 'REAL32')
+            time.sleep(0.04)
+            # FENCE_ALT_MIN 僅部分機型支援 — 寫入失敗不影響整體上傳
+            try:
+                self._send_param_set('FENCE_ALT_MIN', float(args['alt_min_m']), 'REAL32')
+                time.sleep(0.04)
+            except Exception:
+                pass
+        except Exception as e:
+            logger.warning(f'[Fence] FENCE_* 參數寫入部分失敗: {e}')
+
+        # 6) 最後啟用 fence
+        time.sleep(0.1)
+        try:
+            self._send_param_set('FENCE_ENABLE', 1, 'INT8')
+        except Exception:
+            pass
+
+        # 統計 polygon / circle 數量給狀態列
+        n_poly = sum(1 for z in zones if z.shape.value == 'POLYGON')
+        n_circ = sum(1 for z in zones if z.shape.value == 'CIRCLE')
+        self.status_text.emit(
+            6,
+            f'🛡️ 多區 fence 已上傳: {len(items)} items '
+            f'(polygons={n_poly}, circles={n_circ}, type=0x{int(args["fence_type_bits"]):02X})'
+        )
+        logger.info(
+            f'[Fence] sysid={self.sysid_label} 多區上傳完成: '
+            f'{len(items)} items, type_bits={args["fence_type_bits"]}'
+        )
 
     def _request_servo_function_params(self):
         """連線後讀取 SERVO{1..16}_FUNCTION/MIN/TRIM/MAX/REVERSED，

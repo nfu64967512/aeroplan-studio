@@ -14,6 +14,12 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from config import get_settings
 from utils.logger import get_logger
 
+# AeroPlan Studio 設計系統 — 統一視覺主題
+# - IconButton：SVG 圖示 + 語意化 tone（取代帶 emoji 的 QPushButton + inline 樣式）
+# - tokens   ：語意色 / 字型 / 尺寸常數（用於極少數無法以 QSS 表達的動態樣式）
+from ui.resources.aeroplan_theme.widgets import IconButton
+from ui.resources.aeroplan_theme import tokens as T
+
 # 獲取配置和日誌實例
 settings = get_settings()
 logger = get_logger()
@@ -37,6 +43,13 @@ class ParameterPanel(QWidget):
     pick_home_point_requested  = pyqtSignal()  # 從地圖點選起飛點
     clear_home_point_requested = pyqtSignal()  # 清除起飛點
     manage_nfz_requested       = pyqtSignal()  # 開啟禁航區管理對話框
+    # ── 統一 Fence Zone（NFZ / 威脅 / 圍籬整合）──
+    fence_zone_create_requested   = pyqtSignal()  # 開啟統一 fence zone 對話框
+    fence_zone_clear_all_requested = pyqtSignal() # 清除所有 fence zone
+    fence_zone_upload_requested   = pyqtSignal()  # 一鍵上傳至飛控（Hard fence）
+    # 直接在 3D 地圖繪製 — 完成後 MainWindow 會以畫好的頂點預填統一對話框
+    fence_zone_draw_polygon_requested = pyqtSignal()
+    fence_zone_draw_circle_requested  = pyqtSignal()
     nfz_draw_polygon_requested = pyqtSignal()  # 在地圖繪製 NFZ 多邊形
     nfz_draw_circle_requested  = pyqtSignal()  # 在地圖拖曳定義 NFZ 圓形
     nfz_poly_finish_requested  = pyqtSignal()  # 完成 NFZ 多邊形繪製
@@ -53,6 +66,9 @@ class ParameterPanel(QWidget):
     sar_heatmap_reset_requested = pyqtSignal()            # 重置熱力圖
     sar_heatmap_clear_requested = pyqtSignal()            # 清除熱力圖
     fov_cone_toggle_requested = pyqtSignal(bool)          # 開關 FOV 光錐
+    # FOV 視覺化參數變更（即時投影梯形角錐 frustum）
+    #   payload: (mount_angle_deg, hfov_deg, vfov_deg)
+    fov_visual_changed = pyqtSignal(float, float, float)
     radar_sim_requested = pyqtSignal(dict)                # 模擬雷達威脅掃描
     radar_clear_requested = pyqtSignal()                  # 清除雷達穹頂
     rcs_toggle_requested = pyqtSignal(bool)               # 開關 RCS 渲染
@@ -70,6 +86,9 @@ class ParameterPanel(QWidget):
     strike_recon_trigger_requested = pyqtSignal(dict)     # DCCPP → Strike 動態切換觸發
     strike_vtol_toggle_changed = pyqtSignal(bool)         # VTOL 模式開關切換
     strike_open_vtol_mission_planner_requested = pyqtSignal()  # 開啟 VTOL 全任務生命週期規劃器（戰術對話框）
+    fence_export_requested = pyqtSignal()  # 匯出電子圍籬（每個 Tab 都有按鈕，共用一個 signal）
+    strike_target_coord_changed = pyqtSignal(float, float)  # 目標 lat/lon 手動輸入 → 同步 3D marker
+    tab_changed = pyqtSignal(str)                           # 分頁切換（傳分頁標題）— 供 main_window 調整地圖點擊路由
 
     def __init__(self, parent=None):
         """初始化參數面板"""
@@ -161,28 +180,76 @@ class ParameterPanel(QWidget):
             self.corner_group, algo_vehicle_group, flight_group,
             self.fixed_wing_group, survey_group, self.circle_center_group,
             self.region_safety_group, advanced_group,
+            self._create_fence_export_group(),    # 每個 Tab 共用的「匯出圍籬」群組
         ])
         self._tabs.addTab(basic_scroll, "基本演算法")
 
         # ── Tab 2: DCCPP ──────────────────────────────────────────────
         dccpp_group = self.create_dccpp_panel()
-        dccpp_scroll = self._make_resizable_tab([dccpp_group])
-        self._tabs.addTab(dccpp_scroll, "DCCPP")
+        dccpp_scroll = self._make_resizable_tab(
+            [dccpp_group, self._create_fence_export_group()]
+        )
+        self._dccpp_tab_index = self._tabs.addTab(dccpp_scroll, "DCCPP")
 
         # ── Tab 4: 戰術模組 ──────────────────────────────────────────
         elev_group = self._create_elevation_slicer_panel()
         sar_group = self._create_sar_heatmap_panel()
         radar_group = self._create_radar_rcs_panel()
         tactical_scroll = self._make_resizable_tab(
-            [elev_group, sar_group, radar_group]
+            [elev_group, sar_group, radar_group,
+             self._create_fence_export_group()]
         )
         self._tabs.addTab(tactical_scroll, "戰術模組")
 
         # ── Tab 5: 蜂群打擊 ──────────────────────────────────────────
         strike_group = self._create_strike_command_panel()
-        strike_scroll = self._make_resizable_tab([strike_group])
+        strike_scroll = self._make_resizable_tab(
+            [strike_group, self._create_fence_export_group()]
+        )
         self._tabs.addTab(strike_scroll, "蜂群打擊")
-    
+
+        # 分頁切換 → 通知 main_window 調整地圖點擊路由
+        self._tabs.currentChanged.connect(self._on_tab_changed)
+
+        # ── Enter / Return 快捷鍵 — DCCPP 分頁觸發規劃 ──
+        # 掛在整個 ParameterPanel（self）以「WidgetWithChildrenShortcut」
+        # 接收 — 焦點在 panel 內任何 widget（包含 tab widget 本身）都會收。
+        # handler 內檢查目前 tab index 才動作，避免影響其它分頁。
+        # QSpinBox / QLineEdit 內按 Enter 會優先消化（commit），所以使用者
+        # 在輸入欄按 Enter 仍是「確認該欄」，不會誤觸發。
+        from PyQt6.QtGui import QShortcut, QKeySequence
+        from PyQt6.QtCore import Qt as _Qt
+        for key in (_Qt.Key.Key_Return, _Qt.Key.Key_Enter):
+            sc = QShortcut(QKeySequence(key), self)
+            sc.setContext(_Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            sc.activated.connect(self._on_enter_pressed)
+
+    def _on_enter_pressed(self) -> None:
+        """ParameterPanel 內按 Enter — 依當前 tab 分派動作。
+
+        DCCPP 分頁    → 觸發「DCCPP 最佳化規劃」按鈕
+        其它分頁       → 不動作（避免誤觸發）
+
+        QSpinBox / QLineEdit 內部會優先消化 Enter（將值 commit 到 dataChanged）；
+        消化後焦點仍在該 widget，使用者要再按一次 Enter 才會觸發本 handler。
+        這是 Qt 標準行為、符合「輸入欄優先確認、再次 Enter 才提交動作」直覺。
+        """
+        try:
+            if self._tabs.currentIndex() == getattr(self, '_dccpp_tab_index', -1):
+                # 確認按鈕可按（規劃流程需要先有邊界點等前置條件）
+                btn = getattr(self, 'dccpp_gen_btn', None)
+                if btn is not None and btn.isEnabled():
+                    btn.click()
+        except Exception:
+            pass
+
+    def _on_tab_changed(self, idx: int):
+        """分頁切換 → 發送名稱通知主視窗（用於切換地圖點擊行為）。"""
+        try:
+            self.tab_changed.emit(self._tabs.tabText(idx) or '')
+        except Exception:
+            pass
+
     # ─────────────────────────────────────────────────────────────────
     #  可拖拉佈局 helpers — 讓每個 GroupBox 可由 Splitter 手動決定大小
     # ─────────────────────────────────────────────────────────────────
@@ -270,6 +337,79 @@ class ParameterPanel(QWidget):
             per = total // n
             sp.setSizes([per] * n)
 
+    # ─────────────────────────────────────────────────────────────────
+    # 電子圍籬匯出群組（每個 Tab 都有）— 飛安強制政策
+    # ─────────────────────────────────────────────────────────────────
+    def _create_fence_export_group(self) -> 'QGroupBox':
+        """
+        產生小型「電子圍籬」群組：狀態標籤 + 匯出按鈕。
+        本方法每呼叫一次回傳新的獨立 QGroupBox（不可共用 — Qt parent 限制）。
+        Tab 切換時都會看到同一介面，提供一致性 UX。
+        """
+        try:
+            from ui.resources.tactical_theme import TacticalColors as TC, TacticalFonts as TF
+        except Exception:
+            class TC:  # type: ignore
+                FG_PRIMARY='#E0E1DD'; FG_SECONDARY='#A8B2BD'; FG_EMPHASIS='#FFB703'
+                NEUTRAL='#00B4D8'; WARNING='#FFB703'; BG_SECONDARY='#0D1B2A'
+                BORDER_DEFAULT='#2A3D54'
+            TF = None
+
+        # 全域 QSS 已套用 QGroupBox 基底樣式；標題保留中文，不再帶 emoji。
+        group = QGroupBox('電子圍籬 (Geofence)')
+        layout = QVBoxLayout(group)
+        layout.setContentsMargins(6, 14, 6, 6)
+        layout.setSpacing(4)
+
+        # 狀態標籤（顯示目前圍籬資訊；由 main_window 透過 update_fence_status 寫入）
+        self._fence_status_labels = getattr(self, '_fence_status_labels', [])
+        status = QLabel('（尚未規劃路徑 — 規劃後系統會自動建構 4 頂點矩形圍籬）')
+        # 使用語意化 role="caption" 取代 inline 灰色文字樣式
+        status.setProperty('role', 'caption')
+        status.style().polish(status)
+        status.setWordWrap(True)
+        self._fence_status_labels.append(status)
+        layout.addWidget(status)
+
+        # 匯出按鈕（IconButton 取代 emoji + inline 樣式）
+        from PyQt6.QtWidgets import QHBoxLayout
+        row = QHBoxLayout()
+        row.setSpacing(4)
+        btn_export = IconButton('warn', '匯出電子圍籬', tone='warn', compact=True)
+        btn_export.setToolTip(
+            '匯出格式：\n'
+            '  .plan       — QGroundControl Plan (含 geoFence)\n'
+            '  .fen        — Mission Planner Fence 純文字\n'
+            'FENCE_TYPE=7（MaxAlt+Circle+Polygon）, FENCE_ACTION=1（RTL）'
+        )
+        btn_export.clicked.connect(self.fence_export_requested.emit)
+        row.addWidget(btn_export)
+        row.addStretch(1)
+        layout.addLayout(row)
+
+        return group
+
+    def update_fence_status(self, bundle) -> None:
+        """
+        由 main_window 呼叫：路徑規劃完成、自動建構圍籬後更新各 Tab 的狀態標籤。
+        bundle: mission.geofence_manager.MissionBundle 或 None。
+
+        動態狀態切換：成功 → role="friendly"；未規劃 → role="caption"。
+        """
+        for lbl in getattr(self, '_fence_status_labels', []):
+            if bundle is None:
+                lbl.setText('（尚未規劃路徑 — 規劃後系統會自動建構 4 頂點矩形圍籬）')
+                lbl.setProperty('role', 'caption')
+            else:
+                g = bundle.geofence
+                lbl.setText(
+                    f'✓ 已建構 {len(g.vertices)} 頂點 {g.method.upper()} 矩形 ｜ '
+                    f'alt = [{g.alt_min_m:.0f}, {g.alt_max_m:.0f}] m ｜ '
+                    f'buffer = {g.buffer_radius_m:.0f} m'
+                )
+                lbl.setProperty('role', 'friendly')
+            lbl.style().polish(lbl)
+
     def create_corner_management(self):
         """創建邊界點管理群組"""
         group = QGroupBox("邊界點管理")
@@ -304,29 +444,28 @@ class ParameterPanel(QWidget):
         coord_widget.setVisible(False)  # 隱藏
         layout.addWidget(coord_widget)
 
-        # 提示：使用地圖點擊添加
-        click_hint = QLabel("🖱️ 請直接在地圖上左鍵點擊添加角點（右鍵開啟工具選單）")
-        click_hint.setStyleSheet("""
-            background-color: rgba(33, 150, 243, 0.1);
-            color: #2196F3;
-            padding: 10px;
-            border-radius: 5px;
-            font-weight: bold;
-            font-size: 12px;
-        """)
+        # 提示：使用地圖點擊添加（強調色卡片，保留特殊半透明背景）
+        click_hint = QLabel("請直接在地圖上左鍵點擊添加角點（右鍵開啟工具選單）")
+        click_hint.setStyleSheet(
+            f"background-color: rgba(21, 101, 192, 0.12);"
+            f"color: {T.NEUTRAL};"
+            "padding: 10px;"
+            "font-weight: bold;"
+            "font-size: 12px;"
+        )
         click_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(click_hint)
 
-        # 刪除最後一點按鈕
-        self.remove_last_corner_btn = QPushButton("↩️ 刪除最後一點")
-        self.remove_last_corner_btn.setStyleSheet("background-color: #FF9800; color: white; font-weight: bold;")
+        # 刪除最後一點按鈕（IconButton/warn tone 取代 inline 橘色）
+        self.remove_last_corner_btn = IconButton('clear', '刪除最後一點', tone='warn')
         self.remove_last_corner_btn.setToolTip("刪除最後一個新增的角點（快捷鍵: Backspace）")
         self.remove_last_corner_btn.clicked.connect(self.on_remove_last_corner)
         layout.addWidget(self.remove_last_corner_btn)
 
-        # 角點數量顯示
+        # 角點數量顯示（emphasis：琥珀色等寬數字）
         self.corner_count_label = QLabel("目前角點: 0 個")
-        self.corner_count_label.setStyleSheet("color: #2196F3; font-weight: bold;")
+        self.corner_count_label.setProperty('role', 'emphasis')
+        self.corner_count_label.style().polish(self.corner_count_label)
         layout.addWidget(self.corner_count_label)
 
         return group
@@ -334,32 +473,25 @@ class ParameterPanel(QWidget):
     def create_circle_center_panel(self) -> QGroupBox:
         """創建螺旋/同心圓圓心掃描設定群組"""
         group = QGroupBox("螺旋 / 同心圓掃描設定")
-        group.setObjectName("circleCenterGroup")
-        group.setStyleSheet(
-            "QGroupBox#circleCenterGroup { font-weight: bold; color: #2196F3; }"
-        )
+        # 全域 QSS 已套用 QGroupBox 樣式，不再 inline。
         layout = QVBoxLayout(group)
         layout.setSpacing(6)
 
-        # ── 圓心座標顯示 ──
+        # ── 圓心座標顯示（caption 灰字斜體 → 用 role 取代）──
         center_frame = QFrame()
         center_frame.setFrameShape(QFrame.Shape.StyledPanel)
         center_frame_layout = QHBoxLayout(center_frame)
         center_frame_layout.setContentsMargins(6, 4, 6, 4)
         self.circle_center_label = QLabel("圓心：尚未設定")
-        self.circle_center_label.setStyleSheet(
-            "color: #888; font-size: 11px; font-style: italic;"
-        )
+        self.circle_center_label.setProperty('role', 'caption')
+        self.circle_center_label.style().polish(self.circle_center_label)
         self.circle_center_label.setWordWrap(True)
         center_frame_layout.addWidget(self.circle_center_label, 1)
         layout.addWidget(center_frame)
 
         # ── 操作按鈕（拖曳定義 / 點選圓心）──
         btn_row = QHBoxLayout()
-        drag_btn = QPushButton("地圖拖曳定義圓形")
-        drag_btn.setStyleSheet(
-            "background-color: #1565C0; color: white; font-weight: bold; padding: 5px;"
-        )
+        drag_btn = IconButton('circle', '地圖拖曳定義圓形', tone='primary')
         drag_btn.setToolTip(
             "按住滑鼠左鍵並在地圖上拖曳\n"
             "即可同時設定圓心與半徑（Mission Planner 風格）"
@@ -367,10 +499,7 @@ class ParameterPanel(QWidget):
         drag_btn.clicked.connect(self.drag_circle_requested.emit)
         btn_row.addWidget(drag_btn, 2)
 
-        pick_btn = QPushButton("僅點選圓心")
-        pick_btn.setStyleSheet(
-            "background-color: #455A64; color: white; padding: 5px;"
-        )
+        pick_btn = IconButton('pin', '僅點選圓心', tone='neutral')
         pick_btn.setToolTip("點擊此鈕後，在地圖上左鍵點一下即可設定圓心（半徑手動調整）")
         pick_btn.clicked.connect(self.pick_center_requested.emit)
         btn_row.addWidget(pick_btn, 1)
@@ -423,15 +552,14 @@ class ParameterPanel(QWidget):
         layout.addLayout(form)
 
         # ── 螺旋專用參數（僅 spiral 模式顯示）──
+        # 全域 QSS 已為 QFrame 套用標準邊框與背景；標題使用 emphasis 角色。
         self.spiral_params_frame = QFrame()
         self.spiral_params_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        self.spiral_params_frame.setStyleSheet(
-            "QFrame { border: 1px solid #1565C0; border-radius: 4px; }"
-        )
         spiral_form_layout = QVBoxLayout(self.spiral_params_frame)
         spiral_form_layout.setContentsMargins(6, 4, 6, 4)
         spiral_title = QLabel("螺旋路徑參數")
-        spiral_title.setStyleSheet("font-weight: bold; color: #1565C0; font-size: 11px;")
+        spiral_title.setProperty('role', 'emphasis')
+        spiral_title.style().polish(spiral_title)
         spiral_form_layout.addWidget(spiral_title)
 
         spiral_form = QFormLayout()
@@ -473,14 +601,14 @@ class ParameterPanel(QWidget):
         layout.addWidget(self.spiral_params_frame)
         self.spiral_params_frame.setVisible(False)  # 預設隱藏，切到 spiral 時顯示
 
-        # ── 提示說明 ──
+        # ── 提示說明（特殊半透明背景卡片，保留 inline 但改用 tokens 顏色）──
         hint = QLabel(
             "圈間間距請使用上方「航線間距」調整。\n"
             "飛行高度請使用上方「飛行高度」設定。"
         )
         hint.setStyleSheet(
-            "background-color: rgba(33,150,243,0.08);"
-            "color: #2196F3; padding: 6px; border-radius: 4px; font-size: 10px;"
+            f"background-color: rgba(21, 101, 192, 0.10);"
+            f"color: {T.NEUTRAL}; padding: 6px; font-size: 10px;"
         )
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -533,9 +661,10 @@ class ParameterPanel(QWidget):
         self.vehicle_model_combo.currentIndexChanged.connect(self.on_vehicle_model_changed)
         layout.addRow("載具型號:", self.vehicle_model_combo)
 
-        # 載具資訊標籤
+        # 載具資訊標籤（caption：灰色說明文字）
         self.vehicle_info_label = QLabel("選擇載具以顯示資訊")
-        self.vehicle_info_label.setStyleSheet("color: #888; font-size: 10px;")
+        self.vehicle_info_label.setProperty('role', 'caption')
+        self.vehicle_info_label.style().polish(self.vehicle_info_label)
         self.vehicle_info_label.setWordWrap(True)
         layout.addRow("", self.vehicle_info_label)
 
@@ -743,9 +872,10 @@ class ParameterPanel(QWidget):
         outer = QVBoxLayout(group)
         outer.setSpacing(6)
 
-        # ── 說明標籤 ────────────────────────────────────────────────
+        # ── 說明標籤（caption 灰字）────────────────────────────────
         hint = QLabel("設定各子區域邊界間隔，防止相鄰無人機物理碰撞")
-        hint.setStyleSheet("color:#888; font-size:10px;")
+        hint.setProperty('role', 'caption')
+        hint.style().polish(hint)
         hint.setWordWrap(True)
         outer.addWidget(hint)
 
@@ -781,7 +911,8 @@ class ParameterPanel(QWidget):
         stagger_row.addStretch()
 
         self._stagger_detail = QLabel("")
-        self._stagger_detail.setStyleSheet("color:#2196F3; font-size:10px;")
+        # 動態高度預覽，使用 NEUTRAL（青藍）強調
+        self._stagger_detail.setStyleSheet(f"color:{T.NEUTRAL}; font-size:10px;")
         self._stagger_detail.setWordWrap(True)
 
         self._stagger_widget = QWidget()
@@ -936,49 +1067,49 @@ class ParameterPanel(QWidget):
         logger.info("請求清除所有角點")
 
     def update_corner_count(self, count: int):
-        """更新角點數量顯示"""
+        """更新角點數量顯示
+
+        達到 3 點以上 → friendly（綠色），不足 → hostile（紅色），透過 role 切換。
+        """
         self.corner_count_label.setText(f"目前角點: {count} 個")
-        if count >= 3:
-            self.corner_count_label.setStyleSheet("color: #4CAF50; font-weight: bold;")
-        else:
-            self.corner_count_label.setStyleSheet("color: #f44336; font-weight: bold;")
+        self.corner_count_label.setProperty(
+            'role', 'friendly' if count >= 3 else 'hostile'
+        )
+        self.corner_count_label.style().polish(self.corner_count_label)
 
     def set_circle_center_display(self, lat: float, lon: float, radius_m: float = 0.0):
-        """更新圓心座標顯示（拖曳時同時帶入半徑）"""
+        """更新圓心座標顯示（拖曳時同時帶入半徑）— 設定後切到 friendly 角色"""
         radius_str = f"  ／  半徑 {radius_m:.0f} m" if radius_m > 1.0 else ""
         if hasattr(self, 'circle_center_label'):
             self.circle_center_label.setText(
                 f"圓心：{lat:.6f}, {lon:.6f}{radius_str}"
             )
-            self.circle_center_label.setStyleSheet(
-                "color: #4CAF50; font-size: 11px; font-weight: bold;"
-            )
+            self.circle_center_label.setProperty('role', 'friendly')
+            self.circle_center_label.style().polish(self.circle_center_label)
         self.update_parameter('circle_center_lat', lat)
         self.update_parameter('circle_center_lon', lon)
         if radius_m > 1.0:
             self.set_circle_radius_display(radius_m)
 
     def set_home_point_display(self, lat: float, lon: float):
-        """更新起飛點座標顯示"""
+        """更新起飛點座標顯示 — 設定後切到 friendly 角色（綠色）"""
         txt = f"起飛點：{lat:.6f}, {lon:.6f}"
-        style = "color: #4CAF50; font-size: 11px; font-weight: bold;"
-        if hasattr(self, 'home_point_label'):
-            self.home_point_label.setText(txt)
-            self.home_point_label.setStyleSheet(style)
-        if hasattr(self, 'dccpp_home_label'):
-            self.dccpp_home_label.setText(txt)
-            self.dccpp_home_label.setStyleSheet(style)
+        for attr in ('home_point_label', 'dccpp_home_label'):
+            lbl = getattr(self, attr, None)
+            if lbl is not None:
+                lbl.setText(txt)
+                lbl.setProperty('role', 'friendly')
+                lbl.style().polish(lbl)
 
     def clear_home_point_display(self):
-        """清除起飛點顯示（由 main_window 呼叫，純 UI 更新）"""
+        """清除起飛點顯示（由 main_window 呼叫，純 UI 更新）— 切回 caption 灰字"""
         txt = "起飛點：尚未設定（預設使用掃描區中心）"
-        style = "color: #888; font-size: 11px; font-style: italic;"
-        if hasattr(self, 'home_point_label'):
-            self.home_point_label.setText(txt)
-            self.home_point_label.setStyleSheet(style)
-        if hasattr(self, 'dccpp_home_label'):
-            self.dccpp_home_label.setText(txt)
-            self.dccpp_home_label.setStyleSheet(style)
+        for attr in ('home_point_label', 'dccpp_home_label'):
+            lbl = getattr(self, attr, None)
+            if lbl is not None:
+                lbl.setText(txt)
+                lbl.setProperty('role', 'caption')
+                lbl.style().polish(lbl)
 
     def create_flight_parameters(self):
         """創建飛行參數群組"""
@@ -1068,7 +1199,9 @@ class ParameterPanel(QWidget):
         self.heading_slider.setTickInterval(45)
         self.heading_value_label = QLabel("0° 北")
         self.heading_value_label.setMinimumWidth(55)
-        self.heading_value_label.setStyleSheet("font-weight: bold; color: #2196F3;")
+        # emphasis：琥珀色等寬數字，符合 1472H 讀值規格
+        self.heading_value_label.setProperty('role', 'emphasis')
+        self.heading_value_label.style().polish(self.heading_value_label)
         self.heading_slider.valueChanged.connect(self.on_heading_changed)
         heading_layout.addWidget(self.heading_slider)
         heading_layout.addWidget(self.heading_value_label)
@@ -1093,8 +1226,7 @@ class ParameterPanel(QWidget):
         """
         group = QGroupBox("固定翼專用設定")
         group.setObjectName("fixedWingGroup")
-        # 使用 object-name 選擇器，防止樣式向下繼承至子 QGroupBox
-        group.setStyleSheet("QGroupBox#fixedWingGroup { font-weight: bold; color: #FF9800; }")
+        # QGroupBox 基底樣式由全域 QSS 提供；不再 inline 著色。
         outer = QVBoxLayout(group)
         outer.setSpacing(8)
 
@@ -1104,23 +1236,16 @@ class ParameterPanel(QWidget):
         home_layout.setSpacing(4)
 
         self.home_point_label = QLabel("起飛點：尚未設定（預設使用掃描區中心）")
-        self.home_point_label.setStyleSheet(
-            "color: #888; font-size: 11px; font-style: italic;"
-        )
+        self.home_point_label.setProperty('role', 'caption')
+        self.home_point_label.style().polish(self.home_point_label)
         self.home_point_label.setWordWrap(True)
         home_layout.addWidget(self.home_point_label)
 
-        pick_home_btn = QPushButton("📍 從地圖點選起飛點")
-        pick_home_btn.setStyleSheet(
-            "background-color: #455A64; color: white; padding: 6px; border-radius: 3px;"
-        )
+        pick_home_btn = IconButton('pin', '從地圖點選起飛點', tone='neutral')
         pick_home_btn.clicked.connect(self.pick_home_point_requested.emit)
         home_layout.addWidget(pick_home_btn)
 
-        clear_home_btn = QPushButton("✖ 清除起飛點")
-        clear_home_btn.setStyleSheet(
-            "background-color: #78909C; color: white; padding: 4px; border-radius: 3px;"
-        )
+        clear_home_btn = IconButton('clear', '清除起飛點', tone='ghost', compact=True)
         clear_home_btn.clicked.connect(self.clear_home_point_requested.emit)
         home_layout.addWidget(clear_home_btn)
 
@@ -1132,54 +1257,118 @@ class ParameterPanel(QWidget):
         nfz_layout.setSpacing(4)
 
         self.nfz_count_label = QLabel("目前禁航區：0 個")
-        self.nfz_count_label.setStyleSheet("color: #888; font-size: 11px;")
+        self.nfz_count_label.setProperty('role', 'caption')
+        self.nfz_count_label.style().polish(self.nfz_count_label)
         nfz_layout.addWidget(self.nfz_count_label)
 
-        # 地圖繪製按鈕列
+        # 地圖繪製按鈕列（NFZ 屬危險區域，使用 danger tone）
         nfz_draw_row = QHBoxLayout()
-        nfz_draw_poly_btn = QPushButton("✏️ 繪製多邊形")
+        nfz_draw_poly_btn = IconButton('polygon', '繪製多邊形', tone='danger')
         nfz_draw_poly_btn.setToolTip("在地圖上點擊新增頂點，雙擊完成")
-        nfz_draw_poly_btn.setStyleSheet(
-            "background-color: #E53935; color: white; padding: 5px; border-radius: 3px;"
-        )
         nfz_draw_poly_btn.clicked.connect(self.nfz_draw_polygon_requested.emit)
         nfz_draw_row.addWidget(nfz_draw_poly_btn)
 
-        nfz_draw_circle_btn = QPushButton("⭕ 拖曳圓形")
+        nfz_draw_circle_btn = IconButton('circle', '拖曳圓形', tone='danger')
         nfz_draw_circle_btn.setToolTip("在地圖上按住拖曳定義圓形禁航區")
-        nfz_draw_circle_btn.setStyleSheet(
-            "background-color: #E53935; color: white; padding: 5px; border-radius: 3px;"
-        )
         nfz_draw_circle_btn.clicked.connect(self.nfz_draw_circle_requested.emit)
         nfz_draw_row.addWidget(nfz_draw_circle_btn)
         nfz_layout.addLayout(nfz_draw_row)
 
-        self.nfz_finish_poly_btn = QPushButton("✅ 完成多邊形")
-        self.nfz_finish_poly_btn.setStyleSheet(
-            "background-color: #388E3C; color: white; padding: 5px; border-radius: 3px;"
-        )
+        self.nfz_finish_poly_btn = IconButton('confirm', '完成多邊形', tone='success')
         self.nfz_finish_poly_btn.setVisible(False)
         self.nfz_finish_poly_btn.clicked.connect(self.nfz_poly_finish_requested.emit)
         nfz_layout.addWidget(self.nfz_finish_poly_btn)
 
-        manage_nfz_btn = QPushButton("🗂 管理 / 刪除禁航區...")
-        manage_nfz_btn.setStyleSheet(
-            "background-color: #B71C1C; color: white; padding: 6px; border-radius: 3px;"
-        )
+        manage_nfz_btn = IconButton('settings', '管理 / 刪除禁航區...', tone='danger')
         manage_nfz_btn.clicked.connect(self.manage_nfz_requested.emit)
         nfz_layout.addWidget(manage_nfz_btn)
 
         outer.addWidget(nfz_group)
+
+        # ── 0.6. 統一 Fence Zones（NFZ + 威脅 + 圍籬 / Hard fence）──
+        fence_group = QGroupBox("Fence Zones（NFZ / 威脅 / 圍籬 統一設定）")
+        fence_group.setToolTip(
+            "把禁航區、動態威脅、作業圍籬統一成 fence-style 設定：\n"
+            "  • 同一對話框設定（多邊形 / 圓形、海拔上下限、分類）\n"
+            "  • Cesium 3D 視覺以 fence 風格立體呈現（floor + walls + ceiling）\n"
+            "  • 一鍵上傳飛控 EEPROM (ArduPilot 4.2+ Polygon Fence 協定)\n"
+            "    所有 inclusion / exclusion polygon 與 circle 都會送進 FC\n"
+            "    飛機真飛時 FENCE_ACTION 會自動 RTL"
+        )
+        fence_layout = QVBoxLayout(fence_group)
+        fence_layout.setSpacing(4)
+
+        self.fence_zone_count_label = QLabel("目前 Fence 區域：0 個")
+        self.fence_zone_count_label.setProperty('role', 'caption')
+        self.fence_zone_count_label.style().polish(self.fence_zone_count_label)
+        fence_layout.addWidget(self.fence_zone_count_label)
+
+        # 新增按鈕 — 開啟統一對話框（手動輸入頂點 / 圓心）
+        fence_new_btn = IconButton('polygon', '＋ 新增 Fence 區域（手動）...', tone='warn')
+        fence_new_btn.setToolTip("開啟統一對話框，手動輸入頂點 / 圓心設定 NFZ / 威脅 / 圍籬")
+        fence_new_btn.clicked.connect(self.fence_zone_create_requested.emit)
+        fence_layout.addWidget(fence_new_btn)
+
+        # 直接從 3D 地圖繪製：完成後自動開對話框、頂點預填好，使用者只需選分類 / 海拔
+        fence_draw_row = QHBoxLayout()
+        fence_draw_poly_btn = IconButton(
+            'polygon', '⊕ 地圖繪製多邊形', tone='warn',
+        )
+        fence_draw_poly_btn.setToolTip(
+            "進入 3D 地圖多邊形繪製模式：\n"
+            "  • 左鍵點擊新增頂點（至少 3 點）\n"
+            "  • 雙擊或在地面右鍵完成繪製\n"
+            "完成後自動彈出對話框、頂點已預填，只需選分類 + 海拔 + 命名"
+        )
+        fence_draw_poly_btn.clicked.connect(
+            self.fence_zone_draw_polygon_requested.emit
+        )
+        fence_draw_row.addWidget(fence_draw_poly_btn)
+
+        fence_draw_circle_btn = IconButton(
+            'circle', '⊕ 地圖拖曳圓形', tone='warn',
+        )
+        fence_draw_circle_btn.setToolTip(
+            "進入 3D 地圖圓形拖曳模式：\n"
+            "  • 按住左鍵從圓心往外拖曳即時定義半徑\n"
+            "  • 放開滑鼠完成\n"
+            "完成後自動彈出對話框、圓心半徑已預填"
+        )
+        fence_draw_circle_btn.clicked.connect(
+            self.fence_zone_draw_circle_requested.emit
+        )
+        fence_draw_row.addWidget(fence_draw_circle_btn)
+        fence_layout.addLayout(fence_draw_row)
+
+        # 操作列：上傳 FC + 清除
+        fence_op_row = QHBoxLayout()
+        fence_upload_btn = IconButton('upload', '上傳至飛控', tone='success')
+        fence_upload_btn.setToolTip(
+            "把所有 Fence 區域以 ArduPilot 4.2+ Polygon Fence 協定上傳到\n"
+            "各 SITL 連線 / 真機 EEPROM。上傳完 FENCE_ENABLE=1，飛機越界\n"
+            "會觸發 FENCE_ACTION (預設 RTL)。"
+        )
+        fence_upload_btn.clicked.connect(self.fence_zone_upload_requested.emit)
+        fence_op_row.addWidget(fence_upload_btn)
+
+        fence_clear_btn = IconButton('clear', '全部清除', tone='danger')
+        fence_clear_btn.setToolTip("清除所有 fence 區域（視覺與 registry）")
+        fence_clear_btn.clicked.connect(self.fence_zone_clear_all_requested.emit)
+        fence_op_row.addWidget(fence_clear_btn)
+        fence_layout.addLayout(fence_op_row)
+
+        outer.addWidget(fence_group)
 
         # ── 1. 轉彎半徑合規性檢測 ────────────────────────────
         check_group = QGroupBox("轉彎半徑合規性檢測")
         check_layout = QVBoxLayout(check_group)
         check_layout.setSpacing(4)
 
-        # 狀態燈 + 摘要（一行）
+        # 狀態燈 + 摘要（一行）— 顏色由 _update_turn_radius_check 動態設定，
+        # 因此保留 inline setStyleSheet 但只在初始化時設預設灰。
         status_row = QHBoxLayout()
         self.fw_status_dot = QLabel("●")
-        self.fw_status_dot.setStyleSheet("color: #888; font-size: 20px;")
+        self.fw_status_dot.setStyleSheet(f"color: {T.FG_MUTED}; font-size: 20px;")
         self.fw_status_dot.setFixedWidth(24)
         self.fw_status_summary = QLabel("請先設定轉彎半徑與速度")
         self.fw_status_summary.setStyleSheet("font-weight: bold; font-size: 11px;")
@@ -1188,9 +1377,9 @@ class ParameterPanel(QWidget):
         status_row.addWidget(self.fw_status_summary, 1)
         check_layout.addLayout(status_row)
 
-        # 詳細說明
+        # 詳細說明（caption 灰字；色彩會於檢測後由 _update_turn_radius_check 動態覆寫）
         self.fw_status_detail = QLabel("")
-        self.fw_status_detail.setStyleSheet("color: #888; font-size: 10px;")
+        self.fw_status_detail.setStyleSheet(f"color: {T.FG_MUTED}; font-size: 10px;")
         self.fw_status_detail.setWordWrap(True)
         check_layout.addWidget(self.fw_status_detail)
 
@@ -1219,19 +1408,18 @@ class ParameterPanel(QWidget):
         )
         self.fw_max_bank_spin.valueChanged.connect(self._on_bank_angle_changed)
 
-        # 即時顯示對應的最小轉彎半徑
+        # 即時顯示對應的最小轉彎半徑（NEUTRAL 青色強調，token 取代硬編碼）
         self.fw_min_radius_label = QLabel("→ 最小半徑: ─ m")
         self.fw_min_radius_label.setStyleSheet(
-            "color: #2196F3; font-size: 10px; font-weight: bold;"
+            f"color: {T.NEUTRAL}; font-size: 10px; font-weight: bold;"
         )
         bank_row.addWidget(self.fw_max_bank_spin)
         bank_row.addWidget(self.fw_min_radius_label, 1)
         bank_form.addRow("最大傾斜角\n(LIM_ROLL_CD):", bank_row)
 
         # 套用：由傾斜角→最小半徑→填入轉彎半徑欄位
-        apply_bank_btn = QPushButton("套用最小半徑至轉彎半徑設定")
-        apply_bank_btn.setStyleSheet(
-            "background-color: #37474F; color: white; font-size: 10px; padding: 3px;"
+        apply_bank_btn = IconButton(
+            'tool', '套用最小半徑至轉彎半徑設定', tone='neutral', compact=True
         )
         apply_bank_btn.setToolTip(
             "依目前「最大傾斜角」和「速度」計算最小轉彎半徑，\n"
@@ -1243,10 +1431,7 @@ class ParameterPanel(QWidget):
         check_layout.addLayout(bank_form)
 
         # 手動觸發檢測按鈕
-        check_btn = QPushButton("立即檢測轉彎半徑")
-        check_btn.setStyleSheet(
-            "background-color: #1565C0; color: white; font-weight: bold;"
-        )
+        check_btn = IconButton('read', '立即檢測轉彎半徑', tone='primary')
         check_btn.clicked.connect(self._update_turn_radius_check)
         check_layout.addWidget(check_btn)
 
@@ -1271,7 +1456,9 @@ class ParameterPanel(QWidget):
             lambda v: self.update_parameter('fw_takeoff_bearing', v)
         )
         self.fw_takeoff_bearing_label = QLabel("")
-        self.fw_takeoff_bearing_label.setStyleSheet("color: #2196F3; font-size: 10px; min-width: 30px;")
+        self.fw_takeoff_bearing_label.setStyleSheet(
+            f"color: {T.NEUTRAL}; font-size: 10px; min-width: 30px;"
+        )
         self.fw_takeoff_bearing_spin.valueChanged.connect(
             lambda v: self.fw_takeoff_bearing_label.setText(self._bearing_to_compass(v))
         )
@@ -1318,7 +1505,9 @@ class ParameterPanel(QWidget):
             lambda v: self.update_parameter('fw_landing_bearing', v)
         )
         self.fw_landing_bearing_label = QLabel("")
-        self.fw_landing_bearing_label.setStyleSheet("color: #2196F3; font-size: 10px; min-width: 30px;")
+        self.fw_landing_bearing_label.setStyleSheet(
+            f"color: {T.NEUTRAL}; font-size: 10px; min-width: 30px;"
+        )
         self.fw_landing_bearing_spin.valueChanged.connect(
             lambda v: self.fw_landing_bearing_label.setText(self._bearing_to_compass(v))
         )
@@ -1401,30 +1590,22 @@ class ParameterPanel(QWidget):
         land_layout.addRow("降落滑行距:", self.fw_landing_rollout_spin)
 
         # ── AutoLand 開關 ──────────────────────────────────────
-        # 分隔線
+        # 分隔線（全域 QSS 已為 QFrame HLine 套用 BORDER 色，這裡保留淡色覆寫）
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setStyleSheet("color: #CFD8DC;")
+        sep.setStyleSheet(f"color: {T.BORDER_SUBTLE};")
         land_layout.addRow(sep)
 
         self.fw_autoland_check = QCheckBox("啟用 AutoLand")
         self.fw_autoland_check.setChecked(self.parameters['fw_autoland'])
-        self.fw_autoland_check.setStyleSheet("""
-            QCheckBox {
-                font-weight: bold;
-                color: #E65100;
-                font-size: 12px;
-                padding: 4px 0px;
-            }
-            QCheckBox::indicator {
-                width: 18px; height: 18px;
-            }
-            QCheckBox::indicator:checked {
-                background-color: #E65100;
-                border: 2px solid #BF360C;
-                border-radius: 3px;
-            }
-        """)
+        # AutoLand 為高風險動作，保留 ORANGE 強調 — 屬「特殊狀態指示」。
+        self.fw_autoland_check.setStyleSheet(
+            f"QCheckBox {{ font-weight: bold; color: {T.ORANGE};"
+            "  font-size: 12px; padding: 4px 0px; }}"
+            "QCheckBox::indicator { width: 18px; height: 18px; }"
+            f"QCheckBox::indicator:checked {{ background-color: {T.ORANGE};"
+            "  border: 2px solid #BF360C; }}"
+        )
         self.fw_autoland_check.setToolTip(
             "【開啟】匯出時跳過五邊電路，在最後任務點後直接插入\n"
             "  DO_LAND_START (189) + NAV_LAND (21)\n"
@@ -1438,14 +1619,14 @@ class ParameterPanel(QWidget):
         )
         land_layout.addRow("降落模式:", self.fw_autoland_check)
 
-        # AutoLand 說明標籤（動態顯示/隱藏）
+        # AutoLand 說明標籤（橘色半透明卡片，屬特殊「警示卡片」樣式 — 保留 inline）
         self._autoland_hint = QLabel(
             "⚡ AutoLand 已啟用：匯出時跳過五邊電路\n"
             "   五邊設定僅供地圖預覽參考"
         )
         self._autoland_hint.setStyleSheet(
-            "background-color: rgba(230,81,0,0.10);"
-            "color: #E65100; padding: 6px 8px; border-radius: 4px;"
+            "background-color: rgba(216, 67, 21, 0.10);"
+            f"color: {T.ORANGE}; padding: 6px 8px;"
             "font-size: 10px; border: 1px solid #FFCCBC;"
         )
         self._autoland_hint.setWordWrap(True)
@@ -1454,15 +1635,15 @@ class ParameterPanel(QWidget):
 
         outer.addWidget(land_group)
 
-        # ── 4. 固定翼掃描模式說明 ─────────────────────────────
+        # ── 4. 固定翼掃描模式說明（warning 半透明卡片）─────────────
         hint = QLabel(
             "固定翼建議使用「螺旋掃描」或「同心圓掃描」。\n"
             "路徑已自動考慮最小轉彎半徑，若轉彎半徑不足\n"
             "將顯示警告並調整掃描間距。"
         )
         hint.setStyleSheet(
-            "background-color: rgba(255,152,0,0.1);"
-            "color: #FF9800; padding: 8px; border-radius: 4px;"
+            "background-color: rgba(255, 183, 3, 0.10);"
+            f"color: {T.WARNING}; padding: 8px;"
             "font-size: 10px;"
         )
         hint.setWordWrap(True)
@@ -1523,6 +1704,7 @@ class ParameterPanel(QWidget):
         status_icons = {'ok': '●', 'warning': '▲', 'critical': '✖'}
         icon = status_icons.get(result['status'], '●')
 
+        # 動態狀態著色 — 由 TurnRadiusChecker 回傳之 color 直接決定（保留 inline）
         self.fw_status_dot.setText(icon)
         self.fw_status_dot.setStyleSheet(f"color: {color}; font-size: 18px; font-weight: bold;")
 
@@ -1532,7 +1714,7 @@ class ParameterPanel(QWidget):
         self.fw_status_summary.setText(summary)
         self.fw_status_summary.setStyleSheet(f"color: {color}; font-weight: bold; font-size: 11px;")
 
-        # 詳細說明
+        # 詳細說明（動態色 — 保留 inline）
         detail = (
             f"理論所需傾斜角: {result['required_bank']:.1f}°  "
             f"(機體上限: {result['max_bank']:.0f}°)\n"
@@ -1669,7 +1851,8 @@ class ParameterPanel(QWidget):
         safety_layout = QHBoxLayout()
         safety_layout.addWidget(QLabel("安全距離:"))
         safety_label = QLabel(f"{settings.safety.default_safety_distance_m} m")
-        safety_label.setStyleSheet("color: #4CAF50; font-weight: bold;")
+        safety_label.setProperty('role', 'friendly')
+        safety_label.style().polish(safety_label)
         safety_layout.addWidget(safety_label)
         safety_layout.addStretch()
         layout.addLayout(safety_layout)
@@ -1783,20 +1966,18 @@ class ParameterPanel(QWidget):
         """建立 DCCPP 最佳化規劃設定群組（多機覆蓋最佳化 + 高度平滑）"""
         group = QGroupBox("=== DCCPP 最佳化規劃 ===")
         group.setObjectName("dccppGroup")
-        group.setStyleSheet(
-            "QGroupBox#dccppGroup { font-weight: bold; color: #00695C; }"
-        )
+        # 全域 QSS 已套用 QGroupBox 基底樣式（粗體、字距、邊框）。
         layout = QVBoxLayout(group)
         layout.setSpacing(6)
 
-        # 說明標籤
+        # 說明標籤（friendly/info 半透明卡片 — 特殊樣式保留 inline）
         hint = QLabel(
             "使用論文 MDTSP + IDP 最佳化模型進行\n"
             "多機協同覆蓋路徑規劃，含 GDA 高度平滑。"
         )
         hint.setStyleSheet(
-            "background-color: rgba(0,105,92,0.08);"
-            "color: #00695C; padding: 6px; border-radius: 4px; font-size: 10px;"
+            "background-color: rgba(0, 230, 118, 0.08);"
+            f"color: {T.FRIENDLY_DEEP}; padding: 6px; font-size: 10px;"
         )
         hint.setWordWrap(True)
         layout.addWidget(hint)
@@ -1907,35 +2088,28 @@ class ParameterPanel(QWidget):
         layout.addWidget(self.dccpp_auto_landing_check)
 
         # ── 跑道 / 起降設定（固定翼專用）──────────────────
+        # 全域 QSS 已處理 QGroupBox 基底樣式。
         self.dccpp_runway_group = QGroupBox("跑道 / 起降設定")
-        self.dccpp_runway_group.setStyleSheet(
-            "QGroupBox { font-weight: bold; color: #FF6D00; }"
-        )
         rwy_layout = QVBoxLayout(self.dccpp_runway_group)
         rwy_layout.setSpacing(4)
 
-        # 起飛點顯示
+        # 起飛點顯示（caption 灰字 — 設定後由 set_home_point_display 切到 friendly）
         self.dccpp_home_label = QLabel("起飛點：尚未設定（預設使用掃描區中心）")
-        self.dccpp_home_label.setStyleSheet(
-            "color: #888; font-size: 11px; font-style: italic;"
-        )
+        self.dccpp_home_label.setProperty('role', 'caption')
+        self.dccpp_home_label.style().polish(self.dccpp_home_label)
         self.dccpp_home_label.setWordWrap(True)
         rwy_layout.addWidget(self.dccpp_home_label)
 
         home_btn_row = QHBoxLayout()
-        dccpp_pick_home_btn = QPushButton("📍 從地圖點選起飛點")
-        dccpp_pick_home_btn.setStyleSheet(
-            "background-color: #455A64; color: white; padding: 5px; border-radius: 3px;"
+        dccpp_pick_home_btn = IconButton(
+            'pin', '從地圖點選起飛點', tone='neutral', compact=True
         )
         dccpp_pick_home_btn.clicked.connect(self.pick_home_point_requested.emit)
         home_btn_row.addWidget(dccpp_pick_home_btn)
 
-        dccpp_clear_home_btn = QPushButton("✖ 清除")
-        dccpp_clear_home_btn.setStyleSheet(
-            "background-color: #78909C; color: white; padding: 5px; border-radius: 3px;"
-        )
+        dccpp_clear_home_btn = IconButton('clear', '清除', tone='ghost', compact=True)
         dccpp_clear_home_btn.clicked.connect(self.clear_home_point_requested.emit)
-        dccpp_clear_home_btn.setFixedWidth(60)
+        dccpp_clear_home_btn.setFixedWidth(70)
         home_btn_row.addWidget(dccpp_clear_home_btn)
         rwy_layout.addLayout(home_btn_row)
 
@@ -1954,7 +2128,9 @@ class ParameterPanel(QWidget):
             "桃園機場 05L/23R 跑道方向約 050°/230°"
         )
         self.dccpp_takeoff_compass_label = QLabel("北")
-        self.dccpp_takeoff_compass_label.setStyleSheet("color: #2196F3; font-size: 10px; min-width: 30px;")
+        self.dccpp_takeoff_compass_label.setStyleSheet(
+            f"color: {T.NEUTRAL}; font-size: 10px; min-width: 30px;"
+        )
         self.dccpp_takeoff_bearing_spin.valueChanged.connect(
             lambda v: self.dccpp_takeoff_compass_label.setText(self._bearing_to_compass(v))
         )
@@ -1986,7 +2162,9 @@ class ParameterPanel(QWidget):
             "通常與起飛方向相反或逆風方向"
         )
         self.dccpp_landing_compass_label = QLabel("南")
-        self.dccpp_landing_compass_label.setStyleSheet("color: #2196F3; font-size: 10px; min-width: 30px;")
+        self.dccpp_landing_compass_label.setStyleSheet(
+            f"color: {T.NEUTRAL}; font-size: 10px; min-width: 30px;"
+        )
         self.dccpp_landing_bearing_spin.valueChanged.connect(
             lambda v: self.dccpp_landing_compass_label.setText(self._bearing_to_compass(v))
         )
@@ -2048,9 +2226,45 @@ class ParameterPanel(QWidget):
         self.dccpp_mounting_angle_spin.setToolTip(
             "感測器掛載角 α_m（度）\n"
             "0° = 垂直朝下（矩形 FOV）\n"
-            "> 0° = 前傾安裝（梯形 FOV，論文 Eq. 2-3）"
+            "> 0° = 前傾安裝（梯形 FOV，論文 Eq. 2-3）\n"
+            "▶ 改變此值會即時投影 3D 光錐"
         )
         adv_form.addRow("感測器掛載角:", self.dccpp_mounting_angle_spin)
+
+        # 水平視場角 HFOV — 影響光錐橫向角度（左右展開）
+        self.dccpp_hfov_spin = QDoubleSpinBox()
+        self.dccpp_hfov_spin.setRange(1.0, 170.0)
+        self.dccpp_hfov_spin.setDecimals(1)
+        self.dccpp_hfov_spin.setValue(60.0)
+        self.dccpp_hfov_spin.setSingleStep(1.0)
+        self.dccpp_hfov_spin.setSuffix(" °")
+        self.dccpp_hfov_spin.setToolTip(
+            "水平視場角 HFOV（橫向全角，單位：度）\n"
+            "由相機焦距與感光元件寬度推得：HFOV = 2·atan(W / 2f)\n"
+            "▶ 控制 3D 光錐底面的橫向寬度（即時投影）"
+        )
+        adv_form.addRow("水平 FOV (HFOV):", self.dccpp_hfov_spin)
+
+        # 垂直視場角 VFOV — 影響光錐縱向角度（前後展開、α_m>0 時形成梯形）
+        self.dccpp_vfov_spin = QDoubleSpinBox()
+        self.dccpp_vfov_spin.setRange(1.0, 170.0)
+        self.dccpp_vfov_spin.setDecimals(1)
+        self.dccpp_vfov_spin.setValue(45.0)
+        self.dccpp_vfov_spin.setSingleStep(1.0)
+        self.dccpp_vfov_spin.setSuffix(" °")
+        self.dccpp_vfov_spin.setToolTip(
+            "垂直視場角 VFOV（縱向全角，單位：度）\n"
+            "由相機焦距與感光元件高度推得：VFOV = 2·atan(H / 2f)\n"
+            "▶ 控制光錐底面前後深度；掛載角 > 0 時形成梯形遠近差"
+        )
+        adv_form.addRow("垂直 FOV (VFOV):", self.dccpp_vfov_spin)
+
+        # 三個 FOV 視覺參數 → 即時投影 signal
+        self.dccpp_mounting_angle_spin.valueChanged.connect(
+            self._on_fov_visual_changed
+        )
+        self.dccpp_hfov_spin.valueChanged.connect(self._on_fov_visual_changed)
+        self.dccpp_vfov_spin.valueChanged.connect(self._on_fov_visual_changed)
 
         # 協調模式
         self.dccpp_coord_combo = QComboBox()
@@ -2065,10 +2279,11 @@ class ParameterPanel(QWidget):
         # DEM 地形檔案
         dem_row = QHBoxLayout()
         self.dccpp_dem_path_label = QLabel("（無）")
-        self.dccpp_dem_path_label.setStyleSheet("color: #888; font-size: 11px;")
+        self.dccpp_dem_path_label.setProperty('role', 'caption')
+        self.dccpp_dem_path_label.style().polish(self.dccpp_dem_path_label)
         self._dccpp_dem_path = ""
-        dem_btn = QPushButton("載入 DEM")
-        dem_btn.setFixedWidth(80)
+        dem_btn = IconButton('import', '載入 DEM', tone='ghost', compact=True)
+        dem_btn.setMinimumWidth(100)
         dem_btn.setToolTip(
             "載入 DEM 地形檔案（GeoTIFF 或 .npy）\n"
             "用於 3D 高度規劃與地形迴避（論文 Eq. 4）"
@@ -2078,15 +2293,34 @@ class ParameterPanel(QWidget):
         dem_row.addWidget(dem_btn)
         adv_form.addRow("DEM 地形:", dem_row)
 
+        # ── Fence Zones（NFZ + 威脅）即時狀態 ──
+        # DCCPP 規劃會把所有 NFZ + THREAT 分類的 fence 區域作為禁區，
+        # 路徑出來後自動繞開。這裡只顯示計數 + 開啟對話框的捷徑。
+        fence_row = QHBoxLayout()
+        self.dccpp_fence_count_label = QLabel("（無 fence 區域 — DCCPP 將不會繞行）")
+        self.dccpp_fence_count_label.setProperty('role', 'caption')
+        self.dccpp_fence_count_label.style().polish(self.dccpp_fence_count_label)
+        self.dccpp_fence_count_label.setToolTip(
+            "FenceZoneRegistry 內所有 NFZ + THREAT 分類的區域\n"
+            "都會在 DCCPP 規劃完成後，被用來自動繞行修正航點"
+        )
+        dccpp_fence_btn = IconButton('polygon', '＋ 管理 fence 區域',
+                                     tone='warn', compact=True)
+        dccpp_fence_btn.setMinimumWidth(140)
+        dccpp_fence_btn.setToolTip(
+            "開啟統一 Fence 區域對話框（NFZ / 威脅 / 圍籬）\n"
+            "新增的區域會被 DCCPP 規劃納入繞行考量"
+        )
+        # 共用主面板「Fence Zones」群組的 signal — 避免再開新對話框入口
+        dccpp_fence_btn.clicked.connect(self.fence_zone_create_requested.emit)
+        fence_row.addWidget(self.dccpp_fence_count_label, 1)
+        fence_row.addWidget(dccpp_fence_btn)
+        adv_form.addRow("禁飛 / 威脅:", fence_row)
+
         layout.addLayout(adv_form)
 
-        # ── 避撞設定 ──────────────────────────────────────
+        # ── 避撞設定（全域 QSS 已套用 QGroupBox 樣式）──────────────
         collision_group = QGroupBox("避撞模擬")
-        collision_group.setStyleSheet(
-            "QGroupBox { font-weight: bold; border: 1px solid #555; "
-            "border-radius: 4px; margin-top: 8px; padding-top: 16px; }"
-            "QGroupBox::title { subcontrol-origin: margin; left: 8px; }"
-        )
         collision_layout = QFormLayout()
         collision_layout.setSpacing(4)
 
@@ -2130,37 +2364,29 @@ class ParameterPanel(QWidget):
         layout.addWidget(collision_group)
 
         # 刪除上一點按鈕
-        del_corner_btn = QPushButton("⌫ 刪除上一個邊界點")
-        del_corner_btn.setStyleSheet(
-            "background-color: #E53935; color: white; "
-            "padding: 6px; font-size: 11px; border-radius: 3px;"
-        )
+        del_corner_btn = IconButton('clear', '刪除上一個邊界點', tone='danger')
         del_corner_btn.setToolTip("刪除最後一個邊界點（等同 Delete 鍵）")
         del_corner_btn.clicked.connect(self.delete_last_corner_requested.emit)
         layout.addWidget(del_corner_btn)
 
-        gen_btn = QPushButton("DCCPP 最佳化規劃")
-        gen_btn.setStyleSheet(
-            "background-color: #00695C; color: white; "
-            "font-weight: bold; padding: 8px; font-size: 12px;"
-        )
+        gen_btn = IconButton('settings', 'DCCPP 最佳化規劃 (Enter)', tone='success')
         gen_btn.setToolTip(
             "執行完整 DCCPP 流程：\n"
             "① GreedyAllocator 分配 UAV → 各區域\n"
             "② IDPSolver 最佳化各區域作業路徑序列\n"
-            "③ AltitudePlanner + GDA 高度平滑"
+            "③ AltitudePlanner + GDA 高度平滑\n"
+            "\n"
+            "快捷鍵：在 DCCPP 分頁按 Enter / Return 即可觸發\n"
+            "（QSpinBox 內按 Enter 仍是確認欄位值，再按一次才觸發規劃）"
         )
         gen_btn.clicked.connect(self._on_dccpp_btn_clicked)
         layout.addWidget(gen_btn)
+        # 存成 instance attr — 給 QShortcut handler 與 dccpp 分頁切換用
+        self.dccpp_gen_btn = gen_btn
 
-        # ── 任務匯出模式 ──────────────────────────────────────
+        # ── 任務匯出模式（QGroupBox 採全域樣式）──────────────
         from PyQt6.QtWidgets import QFormLayout as _FL2
         export_group = QGroupBox("任務匯出")
-        export_group.setStyleSheet(
-            "QGroupBox{font-weight:bold;border:1px solid #455a64;"
-            "border-radius:4px;margin-top:6px;padding-top:14px;}"
-            "QGroupBox::title{color:#90caf9;}"
-        )
         export_form = _FL2()
         export_form.setContentsMargins(6, 4, 6, 4)
         export_form.setSpacing(4)
@@ -2196,12 +2422,8 @@ class ParameterPanel(QWidget):
         export_group.setLayout(export_form)
         layout.addWidget(export_group)
 
-        # 匯出按鈕
-        export_btn = QPushButton("匯出群飛任務")
-        export_btn.setStyleSheet(
-            "background-color: #4A148C; color: white; "
-            "font-weight: bold; padding: 8px; font-size: 12px;"
-        )
+        # 匯出按鈕（紫色 = 上傳/匯出層級）
+        export_btn = IconButton('upload', '匯出群飛任務', tone='purple')
         export_btn.setToolTip(
             "將 DCCPP 最佳化結果匯出為每架 UAV 獨立的 .waypoints 檔案\n"
             "格式：QGC WPL 110（Mission Planner 相容）"
@@ -2263,11 +2485,12 @@ class ParameterPanel(QWidget):
         )
         if path:
             self._dccpp_dem_path = path
-            # 顯示簡短檔名
+            # 顯示簡短檔名 — 載入成功切換到 friendly（綠）角色
             from pathlib import Path
             short = Path(path).name
             self.dccpp_dem_path_label.setText(short)
-            self.dccpp_dem_path_label.setStyleSheet("color: #00695C; font-size: 11px;")
+            self.dccpp_dem_path_label.setProperty('role', 'friendly')
+            self.dccpp_dem_path_label.style().polish(self.dccpp_dem_path_label)
             self.dccpp_dem_path_label.setToolTip(path)
             self.dem_loaded.emit(path)
 
@@ -2289,6 +2512,8 @@ class ParameterPanel(QWidget):
             'enable_altitude': self.dccpp_altitude_check.isChecked(),
             'auto_landing': self.dccpp_auto_landing_check.isChecked(),
             'mounting_angle_deg': self.dccpp_mounting_angle_spin.value(),
+            'hfov_deg': self.dccpp_hfov_spin.value(),
+            'vfov_deg': self.dccpp_vfov_spin.value(),
             'coordination_mode': self.dccpp_coord_combo.currentData(),
             'dem_path': self._dccpp_dem_path,
             # 跑道 / 起降參數
@@ -2315,13 +2540,8 @@ class ParameterPanel(QWidget):
     # ══════════════════════════════════════════════════════════════════
 
     def _create_elevation_slicer_panel(self):
-        """模組一：FSDM 高程切片分析面板"""
+        """模組一：FSDM 高程切片分析面板（全域 QSS 已套 QGroupBox 樣式）"""
         group = QGroupBox("FSDM 高程切片分析")
-        group.setStyleSheet(
-            "QGroupBox{font-weight:bold;color:#4CAF50;border:1px solid #388E3C;"
-            "border-radius:4px;margin-top:8px;padding-top:14px;}"
-            "QGroupBox::title{subcontrol-position:top left;padding:2px 8px;}"
-        )
         layout = QFormLayout(group)
 
         # 最低安全高度滑桿
@@ -2360,11 +2580,7 @@ class ParameterPanel(QWidget):
 
         # 啟用按鈕
         btn_row = QHBoxLayout()
-        apply_btn = QPushButton("啟用切片分析")
-        apply_btn.setStyleSheet(
-            "background-color:#2E7D32;color:white;font-weight:bold;"
-            "padding:6px;border-radius:3px;"
-        )
+        apply_btn = IconButton('confirm', '啟用切片分析', tone='success')
         apply_btn.setToolTip(
             "將地形依設定的高度區間分色渲染\n"
             "綠色 = 盲區走廊（安全飛行區間）\n"
@@ -2373,10 +2589,7 @@ class ParameterPanel(QWidget):
         apply_btn.clicked.connect(self._on_elev_slicer_apply)
         btn_row.addWidget(apply_btn)
 
-        clear_btn = QPushButton("清除切片")
-        clear_btn.setStyleSheet(
-            "background-color:#455A64;color:white;padding:6px;border-radius:3px;"
-        )
+        clear_btn = IconButton('clear', '清除切片', tone='ghost')
         clear_btn.clicked.connect(self.elevation_slicer_cleared.emit)
         btn_row.addWidget(clear_btn)
         layout.addRow(btn_row)
@@ -2393,13 +2606,8 @@ class ParameterPanel(QWidget):
         self.elevation_slicer_changed.emit(min_alt, max_alt)
 
     def _create_sar_heatmap_panel(self):
-        """模組二：FOV 光錐 + SAR 搜救機率熱力圖面板"""
+        """模組二：FOV 光錐 + SAR 搜救機率熱力圖面板（全域 QSS 樣式）"""
         group = QGroupBox("SAR 搜救機率熱力圖")
-        group.setStyleSheet(
-            "QGroupBox{font-weight:bold;color:#FF9800;border:1px solid #F57C00;"
-            "border-radius:4px;margin-top:8px;padding-top:14px;}"
-            "QGroupBox::title{subcontrol-position:top left;padding:2px 8px;}"
-        )
         layout = QFormLayout(group)
 
         # FOV 光錐開關
@@ -2456,11 +2664,7 @@ class ParameterPanel(QWidget):
         # 初始化 / 重置 / 清除按鈕列
         btn_row = QHBoxLayout()
 
-        init_btn = QPushButton("初始化熱力圖")
-        init_btn.setStyleSheet(
-            "background-color:#E65100;color:white;font-weight:bold;"
-            "padding:6px;border-radius:3px;"
-        )
+        init_btn = IconButton('launch', '初始化熱力圖', tone='orange')
         init_btn.setToolTip(
             "在目前邊界區域內建立搜救機率網格\n"
             "紅色 = 高殘餘機率（未搜索）\n"
@@ -2469,18 +2673,12 @@ class ParameterPanel(QWidget):
         init_btn.clicked.connect(self._on_sar_heatmap_init)
         btn_row.addWidget(init_btn)
 
-        reset_btn = QPushButton("重置")
-        reset_btn.setStyleSheet(
-            "background-color:#F57C00;color:white;padding:6px;border-radius:3px;"
-        )
+        reset_btn = IconButton('rtb', '重置', tone='warn')
         reset_btn.setToolTip("保留網格但重設所有 COS 為 0")
         reset_btn.clicked.connect(self.sar_heatmap_reset_requested.emit)
         btn_row.addWidget(reset_btn)
 
-        clear_btn = QPushButton("清除")
-        clear_btn.setStyleSheet(
-            "background-color:#455A64;color:white;padding:6px;border-radius:3px;"
-        )
+        clear_btn = IconButton('clear', '清除', tone='ghost')
         clear_btn.clicked.connect(self.sar_heatmap_clear_requested.emit)
         btn_row.addWidget(clear_btn)
 
@@ -2499,13 +2697,8 @@ class ParameterPanel(QWidget):
         self.sar_heatmap_init_requested.emit(params)
 
     def _create_radar_rcs_panel(self):
-        """模組三：雷達威脅穹頂 + RCS 敏感度面板"""
+        """模組三：雷達威脅穹頂 + RCS 敏感度面板（全域 QSS 樣式）"""
         group = QGroupBox("雷達威脅穹頂 / RCS 敏感度")
-        group.setStyleSheet(
-            "QGroupBox{font-weight:bold;color:#F44336;border:1px solid #D32F2F;"
-            "border-radius:4px;margin-top:8px;padding-top:14px;}"
-            "QGroupBox::title{subcontrol-position:top left;padding:2px 8px;}"
-        )
         layout = QFormLayout(group)
 
         # 雷達緯度
@@ -2556,11 +2749,7 @@ class ParameterPanel(QWidget):
         # 按鈕列
         btn_row = QHBoxLayout()
 
-        sim_btn = QPushButton("模擬雷達威脅掃描")
-        sim_btn.setStyleSheet(
-            "background-color:#C62828;color:white;font-weight:bold;"
-            "padding:6px;border-radius:3px;"
-        )
+        sim_btn = IconButton('radar', '模擬雷達威脅掃描', tone='danger')
         sim_btn.setToolTip(
             "在地圖上建立雷達威脅穹頂\n"
             "並啟動脈衝掃描動畫"
@@ -2568,10 +2757,7 @@ class ParameterPanel(QWidget):
         sim_btn.clicked.connect(self._on_radar_sim)
         btn_row.addWidget(sim_btn)
 
-        clear_btn = QPushButton("清除雷達")
-        clear_btn.setStyleSheet(
-            "background-color:#455A64;color:white;padding:6px;border-radius:3px;"
-        )
+        clear_btn = IconButton('clear', '清除雷達', tone='ghost')
         clear_btn.clicked.connect(self.radar_clear_requested.emit)
         btn_row.addWidget(clear_btn)
 
@@ -2593,6 +2779,52 @@ class ParameterPanel(QWidget):
         """取得目前 FOV 半徑設定值"""
         return self._fov_radius_spin.value()
 
+    def update_fence_zone_count(self, n: int, nfz_count: int = -1) -> None:
+        """由 MainWindow 在 FenceZoneRegistry.zones_changed 時呼叫，
+        更新「Fence Zones」與 DCCPP 進階區內的計數標籤。
+
+        Args:
+            n         : 全部 fence 區數（任何 category）
+            nfz_count : NFZ + THREAT 兩類（會被 DCCPP 視為禁區）的數量；
+                        傳 -1 時用 n 當預設值（向後相容舊呼叫端）
+        """
+        n = int(n)
+        if hasattr(self, 'fence_zone_count_label'):
+            self.fence_zone_count_label.setText(f"目前 Fence 區域：{n} 個")
+        if hasattr(self, 'dccpp_fence_count_label'):
+            nz = n if nfz_count < 0 else int(nfz_count)
+            if nz == 0:
+                self.dccpp_fence_count_label.setText(
+                    "（無 fence 區域 — DCCPP 將不會繞行）"
+                )
+            else:
+                self.dccpp_fence_count_label.setText(
+                    f"DCCPP 將繞行 {nz} 個禁區 (NFZ + 威脅)"
+                )
+
+    def get_fov_visual_params(self) -> tuple:
+        """取得 FOV 光錐視覺化參數 (mount_angle_deg, hfov_deg, vfov_deg)
+
+        Returns:
+            (掛載角°, 水平 FOV°, 垂直 FOV°) — 用於 Cesium 梯形角錐 frustum
+            投影。任何一個 > 0 即觸發 frustum 模式；皆為 0 退回 legacy 圓錐。
+        """
+        return (
+            self.dccpp_mounting_angle_spin.value(),
+            self.dccpp_hfov_spin.value(),
+            self.dccpp_vfov_spin.value(),
+        )
+
+    def _on_fov_visual_changed(self):
+        """掛載角 / HFOV / VFOV spinbox 變更 → 發 signal 給 main_window
+        立即更新 3D 光錐投影（不需等下一筆遙測）。
+        """
+        self.fov_visual_changed.emit(
+            self.dccpp_mounting_angle_spin.value(),
+            self.dccpp_hfov_spin.value(),
+            self.dccpp_vfov_spin.value(),
+        )
+
     def is_fov_cone_enabled(self) -> bool:
         """FOV 光錐是否啟用"""
         return self._fov_cone_check.isChecked()
@@ -2605,11 +2837,645 @@ class ParameterPanel(QWidget):
     # 蜂群打擊控制面板
     # ─────────────────────────────────────────────────────────────────
     def _create_strike_command_panel(self) -> QGroupBox:
-        """蜂群分佈式協同打擊與末端俯衝 (Swarm Distributed Strike & Terminal Dive)"""
+        """
+        UCAV 蜂群協同打擊（簡化版）— 只保留核心 4 步驟流程：
+            ① 規劃起飛點  → ② 起飛  → ③ 巡航  → ④ 打擊目標點
+
+        其他進階參數（DTOT/STOT 時間協同、動態偵打、VTOL、OWA-UAV、高度錯層、
+        俯衝角等）以隱藏 widget 形式保留實例供後端 emit 邏輯使用，預設值合理化。
+        """
+        try:
+            from ui.resources.tactical_theme import TacticalColors as TC, TacticalFonts as TF
+        except Exception:
+            class TC:
+                HOSTILE='#FF003C'; WARNING='#FFB703'; FRIENDLY='#00E676'
+                NEUTRAL='#00B4D8'; FG_EMPHASIS='#FFB703'; FG_PRIMARY='#E0E1DD'
+                FG_SECONDARY='#A8B2BD'; BG_PRIMARY='#0A0F14'; BG_SECONDARY='#0D1B2A'
+                BG_SUNKEN='#060A0F'; BG_ELEVATED='#132236'; BORDER_DEFAULT='#2A3D54'
+                BORDER_SUBTLE='#1F2D3D'; FG_MUTED='#6B7A8C'
+            class TF:
+                @staticmethod
+                def css_mono(): return '"JetBrains Mono","Consolas",monospace'
+                @staticmethod
+                def css_condensed(): return '"Rajdhani","Roboto Condensed",sans-serif'
+                @staticmethod
+                def css_sans(): return '"Segoe UI",sans-serif'
+
         group = QGroupBox("UCAV 蜂群協同打擊")
         group.setStyleSheet(
+            f"QGroupBox{{font-weight:bold;color:{TC.HOSTILE};"
+            f"border:1px solid {TC.BORDER_DEFAULT};border-radius:0;"
+            f"margin-top:8px;padding-top:14px;"
+            f"font-family:{TF.css_condensed()};letter-spacing:1.5px;}}"
+            f"QGroupBox::title{{subcontrol-position:top left;padding:2px 8px;}}"
+        )
+        layout = QVBoxLayout(group)
+        layout.setSpacing(10)
+        layout.setContentsMargins(8, 14, 8, 8)
+
+        # 1) 預先建立所有「後端依賴 — UI 不顯示」的 widget（合理預設值）
+        self._init_strike_hidden_widgets(TC, TF)
+
+        # 2) 用語意色 helper 建立 4 個編號區段
+        def _section(title: str, accent: str) -> QGroupBox:
+            sg = QGroupBox(title)
+            sg.setStyleSheet(
+                f"QGroupBox{{color:{accent};border:1px solid {TC.BORDER_DEFAULT};"
+                f"border-radius:0;margin-top:8px;padding-top:14px;"
+                f"font-weight:bold;font-family:{TF.css_condensed()};letter-spacing:1px;}}"
+                f"QGroupBox::title{{subcontrol-position:top left;padding:2px 8px;}}"
+            )
+            return sg
+
+        def _spin(initial: float, lo: float, hi: float, step: float, suffix: str,
+                   decimals: int = 1, accent: str = None) -> QDoubleSpinBox:
+            sb = QDoubleSpinBox()
+            sb.setRange(lo, hi); sb.setValue(initial)
+            sb.setSingleStep(step); sb.setSuffix(' ' + suffix); sb.setDecimals(decimals)
+            sb.setStyleSheet(
+                f"QDoubleSpinBox{{background:{TC.BG_SUNKEN};color:{accent or TC.FG_PRIMARY};"
+                f"border:1px solid {TC.BORDER_DEFAULT};border-radius:0;"
+                f"padding:3px 6px;font-family:{TF.css_mono()};font-weight:bold;}}"
+            )
+            return sb
+
+        def _btn(text: str, fg: str, bg: str = None, height: int = 28) -> QPushButton:
+            b = QPushButton(text)
+            b.setMinimumHeight(height)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setStyleSheet(
+                f"QPushButton{{background:{bg or TC.BG_SECONDARY};color:{fg};"
+                f"border:1px solid {TC.BORDER_DEFAULT};border-radius:0;"
+                f"padding:0 12px;font-weight:bold;letter-spacing:1.2px;"
+                f"font-family:{TF.css_condensed()};}}"
+                f"QPushButton:hover{{background:{TC.BG_ELEVATED};color:{TC.FG_PRIMARY};}}"
+                f"QPushButton:checked{{background:{TC.WARNING};color:{TC.BG_PRIMARY};}}"
+                f"QPushButton:disabled{{background:{TC.BG_SUNKEN};color:{TC.FG_MUTED};}}"
+            )
+            return b
+
+        # ════════════════════════════════════════════════════════════
+        # ⓿  ROE 授權 + 全局目標鎖定（任務最頂層 — Fleet Command）
+        # ════════════════════════════════════════════════════════════
+        s0 = _section("⓿  ROE 授權 + 目標鎖定", TC.HOSTILE)
+        s0l = QVBoxLayout(s0)
+        s0l.setSpacing(6); s0l.setContentsMargins(8, 14, 8, 8)
+
+        # ROE 雙模式開關（飽和打擊紅 / 編隊偵察綠）
+        roe_row = QHBoxLayout()
+        roe_row.setSpacing(0)
+        # 移除 emoji；雙模式自訂着色由下方 setStyleSheet 提供
+        self._strike_roe_recon = QPushButton("FORMATION RECON")
+        self._strike_roe_strike = QPushButton("SATURATION STRIKE")
+        for btn in (self._strike_roe_recon, self._strike_roe_strike):
+            btn.setCheckable(True)
+            btn.setMinimumHeight(32)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        # 預設 = RECON（綠）
+        self._strike_roe_recon.setChecked(True)
+        self._strike_roe_recon.setStyleSheet(
+            f"QPushButton{{background:{TC.FRIENDLY};color:{TC.BG_PRIMARY};"
+            f"border:1px solid {TC.BORDER_DEFAULT};border-radius:0;"
+            f"padding:0 8px;font-size:11px;font-weight:bold;letter-spacing:1.5px;"
+            f"font-family:{TF.css_condensed()};}}"
+            f"QPushButton:!checked{{background:{TC.BG_SECONDARY};color:{TC.FG_MUTED};}}"
+            f"QPushButton:hover{{background:{TC.FRIENDLY};color:{TC.BG_PRIMARY};}}"
+        )
+        self._strike_roe_strike.setStyleSheet(
+            f"QPushButton{{background:{TC.HOSTILE};color:{TC.FG_PRIMARY};"
+            f"border:1px solid {TC.BORDER_DEFAULT};border-radius:0;"
+            f"padding:0 8px;font-size:11px;font-weight:bold;letter-spacing:1.5px;"
+            f"font-family:{TF.css_condensed()};}}"
+            f"QPushButton:!checked{{background:{TC.BG_SECONDARY};color:{TC.FG_MUTED};}}"
+            f"QPushButton:hover{{background:{TC.HOSTILE};color:{TC.FG_PRIMARY};}}"
+        )
+        # 兩顆互斥：點任一顆 → 另一顆取消
+        self._strike_roe_recon.clicked.connect(
+            lambda: self._strike_roe_strike.setChecked(False)
+        )
+        self._strike_roe_strike.clicked.connect(
+            lambda: self._strike_roe_recon.setChecked(False)
+        )
+        roe_row.addWidget(self._strike_roe_recon)
+        roe_row.addWidget(self._strike_roe_strike)
+        s0l.addLayout(roe_row)
+
+        # 目標座標輸入（取代多目標標記）
+        tgt_row = QHBoxLayout()
+        tgt_row.setSpacing(4)
+        from PyQt6.QtWidgets import QDoubleSpinBox as _DSB
+        self._strike_tgt_lat = _DSB()
+        self._strike_tgt_lat.setRange(-90.0, 90.0)
+        self._strike_tgt_lat.setDecimals(6)
+        self._strike_tgt_lat.setSingleStep(0.0001)
+        self._strike_tgt_lat.setValue(0.0)
+        self._strike_tgt_lat.setSuffix(" °N")
+        self._strike_tgt_lon = _DSB()
+        self._strike_tgt_lon.setRange(-180.0, 180.0)
+        self._strike_tgt_lon.setDecimals(6)
+        self._strike_tgt_lon.setSingleStep(0.0001)
+        self._strike_tgt_lon.setValue(0.0)
+        self._strike_tgt_lon.setSuffix(" °E")
+        for sb in (self._strike_tgt_lat, self._strike_tgt_lon):
+            sb.setStyleSheet(
+                f"QDoubleSpinBox{{background:{TC.BG_SUNKEN};color:{TC.HOSTILE};"
+                f"border:1px solid {TC.BORDER_DEFAULT};border-radius:0;"
+                f"padding:3px 6px;font-family:{TF.css_mono()};font-weight:bold;}}"
+            )
+        # 編輯時即時同步到 _strike_targets
+        self._strike_tgt_lat.valueChanged.connect(self._on_strike_target_coord_changed)
+        self._strike_tgt_lon.valueChanged.connect(self._on_strike_target_coord_changed)
+        tgt_row.addWidget(QLabel("Lat:"))
+        tgt_row.addWidget(self._strike_tgt_lat, 1)
+        tgt_row.addWidget(QLabel("Lon:"))
+        tgt_row.addWidget(self._strike_tgt_lon, 1)
+        s0l.addLayout(tgt_row)
+
+        # 在地圖上點選按鈕（沿用戰術風格 _btn 自訂樣式 — 已移除 emoji，
+        # IconButton 在戰術配色語境下無法重現此 hover/checked 狀態，故保留 _btn）
+        pick_btn = _btn(
+            "在 3D 地圖上點選目標 (Pick on Map)",
+            TC.FG_PRIMARY, TC.HOSTILE, height=30
+        )
+        pick_btn.setCheckable(True)
+        pick_btn.clicked.connect(
+            lambda checked: self.strike_mark_targets_requested.emit()
+        )
+        # 把 _strike_mark_btn 指到這顆，讓既有同步邏輯生效
+        self._strike_mark_btn = pick_btn
+        s0l.addWidget(pick_btn)
+
+        layout.addWidget(s0)
+
+        # ════════════════════════════════════════════════════════════
+        # ①  規劃起飛點 — 載具類型 + 標記發射基地
+        # ════════════════════════════════════════════════════════════
+        s1 = _section("①  規劃起飛點 (Launch Position)", TC.NEUTRAL)
+        s1l = QVBoxLayout(s1)
+        s1l.setSpacing(4); s1l.setContentsMargins(8, 14, 8, 8)
+
+        # 載具類型 + UCAV 數量
+        s1f = QFormLayout()
+        s1f.setSpacing(4)
+
+        # UCAV 數量（多打一：N 機同時對單目標）
+        self._strike_n_uavs = QSpinBox()
+        self._strike_n_uavs.setRange(2, 12)
+        self._strike_n_uavs.setValue(4)
+        self._strike_n_uavs.setSuffix(" 架")
+        self._strike_n_uavs.setStyleSheet(
+            f"QSpinBox{{background:{TC.BG_SUNKEN};color:{TC.HOSTILE};"
+            f"border:1px solid {TC.BORDER_DEFAULT};border-radius:0;padding:3px 6px;"
+            f"font-family:{TF.css_mono()};font-weight:bold;}}"
+        )
+        self._strike_n_uavs.setToolTip(
+            "參戰 UCAV 數量（2–12 架）— 全部對同一目標執行 STOT 飽和打擊。\n"
+            "編隊自動依 N 調整：\n"
+            "  N=2 ─ 雙機並排\n"
+            "  N=3 ─ V 字楔形\n"
+            "  N=4 ─ 標準菱形\n"
+            "  N≥5 ─ 擴展菱形 + 後方梯隊\n"
+            "攻擊方位自動均分 360°/N。"
+        )
+        # N 變更 → 即時刷新「已標記目標」文字
+        self._strike_n_uavs.valueChanged.connect(
+            lambda _v: self.update_strike_target_count(
+                getattr(self, '_strike_target_n', 0)
+            )
+        )
+        s1f.addRow("UCAV 數量 (N):", self._strike_n_uavs)
+
+        self._strike_vehicle_combo = QComboBox()
+        self._strike_vehicle_combo.addItem("固定翼 (Fixed-Wing)", "fixed_wing")
+        self._strike_vehicle_combo.addItem("VTOL (4+1 QuadPlane)", "vtol")
+        self._strike_vehicle_combo.setStyleSheet(
+            f"QComboBox{{background:{TC.BG_SUNKEN};color:{TC.FG_PRIMARY};"
+            f"border:1px solid {TC.BORDER_DEFAULT};border-radius:0;padding:3px 6px;"
+            f"font-family:{TF.css_sans()};}}"
+        )
+        self._strike_vehicle_combo.setToolTip(
+            "固定翼：常規 NAV_TAKEOFF + Dubins 巡航\n"
+            "VTOL：NAV_VTOL_TAKEOFF (垂直) + DO_VTOL_TRANSITION 切換"
+        )
+        self._strike_vehicle_combo.currentIndexChanged.connect(
+            self._on_strike_vehicle_combo_changed
+        )
+        s1f.addRow("載具類型:", self._strike_vehicle_combo)
+        s1l.addLayout(s1f)
+
+        self._strike_mark_base_btn = _btn(
+            "從 3D 地圖標記發射基地", TC.FG_PRIMARY, TC.NEUTRAL, height=32
+        )
+        self._strike_mark_base_btn.setCheckable(True)
+        self._strike_mark_base_btn.setToolTip(
+            "啟用後左鍵點擊 3D 地圖任一處設定共用起飛點；\n"
+            "所有 UCAV 將從該點同時起飛。"
+        )
+        self._strike_mark_base_btn.clicked.connect(
+            lambda: self.strike_mark_base_requested.emit()
+        )
+        s1l.addWidget(self._strike_mark_base_btn)
+
+        self._strike_base_label = QLabel("尚未標記 — 點上方按鈕後在 3D 地圖左鍵選擇位置")
+        self._strike_base_label.setStyleSheet(
+            f"color:{TC.HOSTILE};font-size:10px;padding:2px 4px;"
+            f"font-family:{TF.css_mono()};"
+        )
+        self._strike_base_label.setWordWrap(True)
+        s1l.addWidget(self._strike_base_label)
+        layout.addWidget(s1)
+
+        # ════════════════════════════════════════════════════════════
+        # ②  起飛 — 直線爬升（非螺旋）
+        # ════════════════════════════════════════════════════════════
+        s2 = _section("②  起飛 (Takeoff)", TC.FRIENDLY)
+        s2f = QFormLayout(s2)
+        s2f.setSpacing(6); s2f.setContentsMargins(8, 14, 8, 8)
+
+        self._strike_takeoff_alt = _spin(50.0, 10.0, 500.0, 5.0, "m", 0, TC.FRIENDLY)
+        self._strike_takeoff_alt.setToolTip(
+            "NAV_TAKEOFF 目標高度。固定翼為 AGL，VTOL 為 AMSL。\n"
+            "達到此高度後進入巡航段（直線爬升，非螺旋）。"
+        )
+        s2f.addRow("起飛高度:", self._strike_takeoff_alt)
+
+        self._strike_takeoff_pitch = _spin(15.0, 5.0, 45.0, 1.0, "°", 0, TC.FRIENDLY)
+        self._strike_takeoff_pitch.setToolTip(
+            "固定翼起飛俯仰角（推薦 10–20°）。VTOL 自動垂直起飛時忽略。"
+        )
+        s2f.addRow("起飛仰角:", self._strike_takeoff_pitch)
+
+        layout.addWidget(s2)
+
+        # ════════════════════════════════════════════════════════════
+        # ③  巡航 — 高度 / 速度 / 最小轉彎半徑
+        # ════════════════════════════════════════════════════════════
+        s3 = _section("③  巡航 (Cruise)", TC.FG_EMPHASIS)
+        s3f = QFormLayout(s3)
+        s3f.setSpacing(6); s3f.setContentsMargins(8, 14, 8, 8)
+
+        self._strike_cruise_alt = _spin(500.0, 50.0, 5000.0, 10.0, "m", 0, TC.FG_EMPHASIS)
+        self._strike_cruise_alt.setToolTip("UCAV 巡航高度（基準）")
+        s3f.addRow("巡航高度:", self._strike_cruise_alt)
+
+        self._strike_cruise_speed = _spin(60.0, 10.0, 300.0, 1.0, "m/s", 1, TC.FG_EMPHASIS)
+        self._strike_cruise_speed.setToolTip("UCAV 巡航空速")
+        s3f.addRow("巡航速度:", self._strike_cruise_speed)
+
+        # 復用 hidden 的 _strike_turn_radius，把它顯示出來
+        self._strike_turn_radius.setStyleSheet(
+            f"QDoubleSpinBox{{background:{TC.BG_SUNKEN};color:{TC.FG_EMPHASIS};"
+            f"border:1px solid {TC.BORDER_DEFAULT};border-radius:0;padding:3px 6px;"
+            f"font-family:{TF.css_mono()};font-weight:bold;}}"
+        )
+        self._strike_turn_radius.setToolTip(
+            "固定翼最小轉彎半徑 R_min — 影響 Dubins 銜接段曲率"
+        )
+        s3f.addRow("最小轉彎半徑:", self._strike_turn_radius)
+
+        # 編隊間距（縱向 / 橫向）
+        self._strike_long_spacing = _spin(300.0, 100.0, 1500.0, 10.0, "m", 0, TC.NEUTRAL)
+        self._strike_long_spacing.setToolTip(
+            "Longitudinal — 長機與後機 (Trail) 的縱向距離。\n"
+            "建議 ≥ 2 × 最小轉彎半徑（避免後機進入長機尾流）。"
+        )
+        s3f.addRow("縱向間距 (Longitudinal):", self._strike_long_spacing)
+
+        self._strike_lat_spacing = _spin(400.0, 100.0, 2000.0, 10.0, "m", 0, TC.NEUTRAL)
+        self._strike_lat_spacing.setToolTip(
+            "Lateral — 左翼與右翼的總跨距 (Left ↔ Right)。\n"
+            "建議 ≥ 2 × 安全距離（IAPF 觸發閾值）。"
+        )
+        s3f.addRow("橫向間距 (Lateral):", self._strike_lat_spacing)
+
+        layout.addWidget(s3)
+
+        # ════════════════════════════════════════════════════════════
+        # ③′  四散決斷 — 距目標 R_dec 處解散編隊；4 機切入方位角微調
+        # ════════════════════════════════════════════════════════════
+        sd = _section("③′ 四散決斷 (Dispersion & Attack Azimuths)", TC.WARNING)
+        sdl = QVBoxLayout(sd)
+        sdl.setSpacing(6); sdl.setContentsMargins(8, 14, 8, 8)
+
+        sdf = QFormLayout()
+        sdf.setSpacing(4)
+        self._strike_dispersion = _spin(3000.0, 500.0, 10000.0, 100.0, "m", 0, TC.WARNING)
+        self._strike_dispersion.setToolTip(
+            "距目標多遠處解散菱形編隊（Dispersion Ring）。\n"
+            "在 3D 地圖上以琥珀色虛線圓繪出。"
+        )
+        sdf.addRow("決斷圈半徑 (Dispersion):", self._strike_dispersion)
+        sdl.addLayout(sdf)
+
+        # 4 個攻擊方位角（預設 N/E/S/W），可微調
+        az_label = QLabel("攻擊方位角 (Attack Azimuths)：4 機切入方向")
+        az_label.setStyleSheet(
+            f"color:{TC.FG_SECONDARY};font-size:10px;"
+            f"font-family:{TF.css_condensed()};letter-spacing:1px;padding:2px;"
+        )
+        sdl.addWidget(az_label)
+
+        az_row = QHBoxLayout()
+        az_row.setSpacing(4)
+        self._strike_az = []
+        roles = ['N (Leader)', 'E (Right)', 'S (Trail)', 'W (Left)']
+        defaults = [0.0, 90.0, 180.0, 270.0]
+        for role, val in zip(roles, defaults):
+            sb = QDoubleSpinBox()
+            sb.setRange(0.0, 359.9)
+            sb.setDecimals(1)
+            sb.setSingleStep(5.0)
+            sb.setValue(val)
+            sb.setSuffix("°")
+            sb.setStyleSheet(
+                f"QDoubleSpinBox{{background:{TC.BG_SUNKEN};color:{TC.WARNING};"
+                f"border:1px solid {TC.BORDER_DEFAULT};border-radius:0;"
+                f"padding:2px 4px;font-size:10px;font-family:{TF.css_mono()};font-weight:bold;}}"
+            )
+            sb.setToolTip(f'{role}：相對目標的攻擊切入方位角\n0°=正北 90°=正東 180°=正南 270°=正西')
+            self._strike_az.append(sb)
+            az_row.addWidget(sb, 1)
+        sdl.addLayout(az_row)
+        layout.addWidget(sd)
+
+        # ════════════════════════════════════════════════════════════
+        # ④  機間避撞 — IAPF 切線斥力（與 DCCPP 相同機制）
+        # ════════════════════════════════════════════════════════════
+        s4 = _section("④  機間避撞 (Inter-UAV Collision Avoidance)", TC.WARNING)
+        s4l = QVBoxLayout(s4)
+        s4l.setSpacing(6); s4l.setContentsMargins(8, 14, 8, 8)
+
+        self._strike_iapf_enabled = QCheckBox(
+            "啟用 IAPF 切線斥力（兩機 3D 距離 < 安全距離時觸發避讓）"
+        )
+        self._strike_iapf_enabled.setChecked(True)
+        self._strike_iapf_enabled.setStyleSheet(
+            f"QCheckBox{{color:{TC.WARNING};font-weight:bold;}}"
+            f"QCheckBox::indicator{{width:14px;height:14px;border:1px solid {TC.BORDER_DEFAULT};"
+            f"background:{TC.BG_SUNKEN};}}"
+            f"QCheckBox::indicator:checked{{background:{TC.WARNING};}}"
+        )
+        self._strike_iapf_enabled.setToolTip(
+            "Inter-vehicle Artificial Potential Field：\n"
+            "兩機 3D 距離 < 安全距離時，互相施加切線方向斥力以避讓\n"
+            "（與 DCCPP 機間避撞相同機制）"
+        )
+        s4l.addWidget(self._strike_iapf_enabled)
+
+        s4f = QFormLayout()
+        s4f.setSpacing(4)
+        self._strike_iapf_dist.setStyleSheet(
+            f"QDoubleSpinBox{{background:{TC.BG_SUNKEN};color:{TC.WARNING};"
+            f"border:1px solid {TC.BORDER_DEFAULT};border-radius:0;padding:3px 6px;"
+            f"font-family:{TF.css_mono()};font-weight:bold;}}"
+        )
+        self._strike_iapf_dist.setToolTip(
+            "兩機 3D 距離小於此值時啟動斥力\n"
+            "建議：固定翼 ≥ 200m，VTOL ≥ 80m"
+        )
+        self._strike_iapf_dist.setValue(200.0)
+        s4f.addRow("安全距離:", self._strike_iapf_dist)
+        s4l.addLayout(s4f)
+        layout.addWidget(s4)
+
+        # ════════════════════════════════════════════════════════════
+        # ⑤  終端打擊 — 俯衝幾何（目標於 ⓿ 區設定）
+        # ════════════════════════════════════════════════════════════
+        s5 = _section("⑤  終端打擊 (Terminal Strike)", TC.HOSTILE)
+        s5l = QVBoxLayout(s5)
+        s5l.setSpacing(4); s5l.setContentsMargins(8, 14, 8, 8)
+
+        # 目標計數（只用作狀態指示，不再有重複的標記按鈕）
+        self._strike_target_count = QLabel("已標記目標: 0 個 — 請於 ⓿ 區設定座標")
+        self._strike_target_count.setStyleSheet(
+            f"color:{TC.HOSTILE};font-weight:bold;font-size:11px;padding:2px 4px;"
+            f"font-family:{TF.css_mono()};"
+        )
+        s5l.addWidget(self._strike_target_count)
+
+        s5f = QFormLayout()
+        s5f.setSpacing(4)
+        self._strike_max_dive_angle.setStyleSheet(
+            f"QDoubleSpinBox{{background:{TC.BG_SUNKEN};color:{TC.HOSTILE};"
+            f"border:1px solid {TC.BORDER_DEFAULT};border-radius:0;padding:3px 6px;"
+            f"font-family:{TF.css_mono()};font-weight:bold;}}"
+        )
+        self._strike_max_dive_angle.setToolTip(
+            "末端俯衝最大角度（物理極限）。45° 是常見折衷；\n"
+            "≥60° 接近垂直俯衝，需確認載具結構限制。"
+        )
+        s5f.addRow("最大俯衝角:", self._strike_max_dive_angle)
+
+        self._strike_dive_dist.setStyleSheet(self._strike_max_dive_angle.styleSheet())
+        self._strike_dive_dist.setToolTip(
+            "距離目標多遠開始從巡航高度轉為俯衝姿態。\n"
+            "若距離不足以滿足最大俯衝角，系統會自動後推。"
+        )
+        s5f.addRow("俯衝起始距離:", self._strike_dive_dist)
+        s5l.addLayout(s5f)
+        layout.addWidget(s5)
+
+        # ════════════════════════════════════════════════════════════
+        # 動作 — EXECUTE / 匯出 / 上傳 SITL
+        # ════════════════════════════════════════════════════════════
+        sa = _section("動作 (Actions)", TC.FG_EMPHASIS)
+        sal = QVBoxLayout(sa)
+        sal.setSpacing(6); sal.setContentsMargins(8, 14, 8, 8)
+
+        self._strike_execute_btn = _btn(
+            "EXECUTE  SWARM  STRIKE", TC.BG_PRIMARY, TC.HOSTILE, height=44
+        )
+        self._strike_execute_btn.setStyleSheet(
+            self._strike_execute_btn.styleSheet().replace(
+                "font-weight:bold;letter-spacing:1.2px",
+                "font-weight:bold;font-size:13px;letter-spacing:2.5px"
+            )
+        )
+        self._strike_execute_btn.setEnabled(False)
+        self._strike_execute_btn.setToolTip(
+            "觸發後台演算法：\n"
+            "  1. 起飛點 → 巡航高度（直線爬升）\n"
+            "  2. 巡航段（Dubins，IAPF 機間避撞）\n"
+            "  3. 末端俯衝攻擊（匈牙利分配 + 最大俯衝角約束）"
+        )
+        self._strike_execute_btn.clicked.connect(self._on_strike_execute)
+        sal.addWidget(self._strike_execute_btn)
+
+        action_row = QHBoxLayout()
+        action_row.setSpacing(4)
+
+        self._strike_export_btn = _btn(
+            "匯出 QGC WPL", TC.BG_PRIMARY, TC.WARNING, height=32
+        )
+        self._strike_export_btn.setEnabled(False)
+        self._strike_export_btn.setToolTip(
+            "匯出每架 UCAV 一個 .waypoints 檔（QGC WPL 110），\n"
+            "附任務簡報 TXT。內容：\n"
+            "  DO_SET_HOME → NAV_TAKEOFF → 巡航 → 俯衝"
+        )
+        self._strike_export_btn.clicked.connect(self.strike_export_requested.emit)
+        action_row.addWidget(self._strike_export_btn)
+
+        self._strike_sitl_upload_btn = _btn(
+            "上傳到所有 SITL", TC.BG_PRIMARY, TC.NEUTRAL, height=32
+        )
+        self._strike_sitl_upload_btn.setEnabled(False)
+        self._strike_sitl_upload_btn.setToolTip(
+            "將蜂群打擊任務上傳到所有已連線的 SITL 實例。\n"
+            "每架 UCAV 獨立路徑：\n"
+            "  DO_CHANGE_SPEED → NAV_TAKEOFF → 巡航 → 俯衝\n"
+            "（需先完成 EXECUTE + 已連線 SITL）"
+        )
+        # 簡化版固定 STOT，使用統一 cruise_speed（不傳 DTOT 各機獨立空速）
+        self._strike_sitl_upload_btn.clicked.connect(
+            lambda: self.strike_sitl_upload_requested.emit(False)
+        )
+        action_row.addWidget(self._strike_sitl_upload_btn)
+        sal.addLayout(action_row)
+
+        layout.addWidget(sa)
+
+        return group
+
+    def _on_strike_vehicle_combo_changed(self, index: int):
+        """簡化面板的載具類型切換 → 同步到舊 VTOL 開關。"""
+        data = self._strike_vehicle_combo.itemData(index)
+        if hasattr(self, '_strike_vtol_enabled'):
+            is_vtol = (data == 'vtol')
+            self._strike_vtol_enabled.setChecked(is_vtol)
+            try:
+                self._on_strike_vtol_toggled(is_vtol)
+            except Exception:
+                pass
+
+    # ─────────────────────────────────────────────────────────────────
+    #  Hidden widget initialiser — backend handler 仍可讀取所需值
+    # ─────────────────────────────────────────────────────────────────
+    def _init_strike_hidden_widgets(self, TC, TF):
+        """建立背景處理邏輯依賴但 UI 不顯示的 widget（合理預設）。"""
+        from PyQt6.QtWidgets import (
+            QDoubleSpinBox, QSpinBox, QComboBox, QCheckBox, QLabel, QPushButton,
+        )
+
+        # 發射模式：固定為「同地發射」（簡化版只用一個基地點）
+        self._strike_launch_mode = QComboBox()
+        self._strike_launch_mode.addItems(['異地發射', '同地發射'])
+        self._strike_launch_mode.setCurrentIndex(1)
+        self._strike_launch_mode.currentIndexChanged.connect(
+            self._on_strike_launch_mode_changed
+        )
+
+        # 時間協同：固定 STOT（同時命中 — 簡化版預設）
+        self._strike_timing_mode = QComboBox()
+        self._strike_timing_mode.addItems(['STOT — 同時命中', 'DTOT — 間隔命中'])
+        self._strike_timing_mode.setCurrentIndex(0)
+        self._strike_timing_mode.currentIndexChanged.connect(
+            self._on_strike_timing_mode_changed
+        )
+
+        # DTOT 間隔（隱藏）
+        self._strike_interval_sec = QDoubleSpinBox()
+        self._strike_interval_sec.setRange(1.0, 300.0)
+        self._strike_interval_sec.setValue(15.0)
+        self._strike_interval_sec.setEnabled(False)
+        self._strike_interval_label = QLabel("間隔 Δ:")
+
+        # 高度錯層間距（簡化版面板無 UI 控制，使用合理預設值）
+        # UAV_i cruise_alt = base_cruise + i × altitude_step
+        # 預設 80m → 4 機 cruise_alt = 500/580/660/740m
+        # 為什麼 80m：
+        #   ① 並排起飛 lineup 橫向間距僅 30m → 起飛低空時飛機距離很近
+        #   ② SITL 4 機同時起飛時若爬升不同步，alt_step 太小（如 50m）+ 並排 30m
+        #     在 3D 仍可能落在 ~40m 以內 → 觸發「碰撞危險」警告
+        #   ③ 80m 高度 + 30m 橫向 → 3D 距離 ≥ 85m，足夠安全
+        # 注意：line 3524 那段在 _STRIKE_LEGACY_FULL_PANEL_NOT_USED，是 dead code，
+        # 真正初始化只在這裡（hidden widget）。
+        self._strike_alt_step = QDoubleSpinBox()
+        self._strike_alt_step.setRange(0.0, 200.0)
+        self._strike_alt_step.setValue(80.0)
+        self._strike_alt_step.setSuffix(" m")
+        # 高度預覽 label（隱藏，但 _update_strike_alt_preview 會 setText 此 widget）
+        self._strike_alt_preview = QLabel("")
+
+        # 俯衝幾何：固定預設值
+        self._strike_max_dive_angle = QDoubleSpinBox()
+        self._strike_max_dive_angle.setRange(10.0, 89.0)
+        self._strike_max_dive_angle.setValue(45.0)
+        self._strike_dive_dist = QDoubleSpinBox()
+        self._strike_dive_dist.setRange(100.0, 5000.0)
+        self._strike_dive_dist.setValue(800.0)
+
+        # 動畫速度
+        self._strike_anim_speed = QDoubleSpinBox()
+        self._strike_anim_speed.setRange(0.5, 20.0)
+        self._strike_anim_speed.setValue(3.0)
+
+        # 時空邊界（隱藏，但 _on_strike_execute 會讀）
+        self._strike_max_speed = QDoubleSpinBox()
+        self._strike_max_speed.setRange(30.0, 300.0)
+        self._strike_max_speed.setValue(85.0)
+        self._strike_stall_speed = QDoubleSpinBox()
+        self._strike_stall_speed.setRange(10.0, 100.0)
+        self._strike_stall_speed.setValue(25.0)
+        self._strike_turn_radius = QDoubleSpinBox()
+        self._strike_turn_radius.setRange(30.0, 1000.0)
+        self._strike_turn_radius.setValue(150.0)
+
+        # DTOT 結果預覽 + DTOT 匯出按鈕（隱藏）
+        self._strike_dtot_preview = QLabel("")
+        self._strike_dtot_export_btn = QPushButton("")
+        self._strike_dtot_export_btn.setEnabled(False)
+        self._strike_dtot_export_btn.clicked.connect(self._on_dtot_export)
+
+        # SITL 上傳：使用 SITL 分頁完成；簡化版隱藏
+        self._strike_sitl_use_dtot = QCheckBox("")
+        self._strike_sitl_use_dtot.setChecked(True)
+        self._strike_sitl_upload_btn = QPushButton("")
+        self._strike_sitl_upload_btn.setEnabled(False)
+
+        # 動態偵打（隱藏）
+        self._strike_coalition_size = QSpinBox()
+        self._strike_coalition_size.setRange(1, 12)
+        self._strike_coalition_size.setValue(3)
+        self._strike_iapf_dist = QDoubleSpinBox()
+        self._strike_iapf_dist.setRange(100.0, 5000.0)
+        self._strike_iapf_dist.setValue(1500.0)
+        self._strike_recon_btn = QPushButton("")
+        self._strike_recon_btn.setEnabled(False)
+
+        # VTOL 模式（簡化版預設關閉）
+        self._strike_vtol_enabled = QCheckBox("")
+        self._strike_vtol_enabled.setChecked(False)
+        self._strike_vtol_cruise_kts = QDoubleSpinBox()
+        self._strike_vtol_cruise_kts.setRange(30.0, 80.0)
+        self._strike_vtol_cruise_kts.setValue(50.0)
+        self._strike_vtol_terminal_kts = QDoubleSpinBox()
+        self._strike_vtol_terminal_kts.setRange(60.0, 150.0)
+        self._strike_vtol_terminal_kts.setValue(90.0)
+        self._strike_vtol_boundary_m = QDoubleSpinBox()
+        self._strike_vtol_boundary_m.setRange(500.0, 10000.0)
+        self._strike_vtol_boundary_m.setValue(2000.0)
+        self._strike_vtol_cep_m = QDoubleSpinBox()
+        self._strike_vtol_cep_m.setRange(1.0, 100.0)
+        self._strike_vtol_cep_m.setValue(12.0)
+        self._strike_vtol_ai_seeker = QCheckBox("")
+        self._strike_vtol_ai_seeker.setChecked(True)
+
+        # OWA-UAV（隱藏）
+        self._strike_owa_btn = QPushButton("")
+
+        # STOT 共用基地子群組（已被 ① 區段取代，但保留屬性）
+        from PyQt6.QtWidgets import QFrame as _QF
+        self._strike_base_group = _QF()
+        self._strike_base_group.setVisible(False)
+
+    def _STRIKE_LEGACY_FULL_PANEL_NOT_USED(self) -> QGroupBox:
+        """[已棄用] 舊版完整蜂群打擊面板（VTOL/DTOT/動態偵打/OWA 全部展開）。
+        保留作為歷史參照，目前 UI 不再呼叫。"""
+        group = QGroupBox("UCAV 蜂群協同打擊 (legacy full)")
+        group.setStyleSheet(
             "QGroupBox{font-weight:bold;color:#F44336;border:1px solid #D32F2F;"
-            "border-radius:4px;margin-top:8px;padding-top:14px;}"
+            "border-radius:0;margin-top:8px;padding-top:14px;}"
             "QGroupBox::title{subcontrol-position:top left;padding:2px 8px;}"
         )
         layout = QVBoxLayout(group)
@@ -2692,7 +3558,7 @@ class ParameterPanel(QWidget):
         self._strike_base_group = QGroupBox("STOT 共用發射基地")
         self._strike_base_group.setStyleSheet(
             "QGroupBox{color:#4CAF50;border:1px dashed #4CAF50;"
-            "border-radius:3px;margin-top:6px;padding-top:12px;}"
+            "border-radius:0;margin-top:6px;padding-top:12px;}"
             "QGroupBox::title{subcontrol-position:top left;padding:0 6px;}"
         )
         base_layout = QVBoxLayout(self._strike_base_group)
@@ -2702,7 +3568,7 @@ class ParameterPanel(QWidget):
         self._strike_mark_base_btn.setCheckable(True)
         self._strike_mark_base_btn.setStyleSheet(
             "QPushButton{background-color:#2E7D32;color:white;font-weight:bold;"
-            "padding:6px;border-radius:3px;font-size:11px;}"
+            "padding:6px;border-radius:0;font-size:11px;}"
             "QPushButton:hover{background-color:#388E3C;}"
             "QPushButton:checked{background-color:#E65100;}"
         )
@@ -2729,7 +3595,7 @@ class ParameterPanel(QWidget):
         self._strike_mark_btn = QPushButton("🎯 標記多重打擊目標 (Mark Targets)")
         self._strike_mark_btn.setStyleSheet(
             "QPushButton{background-color:#1565C0;color:white;font-weight:bold;"
-            "padding:8px;border-radius:4px;font-size:12px;}"
+            "padding:8px;border-radius:0;font-size:12px;}"
             "QPushButton:hover{background-color:#1976D2;}"
             "QPushButton:checked{background-color:#E65100;}"
         )
@@ -2758,7 +3624,7 @@ class ParameterPanel(QWidget):
         auto_hint.setWordWrap(True)
         auto_hint.setStyleSheet(
             "background-color:rgba(33,150,243,0.08); color:#64B5F6;"
-            "padding:6px; border-radius:4px; font-size:10px;"
+            "padding:6px; border-radius:0; font-size:10px;"
         )
         layout.addWidget(auto_hint)
 
@@ -2873,7 +3739,7 @@ class ParameterPanel(QWidget):
         self._strike_execute_btn.setStyleSheet(
             "QPushButton{"
             "  background-color:#D32F2F;color:white;font-weight:bold;"
-            "  font-size:14px;padding:12px;border-radius:6px;"
+            "  font-size:14px;padding:12px;border-radius:0;"
             "  border:2px solid #B71C1C;"
             "  letter-spacing:2px;"
             "}"
@@ -2892,7 +3758,7 @@ class ParameterPanel(QWidget):
         self._strike_export_btn = QPushButton("💾 匯出打擊任務 (QGC WPL)")
         self._strike_export_btn.setStyleSheet(
             "QPushButton{background-color:#1B5E20;color:white;padding:8px;"
-            "font-weight:bold;border-radius:4px;}"
+            "font-weight:bold;border-radius:0;}"
             "QPushButton:hover{background-color:#2E7D32;}"
             "QPushButton:disabled{background-color:#555;color:#999;}"
         )
@@ -2911,7 +3777,7 @@ class ParameterPanel(QWidget):
         sitl_group = QGroupBox("蜂群打擊 → SITL 模擬")
         sitl_group.setStyleSheet(
             "QGroupBox{color:#00BCD4;border:1px dashed #00BCD4;"
-            "border-radius:3px;margin-top:8px;padding-top:12px;}"
+            "border-radius:0;margin-top:8px;padding-top:12px;}"
             "QGroupBox::title{subcontrol-position:top left;padding:0 6px;}"
         )
         sitl_layout = QVBoxLayout(sitl_group)
@@ -2941,7 +3807,7 @@ class ParameterPanel(QWidget):
         self._strike_sitl_upload_btn = QPushButton("🚀 上傳蜂群打擊任務至 SITL")
         self._strike_sitl_upload_btn.setStyleSheet(
             "QPushButton{background-color:#006064;color:white;font-weight:bold;"
-            "padding:10px;border-radius:4px;font-size:12px;"
+            "padding:10px;border-radius:0;font-size:12px;"
             "border:2px solid #00838F;}"
             "QPushButton:hover{background-color:#00838F;border-color:#00ACC1;}"
             "QPushButton:pressed{background-color:#004D40;}"
@@ -2969,7 +3835,7 @@ class ParameterPanel(QWidget):
         recon_group = QGroupBox("⚡ 動態偵打切換 (DCCPP → Strike)")
         recon_group.setStyleSheet(
             "QGroupBox{color:#FFD54F;border:1px dashed #FFD54F;"
-            "border-radius:3px;margin-top:8px;padding-top:12px;}"
+            "border-radius:0;margin-top:8px;padding-top:12px;}"
             "QGroupBox::title{subcontrol-position:top left;padding:0 6px;}"
         )
         recon_layout = QVBoxLayout(recon_group)
@@ -3015,7 +3881,7 @@ class ParameterPanel(QWidget):
         self._strike_recon_btn = QPushButton("⚡ 觸發偵測事件 → 動態切換打擊")
         self._strike_recon_btn.setStyleSheet(
             "QPushButton{background-color:#F57F17;color:white;font-weight:bold;"
-            "padding:10px;border-radius:4px;font-size:12px;"
+            "padding:10px;border-radius:0;font-size:12px;"
             "border:2px solid #FF6F00;}"
             "QPushButton:hover{background-color:#FF8F00;border-color:#FF6F00;}"
             "QPushButton:disabled{background-color:#555;color:#999;border-color:#444;}"
@@ -3036,7 +3902,7 @@ class ParameterPanel(QWidget):
         vtol_group = QGroupBox("🛩 VTOL 模式 (垂直起降)")
         vtol_group.setStyleSheet(
             "QGroupBox{color:#00ACC1;border:1px dashed #00ACC1;"
-            "border-radius:3px;margin-top:8px;padding-top:12px;}"
+            "border-radius:0;margin-top:8px;padding-top:12px;}"
             "QGroupBox::title{subcontrol-position:top left;padding:0 6px;}"
         )
         vtol_layout = QVBoxLayout(vtol_group)
@@ -3223,7 +4089,7 @@ class ParameterPanel(QWidget):
         self._strike_dtot_export_btn = QPushButton("DTOT/STOT 飽和攻擊匯出 (QGC WPL)")
         self._strike_dtot_export_btn.setStyleSheet(
             "QPushButton{background-color:#E65100;color:white;padding:8px;"
-            "font-weight:bold;border-radius:4px;font-size:11px;}"
+            "font-weight:bold;border-radius:0;font-size:11px;}"
             "QPushButton:hover{background-color:#F57C00;}"
             "QPushButton:disabled{background-color:#555;color:#999;}"
         )
@@ -3261,7 +4127,7 @@ class ParameterPanel(QWidget):
         self._strike_owa_btn = QPushButton("產生 OWA-UAV .parm 參數檔")
         self._strike_owa_btn.setStyleSheet(
             "QPushButton{background-color:#37474F;color:white;padding:8px;"
-            "font-weight:bold;border-radius:4px;}"
+            "font-weight:bold;border-radius:0;}"
             "QPushButton:hover{background-color:#455A64;}"
         )
         self._strike_owa_btn.setToolTip(
@@ -3276,7 +4142,7 @@ class ParameterPanel(QWidget):
         clear_btn = QPushButton("清除打擊視覺化")
         clear_btn.setStyleSheet(
             "QPushButton{background-color:#455A64;color:white;padding:6px;"
-            "border-radius:3px;}"
+            "border-radius:0;}"
             "QPushButton:hover{background-color:#546E7A;}"
         )
         clear_btn.clicked.connect(self.strike_clear_requested.emit)
@@ -3465,6 +4331,9 @@ class ParameterPanel(QWidget):
             'max_dive_angle':       self._strike_max_dive_angle.value(),
             'dive_initiation_dist': self._strike_dive_dist.value(),
             'anim_speed':           self._strike_anim_speed.value(),
+            # 起飛 — 固定翼斜爬升參數（決定 3D 爬升軌跡水平距離）
+            'takeoff_alt':          self._strike_takeoff_alt.value(),
+            'takeoff_pitch':        self._strike_takeoff_pitch.value(),
             # 時空協同邊界
             'max_speed':            self._strike_max_speed.value(),
             'stall_speed':          self._strike_stall_speed.value(),
@@ -3478,18 +4347,82 @@ class ParameterPanel(QWidget):
             + (f' Δ={params["interval_sec"]}s' if timing == 'DTOT' else '')
         )
 
+    def _on_strike_target_coord_changed(self, _val: float = 0.0):
+        """目標 lat/lon spinbox 變更 → 通知主視窗即時刷新 3D 地圖標記。"""
+        # 嘗試 emit 一個簡化信號（main_window 監聽）
+        try:
+            lat = float(self._strike_tgt_lat.value())
+            lon = float(self._strike_tgt_lon.value())
+            if abs(lat) > 1e-3 or abs(lon) > 1e-3:
+                # 有效座標 → 走「手動」單目標流程
+                self.strike_target_coord_changed.emit(lat, lon)
+        except Exception:
+            pass
+
+    def get_strike_target_coord(self):
+        """回傳目前面板上輸入的目標 (lat, lon)，全 0 視為未設。"""
+        lat = float(self._strike_tgt_lat.value())
+        lon = float(self._strike_tgt_lon.value())
+        if abs(lat) < 1e-3 and abs(lon) < 1e-3:
+            return None
+        return (lat, lon)
+
+    def set_strike_target_coord(self, lat: float, lon: float):
+        """由 main_window 呼叫，例如使用者在地圖上點選 → 同步顯示。"""
+        # 暫時 block signal 避免遞迴
+        for sb in (self._strike_tgt_lat, self._strike_tgt_lon):
+            sb.blockSignals(True)
+        self._strike_tgt_lat.setValue(float(lat))
+        self._strike_tgt_lon.setValue(float(lon))
+        for sb in (self._strike_tgt_lat, self._strike_tgt_lon):
+            sb.blockSignals(False)
+
+    def get_strike_formation_params(self) -> dict:
+        """從面板讀取 Diamond 編隊與四散參數（給 _on_diamond_strike_execute 使用）。"""
+        return {
+            'n_uavs':           int(self._strike_n_uavs.value())
+                                  if hasattr(self, '_strike_n_uavs') else 4,
+            'longitudinal_m':   float(self._strike_long_spacing.value())
+                                  if hasattr(self, '_strike_long_spacing') else 300.0,
+            'lateral_m':        float(self._strike_lat_spacing.value())
+                                  if hasattr(self, '_strike_lat_spacing') else 400.0,
+            'dispersion_radius_m': float(self._strike_dispersion.value())
+                                  if hasattr(self, '_strike_dispersion') else 3000.0,
+            'attack_bearings':  [
+                float(self._strike_az[i].value()) if hasattr(self, '_strike_az')
+                else (i * 90.0) for i in range(4)
+            ],
+            'roe_strike_mode':  self._strike_roe_strike.isChecked()
+                                  if hasattr(self, '_strike_roe_strike') else False,
+        }
+
     def update_strike_target_count(self, count: int):
-        """更新打擊目標計數顯示"""
-        self._strike_target_count.setText(
-            f"已標記目標: {count} 個 → 自動生成 {count} 架 UCAV"
-            if count > 0 else "已標記目標: 0 個"
-        )
+        """更新打擊目標計數顯示。
+        多打一模式：N 架 UCAV 共同攻擊 1 目標（N 由 ① 區 spinbox 設定）。
+        """
+        n_uavs = (int(self._strike_n_uavs.value())
+                   if hasattr(self, '_strike_n_uavs') else 4)
+        if count > 0:
+            self._strike_target_count.setText(
+                f"已標記目標: {count} 個 → {n_uavs} 機 STOT 飽和打擊"
+            )
+        else:
+            self._strike_target_count.setText("已標記目標: 0 個（請於 ⓿ 區輸入座標）")
         self._strike_execute_btn.setEnabled(count > 0)
         self._strike_target_n = count
         self._update_strike_alt_preview()
 
     def _update_strike_alt_preview(self):
-        """更新高度錯層預覽"""
+        """更新高度錯層預覽
+
+        防呆：在 _create_strike_command_panel 建立 _strike_alt_step / _strike_alt_preview
+        之前，update_strike_target_count（地圖點擊新增目標時觸發）可能會先呼叫此函式，
+        造成 AttributeError。先用 hasattr 確認 widget 已存在再讀取。
+        """
+        if not hasattr(self, '_strike_alt_step') or \
+           not hasattr(self, '_strike_alt_preview') or \
+           not hasattr(self, '_strike_cruise_alt'):
+            return
         n = getattr(self, '_strike_target_n', 0)
         if n <= 0:
             self._strike_alt_preview.setText("")

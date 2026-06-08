@@ -26,6 +26,8 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple
 from enum import Enum, auto
 
+from utils.math_utils import EARTH_RADIUS_M  # 0-2 標準化：WGS84 單一來源
+
 logger = logging.getLogger(__name__)
 
 
@@ -542,7 +544,7 @@ class DCCPPPathAssembler:
     @staticmethod
     def _haversine(lat1, lon1, lat2, lon2) -> float:
         """Haversine 距離（公尺）"""
-        R = 6_371_000.0
+        R = EARTH_RADIUS_M
         rlat1, rlat2 = math.radians(lat1), math.radians(lat2)
         dlat = rlat2 - rlat1
         dlon = math.radians(lon2 - lon1)
@@ -568,7 +570,7 @@ class DCCPPPathAssembler:
     @staticmethod
     def _offset_latlon(lat: float, lon: float, dist_m: float, bearing_deg: float):
         """從 (lat,lon) 沿 bearing 偏移 dist_m，回傳 (lat2, lon2)"""
-        R = 6371000.0
+        R = EARTH_RADIUS_M
         br = math.radians(bearing_deg)
         lat_r = math.radians(lat)
         d_lat = dist_m * math.cos(br) / R

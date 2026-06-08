@@ -33,6 +33,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+from utils.math_utils import EARTH_RADIUS_M  # 0-2 標準化：WGS84 單一來源
+
 logger = logging.getLogger(__name__)
 
 
@@ -72,7 +74,7 @@ class AvoidanceAction:
 
 def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """兩點間的大圓距離 (公尺)"""
-    R = 6371000.0
+    R = EARTH_RADIUS_M
     phi1, phi2 = math.radians(lat1), math.radians(lat2)
     dp = math.radians(lat2 - lat1)
     dl = math.radians(lon2 - lon1)

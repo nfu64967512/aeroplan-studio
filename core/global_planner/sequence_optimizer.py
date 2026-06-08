@@ -17,6 +17,7 @@ from typing import List, Tuple, TYPE_CHECKING
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from mission.coverage_path import OperationSegment
+from utils.math_utils import EARTH_RADIUS_M  # 0-2 標準化：WGS84 單一來源
 
 
 class SequenceOptimizer:
@@ -185,7 +186,7 @@ class SequenceOptimizer:
         返回:
             距離（公尺）
         """
-        R = 6371000.0
+        R = EARTH_RADIUS_M
         lat1 = math.radians(p1[0])
         lat2 = math.radians(p2[0])
         dlat = lat2 - lat1

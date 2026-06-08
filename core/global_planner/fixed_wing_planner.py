@@ -20,6 +20,8 @@ import math
 from dataclasses import dataclass, field
 from typing import List, Tuple, Dict, Optional
 
+from utils.math_utils import EARTH_RADIUS_M  # 0-2 標準化：WGS84 單一來源
+
 
 # ============================================================
 # 機型性能規格資料庫
@@ -229,7 +231,7 @@ def _offset_latlon(lat: float, lon: float,
 
 def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """計算兩點間地表距離（公尺，Haversine 公式）"""
-    R = 6_371_000.0
+    R = EARTH_RADIUS_M
     φ1, φ2 = math.radians(lat1), math.radians(lat2)
     dφ = math.radians(lat2 - lat1)
     dλ = math.radians(lon2 - lon1)

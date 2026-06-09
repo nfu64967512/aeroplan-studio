@@ -425,55 +425,11 @@ class MissionManager:
         返回:
             Mission 實例，失敗返回 None
         """
-        try:
-            # 這裡需要導入並使用現有的 waypoint_generator
-            # 由於 waypoint_generator 在專案根目錄，需要調整導入路徑
-            import sys
-            from pathlib import Path
-            project_root = Path(__file__).parent.parent
-            sys.path.insert(0, str(project_root))
-            
-            from waypoint_generator import OptimizedWaypointGenerator
-            from config import FlightParameters
-            
-            # 創建任務
-            mission = self.create_mission(mission_name, 'survey')
-            
-            # 設定 HOME
-            if corners:
-                mission.set_home(corners[0][0], corners[0][1], params.get('altitude', 50.0))
-            
-            # 創建航點生成器
-            generator = OptimizedWaypointGenerator()
-            
-            # 建立飛行參數
-            flight_params = FlightParameters(
-                altitude=params.get('altitude', 50.0),
-                angle=params.get('angle', 0.0),
-                spacing=params.get('spacing', 10.0),
-                speed=params.get('speed', 10.0),
-                yaw_speed=params.get('yaw_speed', 60.0),
-                safety_distance=params.get('safety_distance', 5.0)
-            )
-            
-            # 生成航點
-            lines, waypoints = generator.generate_complete_mission(
-                corners, flight_params, 0, 1
-            )
-            
-            # 轉換為 WaypointSequence
-            mission.waypoints = WaypointSequence.from_qgc_format(lines)
-            
-            # 更新任務參數
-            mission.params.update(params)
-            
-            print(f"成功生成任務: {len(mission.waypoints)} 個航點")
-            return mission
-        except Exception as e:
-            print(f"從生成器建立任務失敗: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
+        # 註：此方法依賴的 OptimizedWaypointGenerator（原 waypoint_generator 模組）已不
+        # 存在於專案中 → 原 try-block 一律走 except、回傳 None；且全專案無任何呼叫處
+        # （完全死碼）。已移除無法解析的死 import 與死碼，保留 always-None 行為。
+        # production 的任務航點產生走 core.global_planner.CoveragePlanner。
+        return None
     
     def generate_mission_briefing(self, mission: Optional[Mission] = None) -> str:
         """

@@ -15,6 +15,7 @@ from PyQt6.QtCore import pyqtSignal, Qt
 
 from ui.widgets.map_widget import MapWidget
 from ui.widgets.cesium_map_widget import CesiumMapWidget
+from ui.widgets.map_base import MapWidgetBase
 from ui.resources.tactical_theme import TacticalColors as TC, TacticalFonts as TF
 from ui.resources.aeroplan_theme.widgets import IconButton
 from utils.logger import get_logger
@@ -50,7 +51,7 @@ _MODE_2D = 0
 _MODE_3D = 1
 
 
-class DualMapWidget(QWidget):
+class DualMapWidget(MapWidgetBase):
     """
     2D / 3D 雙模式地圖容器。
 
@@ -62,13 +63,8 @@ class DualMapWidget(QWidget):
     以供 3D 地圖取得完整高度資訊。
     """
 
-    # ── 轉發 MapWidget 的所有信號 ─────────────────────────────────────
-    corner_added      = pyqtSignal(float, float)
-    corner_moved      = pyqtSignal(int, float, float)
-    circle_defined    = pyqtSignal(float, float, float)
+    # ── 本類專屬 signal（5 個交集 signal 已上移至 MapWidgetBase） ──
     fence_built       = pyqtSignal(object)  # 自動建構 Geofence 完成（傳 MissionBundle 或 None）
-    nfz_polygon_drawn = pyqtSignal(list)
-    nfz_circle_drawn  = pyqtSignal(float, float, float)
     strike_target_added = pyqtSignal(float, float)  # 打擊目標標記
     # ── Fence Zone 工具列觸發信號（NFZ + 威脅 + 圍籬統一） ──
     fence_zone_draw_polygon_requested = pyqtSignal()

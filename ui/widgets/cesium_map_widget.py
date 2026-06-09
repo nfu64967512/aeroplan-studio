@@ -22,6 +22,7 @@ from PyQt6.QtCore import pyqtSignal, QUrl, Qt
 from urllib.parse import unquote
 
 from utils.logger import get_logger
+from ui.widgets.map_base import MapWidgetBase
 from ui.resources.tactical_theme import TacticalColors as TC
 
 logger = get_logger()
@@ -113,15 +114,12 @@ class CesiumPage(QWebEnginePage):
 # ══════════════════════════════════════════════════════════════════════
 #  CesiumMapWidget
 # ══════════════════════════════════════════════════════════════════════
-class CesiumMapWidget(QWidget):
+class CesiumMapWidget(MapWidgetBase):
     """3D 地圖組件，介面與 MapWidget 相容"""
 
-    # ── 與 MapWidget 相同的信號 ───────────────────────────────────────
-    corner_added       = pyqtSignal(float, float)
-    corner_moved       = pyqtSignal(int, float, float)
-    circle_defined     = pyqtSignal(float, float, float)
-    nfz_polygon_drawn  = pyqtSignal(list)
-    nfz_circle_drawn   = pyqtSignal(float, float, float)
+    # (1-1) 5 個交集 signal（corner_added/corner_moved/circle_defined/
+    #       nfz_polygon_drawn/nfz_circle_drawn）已上移至 MapWidgetBase；
+    #       以下為本類專屬 signal。
     strike_target_added = pyqtSignal(float, float)  # 打擊目標標記
 
     # ── Cesium Ion Token（可在設定中覆寫）────────────────────────────

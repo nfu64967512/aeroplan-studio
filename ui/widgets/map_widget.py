@@ -26,6 +26,7 @@ from folium import plugins
 
 from config import get_settings
 from utils.logger import get_logger
+from ui.widgets.map_base import MapWidgetBase
 
 settings = get_settings()
 logger = get_logger()
@@ -100,16 +101,11 @@ class ClickCapturePage(QWebEnginePage):
         return True
 
 
-class MapWidget(QWidget):
+class MapWidget(MapWidgetBase):
     """地圖組件 - folium + PyQt6 WebEngine"""
 
-    corner_added = pyqtSignal(float, float)
-    corner_moved = pyqtSignal(int, float, float)
-    # 拖曳定義圓形完成：發送 (lat, lon, radius_m)
-    circle_defined = pyqtSignal(float, float, float)
-    # NFZ 地圖繪製完成信號
-    nfz_polygon_drawn = pyqtSignal(list)           # list of (lat, lon) tuples
-    nfz_circle_drawn = pyqtSignal(float, float, float)  # lat, lon, radius_m
+    # (1-1) corner_added/corner_moved/circle_defined/nfz_polygon_drawn/
+    #       nfz_circle_drawn 已上移至 MapWidgetBase；本類無專屬 signal。
 
     def __init__(self, parent=None):
         super().__init__(parent)

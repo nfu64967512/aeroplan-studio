@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
 
 from mission.fleet_registry import FleetRegistry
 from mission.sitl_link import TelemetryFrame
+from ui.qt_utils import repolish
 from ui.resources.aeroplan_theme import tokens as T
 
 
@@ -79,8 +80,7 @@ class _RailCell(QFrame):
         )
         # 強制重設子標籤（避免 QSS 殘留）
         for lab in self.findChildren(QLabel):
-            lab.style().unpolish(lab)
-            lab.style().polish(lab)
+            repolish(lab)
 
     def _setup_label(self) -> None:
         if self.layout() is None:

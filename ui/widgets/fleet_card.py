@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
 )
 
 from mission.sitl_link import TelemetryFrame
+from ui.qt_utils import repolish
 from ui.resources.aeroplan_theme import tokens as T
 
 
@@ -190,8 +191,7 @@ class FleetCard(QFrame):
     def set_selected(self, selected: bool) -> None:
         self._selected = bool(selected)
         self.setProperty("selected", "true" if selected else "false")
-        self.style().unpolish(self)
-        self.style().polish(self)
+        repolish(self)
 
     def update_from_frame(self, frame: TelemetryFrame, mission_label: str = "") -> None:
         """以 TelemetryFrame 更新所有讀數。"""
@@ -223,8 +223,7 @@ class FleetCard(QFrame):
                 f"font-family: {T.FONT_MONO_STACK}; font-weight: 700; "
                 f"font-size: 11px; color: {T.HOSTILE}; background: transparent; border: none;"
             )
-        self._bat_bar.style().unpolish(self._bat_bar)
-        self._bat_bar.style().polish(self._bat_bar)
+        repolish(self._bat_bar)
         self._bat_pct.setText(f"{pct}%" if frame.battery_pct >= 0 else "--%")
 
         # Armed
@@ -244,8 +243,7 @@ class FleetCard(QFrame):
                 f"background: transparent; border: none;"
             )
             self._status_dot.setProperty("severity", "success")
-        self._status_dot.style().unpolish(self._status_dot)
-        self._status_dot.style().polish(self._status_dot)
+        repolish(self._status_dot)
 
         if mission_label:
             self._msn_label.setText(f"MSN {mission_label}")
@@ -260,8 +258,7 @@ class FleetCard(QFrame):
             self._lnk_bar.setProperty("status", "warning")
         else:
             self._lnk_bar.setProperty("status", "critical")
-        self._lnk_bar.style().unpolish(self._lnk_bar)
-        self._lnk_bar.style().polish(self._lnk_bar)
+        repolish(self._lnk_bar)
         self._lnk_pct.setText(f"{pct}%" if pct > 0 else "LOST")
         if rssi_dbm is not None:
             self._rssi_label.setText(f"RSSI {rssi_dbm} dBm")
@@ -269,8 +266,7 @@ class FleetCard(QFrame):
     def set_lost(self) -> None:
         """鏈路失聯狀態：燈號轉紅、armed 顯示 LOST。"""
         self._status_dot.setProperty("severity", "critical")
-        self._status_dot.style().unpolish(self._status_dot)
-        self._status_dot.style().polish(self._status_dot)
+        repolish(self._status_dot)
         self._armed_label.setText("● LOST")
         self._armed_label.setStyleSheet(
             f"font-family: {T.FONT_MONO_STACK}; font-weight: 700; "

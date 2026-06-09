@@ -59,6 +59,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from ui.qt_utils import repolish
 from ui.resources.tactical_theme import TacticalColors, TacticalFonts
 from ui.widgets.master_warning_panel import (
     AlertLevel,
@@ -349,8 +350,7 @@ class TelemetryReadoutGroup(QGroupBox):
                "BATT": "{:5.1f}", "VOLT": "{:5.2f}", "CURR": "{:5.2f}"}
         lbl.setText(fmt.get(key, "{:.2f}").format(value))
         lbl.setProperty("status", status or "")
-        lbl.style().unpolish(lbl)
-        lbl.style().polish(lbl)
+        repolish(lbl)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -792,16 +792,14 @@ class AeroPlanMainWindow(QMainWindow):
         """
         self._status_label.setText(message)
         self._status_label.setProperty("msgSeverity", severity)
-        self._status_label.style().unpolish(self._status_label)
-        self._status_label.style().polish(self._status_label)
+        repolish(self._status_label)
         if timeout_ms > 0:
             QTimer.singleShot(timeout_ms, self._clear_status)
 
     def _clear_status(self) -> None:
         self._status_label.setText("SYSTEM READY  /  系統就緒")
         self._status_label.setProperty("msgSeverity", "info")
-        self._status_label.style().unpolish(self._status_label)
-        self._status_label.style().polish(self._status_label)
+        repolish(self._status_label)
 
     # ------------------------------------------------------------------
     # 事件

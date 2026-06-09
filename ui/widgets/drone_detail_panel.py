@@ -35,6 +35,7 @@ from PyQt6.QtWidgets import (
 
 from mission.fleet_registry import FleetRegistry
 from mission.sitl_link import TelemetryFrame
+from ui.qt_utils import repolish
 from ui.widgets.flight_logs_panel import FlightLogsPanel
 from ui.widgets.parameters_browser import ParametersBrowser
 from ui.resources.aeroplan_theme import tokens as T
@@ -238,8 +239,7 @@ class DroneDetailPanel(QWidget):
             tb.setProperty("role", "navtab")
             tb.setChecked(i == 0)
             tb.setAutoExclusive(True)
-            tb.style().unpolish(tb)
-            tb.style().polish(tb)
+            repolish(tb)
             # 用 lambda 抓 index，切換 stack 對應頁
             tb.clicked.connect(lambda _checked, idx=i: self._on_tab_changed(idx))
             self._tab_buttons.append(tb)
@@ -675,12 +675,10 @@ class DroneDetailPanel(QWidget):
             )
             self._btn_arm.setText("ARM")
             self._btn_arm.setProperty("btnVariant", "success")
-            self._btn_arm.style().unpolish(self._btn_arm)
-            self._btn_arm.style().polish(self._btn_arm)
+            repolish(self._btn_arm)
             return  # avoid double-style below
         self._btn_arm.setProperty("btnVariant", "destructive")
-        self._btn_arm.style().unpolish(self._btn_arm)
-        self._btn_arm.style().polish(self._btn_arm)
+        repolish(self._btn_arm)
 
         # mode combo
         if frame.mode and frame.mode != "---":
@@ -708,8 +706,7 @@ class DroneDetailPanel(QWidget):
             self._bat_bar.setProperty("status", "warning")
         else:
             self._bat_bar.setProperty("status", "nominal")
-        self._bat_bar.style().unpolish(self._bat_bar)
-        self._bat_bar.style().polish(self._bat_bar)
+        repolish(self._bat_bar)
 
         # health chips（簡化版：GPS 與 Compass 由 frame 推；其餘預設 OK）
         gps_ok = frame.gps_fix >= 3

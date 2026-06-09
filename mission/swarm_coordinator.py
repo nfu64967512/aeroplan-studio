@@ -122,57 +122,17 @@ class SwarmMission:
         self.swarm_params['strategy'] = strategy
     
     def calculate_loiter_times(self) -> List[float]:
-        """
-        計算 LOITER 等待時間（智能避撞模式）
-        
+        """計算各機 LOITER 等待時間（簡單時間錯開）。
+
         返回:
             每台無人機的等待時間列表
+
+        註：原本嘗試 import 不存在的 collision_avoidance.CollisionAvoidanceSystem
+        做碰撞感知 loiter，該模組/類別從未存在 → ImportError → runtime 一直走簡單
+        時間錯開 fallback。已移除無法解析的死 import，直接回傳該 fallback（零行為變更）。
+        若日後要做碰撞感知 loiter，應改用 core.dccpp.collision_avoidance 並實作對應方法。
         """
-        try:
-            from collision_avoidance import CollisionAvoidanceSystem
-            
-            collision_system = CollisionAvoidanceSystem(
-                self.swarm_params['safety_distance']
-            )
-            
-            loiter_times = []
-            prev_waypoints = None
-            
-            for idx, drone in enumerate(self.drones):
-                if not drone.mission or len(drone.mission.waypoints) == 0:
-                    loiter_times.append(0.0)
-                    continue
-                
-                # 獲取導航航點
-                nav_waypoints = drone.mission.waypoints.get_navigation_waypoints()
-                waypoints = [(wp.lat, wp.lon) for wp in nav_waypoints]
-                
-                if idx == 0:
-                    # 第一台無人機不需要等待
-                    loiter_times.append(0.0)
-                    prev_waypoints = waypoints
-                else:
-                    # 計算需要等待的時間
-                    if prev_waypoints and waypoints:
-                        start_point = waypoints[0]
-                        speed = drone.mission.params.get('speed', 10.0)
-                        
-                        loiter_time = collision_system.calculate_loiter_delay(
-                            prev_waypoints, start_point, speed
-                        )
-                        
-                        # 加上額外的時間錯開
-                        loiter_time += idx * self.swarm_params['time_buffer']
-                        
-                        loiter_times.append(loiter_time)
-                        prev_waypoints = waypoints
-                    else:
-                        loiter_times.append(idx * self.swarm_params['time_buffer'])
-            
-            return loiter_times
-        except ImportError:
-            # 如果無法導入 collision_avoidance，使用簡單的時間錯開
-            return [i * 5.0 for i in range(len(self.drones))]
+        return [i * 5.0 for i in range(len(self.drones))]
     
     def calculate_rtl_altitudes(self, base_altitude: float = 50.0) -> List[float]:
         """
@@ -241,23 +201,13 @@ class SwarmMission:
             mission: 任務實例
             loiter_time: 等待時間（秒）
         """
-        try:
-            from collision_avoidance import CollisionAvoidanceSystem
-            
-            collision_system = CollisionAvoidanceSystem()
-            
-            # 轉換為 QGC 格式
-            lines = mission.waypoints.to_qgc_format()
-            
-            # 插入 LOITER 命令（在速度設定後）
-            updated_lines = collision_system.insert_loiter_command(
-                lines, loiter_time, insert_after_line=2
-            )
-            
-            # 更新任務航點
-            mission.waypoints = WaypointSequence.from_qgc_format(updated_lines)
-        except Exception as e:
-            print(f"插入 LOITER 命令失敗: {e}")
+        # 註：原本嘗試 import 不存在的 collision_avoidance.CollisionAvoidanceSystem
+        # 的 insert_loiter_command，把 LOITER 命令插進任務航點；但該模組/類別/方法
+        # 從未存在，故此方法 runtime 一直是 no-op（每次呼叫只印一行錯誤）。loiter
+        # 時序實際由 drone.start_time 表示（見 apply_collision_avoidance）。
+        # 已移除無法解析的死 import，改為明確 no-op。若日後要真的把 LOITER 命令
+        # 插入任務航點序列，需另行實作（mission.waypoints 的 QGC 互轉已具備）。
+        return
     
     def _update_rtl_altitude(self, mission: Mission, rtl_altitude: float):
         """

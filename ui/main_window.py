@@ -638,59 +638,38 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
 
         return panel_widget
     
+    def _add_action(self, toolbar, text: str, tip: str, slot):
+        """(1-7) 建立並加入一個工具列 QAction，收斂重複樣板。
+
+        等同 QAction(text,self)+setStatusTip(tip)+triggered.connect(slot)+addAction。
+        回傳該 QAction（呼叫端需要時可保留）。
+        """
+        action = QAction(text, self)
+        action.setStatusTip(tip)
+        action.triggered.connect(slot)
+        toolbar.addAction(action)
+        return action
+
     def create_toolbar(self):
         """創建工具列"""
         toolbar = QToolBar("主工具列")
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
-        
-        # 新建任務
-        new_action = QAction("🆕 新建", self)
-        new_action.setStatusTip("創建新任務")
-        new_action.triggered.connect(self.on_new_mission)
-        toolbar.addAction(new_action)
-        
-        # 開啟任務
-        open_action = QAction("📂 開啟", self)
-        open_action.setStatusTip("開啟現有任務")
-        open_action.triggered.connect(self.on_open_mission)
-        toolbar.addAction(open_action)
-        
-        # 儲存任務
-        save_action = QAction("💾 儲存", self)
-        save_action.setStatusTip("儲存當前任務")
-        save_action.triggered.connect(self.on_save_mission)
-        toolbar.addAction(save_action)
-        
-        toolbar.addSeparator()
-        
-        # 預覽路徑
-        preview_action = QAction("👁 預覽", self)
-        preview_action.setStatusTip("預覽飛行路徑")
-        preview_action.triggered.connect(self.on_preview_paths)
-        toolbar.addAction(preview_action)
-        
-        # 匯出航點
-        export_action = QAction("📤 匯出", self)
-        export_action.setStatusTip("匯出航點檔案")
-        export_action.triggered.connect(self.on_export_waypoints)
-        toolbar.addAction(export_action)
-        
-        toolbar.addSeparator()
 
-        # 蜂群打擊（VTOL 全任務生命週期）— 開啟浮動戰術面板
-        swarm_action = QAction("🎯 蜂群打擊", self)
-        swarm_action.setStatusTip("開啟 VTOL 蜂群打擊任務規劃面板（起飛 → 巡航 → 2km 決斷圈 → ROE）")
-        swarm_action.triggered.connect(self.on_open_swarm_strike_panel)
-        toolbar.addAction(swarm_action)
-
+        self._add_action(toolbar, "🆕 新建", "創建新任務", self.on_new_mission)
+        self._add_action(toolbar, "📂 開啟", "開啟現有任務", self.on_open_mission)
+        self._add_action(toolbar, "💾 儲存", "儲存當前任務", self.on_save_mission)
         toolbar.addSeparator()
-
-        # 清除全部
-        clear_action = QAction("🗑 清除", self)
-        clear_action.setStatusTip("清除所有標記和路徑")
-        clear_action.triggered.connect(self.on_clear_all)
-        toolbar.addAction(clear_action)
+        self._add_action(toolbar, "👁 預覽", "預覽飛行路徑", self.on_preview_paths)
+        self._add_action(toolbar, "📤 匯出", "匯出航點檔案", self.on_export_waypoints)
+        toolbar.addSeparator()
+        self._add_action(
+            toolbar, "🎯 蜂群打擊",
+            "開啟 VTOL 蜂群打擊任務規劃面板（起飛 → 巡航 → 2km 決斷圈 → ROE）",
+            self.on_open_swarm_strike_panel,
+        )
+        toolbar.addSeparator()
+        self._add_action(toolbar, "🗑 清除", "清除所有標記和路徑", self.on_clear_all)
     
     def create_statusbar(self):
         """創建狀態列"""

@@ -797,9 +797,8 @@ class AeroPlanMainWindow(QMainWindow):
             QTimer.singleShot(timeout_ms, self._clear_status)
 
     def _clear_status(self) -> None:
-        self._status_label.setText("SYSTEM READY  /  系統就緒")
-        self._status_label.setProperty("msgSeverity", "info")
-        repolish(self._status_label)
+        # (1-7) reuse show_status 避免重複狀態列設定樣板；timeout_ms=0 常駐不再排程
+        self.show_status("SYSTEM READY  /  系統就緒", "info", timeout_ms=0)
 
     # ------------------------------------------------------------------
     # 事件

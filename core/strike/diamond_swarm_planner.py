@@ -456,6 +456,8 @@ class DiamondSwarmStrikePlanner:
         n_total = len(slots)
         leg_lengths: List[float] = []
         per_uav_cruise_alts: List[float] = []     # 各機個體巡航高度 (m)
+        slot_positions: List[Tuple[float, float]] = []   # (1-3) lineup 起飛點，供第二迴圈 reuse
+        climb_horiz_list: List[float] = []               # (1-3) 爬升水平距離，供第二迴圈 reuse
         for slot_idx, slot in enumerate(slots):
             # 該機個體巡航高度 — 機間錯開避免空中碰撞
             plan_cruise_alt = cfg.cruise_alt_m + slot_idx * cfg.altitude_step_m
@@ -474,6 +476,8 @@ class DiamondSwarmStrikePlanner:
             lineup_lx = (slot_idx - (n_total - 1) / 2.0) * cfg.runway_spacing_m
             de_lu, dn_lu = self._local_to_enu(lineup_lx, 0.0, cruise_heading_deg)
             sl_lat, sl_lon = self._enu_to_latlon(b_lat, b_lon, de_lu, dn_lu)
+            slot_positions.append((sl_lat, sl_lon))       # (1-3) 供第二迴圈 reuse
+            climb_horiz_list.append(plan_climb_horiz)     # (1-3) 供第二迴圈 reuse
             # ② 該機爬升結束點（按該機高度算的水平距離）
             cl_lat, cl_lon = destination(
                 sl_lat, sl_lon, cruise_heading_deg, plan_climb_horiz
@@ -534,16 +538,11 @@ class DiamondSwarmStrikePlanner:
             (d_lat, d_lon) = dive_pts[bearing_idx]
 
             # ── Phase 1：跑道並排起飛點（lineup）─────────────────────────────
-            # 地面 local 座標：x = 跑道左右偏移、y = 0（所有機同一條起跑線）
-            lineup_local_x = (slot_idx - (n_total - 1) / 2.0) * cfg.runway_spacing_m
-            de_lu, dn_lu = self._local_to_enu(
-                lineup_local_x, 0.0, cruise_heading_deg
-            )
-            slot_lat0, slot_lon0 = self._enu_to_latlon(b_lat, b_lon, de_lu, dn_lu)
-
-            # 該機個體巡航高度（用於 Phase 1 爬升、編隊段、俯衝起點）
+            # (1-3 去重) lineup 起飛點 (slot_lat0/lon0) 與爬升水平距離 plan_climb_horiz
+            #   已在第一迴圈以相同輸入算過，此處直接 reuse 避免重算（逐位元相同）。
+            slot_lat0, slot_lon0 = slot_positions[slot_idx]
             plan_cruise_alt = per_uav_cruise_alts[slot_idx]
-            plan_climb_horiz = plan_cruise_alt / math.tan(takeoff_pitch_rad)
+            plan_climb_horiz = climb_horiz_list[slot_idx]
 
             plan = UAVStrikePlan(
                 sysid=slot.sysid,

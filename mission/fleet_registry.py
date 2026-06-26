@@ -98,6 +98,26 @@ class FleetRegistry(QObject):
     def latest(self, callsign: str) -> Optional[TelemetryFrame]:
         return self._latest.get(callsign)
 
+    def latest_by_sysid(self, sysid: int) -> Optional[TelemetryFrame]:
+        """以 sysid 取最新遙測（多機協調器用 sysid 為鍵）。"""
+        cs = self._sysid_index.get(int(sysid))
+        return self._latest.get(cs) if cs else None
+
+    def snapshot(self) -> Dict[int, TelemetryFrame]:
+        """全機最新遙測快照 {sysid: TelemetryFrame}。
+
+        這是「各機之間的資訊互通」的共享黑板讀取點：終端同步打擊協調器每個 tick
+        以此取得**全機**即時態勢，據以計算同步釋放閘 / ToT 速度修正 / 兩兩防撞間隔
+        —— 每架的決策都是全機狀態的函數，而非各看各的。
+        """
+        out: Dict[int, TelemetryFrame] = {}
+        # list(...) 快照鍵集，避免遍歷中 register/unregister 改動 dict 觸發 RuntimeError
+        for sysid, cs in list(self._sysid_index.items()):
+            fr = self._latest.get(cs)
+            if fr is not None:
+                out[int(sysid)] = fr
+        return out
+
     def latest_age_sec(self, callsign: str) -> float:
         """最後一筆遙測距今秒數；無資料回傳 inf。"""
         ts = self._last_packet_ts.get(callsign)

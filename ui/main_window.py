@@ -270,8 +270,16 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
             self.strike_ttt_dashboard.launch_requested.connect(
                 self.launch_kamikaze_synchronized
             )
+            # TERMINAL SYNC → 閉環終端同步打擊（FleetRegistry 共享黑板 + ToT 修正）
+            self.strike_ttt_dashboard.terminal_sync_requested.connect(
+                self.launch_terminal_sync_strike
+            )
             self.strike_ttt_dashboard.abort_requested.connect(
                 self.strike_ttt_dashboard.stop_countdown
+            )
+            # ABORT 同時中止閉環終端同步打擊（若進行中）
+            self.strike_ttt_dashboard.abort_requested.connect(
+                self.abort_terminal_sync
             )
         except Exception as e:
             logger.warning(f'[TTT Dashboard] 初始化失敗: {e}')
@@ -6529,6 +6537,18 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
 
     def closeEvent(self, event):
         """視窗關閉事件"""
+        # 先停掉閉環終端同步打擊 tick + 視覺化 telemetry 訂閱，避免 timer/handler 在
+        # widget 銷毀後仍觸發（存取已刪除的 statusBar / cesium）。
+        try:
+            if hasattr(self, 'abort_terminal_sync'):
+                self.abort_terminal_sync()
+        except Exception:
+            pass
+        try:
+            if getattr(self, '_strike_viz_state', None) is not None:
+                self._finalize_strike_visualization()
+        except Exception:
+            pass
         # 確保 SITL 執行緒安全停止
         for _link in self._sitl_links:
             try:

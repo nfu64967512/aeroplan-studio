@@ -204,210 +204,6 @@ class StrikeControllerMixin:
         self._on_diamond_strike_execute(params)
         return  # ★ 不再 fallthrough 到舊 TerminalStrikePlanner（避免螺旋俯衝視覺殘留）
 
-        # ── Schema 驗證：在進入規劃邏輯前先確認參數合法 ────────
-        # (2026 重構：以 config.schemas 做 fail-fast 驗證，取代散落的 if 檢查)
-        try:
-            from config.schemas import StrikeParameters
-            schema_params = {
-                'launch_mode':   params.get('mode', 'DTOT'),
-                'timing_mode':   params.get('timing_mode', 'STOT'),
-                'interval_sec':  params.get('interval_sec', 0.0),
-                'cruise_alt':    params.get('cruise_alt', 500.0),
-                'cruise_speed':  params.get('cruise_speed', 60.0),
-                'altitude_step': params.get('altitude_step', 30.0),
-                'max_dive_angle': params.get('max_dive_angle', 45.0),
-                'dive_initiation_dist': params.get('dive_initiation_dist', 800.0),
-                'max_speed':     params.get('max_speed', 85.0),
-                'stall_speed':   params.get('stall_speed', 25.0),
-                'min_turn_radius': params.get('min_turn_radius', 150.0),
-            }
-            sp = StrikeParameters.from_dict(schema_params)
-            sp.validate()
-        except ValueError as e:
-            QMessageBox.warning(
-                self, '蜂群打擊 — 參數錯誤',
-                f'參數驗證失敗，請檢查設定:\n\n{e}'
-            )
-            logger.warning(f'[Strike] 參數驗證失敗: {e}')
-            return
-        except Exception as e:
-            logger.warning(f'[Strike] Schema 檢查異常 (忽略): {e}')
-
-        # ── VTOL 模式分流 ──────────────────────────────────────
-        vtol_params = self.parameter_panel.get_strike_vtol_params()
-        if vtol_params.get('enabled', False):
-            self._on_strike_execute_vtol(params, vtol_params)
-            return
-
-        import json
-        from core.strike.terminal_strike_planner import (
-            TerminalStrikePlanner, StrikeTarget,
-        )
-
-        if not self._strike_targets:
-            QMessageBox.warning(self, '蜂群打擊', '請先標記至少一個打擊目標')
-            return
-
-        # ── 讀取「發射位置」模式 (2026 重構：SAME/DIFF 取代 STOT/DTOT) ─
-        # normalize_launch_mode 同時處理新值 (SAME/DIFF) 與 legacy (STOT/DTOT/中文)
-        from core.strike.time_coordination import normalize_launch_mode
-        launch_mode = normalize_launch_mode(
-            params.get('launch_mode') or params.get('mode', 'DIFF')
-        )
-
-        # ── 同地發射必須先設定共用發射基地 ──────────────────────
-        if launch_mode == 'SAME' and self._strike_launch_base is None:
-            QMessageBox.warning(
-                self, '同地發射 (SAME) 所需基地未設定',
-                '請先使用「📍 從地圖標記共用發射基地」按鈕設定起飛點。'
-            )
-            return
-
-        # 關閉任何進行中的標記模式
-        if self._strike_marking_mode:
-            self._on_strike_mark_targets()
-        if self._strike_base_marking_mode:
-            self._toggle_strike_base_marking(False)
-
-        cruise_alt = params.get('cruise_alt', 500.0)
-        cruise_speed = params.get('cruise_speed', 60.0)
-        max_dive = params.get('max_dive_angle', 45.0)
-        dive_dist = params.get('dive_initiation_dist', 800.0)
-        alt_step = params.get('altitude_step', 30.0)
-        anim_speed = params.get('anim_speed', 3.0)
-        turn_radius = params.get('min_turn_radius',
-                                 max(cruise_speed ** 2 / (9.81 * math.tan(math.radians(30.0))), 80.0))
-
-        # 建立目標列表
-        targets = []
-        for i, (lat, lon) in enumerate(self._strike_targets):
-            targets.append(StrikeTarget(target_id=i + 1, lat=lat, lon=lon))
-
-        # 建立規劃器（含起飛爬升 + Dubins 巡航 + 末端俯衝 三段）
-        planner = TerminalStrikePlanner(
-            max_dive_angle_deg=max_dive,
-            dive_initiation_dist_m=dive_dist,
-            cruise_alt_m=cruise_alt,
-            cruise_speed_mps=cruise_speed,
-            altitude_step_m=alt_step,
-            takeoff_alt_m=0.0,
-            climb_angle_deg=8.0,
-            min_turn_radius_m=turn_radius,
-            use_dubins_cruise=True,
-        )
-
-        # ── 依發射位置分流規劃 ──────────────────────────────────
-        if launch_mode == 'SAME':
-            base_lat, base_lon = self._strike_launch_base
-            trajectories = planner.plan_stot(
-                targets,
-                launch_lat=base_lat,
-                launch_lon=base_lon,
-                launch_alt=0.0,
-            )
-            logger.info(
-                f'[Strike/SAME] 同地發射：base=({base_lat:.6f}, {base_lon:.6f}), '
-                f'{len(targets)} 目標 → {len(trajectories)} 架 UCAV'
-            )
-        else:
-            # DIFF (異地)：各 UCAV 依目標分散起飛
-            trajectories = planner.plan_auto(targets, spawn_dist_m=1500.0)
-            logger.info(
-                f'[Strike/DIFF] 異地發射：{len(targets)} 目標 → {len(trajectories)} 架 UCAV'
-            )
-
-        # 保留舊變數名以利後面程式碼最小修改 (mode == launch_mode)
-        mode = launch_mode
-
-        if not trajectories:
-            QMessageBox.warning(self, '蜂群打擊', '軌跡規劃失敗：無有效分配')
-            return
-
-        # 轉換為 Cesium JSON 並送往前端
-        cesium_data = planner.trajectories_to_cesium_data(trajectories, targets)
-        data_json = json.dumps(cesium_data)
-
-        cesium = self._get_cesium_widget()
-        if cesium:
-            # 直接渲染靜態打擊路徑（起飛=黃 / 巡航=綠 / 俯衝=紅），
-            # 不再播放飛行動畫，讓操作員可檢視整條預定航線
-            cesium.strike_render_path(data_json)
-
-        # 快取結果 → 供「匯出打擊任務」按鈕使用 (含模式與基地資訊)
-        # 使用 TypedDict 確保 schema 一致性 (core.strike.strike_result)
-        from core.strike.strike_result import make_empty_strike_result
-        self._strike_result = make_empty_strike_result(
-            mode=mode,                                         # 'SAME' 同地 / 'DIFF' 異地
-            launch_base=self._strike_launch_base,              # (lat, lon) 或 None
-            trajectories=trajectories,
-            targets=targets,
-            params=dict(params),
-        )
-        self.parameter_panel.set_strike_export_enabled(True)
-
-        # ── 時空協同即時預算：依 timing_mode 計算各機 TOT 速度預覽 ──────
-        # 架構說明：
-        #   mode         = 發射位置 ('SAME' 同地 / 'DIFF' 異地) → 已於空間規劃階段處理
-        #   timing_mode  = 時間協同 ('STOT' 同時 / 'DTOT' 間隔) → 此處決定 TOT 排程
-        timing_mode = params.get('timing_mode', 'STOT')
-        interval_sec = float(params.get('interval_sec', 0.0))
-        try:
-            from core.strike.dtot_coordinator import DTOTCoordinator
-            stall_v = params.get('stall_speed',
-                                 self.parameter_panel._strike_stall_speed.value())
-            max_v = params.get('max_speed',
-                               self.parameter_panel._strike_max_speed.value())
-            turn_r = params.get('min_turn_radius',
-                                self.parameter_panel._strike_turn_radius.value())
-            coord = DTOTCoordinator(
-                cruise_speed_mps=cruise_speed,
-                max_speed_mps=max_v,
-                stall_speed_mps=stall_v,
-                min_turn_radius_m=turn_r,
-            )
-            plans = coord.coordinate(
-                trajectories,
-                mode=timing_mode,
-                interval_sec=interval_sec if timing_mode == 'DTOT' else 0.0,
-            )
-            if plans:
-                # STOT: 所有機同秒命中；DTOT: slot k 於 T+k·Δ 命中
-                if timing_mode == 'STOT':
-                    tot = plans[0].tot_sec
-                    pv = [f'STOT — TOT = {tot:.1f}s (同秒命中)']
-                else:
-                    tots = sorted(p.tot_sec for p in plans)
-                    pv = [f'DTOT Δ={interval_sec:.1f}s → 命中時刻 '
-                          + ', '.join(f'{t:.1f}' for t in tots) + 's']
-                for p in plans:
-                    hold = f' +Loiter {p.holding_time_sec:.0f}s' if p.holding_time_sec > 0.5 else ''
-                    flag = '' if p.feasible else ' [NG]'
-                    pv.append(
-                        f'{p.uav_name}: V={p.required_speed_mps:.1f}m/s '
-                        f'@t={p.tot_sec:.0f}s{hold}{flag}'
-                    )
-                self.parameter_panel.update_dtot_preview('\n'.join(pv))
-                # 快取計畫結果，供匯出/SITL 上傳時免重算
-                self._strike_result['coord_plans'] = plans
-                self._strike_result['timing_mode'] = timing_mode
-                self._strike_result['interval_sec'] = interval_sec
-        except Exception as e:
-            logger.warning(f'[Strike] 時空協同預算失敗: {e}')
-
-        # 顯示結果摘要
-        summary_lines = [
-            f'蜂群打擊規劃完成 ({mode})：{len(trajectories)} 架 UCAV → '
-            f'{len(targets)} 個目標（高度錯層 {alt_step:.0f}m）'
-        ]
-        for tr in trajectories:
-            summary_lines.append(
-                f'  {tr.uav_name} → {tr.target_name}: '
-                f'{tr.total_distance_m:.0f}m, alt={tr.cruise_alt_m:.0f}m, '
-                f'dive@WP{tr.dive_start_index}'
-            )
-        self.statusBar().showMessage(summary_lines[0], 5000)
-        logger.info('\n'.join(summary_lines))
-
     # ═════════════════════════════════════════════════════════════════
     #  Diamond Swarm Strike — 4 機菱形編隊 + STOT 飽和打擊
     # ═════════════════════════════════════════════════════════════════
@@ -963,6 +759,207 @@ class StrikeControllerMixin:
         # ─────────────────────────────────────────────────────────────
         self._start_strike_visualization(plans, scheduled)
 
+    # ═════════════════════════════════════════════════════════════════
+    #  閉環終端同步打擊 — FleetRegistry 共享黑板 + 同步釋放 + ToT 速度修正
+    # ═════════════════════════════════════════════════════════════════
+    def launch_terminal_sync_strike(self):
+        """閉環終端同步打擊：以 FleetRegistry 共享黑板為態勢源，分段同步釋放 + 飛行中 ToT
+        速度修正 → 確保多機同時命中（實測命中散度 ~4s，遠優於開環 ~38s）。
+
+        與 launch_kamikaze_synchronized（開環：mission 內 S 機動/盤旋補時 + 排程起飛）互補：
+        建議流程「先 KAMIKAZE LAUNCH 起飛巡航 → 各機接近目標區後按 TERMINAL SYNC 收尾」。
+        本流程每個 tick 讀「全機」即時態勢（snapshot），每架的指令都是全機狀態的函數
+        （同步釋放閘＝全員就位、ToT 速度＝最遠機 ETA、防撞＝兩兩間隔）→ 各機資訊互通。
+        """
+        from PyQt6.QtCore import QTimer
+        plans = getattr(self, '_diamond_plans', None)
+        target = getattr(self, '_diamond_target', None)
+        cfg = getattr(self, '_diamond_cfg', None)
+        if not plans or target is None:
+            QMessageBox.information(
+                self, '無蜂群打擊任務',
+                '尚未規劃蜂群打擊，請先按「執行打擊」生成菱形 STOT 計畫')
+            return
+        if not getattr(self, '_sitl_links', None):
+            QMessageBox.warning(self, 'SITL 未連線', '尚未連線任何 SITL')
+            return
+
+        from mission.fleet_registry import FleetRegistry
+        from core.strike.terminal_sync_coordinator import TerminalSyncCoordinator
+        from core.strike.terminal_sync import equidistant_push_points, layered_altitudes
+
+        reg = FleetRegistry.instance()
+        snap = reg.snapshot()                       # ★ 共享黑板：全機即時態勢
+        seen = [p.sysid for p in plans if p.sysid in snap]
+        if len(seen) < len(plans):
+            missing = [p.sysid for p in plans if p.sysid not in snap]
+            ans = QMessageBox.question(
+                self, '部分機尚未回報遙測',
+                f'FleetRegistry 共享黑板目前只看到 {len(seen)}/{len(plans)} 機'
+                f'（缺 UAV {missing}）。\n協調器會等到全機就位才同步釋放；仍要啟動嗎？',
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if ans != QMessageBox.StandardButton.Yes:
+                return
+
+        # ── 由 plan 建構等距 push points + 分層平飛高度（缺值則用幾何回退）──
+        ordered = sorted(plans, key=lambda x: x.sysid)
+        bearings = [float(p.attack_bearing_deg) for p in ordered]
+        stage_m = float(getattr(cfg, 'pre_strike_radius_m', 1500.0)) or 1500.0
+        fallback_pp = equidistant_push_points(target.lat, target.lon, bearings, stage_m)
+        base_alt = float(getattr(cfg, 'cruise_alt_m', 200.0)) or 200.0
+        step = max(float(getattr(cfg, 'altitude_step_m', 0.0)), 16.0)
+        fallback_alt = layered_altitudes(len(plans), base_alt, step)
+
+        push, approach = {}, {}
+        for i, p in enumerate(ordered):
+            if abs(p.pre_strike_lat) > 1e-9 and abs(p.pre_strike_lon) > 1e-9:
+                push[p.sysid] = (float(p.pre_strike_lat), float(p.pre_strike_lon))
+            else:
+                push[p.sysid] = fallback_pp[i]
+            approach[p.sysid] = float(p.cruise_alt) if p.cruise_alt > 1.0 else fallback_alt[i]
+
+        v_cruise = float(getattr(cfg, 'cruise_speed_mps', 20.0))
+        if v_cruise <= 1.0:
+            v_cruise = 20.0
+        v_min = max(v_cruise * 0.6, 10.0)
+        v_max = max(v_cruise * 1.15, v_min + 4.0)   # 保證 v_max > v_min（小 cruise 時不退化）
+        try:
+            coord = TerminalSyncCoordinator(
+                target.lat, target.lon, push, approach,
+                v_min=v_min, v_max=v_max,
+                arrive_m=max(stage_m * 0.18, 200.0),
+                target_radius_m=150.0, impact_buffer_s=4.0,
+            )
+        except Exception as e:
+            QMessageBox.critical(self, '終端同步協調器初始化失敗', f'參數無效：{e}')
+            logger.error(f'[TSYNC] coordinator init failed: {e}', exc_info=True)
+            return
+        self._tsync = {'coord': coord, 'plans': plans, 'n': len(plans),
+                       't0': None, 'last_log': -1e9, 'impact_t': {}}
+        if getattr(self, '_tsync_timer', None) is None:
+            self._tsync_timer = QTimer(self)
+            self._tsync_timer.timeout.connect(self._tick_terminal_sync)
+        self._tsync_timer.start(1000)
+
+        # 鎖住儀表板兩個啟動鈕（與開環 KAMIKAZE 互斥），開 ABORT
+        dash = getattr(self, 'strike_ttt_dashboard', None)
+        if dash is not None and hasattr(dash, 'set_strike_running'):
+            dash.set_strike_running(True)
+
+        # 共用 3D 攻擊視覺化（cesium 不可用時自動略過）
+        try:
+            self._start_strike_visualization(plans, [(p.sysid, 0.0) for p in plans])
+        except Exception:
+            pass
+
+        self.statusBar().showMessage(
+            f'🎯 閉環終端同步打擊啟動：{len(plans)} 機（共享黑板看到 {len(seen)} 機）'
+            f'→ 等距同步釋放 + ToT 修正中…', 8000)
+        logger.info(
+            f'[TSYNC] launch n={len(plans)} seen={len(seen)} stage={stage_m:.0f}m '
+            f'v=[{coord.tot.v_min:.0f},{coord.tot.v_max:.0f}] arrive={coord.arrive_m:.0f}m')
+
+    def _tick_terminal_sync(self):
+        """1Hz：讀 FleetRegistry 全機快照 → 協調器 step() → 派送指令到各 SITLLink。"""
+        import time as _t
+        from mission.fleet_registry import FleetRegistry
+        from core.strike.terminal_sync_coordinator import FleetState, PHASE_DONE
+        ts = getattr(self, '_tsync', None)
+        if not ts:
+            if getattr(self, '_tsync_timer', None):
+                self._tsync_timer.stop()
+            return
+        now = _t.monotonic()
+        if ts['t0'] is None:
+            ts['t0'] = now
+        t = now - ts['t0']
+
+        reg = FleetRegistry.instance()
+        snap = reg.snapshot()                       # ★ 全機共享態勢（資訊互通讀取點）
+        now_wall = _t.time()
+        MAX_AGE_S = 5.0                              # 過期遙測不採用（交給協調器失聯邏輯）
+        states = {}
+        for p in ts['plans']:
+            fr = snap.get(p.sysid)
+            if fr is None:
+                continue
+            if now_wall - float(getattr(fr, 'last_update', now_wall)) > MAX_AGE_S:
+                continue                            # 陳舊：連線掉/卡 → 視為缺，不據此下令
+            states[p.sysid] = FleetState(
+                p.sysid, float(fr.lat), float(fr.lon),
+                float(fr.alt_rel), float(fr.ground_speed), t)
+        res = ts['coord'].step(states, t)
+
+        # 派送協調器算出的各機指令（每架命令皆為全機態勢函數）
+        for cmd in res.commands:
+            link = reg.get_link_by_sysid(cmd.sysid)
+            if link is None:
+                continue
+            try:
+                if cmd.kind == 'goto':
+                    link.guided_goto(cmd.lat, cmd.lon, cmd.alt)
+                elif cmd.kind == 'speed':
+                    link.change_speed(cmd.speed)
+            except Exception as e:
+                logger.warning(f'[TSYNC] UAV{cmd.sysid} 指令 {cmd.kind} 失敗: {e}')
+
+        for sid in res.impacted:
+            ts['impact_t'].setdefault(sid, t)
+
+        if t - ts['last_log'] >= 2.0:
+            ts['last_log'] = t
+            gate = f'UAV{res.gating_sysid}' if res.gating_sysid else '─'
+            sep = ('%.0f' % res.min_separation_m) if res.min_separation_m < 1e8 else '∞'
+            msg = (f'[TSYNC t={t:5.1f}] {res.phase} 就位{len(res.staged)}/{ts["n"]} '
+                   f'命中{len(res.impacted)}/{ts["n"]} 見{len(res.seen_sysids)}機 '
+                   f'minSep={sep}m 等待{gate} {res.note}')
+            logger.info(msg)
+            self.statusBar().showMessage(msg, 3000)
+
+        if res.phase == PHASE_DONE or t > 900.0:
+            self._tsync_timer.stop()
+            its = ts['impact_t']
+            if its and res.phase == PHASE_DONE:
+                spread = max(its.values()) - min(its.values())
+                summary = (f'✅ 終端同步打擊完成：{len(its)}/{ts["n"]} 機命中，'
+                           f'命中散度 {spread:.1f}s（同時命中）')
+            elif its:
+                summary = f'⚠ 終端同步逾時：{len(its)}/{ts["n"]} 機命中'
+            else:
+                summary = '⚠ 終端同步結束：尚無命中紀錄'
+            self.statusBar().showMessage(summary, 12000)
+            logger.info(f'[TSYNC] {summary}')
+            self._tsync = None
+            dash = getattr(self, 'strike_ttt_dashboard', None)
+            if dash is not None and hasattr(dash, 'set_strike_running'):
+                dash.set_strike_running(False)
+
+    def abort_terminal_sync(self):
+        """中止進行中的閉環終端同步打擊（ABORT 按鈕也會呼叫）。
+
+        停掉 tick timer、清狀態；不對已起飛的 UAV 發 RTL（與 KAMIKAZE ABORT 一致，
+        避免誤把自殺機召回）。使用者可重新 TERMINAL SYNC 啟動。
+        """
+        if getattr(self, '_tsync_timer', None) is not None:
+            try:
+                self._tsync_timer.stop()
+            except Exception:
+                pass
+        # 收掉本流程啟動的 3D 視覺化 telemetry 訂閱（避免懸空 handler）
+        try:
+            if getattr(self, '_strike_viz_state', None) is not None:
+                self._finalize_strike_visualization()
+        except Exception:
+            pass
+        if getattr(self, '_tsync', None) is not None:
+            self._tsync = None
+            self.statusBar().showMessage('⏹ 閉環終端同步打擊已中止（不召回已起飛 UAV）', 6000)
+            logger.info('[TSYNC] aborted by user')
+        # 還原儀表板按鈕（結束 running 狀態）
+        dash = getattr(self, 'strike_ttt_dashboard', None)
+        if dash is not None and hasattr(dash, 'set_strike_running'):
+            dash.set_strike_running(False)
+
     def _start_strike_visualization(self, plans, scheduled):
         """KAMIKAZE LAUNCH 後啟動 3D 攻擊視覺化（軌跡 / HUD / 爆炸 / BDA）。
 
@@ -974,6 +971,13 @@ class StrikeControllerMixin:
         """
         if not self._strike_targets:
             return
+        # 防重複訂閱：若已有進行中的視覺化（開環或上一輪），先收掉再重啟，
+        # 避免 FleetRegistry.telemetry_updated 累積多個 handler。
+        if getattr(self, '_strike_viz_state', None) is not None:
+            try:
+                self._finalize_strike_visualization()
+            except Exception:
+                pass
         cesium = self._get_cesium_widget()
         if cesium is None or not hasattr(cesium, 'strike_viz_begin'):
             return
@@ -1193,7 +1197,6 @@ class StrikeControllerMixin:
                 ))
         else:
             # 異地發射：使用「目標周邊分散點」近似（真實場景應用實際起飛點）
-            import math as _math
             n = len(self._strike_targets)
             for i in range(n):
                 # 目標外圍 1.5 km 方圓產生起飛點
@@ -1266,7 +1269,7 @@ class StrikeControllerMixin:
 
         # ── 結果摘要 ────────────────────────────────────────────
         summary = (f'VTOL 蜂群打擊規劃完成：{len(vtol_plans)} 架 UCAV → '
-                   f'{mode} 發射 / {timing_mode} 時間協同')
+                   f'{launch_mode} 發射 / {timing_mode} 時間協同')
         self.statusBar().showMessage(summary, 5000)
         logger.info(summary)
         for p in vtol_plans:
@@ -1536,7 +1539,6 @@ class StrikeControllerMixin:
         模式以「快取的 _strike_result['mode']」為準（即 EXECUTE 時選的發射模式），
         避免使用者在不同介面設定不一致。
         """
-        import os
         from core.strike.dtot_coordinator import DTOTCoordinator
 
         if not self._strike_result:
@@ -1661,7 +1663,6 @@ class StrikeControllerMixin:
           1. 兩兩巡航高度差 (step < 25m 視為違規)
           2. 盤旋中心兩兩 2D 距離 (若 < 2R 且同高度層則衝突)
         """
-        import math as _math
         conflicts = []
         min_alt_sep = 25.0
 
@@ -1899,7 +1900,7 @@ class StrikeControllerMixin:
 
         speed_mode = ('協同空速 (各機 V_i)' if use_dtot_speed and plan_by_uav
                       else '統一 cruise_speed')
-        timing_desc = (f'STOT 同秒命中' if timing_mode == 'STOT'
+        timing_desc = ('STOT 同秒命中' if timing_mode == 'STOT'
                        else f'DTOT 間隔命中 (Δ={interval_sec:.1f}s)')
         summary = '\n'.join(
             f'  link#{idx}: {name} — V={v:.1f} m/s ({n} 點)'
@@ -2027,11 +2028,18 @@ class StrikeControllerMixin:
             link_idx = uid - 1 if isinstance(uid, int) else -1
             if 0 <= link_idx < len(self._sitl_links):
                 lk = self._sitl_links[link_idx]
-                frame = getattr(lk, 'last_frame', None)
-                if frame and getattr(frame, 'lat', None) is not None:
-                    live_pos = (frame.lat, frame.lon, frame.alt,
-                                getattr(frame, 'heading_deg', 0.0),
-                                getattr(frame, 'groundspeed_mps', 25.0))
+                # SITLLink 沒有 last_frame；即時遙測經 telemetry signal 存進
+                # FleetRegistry，依註冊 callsign（UAV-<sysid_label>）反查最新 frame。
+                # 注意：欄位用真實 TelemetryFrame 名稱（alt_rel/heading/ground_speed），
+                # 而非 Mock 的 alt/heading_deg/groundspeed_mps。
+                sysid = int(getattr(lk, 'sysid_label', 0) or 0)
+                frame = None
+                if sysid:
+                    from mission.fleet_registry import FleetRegistry
+                    frame = FleetRegistry.instance().latest(f'UAV-{sysid}')
+                if frame is not None and frame.is_valid_gps():
+                    live_pos = (frame.lat, frame.lon, frame.alt_rel,
+                                frame.heading, frame.ground_speed)
 
             if live_pos:
                 lat, lon, alt, hdg, gs = live_pos
@@ -2108,7 +2116,7 @@ class StrikeControllerMixin:
                 f'  ! {c}' for c in report.iapf_conflicts[:3]
             )
         if report.iapf_adjustments:
-            conflict_txt += f'\n\nIAPF 避障調整:\n' + '\n'.join(
+            conflict_txt += '\n\nIAPF 避障調整:\n' + '\n'.join(
                 f'  + {a}' for a in report.iapf_adjustments[:3]
             )
 

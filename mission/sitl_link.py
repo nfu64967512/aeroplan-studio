@@ -250,6 +250,14 @@ class SITLLink(QThread):
         current=2），因為 ArduPlane 固定翼 GUIDED 不執行 SET_POSITION_TARGET。"""
         self._cmd_queue.put(('guided_goto', (float(lat), float(lon), float(alt))))
 
+    def change_speed(self, speed_mps: float, speed_type: int = 0):
+        """DO_CHANGE_SPEED：即時設定目標空速 (type=0) / 地速 (type=1)。
+
+        供終端同步打擊的飛行中 Time-on-Target 速度修正（[[tot_controller]]）使用：
+        GCS 端每 ~1s 依各機 ETA 回算應有空速 → 呼叫此法 → 收斂同一命中時刻。
+        """
+        self._cmd_queue.put(('change_speed', (float(speed_mps), int(speed_type))))
+
     def get_latest_telemetry(self) -> Optional['TelemetryFrame']:
         """本連線主 sysid 的最新遙測快照（無則 None）。供外部讀取，避免直接碰 _frames。"""
         return self._frames.get(self.sysid_label)
@@ -686,6 +694,8 @@ class SITLLink(QThread):
                     self._send_guided_takeoff(float(arg))
                 elif cmd == 'guided_goto':
                     self._send_guided_goto(*arg)
+                elif cmd == 'change_speed':
+                    self._send_change_speed(*arg)
                 elif cmd == 'vtol_transition':
                     self._send_vtol_transition(int(arg))
                 elif cmd == 'upload_fence':
@@ -793,6 +803,17 @@ class SITLLink(QThread):
             int(lat * 1e7), int(lon * 1e7), float(alt),
             mavutil.mavlink.MAV_MISSION_TYPE_MISSION)
         self.status_text.emit(6, f'🎯 GUIDED 飛往 ({lat:.5f},{lon:.5f}) @ {alt:.0f}m')
+
+    def _send_change_speed(self, speed_mps: float, speed_type: int):
+        """DO_CHANGE_SPEED：param1=速度類型(0=空速,1=地速)、param2=目標速度、param3=油門(-1 不變)。
+
+        AUTO / GUIDED 皆生效；終端同步打擊在 GUIDED 平飛段以此即時調速收斂命中時刻。
+        """
+        from pymavlink import mavutil
+        self._mav.mav.command_long_send(
+            self._mav.target_system, self._mav.target_component,
+            mavutil.mavlink.MAV_CMD_DO_CHANGE_SPEED, 0,
+            float(speed_type), float(speed_mps), -1, 0, 0, 0, 0)
 
     def _send_mission_start(self):
         """MAV_CMD_MISSION_START：觸發 AUTO 任務執行（ArduPlane SITL 必要）"""

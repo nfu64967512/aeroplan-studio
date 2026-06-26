@@ -49,6 +49,8 @@ def energy_per_distance(v: float, v_eff: float) -> float:
 
 def _aircraft_energy(r: float, tau: float, v_min: float, v_eff: float) -> float:
     """單機在共同剩餘時間 τ 下的能量（直線段 vs 耗時段）。"""
+    if r <= 0.0:
+        return 0.0                       # 已在目標 → 零距離零能量（勿落入 burn 分支）
     if tau <= 0.0:
         return float('inf')
     v = r / tau
@@ -96,10 +98,18 @@ def negotiate_tgo(rs: Dict[int, float], v_min: float, v_max: float,
         raise ValueError("rs 不可為空")
     if not (0 < v_min < v_max):
         raise ValueError(f"need 0 < v_min < v_max, got {v_min}, {v_max}")
-    if v_eff <= 0:
-        raise ValueError(f"v_eff 需 > 0，收到 {v_eff}")
+    if any(r < 0 for r in rs.values()):
+        raise ValueError(f"剩餘距離 r 需 >= 0，收到 {dict(rs)}")
+    # v_eff 夾進 [v_min, v_max]（能耗最小點須落在可行速度域內；驅動傳巡航速通常即在域內）
+    v_eff = min(max(v_eff, v_min * 1.001), v_max * 0.999)
 
     r_list = list(rs.values())
+    # 全機都已在目標（皆 r=0）→ 退化解：τ*=0、零能量
+    if max(r_list) <= 0.0:
+        return TgoPlan(tgo_common_s=0.0,
+                       roles={s: ROLE_BURN for s in rs},
+                       speeds={s: v_min for s in rs},
+                       energy=0.0, tgo_floor_s=0.0)
     # 可行下界：最遠機都得能（全速）抵達 → τ ≥ max(r/v_max)
     tau_floor = max(r / v_max for r in r_list)
     # 上界：略超過「最遠機以 v_min 飛」的時間（再大全機都在耗時段、能量續增）

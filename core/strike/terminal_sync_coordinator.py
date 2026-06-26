@@ -160,6 +160,7 @@ class TerminalSyncCoordinator:
         self._last_seen: Dict[int, float] = {}   # sysid → 最近一次有遙測的 t（失聯判斷）
         self._t_star: Optional[float] = None     # 協商鎖定的共同命中時刻 t*（絕對秒）
         self._energy: float = 0.0                # 協商 τ* 的總能量（顯示用）
+        self._first_tlm_t: Optional[float] = None  # 首次收到任一機遙測的 t（失聯寬限基準）
 
     # ── 幾何小工具 ────────────────────────────────────────────────────────
     def _stage_radius(self) -> float:
@@ -203,9 +204,10 @@ class TerminalSyncCoordinator:
                 continue
             seen = self._last_seen.get(sid)
             if seen is None:
-                # 啟動寬限：開機初期遙測尚未灌入時，不可把「從未見過」當失聯
-                # （否則第一個 tick 全機被當失聯 → STAGE→…→DONE 空轉收尾）。
-                if t_now > self.lost_timeout_s:
+                # 啟動寬限：以「首次收到任一機遙測」為基準計時（非固定 t=0），
+                # 兼容較慢的任務初始化；完全沒有遙測時退回以 t=0 起算，避免永久等待。
+                base = self._first_tlm_t if self._first_tlm_t is not None else 0.0
+                if t_now - base > self.lost_timeout_s:
                     out.add(sid)
             elif (t_now - seen) > self.lost_timeout_s:
                 out.add(sid)
@@ -218,7 +220,9 @@ class TerminalSyncCoordinator:
         單次 step 內會把已觸發的階段轉換「鏈接」走完（STAGE→RELEASE→CORRECT），
         讓「全員就位」當下就送出釋放 goto + 首輪 ToT 修正，不浪費一個 tick。
         """
-        # 更新「最近有遙測」時戳（失聯判斷的依據）
+        # 更新「最近有遙測」時戳（失聯判斷的依據）+ 記首次遙測時刻（失聯寬限基準）
+        if states and self._first_tlm_t is None:
+            self._first_tlm_t = t_now
         for sid in states:
             if sid in self.sysids:
                 self._last_seen[sid] = t_now
@@ -298,14 +302,6 @@ class TerminalSyncCoordinator:
         self._t_star = t_now + plan.tgo_common_s
         self._energy = plan.energy
 
-    def _ensure_feasible(self, rs: Dict[int, float], t_now) -> None:
-        """維持可達性：若 t* 已逼近到「最遠機全速也來不及」，把 t* 往後推。"""
-        if self._t_star is None or not rs:
-            return
-        floor = t_now + max(r / self.v_max for r in rs.values())
-        if floor > self._t_star:
-            self._t_star = floor
-
     # ── RELEASE：以 t_go 協商出能量最省的共同命中時刻 t*（協同變數），鎖定後入網格 ──
     def _step_release(self, states, t_now, res: StepResult) -> None:
         self._negotiate_lock(states, t_now)
@@ -338,11 +334,10 @@ class TerminalSyncCoordinator:
             res.note = '；'.join(hits)            # 同一 tick 多機命中皆保留，不互相覆蓋
         res.gating_sysid = worst_sid
 
-        # t* 鎖定（首次補算）+ 維持可達性
-        rs = self._remaining_distances(states)
+        # t* 鎖定（首次補算）。鎖定後不再每 tick 以樂觀 v_max 外推 —— 那會讓 t* 微幅漂移
+        # 累積、鬆散命中散度；逾時(t_now>t*)時 τ 自然夾到 0.5 → 全機 sprint 直撲（見下）。
         if self._t_star is None:
             self._negotiate_lock(states, t_now)
-        self._ensure_feasible(rs, t_now)
 
         do_speed = (t_now - self._last_speed_t) >= self.speed_interval_s
         if do_speed:
@@ -394,12 +389,10 @@ class TerminalSyncCoordinator:
                             sysid=sid, kind='goto', lat=st.lat, lon=st.lon,
                             alt=self.alt[sid], reason='loiter'))
                         self._last_goto_t[sid] = t_now
+                    if do_speed:                 # 盤旋以 v_min 慢飛（省油、圈小、耗時最有效）
+                        res.commands.append(StrikeCommand(
+                            sysid=sid, kind='speed', speed=self.v_min, reason='loiter'))
                     res.roles[sid] = ROLE_BURN
-
-        if (self.impacted | lost) >= self.sysids:
-            self.phase = PHASE_DONE
-            res.note = (f'全機收尾：命中 {len(self.impacted)}/{len(self.sysids)}'
-                        + (f'，失聯 {sorted(lost)}' if lost else '')) or res.note
 
         # 收尾：命中 ∪ 失聯 ⊇ 全體（失聯機不得卡死整隊；命中數另由驅動端統計散度）
         if (self.impacted | lost) >= self.sysids:

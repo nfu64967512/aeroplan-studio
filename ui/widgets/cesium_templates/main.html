@@ -1020,7 +1020,6 @@ function setFpvCamera(sysid, gimbalPitchDeg, fovDeg, rollFollow) {
     viewer.scene.preRender.removeEventListener(_chasePreRender);
     _chasePreRender = null;
     _chaseSysid = 0;
-    _chaseCamPos = null;
   }
   _disableFpvCamera();
   try { viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY); } catch(_) {}
@@ -1346,8 +1345,10 @@ function updateUAVPosition(lat, lon, alt, headingDeg, speedMs, sysid, mode, arme
         alignedAxis: Cesium.Cartesian3.UNIT_Z,
         heightReference: Cesium.HeightReference.NONE,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        // GLB 模型現在全距離顯示，平面圖示只在極遠(>80km)當 fallback，
+        // 正常縮放下只看立體姿態模型。無 GLB 時平面圖示 800m 起接手。
         distanceDisplayCondition: useGlbModel
-          ? new Cesium.DistanceDisplayCondition(2000.0, 1.0e8)
+          ? new Cesium.DistanceDisplayCondition(80000.0, 1.0e8)
           : new Cesium.DistanceDisplayCondition(800.0, 1.0e8),
       },
       label: {
@@ -1369,7 +1370,9 @@ function updateUAVPosition(lat, lon, alt, headingDeg, speedMs, sysid, mode, arme
         minimumPixelSize: 32,
         maximumScale: 50,
         scale: 0.01,
-        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2000.0),
+        // 全距離顯示立體模型，遠看靠 minimumPixelSize 保持 ≥32px，姿態
+        // (pitch/roll/yaw) 在任何縮放下都看得到（取代原本 >2000m 退化為平面圖示）。
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 1.0e8),
       };
     } else if (isCopterGlb) {
       console.log('[3D] 載入多旋翼 GLB 模型:', _COPTER_MODEL_URI);
@@ -1378,7 +1381,9 @@ function updateUAVPosition(lat, lon, alt, headingDeg, speedMs, sysid, mode, arme
         minimumPixelSize: 32,
         maximumScale: 50,
         scale: 0.01,
-        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2000.0),
+        // 全距離顯示立體模型，遠看靠 minimumPixelSize 保持 ≥32px，姿態
+        // (pitch/roll/yaw) 在任何縮放下都看得到（取代原本 >2000m 退化為平面圖示）。
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 1.0e8),
       };
     } else if (isPlane) {
       entityOpts.box = {
@@ -1783,7 +1788,7 @@ clickHandler.setInputAction(function (e) {
   }
 }, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
 
-// RIGHT_CLICK — 多邊形完成（主要觸發，比雙擊穩定）
+// RIGHT_CLICK — NFZ 多邊形/圓形完成；非繪製模式時 = GUIDED 飛到此點（Mission Planner 風格）
 clickHandler.setInputAction(function (e) {
   if (_nfzDrawMode === 'polygon') {
     finishNFZPolygon();
@@ -1791,6 +1796,12 @@ clickHandler.setInputAction(function (e) {
     // 圓形繪製中右鍵 = 取消
     setNFZCircleDrawMode(false);
     console.log('[NFZ Draw] circle cancelled via right-click');
+  } else {
+    // 一般模式右鍵 → 拾取地表經緯度，交由 Python 跳高度框後送長機 GUIDED
+    var p = _pickLatLon(e.position);
+    if (p) {
+      window.location.href = 'pyqt://rclick/' + p.lat + '/' + p.lon;
+    }
   }
 }, Cesium.ScreenSpaceEventType.RIGHT_CLICK);
 
@@ -2471,7 +2482,7 @@ function updateFOVCone(sysid, lat, lon, alt, fovRadius, headingDeg, pitchDeg, ro
   }
   sysid = sysid || 1;
 
-  if (!lat || !lon || !alt || alt <= 0) {
+  if (lat == null || lon == null || !(alt > 0)) {   // 0,0 是有效經緯度，勿用 falsy 判斷
     _removeFOVConeForSysid(sysid);
     return;
   }

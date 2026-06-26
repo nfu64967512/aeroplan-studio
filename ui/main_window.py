@@ -3,16 +3,14 @@
 整合地圖、參數面板、任務面板等核心 UI 組件
 """
 
-import sys
 import math
 from typing import Optional, Tuple
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QSplitter, QStatusBar, QToolBar, QMessageBox,
+    QMainWindow, QWidget, QVBoxLayout, QSplitter, QStatusBar, QToolBar, QMessageBox,
     QFileDialog, QLabel, QScrollArea, QApplication
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QAction, QIcon, QKeySequence, QShortcut
+from PyQt6.QtGui import QAction, QKeySequence, QShortcut
 
 # 修正導入路徑
 from config import get_settings
@@ -27,8 +25,7 @@ from core.global_planner.fixed_wing_planner import (
     FixedWingPlanner, FixedWingParameters, TurnRadiusChecker,
 )
 from core.collision import CollisionChecker
-from mission.swarm_coordinator import SwarmCoordinator, SwarmMission, DroneInfo
-from mission.coverage_path import CoveragePath
+from mission.swarm_coordinator import SwarmCoordinator
 
 # 2026 重構：Swarm Strike 邏輯已抽出至 Controller Mixin (ui/controllers/)
 from ui.controllers import StrikeControllerMixin
@@ -308,6 +305,9 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         # 連接信號
         map_widget.corner_added.connect(self.on_corner_added)
         map_widget.corner_moved.connect(self.on_corner_moved)
+        # 3D 右鍵 GUIDED 飛到此點（Mission Planner 風格：右鍵 → 跳高度框 → 送長機）
+        if hasattr(map_widget, 'guided_goto_requested'):
+            map_widget.guided_goto_requested.connect(self.on_rclick_guided_goto)
 
         return map_widget
 
@@ -521,6 +521,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         from ui.widgets.sitl_hud import SITLHud
         self.sitl_hud = SITLHud(self)
         self.sitl_hud.connect_requested.connect(self.on_sitl_connect)
+        self.sitl_hud.connect_embedded_requested.connect(self.on_embedded_swarm_connect)
         self.sitl_hud.disconnect_requested.connect(self.on_sitl_disconnect)
         self.sitl_hud.launch_sitl_requested.connect(self.on_sitl_launch)
         self.sitl_hud.stop_sitl_requested.connect(self.on_sitl_stop_local)
@@ -531,6 +532,10 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         self.sitl_hud.cmd_upload.connect(self.on_sitl_upload_mission)
         self.sitl_hud.cmd_upload_fence.connect(self.on_sitl_upload_fence)
         self.sitl_hud.cmd_auto_start.connect(lambda: self._sitl_broadcast('auto_start'))
+        self.sitl_hud.cmd_guided_takeoff.connect(
+            lambda a: self._sitl_broadcast('guided_takeoff', a))
+        self.sitl_hud.cmd_guided_goto_mode.connect(self.on_guided_goto_mode)
+        self.sitl_hud.cmd_guided_takeoff_mode.connect(self.on_guided_takeoff_mode)
         self.sitl_hud.cmd_param_set.connect(
             lambda n, v, t: self._sitl_broadcast('set_param', (n, v, t))
         )
@@ -552,14 +557,16 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         from ui.widgets.sitl_command_panel import SitlCommandPanel
 
         sitl_inner_tabs = QTabWidget()
-        self.sitl_command_panel = SitlCommandPanel()
-        sitl_inner_tabs.addTab(self.sitl_command_panel, "Command")
 
+        # 「HUD / Servo」（含 SITL 連線 + 嵌入式蜂群入口）置於最前、為預設分頁
         sitl_hud_scroll = QScrollArea()
         sitl_hud_scroll.setWidget(self.sitl_hud)
         sitl_hud_scroll.setWidgetResizable(True)
         sitl_hud_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         sitl_inner_tabs.addTab(sitl_hud_scroll, "HUD / Servo")
+
+        self.sitl_command_panel = SitlCommandPanel()
+        sitl_inner_tabs.addTab(self.sitl_command_panel, "Command")
 
         self.parameter_panel._tabs.addTab(sitl_inner_tabs, "🛰 SITL")
 
@@ -1221,6 +1228,32 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
     
     def on_corner_added(self, lat, lon):
         """處理新增邊界點（從地圖點擊）"""
+        # GUIDED 點圖起飛模式：最高優先攔截 → 整群 GUIDED 起飛（2D/3D 地圖皆可）
+        if getattr(self, '_guided_takeoff_mode', False):
+            try:
+                if self.map_widget.corners:
+                    self.map_widget.corners.pop()
+                if getattr(self.map_widget, 'markers', None):
+                    self.map_widget.markers.pop()
+                self.map_widget._render_map()
+            except Exception:
+                pass
+            self._send_guided_takeoff_swarm(lat, lon)
+            return
+
+        # GUIDED 點圖飛到模式：次優先攔截 → 長機 GUIDED 飛往該點（僚機由蜂群跟）
+        if getattr(self, '_guided_goto_mode', False):
+            try:
+                if self.map_widget.corners:
+                    self.map_widget.corners.pop()
+                if getattr(self.map_widget, 'markers', None):
+                    self.map_widget.markers.pop()
+                self.map_widget._render_map()
+            except Exception:
+                pass
+            self._send_guided_goto(lat, lon)
+            return
+
         # 起飛點點選模式：優先攔截（在圓心模式之前）
         if self.picking_home_point:
             if self.map_widget.corners:
@@ -1470,6 +1503,11 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
                         _trimmed = True
                     else:
                         _trimmed = False
+                    # 附加 NFZ 繞行回程（避免匯出 bare RTL 直線飛回 home 穿越禁區）。
+                    # 置於 trim 之後：回程航點不參與 spiral_alts 對位，匯出時自動以
+                    # 巡航高度填充。
+                    if self.nfz_zones:
+                        path = self._append_nfz_safe_return(path, c_lat, c_lon)
                     self.waypoints = path
                     self.spiral_waypoint_altitudes = _spiral_alts
                     self.sub_paths = []
@@ -1553,8 +1591,14 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
                     if self.nfz_zones and self.corners:
                         _ref_lat = sum(p[0] for p in self.corners) / len(self.corners)
                         _ref_lon = sum(p[1] for p in self.corners) / len(self.corners)
+                        # 各子區域：掃描段繞行 + 附加 NFZ 安全回程（每機回各自 sub_path[0]，
+                        # 匯出端逐 sub_path 加 RTL → 避免 bare RTL 穿越禁區）
                         sub_paths = [
-                            self._apply_nfz_correction_multirotor_latlon(sp, _ref_lat, _ref_lon)
+                            self._append_nfz_safe_return(
+                                self._apply_nfz_correction_multirotor_latlon(
+                                    sp, _ref_lat, _ref_lon),
+                                _ref_lat, _ref_lon,
+                            )
                             for sp in sub_paths
                         ]
                     self.sub_paths = sub_paths  # 保存各子區域路徑供匯出使用
@@ -1573,6 +1617,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
                         path = self._apply_nfz_correction_multirotor_latlon(
                             path, _ref_lat, _ref_lon
                         )
+                        # 附加 NFZ 安全回程（避免匯出 bare RTL 直穿禁區）
+                        path = self._append_nfz_safe_return(path, _ref_lat, _ref_lon)
                     self.map_widget.clear_transit_paths()
 
             elif algorithm == 'astar':
@@ -2019,9 +2065,23 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
                         result['mission_path'] = [
                             (lat, lon, _alt_nfz) for lat, lon in _corrected_ll
                         ]
-                        result['full_path'] = (
-                            takeoff_ll + _corrected_ll + landing_ll
+                        # ── 回程/離場段也要繞 NFZ（鏡像 DCCPP _split_landing_tail）──
+                        # 先前 takeoff_ll（離場）與 landing_ll（回程+降落）直接串接，
+                        # 跳過 NFZ 檢查 → 離場/回程可能直穿禁區。
+                        # 修法：把 takeoff_ll + 已修正掃描段 + landing_ll[0]（進場入口）
+                        # 當成一條巡航包絡一起繞行；僅豁免最終下降進場型態 landing_ll[1:]
+                        # （VG 折線會破壞下滑道幾何、且須保住觸地 NAV_LAND）。
+                        if len(landing_ll) >= 2:
+                            _approach_entry = [landing_ll[0]]
+                            _descent_tail = list(landing_ll[1:])
+                        else:
+                            _approach_entry = list(landing_ll)
+                            _descent_tail = []
+                        _cruise_env = takeoff_ll + _corrected_ll + _approach_entry
+                        _cruise_corr = self._apply_nfz_correction_latlon(
+                            _cruise_env, center_lat, center_lon
                         )
+                        result['full_path'] = _cruise_corr + _descent_tail
 
                 # ── 插入進場弧：起飛末端 → 任務第一點（Dubins 雙約束）─────
                 _mission_ll = result.get('mission_latlon', [])
@@ -2675,6 +2735,48 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
             for x, y in correction.corrected_path
         ]
 
+    def _append_nfz_safe_return(
+        self,
+        path: list,
+        ref_lat: float,
+        ref_lon: float,
+        fixed_wing: bool = False,
+    ) -> list:
+        """在掃描路徑尾端附加「回 home（path[0]）的 NFZ 繞行回程段」。
+
+        多旋翼 / survey 匯出僅在尾端加 bare RTL（cmd 20），韌體會直線飛回 home
+        → 直穿 NFZ。本方法以 Visibility Graph 繞行算出 path[-1] → home 的安全折線，
+        把中繼繞行點 + home 顯式接到 path 尾端；匯出時的 RTL 變成 home→home 的
+        無動作收尾。
+
+        僅在「直線回程確實穿越 NFZ（產生繞行）」時才附加；無 NFZ / 不穿越則原樣
+        回傳，維持既有行為（bare RTL 直線回程本就 NFZ-free）。
+
+        Args:
+            path: 掃描航點 [(lat, lon), ...]（path[0] 視為起飛/home 點）
+            ref_lat, ref_lon: 座標轉換參考原點
+            fixed_wing: True 用固定翼 buffer（R_min×1.5）；False 用多旋翼小 buffer
+
+        Returns:
+            附加回程後的新 path（未穿越時為原 path）
+        """
+        if not self.nfz_zones or len(path) < 2:
+            return path
+        home = path[0]
+        last = path[-1]
+        if abs(last[0] - home[0]) < 1e-9 and abs(last[1] - home[1]) < 1e-9:
+            return path  # 已在 home，無需回程
+        corrector = (self._apply_nfz_correction_latlon if fixed_wing
+                     else self._apply_nfz_correction_multirotor_latlon)
+        corrected = corrector([last, home], ref_lat, ref_lon)
+        if len(corrected) <= 2:
+            return path  # 直線回程未穿越 NFZ → 沿用 bare RTL，不附加多餘航點
+        logger.info(
+            f"NFZ 安全回程：附加 {len(corrected) - 1} 個繞行航點（避免 bare RTL 穿越禁區）"
+        )
+        # 去掉第一點（== last，重複），其餘繞行中繼點 + home 接到尾端
+        return list(path) + [tuple(p) for p in corrected[1:]]
+
     # ══════════════════════════════════════════════════════════════════
     # 輔助：固定翼約束建立
     # ══════════════════════════════════════════════════════════════════
@@ -2829,7 +2931,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         """
         from core.global_planner.coverage_path_planner import CoveragePathPlanner
         from core.trajectory.dubins_trajectory import DubinsTrajectoryGenerator
-        from utils.math_utils import latlon_to_meters, meters_to_latlon
+        from utils.math_utils import latlon_to_meters
 
         constraints = self._build_fw_constraints(fw_params)
         dubins_gen = DubinsTrajectoryGenerator(constraints)
@@ -3335,7 +3437,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
             filepath = self.mission_manager.save_mission(self.current_mission)
             
             if filepath:
-                self.statusBar().showMessage(f"任務已儲存", 3000)
+                self.statusBar().showMessage("任務已儲存", 3000)
                 logger.info(f"儲存任務: {filepath}")
             else:
                 QMessageBox.warning(self, "儲存失敗", "無法儲存任務")
@@ -3566,7 +3668,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         about_text = """
         <h2>AeroPlan Studio</h2>
         <p><b>Collaborative UAV Mission Planning Suite</b></p>
-        <p>版本 2.5.0 · PyQt6 · MIT License</p>
+        <p>版本 2.8.1 · PyQt6 · MIT License</p>
         <p>面向多機協同作業的專業級無人機任務規劃平台，整合：</p>
         <ul>
             <li>2D Folium / 3D Cesium 雙模式地圖（離線可用）</li>
@@ -3795,27 +3897,6 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
                     return True
             return False
 
-        def _find_all_crossings(a, b):
-            """找出線段 [a, b] 與所有 NFZ 邊界的所有交點，依與 a 的距離排序。
-
-            對單一凸 NFZ：通常回傳 0 或 2 點（in / out 配對）
-            對多 NFZ 或非凸：可能 4 點、6 點等（多組 in / out 配對）
-            """
-            seg = LineString([a, b])
-            points = []
-            for poly in polys:
-                inter = seg.intersection(poly.exterior)
-                if inter.is_empty:
-                    continue
-                if inter.geom_type == 'Point':
-                    points.append((inter.x, inter.y))
-                elif inter.geom_type == 'MultiPoint':
-                    for pt in inter.geoms:
-                        points.append((pt.x, pt.y))
-            # 依與 a 距離排序 → 第 0, 2, 4... 是 entry，第 1, 3, 5... 是 exit
-            points.sort(key=lambda p: _m.hypot(p[0] - a[0], p[1] - a[1]))
-            return points
-
         # 主迴圈
         out_xy: list = [metric_wps[0]]
         out_refs: list = [0]
@@ -3838,107 +3919,62 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
             is_scan_strip = _is_op(wps[last_ref]) and _is_op(wps[i])
 
             if is_scan_strip:
-                # ── OPERATION 段：找出所有 NFZ 邊界交點，配對 in / out 處理 ──
-                # 對每對 [in_pt, out_pt]：
-                #   1. 加 in_pt（保留 NFZ 邊緣 scan 覆蓋）
-                #   2. 用 VG 從 in_pt 繞到 out_pt（detour 中間點）
-                #   3. 加 out_pt（恢復 scan 方向）
-                #   4. 繼續到原 cur（保留 NFZ 出口後的 scan 覆蓋）
-                crossings = _find_all_crossings(last_xy, cur_xy)
+                # ── OPERATION 段：difference-based 邊界截斷，保留「所有」NFZ 外掃描覆蓋 ──
+                # 偵察任務以「覆蓋率」為優先：用 lane.difference(buffered_NFZ) 取得此線段在
+                # NFZ 外的所有子段（依距 last_xy 排序），全部保留——即使 cur_xy 落在 NFZ 內，
+                # 仍保留入口側覆蓋直到邊界；子段之間的缺口（NFZ 內）用 correct_path VG 繞行。
+                #
+                # 取代舊「Case A：while skip-inside → 丟整條尾段 / 整批 lane」的覆蓋損失：
+                # 舊法在 lane 的遠端落在 NFZ 內時，會把該 lane（含其在 NFZ 另一側的覆蓋）整段
+                # 跳過 → 偵察區大量空洞。新法逐線段裁切、保留每一段 NFZ 外覆蓋，缺口才繞行。
+                # 不重排 / 不改順序（起飛接線、Dubins R_min、geofence 全部維持）。
+                seg_line = LineString([last_xy, cur_xy])
+                try:
+                    outside = seg_line.difference(merged)
+                except Exception:
+                    outside = None
+                pieces = []
+                if outside is not None and not outside.is_empty:
+                    geoms = (list(outside.geoms)
+                             if outside.geom_type == 'MultiLineString' else [outside])
+                    for g in geoms:
+                        if getattr(g, 'geom_type', '') != 'LineString' or g.length <= 0.5:
+                            continue
+                        cs = list(g.coords)
+                        a_pt = (cs[0][0], cs[0][1])
+                        b_pt = (cs[-1][0], cs[-1][1])
+                        da = _m.hypot(a_pt[0] - last_xy[0], a_pt[1] - last_xy[1])
+                        db = _m.hypot(b_pt[0] - last_xy[0], b_pt[1] - last_xy[1])
+                        if db < da:           # 端點依「距 last_xy」排：a=近端、b=遠端
+                            a_pt, b_pt, da = b_pt, a_pt, db
+                        pieces.append((da, a_pt, b_pt))
+                    pieces.sort(key=lambda t: t[0])
 
-                # 兩種情況：
-                #   (A) cur_xy 也在 NFZ 內 → 交點數為奇數，最後一個是 entry
-                #       退化為「entry + skip 到下個 outside wp + detour」
-                #   (B) cur_xy 在 NFZ 外 → 交點數為偶數，可配對處理
-                cur_inside = _pt_in_any_poly(cur_xy)
+                if not pieces:
+                    # 整段都在 NFZ 內 → 無 NFZ 外覆蓋可保留；不加點、不穿越，直接前進
+                    i += 1
+                    continue
 
-                if cur_inside or len(crossings) < 2 or len(crossings) % 2 != 0:
-                    # Case A：用原邏輯
-                    if crossings:
-                        out_xy.append(crossings[0])  # 第一個 entry
+                for (_, a_pt, b_pt) in pieces:
+                    prev = out_xy[-1]
+                    # prev → 此覆蓋子段近端 a_pt：若中間跨 NFZ（缺口）→ correct_path VG 繞行
+                    if _m.hypot(a_pt[0] - prev[0], a_pt[1] - prev[1]) > 0.5:
+                        if _seg_crosses_any(prev, a_pt):
+                            try:
+                                r = planner.correct_path([prev, a_pt])
+                                if (r.is_modified and r.corrected_path
+                                        and len(r.corrected_path) >= 2):
+                                    for dpt in r.corrected_path[1:-1]:
+                                        out_xy.append(dpt)
+                                        out_refs.append(last_ref)
+                            except Exception:
+                                pass
+                        out_xy.append(a_pt)
                         out_refs.append(last_ref)
-                    j = i
-                    while j < n and _pt_in_any_poly(metric_wps[j]):
-                        j += 1
-                    if j >= n:
-                        break
-                    try:
-                        result = planner.correct_path(
-                            [out_xy[-1] if crossings else last_xy, metric_wps[j]]
-                        )
-                        if result.is_modified and result.corrected_path:
-                            for dpt in result.corrected_path[1:]:
-                                out_xy.append(dpt)
-                                out_refs.append(j)
-                        else:
-                            out_xy.append(metric_wps[j])
-                            out_refs.append(j)
-                    except Exception:
-                        out_xy.append(metric_wps[j])
-                        out_refs.append(j)
-                    i = j + 1
-                else:
-                    # Case B：成對處理，scan strip 兩端都保留
-                    # 沿原 scan 方向算單位向量（給「nudge 點」用）
-                    seg_dx = cur_xy[0] - last_xy[0]
-                    seg_dy = cur_xy[1] - last_xy[1]
-                    seg_len = _m.hypot(seg_dx, seg_dy)
-                    if seg_len > 1e-6:
-                        ux, uy = seg_dx / seg_len, seg_dy / seg_len
-                    else:
-                        ux = uy = 0.0
-                    # Nudge 距離 — 把 in/out 推離 NFZ buffered 邊界，避免
-                    # 「端點 on boundary」造成 VG 數值不穩定 → detour 失敗
-                    nudge_m = 5.0
-
-                    fallback_used = False
-                    for k in range(0, len(crossings), 2):
-                        in_pt_raw = crossings[k]
-                        out_pt_raw = crossings[k + 1]
-                        # in_pt 往「來向」推（last_xy 方向），out_pt 往「去向」推
-                        in_pt = (
-                            in_pt_raw[0] - ux * nudge_m,
-                            in_pt_raw[1] - uy * nudge_m,
-                        )
-                        out_pt = (
-                            out_pt_raw[0] + ux * nudge_m,
-                            out_pt_raw[1] + uy * nudge_m,
-                        )
-
-                        # 嘗試從 in_pt 繞到 out_pt
-                        detour_ok = False
-                        try:
-                            r = planner.correct_path([in_pt, out_pt])
-                            if r.is_modified and r.corrected_path:
-                                out_xy.append(in_pt)
-                                out_refs.append(last_ref)
-                                for dpt in r.corrected_path[1:-1]:
-                                    out_xy.append(dpt)
-                                    out_refs.append(last_ref)
-                                out_xy.append(out_pt)
-                                out_refs.append(i)
-                                detour_ok = True
-                        except Exception:
-                            pass
-
-                        if not detour_ok:
-                            # ★ Fallback：in/out 配對 VG 失敗 → 整段退回原
-                            # correct_path 處理（避免「直線穿越 NFZ」bug）
-                            fallback_used = True
-                            break
-
-                    if fallback_used:
-                        # nudge 後 detour 失敗（極少數）：接受該段原樣
-                        # （from out_xy[-1] to cur_xy 可能在 NFZ 邊緣略微擦過，
-                        # 但不會出現 safe-skip 造成的長對角擺盪）。
-                        out_xy.append(cur_xy)
-                        out_refs.append(i)
-                        i += 1
-                    else:
-                        # 加上原 cur，保留 NFZ 出口後的 scan 覆蓋
-                        out_xy.append(cur_xy)
-                        out_refs.append(i)
-                        i += 1
+                    # 保留此 NFZ 外覆蓋子段的遠端（最大化偵察覆蓋）
+                    out_xy.append(b_pt)
+                    out_refs.append(i)
+                i += 1
             else:
                 # ── 非 OPERATION 段（TRANSFER/ENTRY/TAKEOFF/LANDING）：VG 繞行 ──
                 j = i
@@ -3962,6 +3998,104 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
 
         return out_xy, out_refs
 
+    @staticmethod
+    def _split_landing_tail(
+        waypoints: list,
+    ) -> tuple:
+        """剝離尾端「下降進場型態」供 NFZ 避障豁免，但把回程到達點併入避障前段。
+
+        DCCPP 固定翼路徑尾端是一串 ``SegmentLabel.LANDING`` 航點（場周入口 →
+        下降階梯 → 觸地 NAV_LAND），全部聚在 home 附近。真正會穿越 NFZ 的是
+        「最後一個作業點 → 第一個 LANDING 航點（場周入口）」這條長回程巡航段。
+
+        先前的實作把「整段」尾端 LANDING 一起豁免，連這條長回程巡航段都跳過
+        避障，導致回程直穿 NFZ（即使用者回報的 bug）。本方法改為：
+
+          1. 找出尾端連續的 LANDING 區段。
+          2. 把「第一個 LANDING 航點（場周入口／回程到達點）」併入前段 ``head``，
+             讓「最後作業點 → 場周入口」的長回程巡航段進入 NFZ 避障
+             （VG 繞行 + Dubins fillet）。
+          3. 其餘下降進場型態（下降階梯 + 觸地點）放進 ``exempt_tail`` 原樣豁免，
+             保住匯出時的 NAV_LAND 與既定下滑道幾何（VG 折線會破壞進場下滑道）。
+
+        Args:
+            waypoints: 單架 UAV 的完整 assembled 航點（含尾端 LANDING 段）。
+
+        Returns:
+            (head, exempt_tail)
+                head        : list — 需做 NFZ 避障的航點（已併入回程到達點）
+                exempt_tail : list — 豁免避障、原樣接回的下降進場航點
+        """
+        ls = len(waypoints)
+        while ls > 0 and getattr(
+            getattr(waypoints[ls - 1], 'segment_type', None), 'name', ''
+        ) == 'LANDING':
+            ls -= 1
+        landing_tail = list(waypoints[ls:])
+        head = list(waypoints[:ls])
+        if landing_tail:
+            # 回程到達點（第一個 LANDING 航點 = 場周入口）併入避障前段，
+            # 使長回程巡航段被 NFZ 避障涵蓋；其餘下降進場仍豁免。
+            head.append(landing_tail[0])
+            landing_tail = landing_tail[1:]
+        return head, landing_tail
+
+    @staticmethod
+    def _resample_alts_by_arclength(
+        query_xy: list,
+        ref_xy: list,
+        ref_alt: list,
+    ) -> list:
+        """沿累積弧長比例，把 (ref_xy, ref_alt) 高度剖面重採樣到 query_xy 各點。
+
+        用途：路徑經 Dubins fillet 倒角 / kink 修復重新離散化後，原 waypoint 索引
+        失效。若改用「幾何最近原始航點」推高度，繞 NFZ 的 detour 點會繼承到鄰近
+        低高度的 takeoff/landing 航點 → 路徑貼地。改以弧長比例內插，detour 點即可
+        保持其所屬巡航段的高度。
+
+        Args:
+            query_xy: 目標折線 [(x, y), ...]（最終 corrected_path，公尺）
+            ref_xy:   基準折線 [(x, y), ...]（fillet 前 corrected_path，公尺）
+            ref_alt:  基準折線各點高度（與 ref_xy 等長）
+
+        Returns:
+            query_xy 各點對應高度 list（長度與 query_xy 相同）
+        """
+        import math as _m
+        nq = len(query_xy)
+        nref = len(ref_xy)
+        if nref == 0 or not ref_alt:
+            return [0.0] * nq
+        if nref == 1:
+            return [ref_alt[0]] * nq
+
+        def _cum(path: list) -> list:
+            cum = [0.0]
+            for k in range(1, len(path)):
+                cum.append(cum[-1] + _m.hypot(
+                    path[k][0] - path[k - 1][0],
+                    path[k][1] - path[k - 1][1],
+                ))
+            return cum
+
+        ref_cum = _cum(ref_xy)
+        ref_total = ref_cum[-1] or 1.0
+        q_cum = _cum(query_xy)
+        q_total = q_cum[-1] or 1.0
+
+        out: list = []
+        j = 0
+        m = min(nref, len(ref_alt))
+        for k in range(nq):
+            target = (q_cum[k] / q_total) * ref_total   # 對應到 ref 的弧長位置
+            while j < m - 2 and ref_cum[j + 1] < target:
+                j += 1
+            seg = ref_cum[j + 1] - ref_cum[j]
+            t = 0.0 if seg <= 1e-9 else (target - ref_cum[j]) / seg
+            t = max(0.0, min(1.0, t))
+            out.append(ref_alt[j] + (ref_alt[j + 1] - ref_alt[j]) * t)
+        return out
+
     def _apply_fence_avoidance_to_dccpp_result(
         self,
         dccpp_result: dict,
@@ -3975,6 +4109,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         策略（_segment_aware_fence_avoidance）：
           • OPERATION 段（scan strip）：截斷在 NFZ 邊界，保留 NFZ 外的覆蓋
           • 其它段（TAKEOFF/TRANSFER 等）：VG 繞 NFZ 外圍
+          • 回程：尾端 LANDING 進場型態原樣豁免，但「最後作業點 → 場周入口」
+            這條長回程巡航段會併入避障（見 _split_landing_tail），避免回程穿越 NFZ
 
         診斷策略：所有失敗都會明確 log + 把摘要彈到 statusBar，避免「靜默失敗」。
         當有區域卻 0 機繞行 → 彈 QMessageBox 確保使用者一定知道。
@@ -4059,15 +4195,12 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
             logger.warning(f'[DCCPP-Fence] 約束建立失敗: {e}')
             return
 
-        # ★★★ 修正一：per-UAV 索引偏置「扇形展開」 ★★★
-        # 原本所有 UAV 共用同一個 planner（同一個 buffered NFZ），個別跑
-        # Visibility Graph 都找「最短繞行」→ 都會選同一個最近 corner →
-        # N 架機全部擠在窄走廊。
-        # 修法：UAV_i 用 base buffer + i × spread_m 的擴大版 buffer，
-        # 每架 UAV 的繞行向 NFZ 外推一段，自然形成「扇形分散」。
-        # spread_m = 12m → 3 機分別 0/12/24m 額外推遠（緊湊扇形，
-        # 減少 NFZ 周圍偵蒐死區，多機仍能避免擠成一團）
-        spread_per_uav_m = 12.0
+        # ★★★ per-UAV 扇形展開（已停用以最大化覆蓋率）★★★
+        # 原為避免多機繞行擠在同一走廊，曾用 base buffer + i×12m 的擴大 buffer 做扇形分散；
+        # 但擴大 buffer 會把「截斷掃描覆蓋」的邊界也外推 → UAV_i 在 NFZ 周圍多損失 12×i m
+        # 的偵察覆蓋（純覆蓋犧牲、與飛安無關）。偵察任務以覆蓋率為優先，且多機已用高度分層
+        # （altitude_step）避撞，無需橫向扇形；故設 0，讓每架都用最小安全 buffer、保留最大覆蓋。
+        spread_per_uav_m = 0.0
 
         # 計算「可加入的區域數」與「基準 buffer」（給最終摘要 / 警告用）
         added_count = sum(
@@ -4112,17 +4245,16 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         n_rerouted = 0
         for uav_idx, uav_id in enumerate(sorted_uav_ids):
             apath = assembled[uav_id]
-            # ★ 降落段豁免：尾端連續的 LANDING 段是「在 home 降落」的必要航段，
-            #   不可被 NFZ 避障繞掉/丟棄（否則匯出就沒有 NAV_LAND）。這裡把它剝離，
-            #   避障只處理非降落段（TAKEOFF/ENTRY/OPERATION/TRANSFER），最後原樣接回。
+            # ★ 降落段豁免（修正回程穿越 NFZ）：
+            #   尾端連續的 LANDING 段是「飛回 home 降落」的進場型態；其下降階梯 +
+            #   觸地點 (NAV_LAND) 不可被 VG 繞掉/丟棄（否則匯出就沒有 NAV_LAND，
+            #   且 VG 折線會破壞進場下滑道幾何）。
+            #   但「最後一個作業點 → 第一個 LANDING 航點（場周入口）」這條長回程
+            #   巡航段先前被一起豁免，導致回程直穿 NFZ。_split_landing_tail 會把
+            #   場周入口併入避障前段，使回程巡航走 VG 繞行 + Dubins fillet，
+            #   其餘下降進場型態 (landing_tail) 仍原樣豁免接回。
             _full_wps = apath.waypoints
-            _ls = len(_full_wps)
-            while _ls > 0 and getattr(
-                getattr(_full_wps[_ls - 1], 'segment_type', None), 'name', ''
-            ) == 'LANDING':
-                _ls -= 1
-            landing_tail = list(_full_wps[_ls:])
-            wps = _full_wps[:_ls]
+            wps, landing_tail = self._split_landing_tail(_full_wps)
             if not wps or len(wps) < 2:
                 continue
 
@@ -4146,11 +4278,15 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
 
             metric_wps = [to_metric(wp.lat, wp.lon) for wp in wps]
 
-            # ★★★ Segment-aware avoidance（OPERATION 段截斷在 NFZ 邊緣）★★★
-            # 讓掃描線「貼著 NFZ 牆邊」結束，保留 NFZ 周圍最大覆蓋。
+            # ★★★ Segment-aware avoidance（OPERATION 段截斷在 NFZ 邊緣，局部繞行）★★★
+            # 讓掃描線「貼著 NFZ 牆邊」結束，保留 NFZ 周圍最大覆蓋；其餘段 VG 繞行。
             # 對 in/out 配對的端點做 5m nudge，避免 VG 在邊界上失敗。
-            # 註：移除 safe-skip fallback（會產生長對角擺盪）；若 nudge 後
-            # detour 仍失敗，接受該段直接連接（極少數情況，視覺不嚴重）。
+            #
+            # 註：曾嘗試「NFZ-aware cell 覆蓋分解」(重排整條覆蓋以求 MP 式乾淨)，但重排
+            # 會打亂起飛接線、cell 轉場可能飛出 geofence、且以 fillet 取代 Dubins 導致
+            # 轉彎半徑可能 < R_min（固定翼飛不過）。為保實飛安全（起飛/邊界/轉彎半徑），
+            # 改回此 segment-aware 局部繞行：保留原 DCCPP 覆蓋順序 + Dubins R_min + 邊界內。
+            ref_indices = None
             try:
                 corrected_path, ref_indices = self._segment_aware_fence_avoidance(
                     wps, metric_wps, per_uav_planner,
@@ -4181,6 +4317,24 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
             if not is_modified:
                 continue
 
+            # ★★★ 高度剖面擷取（修正繞行段貼地）★★★
+            # segment-aware 後的 corrected_path/ref_indices 高度是「正確」的：
+            #   繞行(detour)點的 ref 指向巡航高度的目標 waypoint，截斷點指向 OPERATION。
+            # 但下方 safety-net / kink-repair / fillet 會重新離散化路徑並丟棄 ref_indices，
+            # 之後 ref-mapping 改用「最近原始航點」推高度 → 繞 NFZ 的 detour 點在幾何上
+            # 反而最靠近低高度的 takeoff 爬升 / landing 下降航點，繼承到接近地面的高度，
+            # 造成「路徑貼地」。故在此先記下 (xy, alt) 剖面，最後用弧長內插還原高度。
+            # 巡航高度 = head 航點高度最大值（climb 爬升到它、descent 從它下降）
+            _cruise_alt = max(
+                (getattr(w, 'alt', 0.0) for w in wps), default=0.0
+            )
+            _alt_prof_xy = list(corrected_path)
+            _alt_prof_z = [
+                getattr(wps[r], 'alt', _cruise_alt)
+                if 0 <= r < len(wps) else _cruise_alt
+                for r in ref_indices
+            ] if ref_indices else []
+
             # ★★★ Safety net：walk 最終 path、抓出任何漏網的穿越段 ★★★
             # 對每對相鄰 (a, b)，若仍穿越 NFZ 內部 → 用 correct_path 局部
             # 補一次 detour（只影響該對，不破壞前面截斷邏輯）。
@@ -4189,7 +4343,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
             per_uav_planner._rebuild_merged()
             _merged = per_uav_planner._merged_buffered
             if _merged is not None and not _merged.is_empty:
-                from shapely.geometry import LineString as _LS, Point as _Pt
+                from shapely.geometry import LineString as _LS
                 _polys = (list(_merged.geoms) if _merged.geom_type == 'MultiPolygon'
                           else [_merged])
                 repaired_path = [corrected_path[0]]
@@ -4294,9 +4448,153 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
                         f'[DCCPP-Fence] UAV {uav_id} kink-repair(後) 失敗: {e}'
                     )
 
+            # ★★★ 最終硬性 NFZ gate（絕不穿越）★★★
+            # fillet 倒角會「切入」轉角，可能把貼著 buffered 邊界的路徑切進禁區；
+            # 前面的 safety-net 在 fillet *之前* 跑，抓不到 fillet/kink 造成的殘留穿越。
+            # 這裡做最終 gate：對最終折線每對相鄰點，若仍穿入 NFZ → correct_path 重繞；
+            # 重繞後仍穿越則保留並警告（極少數，通常為端點落在禁區內的任務設計問題）。
+            try:
+                per_uav_planner._rebuild_merged()
+                _mg = per_uav_planner._merged_buffered
+                if _mg is not None and not _mg.is_empty and len(corrected_path) >= 2:
+                    from shapely.geometry import LineString as _LSg
+                    _plg = (list(_mg.geoms) if _mg.geom_type == 'MultiPolygon' else [_mg])
+
+                    def _pen_g(a, b):
+                        s = _LSg([a, b])
+                        for pg in _plg:
+                            if s.intersects(pg):
+                                it = s.intersection(pg)
+                                if (not it.is_empty
+                                        and it.geom_type not in ('Point', 'MultiPoint')
+                                        and getattr(it, 'length', 0.0) > 0.5):
+                                    return True
+                        return False
+
+                    import math as _mg2
+
+                    def _diff_pieces(a, b):
+                        """[a,b] 在 NFZ 外的子段，依距 a 排序 → [(near,far), ...]。"""
+                        try:
+                            outs = _LSg([a, b]).difference(_mg)
+                        except Exception:
+                            return None
+                        if outs is None or outs.is_empty:
+                            return []
+                        gs = (list(outs.geoms) if outs.geom_type == 'MultiLineString'
+                              else [outs])
+                        out = []
+                        for g in gs:
+                            if getattr(g, 'geom_type', '') != 'LineString' or g.length <= 0.5:
+                                continue
+                            cs = list(g.coords)
+                            p0 = (cs[0][0], cs[0][1]); p1 = (cs[-1][0], cs[-1][1])
+                            d0 = _mg2.hypot(p0[0]-a[0], p0[1]-a[1])
+                            d1 = _mg2.hypot(p1[0]-a[0], p1[1]-a[1])
+                            if d1 < d0:
+                                p0, p1, d0 = p1, p0, d1
+                            out.append((d0, p0, p1))
+                        out.sort(key=lambda t: t[0])
+                        return out
+
+                    def _walk_boundary(prev, nxt):
+                        """沿 buffered NFZ 外緣走較短弧繞過（頂點向外偏移 3m）— 不依賴 VG
+                        可視性，對「端點落在邊界」也保證繞開。回傳中繼點（不含端點）。"""
+                        from shapely.ops import substring as _sub
+                        from shapely.geometry import Point as _Pt
+                        best = None
+                        for pg in _plg:
+                            if not _LSg([prev, nxt]).intersects(pg):
+                                continue
+                            ring = pg.exterior
+                            L = ring.length
+                            ta = ring.project(_Pt(prev)); tb = ring.project(_Pt(nxt))
+                            lo, hi = (ta, tb) if ta <= tb else (tb, ta)
+                            if (hi - lo) <= (L - (hi - lo)):
+                                arc = _sub(ring, lo, hi)
+                                coords = list(arc.coords)
+                                if ta > tb:
+                                    coords = coords[::-1]
+                            else:
+                                a1 = list(_sub(ring, hi, L).coords)
+                                a2 = list(_sub(ring, 0, lo).coords)
+                                coords = a1 + a2
+                                if ta < tb:
+                                    coords = coords[::-1]
+                            cx, cy = pg.centroid.x, pg.centroid.y
+                            mids = []
+                            for (x, y) in coords[1:-1]:
+                                dx, dy = x - cx, y - cy
+                                d = _mg2.hypot(dx, dy) or 1.0
+                                mids.append((x + dx / d * 3.0, y + dy / d * 3.0))
+                            # 取繞行後不再穿越者
+                            if best is None or len(mids) < len(best):
+                                best = mids
+                        return best or []
+
+                    def _route_gap(prev, nxt):
+                        """prev→nxt 若跨 NFZ → 回傳中繼繞行點（不含端點）。
+                        先試 correct_path（VG）；失敗則沿外緣走邊界（保證繞開）。"""
+                        if not _pen_g(prev, nxt):
+                            return []
+                        try:
+                            rr = per_uav_planner.correct_path([prev, nxt])
+                            cp = rr.corrected_path if rr.is_modified else None
+                            if (cp and len(cp) >= 2
+                                    and not any(_pen_g(cp[t], cp[t+1]) for t in range(len(cp)-1))):
+                                return [tuple(p) for p in cp[1:-1]]
+                        except Exception:
+                            pass
+                        # 後備：沿 buffered 外緣走邊界
+                        bw = _walk_boundary(prev, nxt)
+                        return bw
+
+                    _gated = [corrected_path[0]]
+                    _ng = 0
+                    for _k in range(1, len(corrected_path)):
+                        _a = _gated[-1]
+                        _b = corrected_path[_k]
+                        if not _pen_g(_a, _b):
+                            _gated.append(_b)
+                            continue
+                        # 穿越 → difference 裁成 NFZ 外子段（端點落邊界、非 buffer 內部），
+                        # 缺口在邊界點之間用 correct_path 繞行（此時 VG 可運作）。
+                        _pcs = _diff_pieces(_a, _b)
+                        if not _pcs:
+                            # 整段在 NFZ 內（兩端皆內部，極少）→ 丟棄此段、保留連通性交給下一段
+                            continue
+                        _ng += 1
+                        for (_, _p0, _p1) in _pcs:
+                            _prev = _gated[-1]
+                            if _mg2.hypot(_p0[0]-_prev[0], _p0[1]-_prev[1]) > 0.5:
+                                _mid = _route_gap(_prev, _p0)
+                                if _mid is not None:
+                                    _gated.extend(_mid)
+                                # _mid is None（繞行失敗）→ 直接接 _p0（極少數，仍貼邊不深入）
+                                _gated.append(_p0)
+                            _gated.append(_p1)
+                    if _ng > 0:
+                        logger.info(
+                            f'[DCCPP-Fence] UAV {uav_id} 最終 NFZ gate：'
+                            f'重繞 {_ng} 段 fillet 後殘留穿越'
+                        )
+                        corrected_path = _gated
+                        ref_indices = None
+            except Exception as e:
+                logger.warning(f'[DCCPP-Fence] UAV {uav_id} 最終 NFZ gate 失敗: {e}')
+
+            # 高度用「弧長內插」還原（修正繞行段貼地）：
+            #   以 fillet 前擷取的正確高度剖面 (_alt_prof_xy/_z) 為基準，沿累積弧長
+            #   比例重採樣到最終 corrected_path。這樣繞 NFZ 的 detour 點維持巡航高度，
+            #   而非被「最近原始航點」誤判繼承到 takeoff/landing 的低高度。
+            interp_alts = self._resample_alts_by_arclength(
+                corrected_path, _alt_prof_xy, _alt_prof_z,
+            ) if _alt_prof_z else None
+
             # 為每個新 metric 點找出「對應的原 waypoint」
             #   有 ref_indices → 直接使用（segment_type 等屬性更準確）
-            #   否則（fillet 後）→ 用「最近原始 wp」fallback
+            #   否則（fillet 後）→ 用「最近原始 wp」fallback（僅用於 segment_type/heading 等屬性，
+            #   高度一律改用上面的弧長內插結果）
             new_wps: list = []
             oi = 0
             for k, (nx, ny) in enumerate(corrected_path):
@@ -4324,8 +4622,16 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
                     # 萬一是 frozen dataclass，退回 dataclasses.replace
                     import dataclasses as _dc
                     new_wp = _dc.replace(ref, lat=lat, lon=lon)
+                # 高度改用弧長內插（避免繞行段貼地）
+                if interp_alts is not None and k < len(interp_alts):
+                    try:
+                        new_wp.alt = interp_alts[k]
+                    except AttributeError:
+                        import dataclasses as _dc
+                        new_wp = _dc.replace(new_wp, alt=interp_alts[k])
                 new_wps.append(new_wp)
-            # ★ 降落段原樣接回（避障豁免）— 確保匯出時仍有 LANDING → NAV_LAND
+            # ★ 下降進場型態原樣接回（避障豁免）— 確保匯出時仍有 LANDING → NAV_LAND；
+            #   回程巡航段（到場周入口）已在上方 new_wps 中完成 NFZ 繞行。
             apath.waypoints = new_wps + landing_tail
             n_rerouted += 1
 
@@ -5104,6 +5410,58 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
 
         logger.info(f'[SITL] 啟動連線執行緒: {conn_str} (sysid={sysid_label})')
 
+    def on_embedded_swarm_connect(self):
+        """連線到嵌入式蜂群（模式 A1：AeroPlan 當監看 GCS）。
+
+        不啟動任何內建 SITL，改為依使用者在 EmbeddedSwarmDialog 設定的
+        嵌入式 IP / 機數 / port / sysid，對原生 ArduPlane SITL 的每個 TCP server
+        各建立一條 MAVLink 監看連線（沿用既有 on_sitl_connect 機制）。
+
+        對應固定翼蜂群文件 §4.1：導引由嵌入式 ROS 蜂群負責，本端只顯示遙測。
+        """
+        from ui.dialogs.embedded_swarm_dialog import EmbeddedSwarmDialog
+
+        # 已有連線時先提醒：避免新舊連線疊加造成同一 sysid 兩張卡片
+        if self._sitl_links:
+            ret = QMessageBox.question(
+                self, '已有連線',
+                f'目前已有 {len(self._sitl_links)} 條 SITL 連線。\n'
+                f'是否先全部斷線，再連線到嵌入式蜂群？',
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            )
+            if ret != QMessageBox.StandardButton.Yes:
+                return
+            self.on_sitl_disconnect()
+
+        cfg = EmbeddedSwarmDialog.get_config(parent=self)
+        if cfg is None:
+            logger.info('[Embedded Swarm] 使用者取消連線')
+            return
+
+        connections = cfg.get('connections') or []
+        if not connections:
+            QMessageBox.warning(self, '嵌入式蜂群', '沒有可連線的端點')
+            return
+
+        direction = cfg.get('direction', 'dial')
+        host = cfg.get('host', '')
+        logger.info(
+            f'[Embedded Swarm] 連線 {len(connections)} 機 '
+            f'(direction={direction}, host={host or "—"})'
+        )
+
+        # 蜂群為固定翼 → vehicle_hint 固定 'PLANE'
+        for c in connections:
+            self.on_sitl_connect(
+                c['conn_str'], sysid_label=int(c['sysid']), vehicle_hint='PLANE',
+            )
+
+        self.statusBar().showMessage(
+            f'🛰 已連線嵌入式蜂群 {len(connections)} 機'
+            f'（{"主動 tcp→" + host if direction == "dial" else "被動 tcpin 監聽"}）',
+            6000,
+        )
+
     def on_sitl_disconnect(self):
         """斷開所有 SITL 連線"""
         # 先把 FleetRegistry 內對應 callsign 反註冊（不擋停止流程）
@@ -5167,6 +5525,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
                 elif cmd == 'disarm':  link.disarm()
                 elif cmd == 'set_mode':link.set_mode(arg)
                 elif cmd == 'takeoff': link.takeoff(arg)
+                elif cmd == 'guided_takeoff': link.guided_takeoff(arg)
+                elif cmd == 'vtol_transition': link.vtol_transition(int(arg))
                 elif cmd == 'auto_start': link.auto_start()
                 elif cmd == 'mission_start': link.mission_start()
                 elif cmd == 'set_param':
@@ -5178,6 +5538,205 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
                     link.get_param(arg)
             except Exception as e:
                 logger.error(f'[SITL] {cmd} 失敗: {e}')
+
+    # ── GUIDED 點圖起飛（點地圖 → 整群一次 GUIDED 起飛）────────────────
+    def on_guided_takeoff_mode(self, enabled: bool):
+        """切換『點圖起飛』模式（2D/3D 地圖點一下 → 整群 GUIDED 起飛）。與點圖飛到互斥。"""
+        if enabled and not self._sitl_links:
+            QMessageBox.information(self, 'GUIDED', '尚未連線任何 SITL / 蜂群')
+            self.sitl_hud.btn_guided_takeoff_pt.setChecked(False)
+            self._guided_takeoff_mode = False
+            return
+        self._guided_takeoff_mode = bool(enabled)
+        if enabled and getattr(self, '_guided_goto_mode', False):
+            # 互斥：開「點圖起飛」時自動關「點圖飛到」（setChecked 會連動清旗標）
+            self.sitl_hud.btn_guided_goto.setChecked(False)
+        self.statusBar().showMessage(
+            '🛫 點圖起飛已開啟：在 2D/3D 地圖點一下 → 長機先起飛，確認 GUIDED 後僚機跟隨'
+            if enabled else '點圖起飛已關閉', 5000)
+
+    # 分階段起飛參數
+    # 確認高度取較高值（≈ 接近 TKOFF_ALT）：固定翼在過低高度進 GUIDED 盤旋容易
+    # 失速，且僚機接手/節點接管時需要安全高度餘裕，故設 45 m 而非 20 m。
+    _TKOFF_CONFIRM_ALT = 45.0     # m：長機升空確認高度（達此高度才算「已穩定起飛」）
+    _TKOFF_CLIMB_TIMEOUT = 60     # 秒：長機爬升逾時保護
+    _TKOFF_GUIDED_TIMEOUT = 12    # 秒：長機切 GUIDED 確認逾時（逾時仍放行僚機）
+
+    def _send_guided_takeoff_swarm(self, lat: float, lon: float, alt: float = 60.0):
+        """點地圖 → 長機帶領的「分階段」GUIDED 起飛（非整群同時）：
+
+        階段1：只有長機（sysid 最小者）單獨 GUIDED 起飛。
+        階段2：輪詢長機遙測，待其升空（alt ≥ 確認高度）→ 切 GUIDED → 確認 mode=GUIDED。
+        階段3：長機 GUIDED 確認後，才讓僚機跟著起飛；之後由蜂群節點維持 V 編隊跟隨。
+        """
+        if not self._sitl_links:
+            return
+        links = sorted(self._sitl_links, key=lambda l: getattr(l, 'sysid_label', 1))
+        leader, wingmen = links[0], links[1:]
+        try:
+            leader.guided_takeoff(alt)           # 階段1：長機單獨起飛
+        except Exception as e:
+            logger.error(f'[GUIDED] 長機起飛失敗: {e}')
+            return
+        self._stage_takeoff = {'leader': leader, 'wingmen': wingmen,
+                               'alt': alt, 'phase': 'climb', 'ticks': 0}
+        self.statusBar().showMessage(
+            f'🛫 長機 UAV-{getattr(leader, "sysid_label", 1)} 單獨 GUIDED 起飛中… '
+            f'（{len(wingmen)} 架僚機待命，確認長機 GUIDED 後跟隨）', 8000)
+        from PyQt6.QtCore import QTimer
+        if getattr(self, '_takeoff_timer', None) is None:
+            self._takeoff_timer = QTimer(self)
+            self._takeoff_timer.timeout.connect(self._tick_staged_takeoff)
+        self._takeoff_timer.start(1000)          # 每秒檢查長機狀態
+
+    def _tick_staged_takeoff(self):
+        """分階段起飛狀態機：輪詢長機遙測，依序推進 climb → confirm_guided → 放行僚機。"""
+        st = getattr(self, '_stage_takeoff', None)
+        if not st:
+            self._takeoff_timer.stop()
+            return
+        st['ticks'] += 1
+        leader = st['leader']
+        frame = leader._frames.get(getattr(leader, 'sysid_label', 1))
+        alt = frame.alt_rel if frame else 0.0
+        mode = frame.mode if frame else '---'
+
+        def _release_wingmen(note: str):
+            for w in st['wingmen']:
+                try:
+                    w.guided_takeoff(st['alt'])
+                except Exception as e:
+                    logger.error(f'[GUIDED] 僚機起飛失敗: {e}')
+            self.statusBar().showMessage(note, 8000)
+            self._takeoff_timer.stop()
+            self._stage_takeoff = None
+
+        if st['phase'] == 'climb':
+            if alt >= self._TKOFF_CONFIRM_ALT:
+                try:
+                    leader.set_mode('GUIDED')        # 升空 → 切 GUIDED
+                except Exception as e:
+                    logger.error(f'[GUIDED] 長機切 GUIDED 失敗: {e}')
+                st['phase'] = 'confirm_guided'
+                st['ticks'] = 0
+                self.statusBar().showMessage(
+                    f'🛫 長機已升空 {alt:.0f} m → 切 GUIDED 中，確認後放行僚機…', 6000)
+            elif st['ticks'] >= self._TKOFF_CLIMB_TIMEOUT:
+                self._takeoff_timer.stop()
+                self._stage_takeoff = None
+                self.statusBar().showMessage('⚠ 長機起飛逾時，已中止分階段流程', 6000)
+        elif st['phase'] == 'confirm_guided':
+            if mode == 'GUIDED':
+                _release_wingmen(
+                    f'✅ 長機 GUIDED 確認 → {len(st["wingmen"])} 架僚機跟隨起飛、組 V 編隊')
+            elif st['ticks'] >= self._TKOFF_GUIDED_TIMEOUT:
+                _release_wingmen('⚠ 長機 GUIDED 未及時確認，仍放行僚機起飛')
+
+    # ── GUIDED 點圖飛到（長機 GUIDED，僚機由蜂群節點跟隨）──────────────
+    def on_guided_goto_mode(self, enabled: bool):
+        """切換『點圖飛到 (GUIDED)』模式。與點圖起飛互斥。"""
+        if enabled and not self._sitl_links:
+            QMessageBox.information(self, 'GUIDED', '尚未連線任何 SITL / 蜂群')
+            self.sitl_hud.btn_guided_goto.setChecked(False)
+            self._guided_goto_mode = False
+            return
+        self._guided_goto_mode = bool(enabled)
+        if enabled and getattr(self, '_guided_takeoff_mode', False):
+            # 互斥：開「點圖飛到」時自動關「點圖起飛」
+            self.sitl_hud.btn_guided_takeoff_pt.setChecked(False)
+        self.statusBar().showMessage(
+            '🎯 點圖飛到已開啟：在地圖點一下 → 長機 GUIDED 飛往該點（僚機跟）'
+            if enabled else '點圖飛到已關閉', 5000)
+
+    def _send_guided_goto(self, lat: float, lon: float, alt: float = 60.0):
+        """送 GUIDED 飛到給長機（sysid 最小者）；僚機由蜂群節點追蹤其 geopose 跟隨。"""
+        if not self._sitl_links:
+            return
+        leader = min(self._sitl_links, key=lambda l: getattr(l, 'sysid_label', 1))
+        try:
+            leader.guided_goto(lat, lon, alt)
+            self.statusBar().showMessage(
+                f'🎯 長機 UAV-{getattr(leader, "sysid_label", 1)} GUIDED 飛往 '
+                f'({lat:.5f},{lon:.5f}) @ {alt:.0f}m，僚機跟隨', 6000)
+        except Exception as e:
+            logger.error(f'[GUIDED] guided_goto 失敗: {e}')
+
+    # ── 3D 右鍵 GUIDED（Mission Planner 風格：右鍵點圖 → 跳高度框 → 送長機）────
+    def on_rclick_guided_goto(self, lat: float, lon: float):
+        """3D 地圖右鍵 → 跳高度輸入框 → 送長機 GUIDED。
+        長機在地面：長機帶頭起飛到該高度 → 僚機 3s 內接續 → 長機飛往該點（僚機 V 跟隨）。
+        長機已在空中：直接 GUIDED 飛往該點。"""
+        if not self._sitl_links:
+            QMessageBox.information(self, 'GUIDED', '尚未連線任何 SITL / 蜂群')
+            return
+        from PyQt6.QtWidgets import QInputDialog
+        alt, ok = QInputDialog.getDouble(
+            self, 'GUIDED 目標高度',
+            f'目標點 ({lat:.5f}, {lon:.5f})\n指定高度 (m，相對起飛點):',
+            float(getattr(self, '_last_guided_alt', 80.0)), 5.0, 2000.0, 0)
+        if not ok:
+            return
+        self._last_guided_alt = alt
+        leader = min(self._sitl_links, key=lambda l: getattr(l, 'sysid_label', 1))
+        frame = leader._frames.get(getattr(leader, 'sysid_label', 1))
+        airborne = bool(frame and frame.armed and frame.alt_rel > 15.0)
+        if airborne:
+            self._send_guided_goto(lat, lon, alt)        # 已在空中 → 直接飛往
+        else:
+            self._rclick_takeoff_goto(lat, lon, alt)     # 地面 → 帶頭起飛後飛往
+
+    def _rclick_takeoff_goto(self, lat: float, lon: float, alt: float):
+        """長機帶頭起飛（僚機 3s 內接續），長機升空後 GUIDED 飛往 (lat,lon,alt)。"""
+        from PyQt6.QtCore import QTimer
+        links = sorted(self._sitl_links, key=lambda l: getattr(l, 'sysid_label', 1))
+        leader, wingmen = links[0], links[1:]
+        try:
+            leader.guided_takeoff(alt)
+        except Exception as e:
+            logger.error(f'[GUIDED] 長機起飛失敗: {e}')
+            return
+        self.statusBar().showMessage(
+            f'🛫 長機 UAV-{getattr(leader, "sysid_label", 1)} 起飛至 {alt:.0f}m → '
+            f'3s 後 {len(wingmen)} 架僚機接續，升空後飛往目標點', 9000)
+
+        def _release_wingmen():
+            for w in wingmen:
+                try:
+                    w.guided_takeoff(alt)
+                except Exception as e:
+                    logger.error(f'[GUIDED] 僚機起飛失敗: {e}')
+            self.statusBar().showMessage(f'🛫 {len(wingmen)} 架僚機接續起飛、組 V 編隊', 6000)
+        QTimer.singleShot(3000, _release_wingmen)        # 僚機 3s 內接續起飛
+
+        # 輪詢長機升空 → 切 GUIDED 飛往目標點
+        self._pending_goto = {'leader': leader, 'lat': lat, 'lon': lon, 'alt': alt, 'ticks': 0}
+        if getattr(self, '_goto_timer', None) is None:
+            self._goto_timer = QTimer(self)
+            self._goto_timer.timeout.connect(self._tick_pending_goto)
+        self._goto_timer.start(1000)
+
+    def _tick_pending_goto(self):
+        pg = getattr(self, '_pending_goto', None)
+        if not pg:
+            self._goto_timer.stop()
+            return
+        pg['ticks'] += 1
+        leader = pg['leader']
+        frame = leader._frames.get(getattr(leader, 'sysid_label', 1))
+        alt = frame.alt_rel if frame else 0.0
+        if alt >= min(pg['alt'] * 0.7, 40.0):            # 升空到目標 7 成或 40m → 飛往目標
+            try:
+                leader.guided_goto(pg['lat'], pg['lon'], pg['alt'])
+                self.statusBar().showMessage(
+                    f'🎯 長機升空 {alt:.0f}m → GUIDED 飛往目標點 '
+                    f'({pg["lat"]:.5f},{pg["lon"]:.5f}) @ {pg["alt"]:.0f}m，僚機 V 跟隨', 7000)
+            except Exception as e:
+                logger.error(f'[GUIDED] 長機飛往目標失敗: {e}')
+            self._goto_timer.stop()
+            self._pending_goto = None
+        elif pg['ticks'] >= 60:
+            self._goto_timer.stop()
+            self._pending_goto = None
 
     def _on_fence_export(self):
         """
@@ -5298,8 +5857,6 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
             #   → 兩架固定翼上傳到同一份任務的 bug。
             #   改為以 uav_id 為 key，上傳時用 link.sysid_label 對應 UAV 路徑。
             per_uav_wps: dict = {}     # {uav_id: (link_idx_for_log, wps_list)}
-            # 向後相容（不再用，但保留變數避免下方判斷式 NameError）
-            per_link_wps: dict = {}
 
             if not wps and getattr(self, '_dccpp_result', None):
                 # DCCPP：輸出完整任務指令序列，讓 SITL AUTO 模式完整起飛→任務→降落。

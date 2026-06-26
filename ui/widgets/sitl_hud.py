@@ -13,8 +13,8 @@ Mission Planner-style Head-Up Display：依 MIL-STD-1472H 5.12.6.5.1
 """
 
 import math
-from PyQt6.QtCore import Qt, pyqtSignal, QRectF, QPointF, QRect
-from PyQt6.QtGui import QFont, QPainter, QColor, QPen, QBrush, QPolygonF, QFontMetrics
+from PyQt6.QtCore import Qt, pyqtSignal, QRectF, QPointF
+from PyQt6.QtGui import QPainter, QColor, QPen, QPolygonF, QFontMetrics
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton,
     QLineEdit, QFrame, QComboBox, QScrollArea, QSizePolicy,
@@ -191,7 +191,6 @@ class MissionPlannerHud(QWidget):
 
         # ── 慢速顯示快照（≤1 Hz；§5.17.22.1.1.1 精讀數值上限）──
         # 這些快照是「使用者必須可靠讀取」的數值，不能跟著 SITL 4-10 Hz 跳動
-        import time as _t
         self._slow_t      = 0.0
         self._d_airspeed  = 0.0
         self._d_altitude  = 0.0
@@ -711,6 +710,7 @@ class SITLHud(QWidget):
     """SITL 連線 + HUD 顯示面板"""
 
     connect_requested    = pyqtSignal(str)   # 連線字串
+    connect_embedded_requested = pyqtSignal()  # 連線到嵌入式蜂群（模式 A1 監看）
     disconnect_requested = pyqtSignal()
     launch_sitl_requested = pyqtSignal(str, int)   # vehicle, count
     stop_sitl_requested   = pyqtSignal()
@@ -726,6 +726,9 @@ class SITLHud(QWidget):
     cmd_param_get  = pyqtSignal(str)
     cmd_params_batch = pyqtSignal(list)            # [(name,value,ptype), ...]
     cmd_vtol_transition = pyqtSignal(int)          # VTOL 轉換: 3=MC, 4=FW
+    cmd_guided_takeoff = pyqtSignal(float)         # 固定翼相容 GUIDED 起飛（TAKEOFF 模式）
+    cmd_guided_goto_mode = pyqtSignal(bool)        # 點圖飛到模式開關（長機 GUIDED 飛到，僚機跟）
+    cmd_guided_takeoff_mode = pyqtSignal(bool)     # 點圖起飛模式開關（點地圖 → 整群 GUIDED 起飛）
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -771,6 +774,16 @@ class SITLHud(QWidget):
         self.btn_connect = IconButton('link', '連線', tone='primary', compact=True)
         self.btn_connect.clicked.connect(self._on_connect_clicked)
         ctrl.addWidget(self.btn_connect)
+
+        # 嵌入式蜂群監看連線（模式 A1）— 不啟動內建 SITL，
+        # 連到嵌入式 Jetson 原生 ArduPlane SITL 的 TCP server（N 機 TCP）。
+        self.btn_embedded = IconButton('drone', '嵌入式蜂群', tone='neutral', compact=True)
+        self.btn_embedded.setToolTip(
+            '連線到嵌入式蜂群（Jetson 原生 ArduPlane SITL，TCP 監看）\n'
+            '不啟動內建 SITL — 純監看 N 機遙測'
+        )
+        self.btn_embedded.clicked.connect(self.connect_embedded_requested.emit)
+        ctrl.addWidget(self.btn_embedded)
 
         root.addWidget(ctrl_frame)
 
@@ -949,6 +962,41 @@ class SITLHud(QWidget):
         arm_row.addWidget(self.btn_takeoff)
         cmd_outer.addLayout(arm_row)
 
+        # ── GUIDED 群飛指令列（固定翼相容）──────────────────────────
+        # ArduPlane 純固定翼 GUIDED 不吃 NAV_TAKEOFF/SET_POSITION_TARGET，
+        # 故起飛走 TAKEOFF 模式、飛到走 guided 航點（MISSION_ITEM current=2）。
+        guided_row = QHBoxLayout()
+        guided_row.setSpacing(4)
+        self.btn_guided_takeoff = self._cmd_btn('🛫 GUIDED 起飛', TC.FRIENDLY)
+        self.btn_guided_takeoff.setToolTip(
+            '固定翼相容 GUIDED 起飛：切 TAKEOFF 模式滑跑爬升 + 自動 ARM（整群一次起飛）。')
+        self.btn_guided_takeoff.clicked.connect(
+            lambda: self.cmd_guided_takeoff.emit(60.0))
+        guided_row.addWidget(self.btn_guided_takeoff)
+        cmd_outer.addLayout(guided_row)
+
+        # ── 點圖指令列：在 2D 或 3D 地圖點一下即下令（起飛 / 飛到）──────────
+        # 兩者互斥（開一個自動關另一個）；2D Leaflet 與 3D Cesium 點擊皆會
+        # 走到 main_window.on_corner_added，故同一攔截即同時支援兩種地圖。
+        guided_row2 = QHBoxLayout()
+        guided_row2.setSpacing(4)
+        self.btn_guided_takeoff_pt = self._cmd_btn('🛫 點圖起飛', TC.FRIENDLY)
+        self.btn_guided_takeoff_pt.setCheckable(True)
+        self.btn_guided_takeoff_pt.setToolTip(
+            '開啟後在 2D 或 3D 地圖點一下 → 長機帶領的分階段 GUIDED 起飛：\n'
+            '長機單獨起飛 → 確認長機升空且進入 GUIDED → 僚機才跟著起飛、組 V 編隊。\n'
+            '再按一次關閉。與「點圖飛到」互斥。')
+        self.btn_guided_takeoff_pt.toggled.connect(self.cmd_guided_takeoff_mode.emit)
+        self.btn_guided_goto = self._cmd_btn('🎯 點圖飛到', TC.WARNING)
+        self.btn_guided_goto.setCheckable(True)
+        self.btn_guided_goto.setToolTip(
+            '開啟後在 2D 或 3D 地圖點一下 → 長機 GUIDED 飛往該點（guided 航點），\n'
+            '僚機由蜂群節點自動跟隨成 V 字。再按一次關閉。與「點圖起飛」互斥。')
+        self.btn_guided_goto.toggled.connect(self.cmd_guided_goto_mode.emit)
+        guided_row2.addWidget(self.btn_guided_takeoff_pt)
+        guided_row2.addWidget(self.btn_guided_goto)
+        cmd_outer.addLayout(guided_row2)
+
         # 飛行模式列
         mode_row1 = QHBoxLayout()
         mode_row1.setSpacing(4)
@@ -1114,7 +1162,7 @@ class SITLHud(QWidget):
                 import time as _t
                 ts = _t.strftime('%H:%M:%S')
                 self._view.appendHtml(
-                    f'<span style=f"color:{TC.FG_MUTED}">{ts}</span> '
+                    f'<span style="color:{TC.FG_MUTED}">{ts}</span> '
                     f'<span style="color:{self._color}">{txt}</span>'
                 )
                 sb = self._view.verticalScrollBar()

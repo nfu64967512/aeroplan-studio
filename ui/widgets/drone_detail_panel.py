@@ -10,8 +10,6 @@ GCS 級指令均對接 `mission.fleet_registry.FleetRegistry.get_link(callsign)`
 """
 from __future__ import annotations
 
-import time
-from datetime import datetime
 from typing import Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -24,7 +22,6 @@ from PyQt6.QtWidgets import (
     QInputDialog,
     QLabel,
     QProgressBar,
-    QPushButton,
     QScrollArea,
     QSizePolicy,
     QStackedWidget,
@@ -361,8 +358,8 @@ class DroneDetailPanel(QWidget):
         veh_grid.setContentsMargins(0, 0, 0, 0)
         veh_grid.setHorizontalSpacing(6)
         veh_grid.setVerticalSpacing(6)
-        self._kv_frame = _make_kv("FRAME", "copter", veh)
-        self._kv_firmware = _make_kv("FIRMWARE", "ArduCopter", veh)
+        self._kv_frame = _make_kv("FRAME", "--", veh)        # 由 HEARTBEAT 即時帶入機種
+        self._kv_firmware = _make_kv("FIRMWARE", "--", veh)  # 由 HEARTBEAT 即時帶入韌體
         self._kv_compute = _make_kv("COMPUTE", "RPi CM4", veh)
         self._kv_weight = _make_kv("WEIGHT", "Micro", veh)
         veh_grid.addWidget(self._kv_frame, 0, 0)
@@ -420,7 +417,9 @@ class DroneDetailPanel(QWidget):
         link = reg.get_link(callsign)
         sysid: Optional[int] = None
         if link is not None:
-            sysid = int(getattr(link, "_frame").sysid)
+            # link 的公開 sysid 識別碼是 sysid_label（SITLLink / MockSITLLink 皆有）；
+            # 不存在 _frame（單數）屬性，遙測快照是 _frames（複數，多來源分流）。
+            sysid = int(getattr(link, "sysid_label", 0)) or None
             # _make_kv() 內部 children 順序：[val_lab, key_lab]
             self._kv_id.findChildren(QLabel)[0].setText(f"sysid {sysid}")
             self._kv_name.findChildren(QLabel)[0].setText(callsign)
@@ -647,6 +646,20 @@ class DroneDetailPanel(QWidget):
         return self._callsign
 
     # ── Telemetry 渲染 ──────────────────────────────
+    @staticmethod
+    def _vehicle_display(vt: str) -> tuple:
+        """MAV_TYPE 解碼字串（PLANE/COPTER/...）→ (機架顯示, 韌體顯示)。"""
+        vt = (vt or '').upper()
+        if vt == 'PLANE' or vt.startswith('VTOL'):
+            return ('plane' if vt == 'PLANE' else 'vtol', 'ArduPlane')
+        if vt == 'COPTER':
+            return ('copter', 'ArduCopter')
+        if vt in ('ROVER', 'BOAT'):
+            return ('rover' if vt == 'ROVER' else 'boat', 'ArduRover')
+        if not vt or vt == '---':
+            return ('--', '--')
+        return (vt.lower(), 'ArduPilot')
+
     def _on_telemetry(self, callsign: str, frame: TelemetryFrame) -> None:
         if callsign != self._callsign:
             return
@@ -654,6 +667,12 @@ class DroneDetailPanel(QWidget):
         self._spd.set_value(f"{frame.ground_speed:.1f}")
         self._hdg.set_value(f"{int(frame.heading) % 360}")
         self._vs.set_value(f"{frame.climb:+.1f}")
+
+        # VEHICLE INFO：依 HEARTBEAT 的機種/韌體即時更新（不再寫死 copter/ArduCopter）。
+        # 放在 arm/disarm 早退之前，未解鎖也會正確顯示固定翼=plane/ArduPlane。
+        frame_name, fw_name = self._vehicle_display(frame.vehicle_type)
+        self._kv_frame.findChildren(QLabel)[0].setText(frame_name)
+        self._kv_firmware.findChildren(QLabel)[0].setText(fw_name)
 
         # state pill
         if frame.armed:

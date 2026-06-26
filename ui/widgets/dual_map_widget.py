@@ -4,14 +4,14 @@
 提供無縫切換功能，對外介面與原 MapWidget 完全相容。
 """
 
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
+    QVBoxLayout, QHBoxLayout, QStackedWidget,
     QPushButton, QLabel, QFrame, QMenu,
 )
 from PyQt6.QtGui import QAction
-from PyQt6.QtCore import pyqtSignal, Qt
+from PyQt6.QtCore import pyqtSignal, QTimer
 
 from ui.widgets.map_widget import MapWidget
 from ui.widgets.cesium_map_widget import CesiumMapWidget
@@ -66,6 +66,7 @@ class DualMapWidget(MapWidgetBase):
     # ── 本類專屬 signal（5 個交集 signal 已上移至 MapWidgetBase） ──
     fence_built       = pyqtSignal(object)  # 自動建構 Geofence 完成（傳 MissionBundle 或 None）
     strike_target_added = pyqtSignal(float, float)  # 打擊目標標記
+    guided_goto_requested = pyqtSignal(float, float)  # 3D 右鍵 GUIDED 飛到此點（lat, lon）
     # ── Fence Zone 工具列觸發信號（NFZ + 威脅 + 圍籬統一） ──
     fence_zone_draw_polygon_requested = pyqtSignal()
     fence_zone_draw_circle_requested  = pyqtSignal()
@@ -74,6 +75,7 @@ class DualMapWidget(MapWidgetBase):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._mode = _MODE_2D
+        self._map3d_settling = False     # 剛切到 3D、WebGL 重建中的安定窗口
         self._init_ui()
         self._connect_signals()
         logger.info('DualMapWidget 初始化完成')
@@ -253,9 +255,12 @@ class DualMapWidget(MapWidgetBase):
         self.map_3d.nfz_polygon_drawn.connect(self.nfz_polygon_drawn)
         self.map_3d.nfz_circle_drawn.connect(self.nfz_circle_drawn)
         self.map_3d.strike_target_added.connect(self.strike_target_added)
+        self.map_3d.guided_goto_requested.connect(self.guided_goto_requested)  # 3D 右鍵 GUIDED
 
     def _on_3d_corner_added(self, lat: float, lon: float):
-        """3D 點擊加角點：把資料鏡射到 2D 內部狀態（不重新 emit 2D 訊號以避免重複）"""
+        """3D 點擊加角點：先把資料鏡射到 2D 內部狀態（避免在 map_2d 上重複 add_corner），
+        再 re-emit 本容器的 corner_added。這個 re-emit 很重要：main_window.on_corner_added
+        的「點圖起飛 / 點圖飛到」攔截就靠它，3D Cesium 點擊才能和 2D 一樣下 GUIDED 指令。"""
         if (lat, lon) not in self.map_2d.corners:
             self.map_2d.add_corner(lat, lon)
         self.corner_added.emit(lat, lon)
@@ -277,6 +282,14 @@ class DualMapWidget(MapWidgetBase):
         if mode == _MODE_3D:
             # 切到 3D：把 2D 的當前狀態同步過去
             self._sync_to_3d()
+            # 安定窗口：QWebEngineView 由隱藏轉可見時，Chromium 需重建 GPU /
+            # WebGL context（隱藏時會被釋放），這段一次性成本較重。若此刻同時
+            # 湧入 ~60 msg/s 的即時遙測（每筆都 runJavaScript），主執行緒會被
+            # GPU 重建與串流夾擊而長時間凍結（視窗「沒有回應」且無法恢復）。
+            # 因此切到 3D 後先開一段安定窗口，期間暫停推送即時遙測到 3D，
+            # 讓 WebGL 安靜地完成初始化；窗口結束後再恢復串流。
+            self._map3d_settling = True
+            QTimer.singleShot(4500, self._end_map3d_settling)
             self._stack.setCurrentIndex(_MODE_3D)
             self._mode_label.setText('3D Cesium')
             self._btn_2d.setChecked(False)
@@ -292,6 +305,12 @@ class DualMapWidget(MapWidgetBase):
             self._btn_3d.setStyleSheet(self._btn_style(active=False))
 
         logger.info(f'地圖模式切換: {"3D" if mode == _MODE_3D else "2D"}')
+
+    def _end_map3d_settling(self):
+        """3D 安定窗口結束：恢復推送即時遙測到 3D 地圖。"""
+        if self._map3d_settling:
+            self._map3d_settling = False
+            logger.info('[Cesium] 3D 安定窗口結束，恢復即時遙測串流')
 
     def _sync_to_3d(self):
         """將 2D 地圖的完整狀態同步到 3D 地圖"""
@@ -715,10 +734,16 @@ class DualMapWidget(MapWidgetBase):
             self._active_sysids = set()
         self._active_sysids.add(int(sysid))
 
-        self.map_3d.update_uav_position(lat, lon, alt, heading_deg, speed_ms,
-                                         sysid=sysid, mode=mode, armed=armed,
-                                         vehicle_type=vehicle_type,
-                                         pitch_deg=pitch_deg, roll_deg=roll_deg)
+        # 只在 3D 模式且非「切換安定窗口」時才推送到 3D：
+        #   (1) 2D 模式下推 3D 是無謂負載（畫面看不到），且讓隱藏頁持續吃 IPC；
+        #   (2) 剛切到 3D 時 WebGL 正重建 GPU context，暫停推送以免主執行緒被
+        #       串流與初始化夾擊而凍結（見 _switch_mode 的安定窗口說明）。
+        # 切回 3D 後約 100ms 內即會收到下一筆遙測，機體位置自然補上，無視覺落差。
+        if self._mode == _MODE_3D and not self._map3d_settling:
+            self.map_3d.update_uav_position(lat, lon, alt, heading_deg, speed_ms,
+                                             sysid=sysid, mode=mode, armed=armed,
+                                             vehicle_type=vehicle_type,
+                                             pitch_deg=pitch_deg, roll_deg=roll_deg)
         if hasattr(self.map_2d, 'update_uav_position'):
             self.map_2d.update_uav_position(lat, lon, alt, heading_deg, speed_ms,
                                              sysid=sysid, mode=mode, armed=armed,
@@ -814,8 +839,36 @@ class DualMapWidget(MapWidgetBase):
         self.map_3d.set_fpv_camera_params(gimbal_pitch_deg, fov_deg,
                                            roll_follow, forward_offset)
 
-    def clear_uav(self):
-        self.map_3d.clear_uav()
+    def clear_uav(self, sysid=None):
+        """清除 UAV 標記（2D + 3D + chase/FPV 選單追蹤的 sysid 註冊）。
+
+        原本只清 3D，導致 2D Leaflet 殘留 UAV marker/trail，且 _active_sysids
+        持續列出已消失的 UAV（chase/FPV 選單）。現在兩張地圖與註冊一併清。
+        """
+        self.map_3d.clear_uav(sysid)
+        try:
+            if sysid is None:
+                self.map_2d.clear_uav()
+            else:
+                self.map_2d.clear_uav(sysid)
+        except TypeError:
+            try:
+                self.map_2d.clear_uav()
+            except Exception:
+                pass
+        except Exception:
+            pass
+        regs = getattr(self, '_active_sysids', None)
+        if regs is not None:
+            try:
+                if sysid is None:
+                    regs.clear()
+                elif isinstance(regs, set):
+                    regs.discard(sysid)
+                elif sysid in regs:
+                    regs.remove(sysid)
+            except Exception:
+                pass
 
     def fly_to_position(self, lat, lon, alt=0.0, range_m=600.0):
         if self._mode == _MODE_3D:

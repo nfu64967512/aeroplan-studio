@@ -15,7 +15,7 @@ import time
 import queue
 import threading
 from dataclasses import dataclass, field
-from typing import Optional, List, Tuple
+from typing import List, Tuple
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -184,7 +184,12 @@ class SITLLink(QThread):
                                               # 而非 list index 對應 UAV 路徑使用
         self._stop = False
         self._mav = None
-        self._frame = TelemetryFrame(sysid=sysid_label)
+        # 多來源遙測分流：每個 MAVLink source system 各自一個 TelemetryFrame。
+        # 一般「一條連線一架」拓樸（內建 SITL 各佔一個 TCP 埠、嵌入式蜂群各佔一個
+        # mavproxy --out 埠）下只會有一個 key（== sysid_label）；但若連線背後的
+        # mavproxy 把多架 fan-in 到同一個 --out，這裡會自動依真實 sysid 拆成多個
+        # frame 各自 emit，HUD 便分出多張正確卡片，而非全部疊在一張、互相覆蓋閃爍。
+        self._frames: dict[int, TelemetryFrame] = {}
         self._cmd_queue: 'queue.Queue' = queue.Queue()  # 主執行緒下指令給接收執行緒
         self._mav_lock = threading.Lock()
         # vehicle_hint: 由 UI 啟動時傳入的載具類型（'VTOL'/'PLANE'/'COPTER'）
@@ -202,6 +207,31 @@ class SITLLink(QThread):
             except Exception:
                 pass
 
+    # ── 內部：送出 GCS heartbeat ──────────────────────────────────────
+    def _send_gcs_heartbeat(self) -> None:
+        """以 GCS 身分送一個 heartbeat 給對端。
+
+        兩個用途：
+          1. 維持 GCS 連線心跳，避免飛控觸發 FS_GCS 失效保護（自動 RTL）。
+          2. ★ udpout / udp client 連線「破冰」：
+             - Windows 上 udpout socket 在「首次 send」之前不會 bind 本地埠，
+               此時呼叫 recvfrom 會直接拋 WinError 10022（無效引數）。
+             - 被動 udpin 對端（例如嵌入式 mavproxy 的 `--out udpin:...`）也必須
+               先收到我方封包，才知道要把遙測回送到哪個位址。
+             因此第一次 wait_heartbeat 之前一定要先送出至少一包。
+        """
+        if self._mav is None:
+            return
+        try:
+            from pymavlink import mavutil as _mu
+            self._mav.mav.heartbeat_send(
+                _mu.mavlink.MAV_TYPE_GCS,
+                _mu.mavlink.MAV_AUTOPILOT_INVALID,
+                0, 0, 0,
+            )
+        except Exception:
+            pass
+
     # ── 主執行緒 → 接收執行緒指令 ────────────────────────────────────
     def arm(self):       self._cmd_queue.put(('arm', None))
     def disarm(self):    self._cmd_queue.put(('disarm', None))
@@ -209,6 +239,16 @@ class SITLLink(QThread):
         self._cmd_queue.put(('set_mode', mode_name))
     def takeoff(self, alt: float = 30.0):
         self._cmd_queue.put(('takeoff', alt))
+
+    def guided_takeoff(self, alt: float = 60.0):
+        """固定翼相容的 GUIDED 起飛：切 ArduPlane TAKEOFF 模式 + force ARM
+        （滑跑爬升）。純固定翼 GUIDED 不吃 NAV_TAKEOFF，故用 TAKEOFF 模式。"""
+        self._cmd_queue.put(('guided_takeoff', float(alt)))
+
+    def guided_goto(self, lat: float, lon: float, alt: float = 60.0):
+        """GUIDED 飛往 (lat, lon, alt_rel)。用 guided 航點（MISSION_ITEM_INT
+        current=2），因為 ArduPlane 固定翼 GUIDED 不執行 SET_POSITION_TARGET。"""
+        self._cmd_queue.put(('guided_goto', (float(lat), float(lon), float(alt))))
     def upload_mission(self, waypoints: List[Tuple[float, float, float]]):
         """waypoints: [(lat, lon, alt_rel), ...]"""
         self._cmd_queue.put(('upload_mission', list(waypoints)))
@@ -303,6 +343,14 @@ class SITLLink(QThread):
             logger.error(f'[SITL] 連線失敗: {e}', exc_info=True)
             return
 
+        # ★ 先送一包 GCS heartbeat「破冰」再等對方 heartbeat。
+        #   udpout（主動連嵌入式 mavproxy）必須先送，否則：
+        #     - Windows udpout socket 未 bind → wait_heartbeat 的 recvfrom
+        #       直接拋 WinError 10022；
+        #     - 被動 udpin 對端不知我方位址 → 永遠不回送遙測 → 逾時。
+        #   對 tcp / udpin / serial 連線而言這只是提早送一包心跳，無副作用。
+        self._send_gcs_heartbeat()
+
         # 等 heartbeat
         try:
             hb = self._mav.wait_heartbeat(timeout=10)
@@ -314,15 +362,27 @@ class SITLLink(QThread):
             self.error.emit('10 秒內未收到 heartbeat — 確認 SITL 已啟動')
             return
 
-        self._frame.vehicle_type = _decode_vehicle_type(hb.type)
-        logger.info(f'[SITL] 已連線，飛行器類型: {self._frame.vehicle_type}')
+        primary_type = _decode_vehicle_type(hb.type)
+        hb_src = int(hb.get_srcSystem())
+        # 預先建立第一個 heartbeat 來源的 frame（跳過我方 GCS 回送 255 / 無效 0）
+        if hb_src not in (0, 255):
+            self._frame_for(hb_src).vehicle_type = primary_type
+        logger.info(
+            f'[SITL] 已連線，飛行器類型: {primary_type} (來源 system {hb_src})'
+        )
         self.connected.emit(self.conn_str)
 
         # ── VTOL QuadPlane 驗證 ─────────────────────────────────────
-        # 若飛行器類型為 VTOL 相關，主動讀取 Q_ENABLE 參數並驗證
-        # ArduPilot QuadPlane 架構：ArduPlane 韌體 + Q_ENABLE=1
-        # 透過 PARAM_REQUEST_READ 讀取 → 等待 PARAM_VALUE 回應
-        if 'VTOL' in self._frame.vehicle_type or 'PLANE' in self._frame.vehicle_type:
+        # QuadPlane (VTOL) 回報 MAV_TYPE=FIXED_WING，無法只憑 heartbeat 區分
+        # 純固定翼與 VTOL，因此對「可能是 VTOL」的連線主動讀 Q_ENABLE 驗證。
+        # 但若 UI 已明確指定 vehicle_hint='PLANE'（例如嵌入式固定翼蜂群監看），
+        # 就確定不是 VTOL → 跳過驗證，省去每條連線最多 5 秒的同步參數讀取阻塞
+        # （多機監看時尤其重要：4 條連線 = 最多 20 秒延遲首筆遙測）。
+        # _verify_vtol_q_enable 只設定 _q_enable_confirmed，跳過不影響固定翼
+        # 起飛序列（_send_auto_start 對 hint='PLANE' 一律走固定翼分支）。
+        if self._vehicle_hint != 'PLANE' and (
+            'VTOL' in primary_type or 'PLANE' in primary_type
+        ):
             self._verify_vtol_q_enable()
 
         # 要求高頻串流（與 Mission Planner 一致）
@@ -359,19 +419,25 @@ class SITLLink(QThread):
             # 多機情境下尤其重要 — 沒有 heartbeat → ArduPlane 會自動切 RTL
             _now = time.time()
             if _now - _last_hb >= 1.0:
-                try:
-                    from pymavlink import mavutil as _mu
-                    self._mav.mav.heartbeat_send(
-                        _mu.mavlink.MAV_TYPE_GCS,
-                        _mu.mavlink.MAV_AUTOPILOT_INVALID,
-                        0, 0, 0,
-                    )
-                except Exception:
-                    pass
+                self._send_gcs_heartbeat()
                 _last_hb = _now
 
             try:
                 msg = self._mav.recv_match(blocking=True, timeout=0.5)
+            except OSError as e:
+                # 防禦性處理：對「尚未 bind 的 Windows udpout socket」呼叫 recvfrom
+                # 會丟 WinError 10022（WSAEINVAL）。正常情況下連線啟動時的 pre-send
+                # 已 bind 該 socket，且 pymavlink 不會重建 udpout socket（mavudp 無
+                # autoreconnect 重連路徑），故此分支幾乎不會觸發 —— 保留為廉價保險：
+                # 萬一遇到未 bind 狀態，補送一包 heartbeat 重新 bind 後續傳，
+                # 不要當成致命錯誤把整條連線收掉。
+                if getattr(e, 'winerror', None) == 10022:
+                    self._send_gcs_heartbeat()
+                    _last_hb = time.time()
+                    time.sleep(0.1)
+                    continue
+                self.error.emit(f'接收錯誤: {e}')
+                break
             except Exception as e:
                 self.error.emit(f'接收錯誤: {e}')
                 break
@@ -465,10 +531,58 @@ class SITLLink(QThread):
                 4, f'[System] Q_ENABLE 驗證失敗: {e}'
             )
 
+    # ── 來源 system → TelemetryFrame 取得/建立 ────────────────────────
+    def _frame_for(self, src: int) -> TelemetryFrame:
+        """取得（或建立）來源 system `src` 對應的 TelemetryFrame。
+
+        first-seen 時建立並 log，讓「同一條連線冒出非預期 sysid」（mavproxy
+        fan-in 多架到同一 --out）能被看見，而非無聲疊在 sysid_label 那張卡片上。
+        """
+        f = self._frames.get(src)
+        if f is None:
+            f = TelemetryFrame(sysid=src)
+            self._frames[src] = f
+            extra = '' if src == self.sysid_label else f'（與標示 sysid={self.sysid_label} 不同）'
+            logger.info(f'[SITL] {self.conn_str} 偵測到來源 system {src}{extra}')
+        return f
+
     # ── 訊息分派 ──────────────────────────────────────────────────────
     def _handle_message(self, msg):
         mtype = msg.get_type()
-        f = self._frame
+
+        # ── 與來源無關的訊息：直接路由到對應信號，不進 frame 分流 ──
+        # （PARAM/STATUSTEXT 走 servo_param / status_text 等連線層級信號）
+        if mtype == 'PARAM_VALUE':
+            try:
+                pname = msg.param_id if isinstance(msg.param_id, str) else msg.param_id.decode('utf-8','ignore')
+                pname = pname.strip('\x00').upper()
+                pval = float(msg.param_value)
+                # 攔截 SERVOn_FUNCTION/MIN/TRIM/MAX/REVERSED → 推送到 ServoOutputPanel
+                # 例如 SERVO5_FUNCTION → ch=5, key=FUNCTION
+                import re as _re
+                m = _re.match(r'^SERVO(\d+)_(FUNCTION|MIN|TRIM|MAX|REVERSED)$', pname)
+                if m:
+                    ch = int(m.group(1))
+                    key = m.group(2)
+                    if 1 <= ch <= 16:
+                        self.servo_param.emit(ch, key, pval)
+                else:
+                    self.status_text.emit(6, f'PARAM {pname} = {pval:g}')
+            except Exception:
+                pass
+            return
+
+        if mtype == 'STATUSTEXT':
+            text = msg.text if isinstance(msg.text, str) else msg.text.decode('utf-8', 'ignore')
+            self.status_text.emit(int(msg.severity), text.strip('\x00'))
+            return
+
+        # ── 遙測類：依來源 system 分流到各自的 TelemetryFrame ──
+        # 跳過我方 GCS 心跳回送 (255) 與無效來源 (0)，避免冒出假卡片。
+        src = int(msg.get_srcSystem())
+        if src in (0, 255):
+            return
+        f = self._frame_for(src)
         emit = False
 
         if mtype == 'HEARTBEAT':
@@ -527,29 +641,6 @@ class SITLLink(QThread):
                     f.servo_pwm[ch - 1] = int(getattr(msg, attr))
             emit = True
 
-        elif mtype == 'PARAM_VALUE':
-            try:
-                pname = msg.param_id if isinstance(msg.param_id, str) else msg.param_id.decode('utf-8','ignore')
-                pname = pname.strip('\x00').upper()
-                pval = float(msg.param_value)
-                # 攔截 SERVOn_FUNCTION/MIN/TRIM/MAX/REVERSED → 推送到 ServoOutputPanel
-                # 例如 SERVO5_FUNCTION → ch=5, key=FUNCTION
-                import re as _re
-                m = _re.match(r'^SERVO(\d+)_(FUNCTION|MIN|TRIM|MAX|REVERSED)$', pname)
-                if m:
-                    ch = int(m.group(1))
-                    key = m.group(2)
-                    if 1 <= ch <= 16:
-                        self.servo_param.emit(ch, key, pval)
-                else:
-                    self.status_text.emit(6, f'PARAM {pname} = {pval:g}')
-            except Exception:
-                pass
-
-        elif mtype == 'STATUSTEXT':
-            text = msg.text if isinstance(msg.text, str) else msg.text.decode('utf-8', 'ignore')
-            self.status_text.emit(int(msg.severity), text.strip('\x00'))
-
         if emit:
             f.last_update = time.time()
             self.telemetry.emit(f)
@@ -587,6 +678,10 @@ class SITLLink(QThread):
                         time.sleep(0.05)
                 elif cmd == 'get_param':
                     self._send_param_request(arg)
+                elif cmd == 'guided_takeoff':
+                    self._send_guided_takeoff(float(arg))
+                elif cmd == 'guided_goto':
+                    self._send_guided_goto(*arg)
                 elif cmd == 'vtol_transition':
                     self._send_vtol_transition(int(arg))
                 elif cmd == 'upload_fence':
@@ -640,6 +735,60 @@ class SITLLink(QThread):
             mavutil.mavlink.MAV_CMD_NAV_TAKEOFF,
             0, 0, 0, 0, 0, 0, 0, alt
         )
+
+    # ── 固定翼相容 GUIDED 起飛 / 飛到 ──────────────────────────────────
+    # ArduPlane 純固定翼 GUIDED 不執行 SET_POSITION_TARGET、也拒絕
+    # GUIDED+NAV_TAKEOFF。起飛改用 TAKEOFF 飛行模式（id 13，滑跑爬升）；
+    # 「飛到」改用 guided 航點 MISSION_ITEM_INT current=2（GCS「fly to here」）。
+    _APM_MODE_TAKEOFF = 13
+    _APM_MODE_GUIDED = 15
+
+    def _send_guided_takeoff(self, alt: float):
+        from pymavlink import mavutil
+        # SITL：先關 ARMING_CHECK（實機請勿）
+        try:
+            self._mav.mav.param_set_send(
+                self._mav.target_system, self._mav.target_component,
+                b'ARMING_CHECK', 0.0, mavutil.mavlink.MAV_PARAM_TYPE_INT32)
+            time.sleep(0.2)
+        except Exception:
+            pass
+        # TAKEOFF 模式（MAVROS/字串無此別名，用數字 custom_mode）
+        self._mav.mav.set_mode_send(
+            self._mav.target_system,
+            mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED,
+            self._APM_MODE_TAKEOFF)
+        time.sleep(0.3)
+        # force arm（param2=21196）→ 滑跑起飛
+        self._mav.mav.command_long_send(
+            self._mav.target_system, self._mav.target_component,
+            mavutil.mavlink.MAV_CMD_COMPONENT_ARM_DISARM, 0,
+            1, 21196, 0, 0, 0, 0, 0)
+        self.status_text.emit(6, f'🛫 GUIDED 起飛（TAKEOFF 模式爬升 ~{alt:.0f}m）')
+
+    def _send_guided_goto(self, lat: float, lon: float, alt: float):
+        from pymavlink import mavutil
+        # 確保在 GUIDED
+        try:
+            mapping = self._mav.mode_mapping() or {}
+            if 'GUIDED' in mapping:
+                self._mav.set_mode(mapping['GUIDED'])
+            else:
+                self._mav.mav.set_mode_send(
+                    self._mav.target_system,
+                    mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED,
+                    self._APM_MODE_GUIDED)
+            time.sleep(0.2)
+        except Exception:
+            pass
+        # guided 航點：current=2 = 「飛到這」
+        self._mav.mav.mission_item_int_send(
+            self._mav.target_system, self._mav.target_component, 0,
+            mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT,
+            mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 2, 0, 0, 0, 0, 0,
+            int(lat * 1e7), int(lon * 1e7), float(alt),
+            mavutil.mavlink.MAV_MISSION_TYPE_MISSION)
+        self.status_text.emit(6, f'🎯 GUIDED 飛往 ({lat:.5f},{lon:.5f}) @ {alt:.0f}m')
 
     def _send_mission_start(self):
         """MAV_CMD_MISSION_START：觸發 AUTO 任務執行（ArduPlane SITL 必要）"""
@@ -738,7 +887,6 @@ class SITLLink(QThread):
     }
 
     def _send_param_set(self, name: str, value: float, ptype: str = 'REAL32'):
-        from pymavlink import mavutil
         pid = name.encode('utf-8')[:16]
         tcode = self._PARAM_TYPE_MAP.get(ptype.upper(), 9)
         self._mav.mav.param_set_send(
@@ -1028,7 +1176,6 @@ class SITLLink(QThread):
         state: 3 = MAV_VTOL_STATE_MC（多旋翼模式）
                4 = MAV_VTOL_STATE_FW（固定翼模式）
         """
-        from pymavlink import mavutil
         self._mav.mav.command_long_send(
             self._mav.target_system, self._mav.target_component,
             3000,        # MAV_CMD_DO_VTOL_TRANSITION

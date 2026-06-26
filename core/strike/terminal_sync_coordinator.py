@@ -23,10 +23,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
-from core.strike.geometry import haversine
+import math
+
+from core.strike.geometry import haversine, bearing_deg, destination
 from core.strike.tot_controller import TimeOnTargetController
 from core.strike.tgo_coordination import (
-    negotiate_tgo, ROLE_SPRINT, ROLE_CRUISE, ROLE_BURN,
+    negotiate_tgo, ROLE_SPRINT, ROLE_CRUISE, ROLE_BURN, ROLE_WEAVE,
 )
 
 # ── 階段常數 ──────────────────────────────────────────────────────────────
@@ -106,7 +108,11 @@ class TerminalSyncCoordinator:
         v_eff: float = 0.0,                  # 最佳續航速度（能耗最小點）；0=自動取 (v_min+v_max)/2
         arrive_m: float = 250.0,
         target_radius_m: float = 150.0,
-        final_lock_m: float = 350.0,         # 進入此半徑即鎖定直撲（不再盤旋，避免盤旋圈掃進目標）
+        final_lock_m: float = 350.0,         # 進入此半徑即鎖定直撲（不再耗時機動，避免擺進目標）
+        time_burn_mode: str = 'WEAVE',       # 耗時手段：'WEAVE'=S 型機動（預設）/ 'LOITER'=原地盤旋
+        weave_period_s: float = 10.0,        # S 機動左右換邊週期（成 zigzag）
+        weave_lookahead_m: float = 350.0,    # S 機動 carrot 前置距離
+        weave_resend_s: float = 2.0,         # S 機動 carrot 重送間隔（航向需較勤更新）
         impact_buffer_s: float = 4.0,
         stage_timeout_s: float = 240.0,
         resend_goto_s: float = 5.0,
@@ -129,6 +135,10 @@ class TerminalSyncCoordinator:
         self.arrive_m = float(arrive_m)
         self.target_radius_m = float(target_radius_m)
         self.final_lock_m = float(final_lock_m)
+        self.time_burn_mode = str(time_burn_mode).upper()
+        self.weave_period_s = float(weave_period_s)
+        self.weave_lookahead_m = float(weave_lookahead_m)
+        self.weave_resend_s = float(weave_resend_s)
         self.resend_goto_s = float(resend_goto_s)
         self.speed_interval_s = float(speed_interval_s)
         self.stage_timeout_s = float(stage_timeout_s)
@@ -355,44 +365,70 @@ class TerminalSyncCoordinator:
                 if st is None or st.alt_rel <= self.min_air_alt_m:
                     continue
                 r = self._dist_to_target(st)
-                v_req = r / tau
-                # dash / loiter 判定（遲滯避免在 v_min 附近抖動）：
-                #   • 已進終端鎖定半徑 → 一律直撲（盤旋圈會掃進目標、不可再盤旋）
-                #   • v_req ≥ v_min        → 直撲（時間不夠，全速/巡航）
-                #   • v_req < 0.9·v_min    → 盤旋耗時（明顯超前進度）
-                #   • 之間                  → 維持上一狀態（遲滯）
-                if r <= self.final_lock_m or v_req >= self.v_min:
-                    dash = True
-                elif v_req < self.v_min * 0.9:
-                    dash = False
-                else:
-                    dash = sid in self._released
-                if dash:
-                    # 直線撲向目標（遠機 sprint、適中 cruise）
-                    newly = sid not in self._released
+                # v_close = 準時抵達 t* 所需的「對目標接近速率」(closing rate)。
+                # 統一制導：以速度 v 與航向偏角 θ 控制 closing = v·cosθ = v_close。
+                #   dr/dt = -v_close = -r/(t*-t_now) → r = K·(t*-t_now) → t→t* 時 r→0（精準對時）
+                v_close = r / tau
+                if r <= self.final_lock_m:
+                    # 終端鎖定：直撲，速度盡力（不再 S 機動，避免擺幅掃進目標）
                     self._released.add(sid)
-                    if newly or self._want_goto(sid, t_now):
+                    if self._want_goto(sid, t_now):
                         res.commands.append(StrikeCommand(
                             sysid=sid, kind='goto', lat=self.tlat, lon=self.tlon,
                             alt=self.alt[sid], reason='release'))
                         self._last_goto_t[sid] = t_now
-                    res.roles[sid] = ROLE_SPRINT if v_req > self.v_eff * 1.02 else ROLE_CRUISE
                     if do_speed:
-                        v = min(self.v_max, max(self.v_min, v_req))
+                        v = min(self.v_max, max(self.v_min, v_close))
                         res.commands.append(StrikeCommand(
                             sysid=sid, kind='speed', speed=v, reason='tot'))
-                else:
-                    # 超前進度 → 原地盤旋耗時（守在當前位置；非退回 push point，避免大幅折返）
+                    res.roles[sid] = ROLE_SPRINT if v_close > self.v_eff else ROLE_CRUISE
+                elif v_close < self.v_min:
+                    # 超前到「直線即使飛最慢 v_min 仍會早到」→ 需耗時。weave 僅在真正需要時啟用，
+                    # 故等距環(v_close≈v_eff>v_min)全程直線、不抖動。
                     self._released.discard(sid)
+                    if self.time_burn_mode == 'LOITER':
+                        # 原地盤旋耗時（守在當前位置；ArduPlane 盤旋行為穩定，極端落差下較穩健）
+                        if self._want_goto(sid, t_now):
+                            res.commands.append(StrikeCommand(
+                                sysid=sid, kind='goto', lat=st.lat, lon=st.lon,
+                                alt=self.alt[sid], reason='loiter'))
+                            self._last_goto_t[sid] = t_now
+                        if do_speed:
+                            res.commands.append(StrikeCommand(
+                                sysid=sid, kind='speed', speed=self.v_min, reason='loiter'))
+                    else:
+                        # S 型機動精修耗時：航向偏角 θ=acos(v_close/v_act)，對目標接近速率
+                        # = v_act·cosθ = v_close（精準對時）；左右交替換邊成 zigzag S。
+                        # 偏角用「實際對地速度」算 → 即使 SITL 未真正慢到 v_min 仍成立（保真穩健）。
+                        v_act = max(st.ground_speed, self.v_min)
+                        cos_t = max(0.0, min(1.0, v_close / v_act))
+                        theta = math.degrees(math.acos(cos_t))
+                        side = 1.0 if (int(t_now / self.weave_period_s) % 2 == 0) else -1.0
+                        brg = bearing_deg(st.lat, st.lon, self.tlat, self.tlon)
+                        carrot = destination(st.lat, st.lon, brg + side * theta,
+                                             self.weave_lookahead_m)
+                        if (t_now - self._last_goto_t.get(sid, -1e9)) >= self.weave_resend_s:
+                            res.commands.append(StrikeCommand(
+                                sysid=sid, kind='goto', lat=carrot[0], lon=carrot[1],
+                                alt=self.alt[sid], reason='weave'))
+                            self._last_goto_t[sid] = t_now
+                        if do_speed:
+                            res.commands.append(StrikeCommand(
+                                sysid=sid, kind='speed', speed=self.v_min, reason='weave'))
+                    res.roles[sid] = ROLE_WEAVE
+                else:
+                    # v_close ≥ v_min → 直線撲向目標，速度 = 接近速率（落後 sprint、適中 cruise）
+                    self._released.add(sid)
                     if self._want_goto(sid, t_now):
                         res.commands.append(StrikeCommand(
-                            sysid=sid, kind='goto', lat=st.lat, lon=st.lon,
-                            alt=self.alt[sid], reason='loiter'))
+                            sysid=sid, kind='goto', lat=self.tlat, lon=self.tlon,
+                            alt=self.alt[sid], reason='release'))
                         self._last_goto_t[sid] = t_now
-                    if do_speed:                 # 盤旋以 v_min 慢飛（省油、圈小、耗時最有效）
+                    if do_speed:
+                        v = min(self.v_max, max(self.v_min, v_close))
                         res.commands.append(StrikeCommand(
-                            sysid=sid, kind='speed', speed=self.v_min, reason='loiter'))
-                    res.roles[sid] = ROLE_BURN
+                            sysid=sid, kind='speed', speed=v, reason='tot'))
+                    res.roles[sid] = ROLE_SPRINT if v_close > self.v_eff * 1.02 else ROLE_CRUISE
 
         # 收尾：命中 ∪ 失聯 ⊇ 全體（失聯機不得卡死整隊；命中數另由驅動端統計散度）
         if (self.impacted | lost) >= self.sysids:

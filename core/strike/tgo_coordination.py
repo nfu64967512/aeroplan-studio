@@ -26,7 +26,8 @@ from typing import Dict, List
 # 角色（牧羊犬網格中各機的終端行為）
 ROLE_SPRINT = 'sprint'    # 距離遠 → 全速直線衝刺（v 顯著 > v_eff）
 ROLE_CRUISE = 'cruise'    # 距離適中 → 近 v_eff 巡航
-ROLE_BURN = 'burn'        # 距離近 → 盤旋 / S 機動耗時（v_req < v_min，先不撲）
+ROLE_BURN = 'burn'        # 距離近 → 盤旋耗時（v_req < v_min，先不撲；舊式盤旋）
+ROLE_WEAVE = 'weave'      # 距離近 → S 型機動耗時（定速 v_eff，航向偏角；精準對時）
 
 
 @dataclass

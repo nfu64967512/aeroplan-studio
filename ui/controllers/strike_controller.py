@@ -912,11 +912,11 @@ class StrikeControllerMixin:
             gate = f'UAV{res.gating_sysid}' if res.gating_sysid else '─'
             sep = ('%.0f' % res.min_separation_m) if res.min_separation_m < 1e8 else '∞'
             shep = ''
-            if res.roles:                       # 牧羊犬網格態勢：協商 τ + sprint/cruise/burn 分布
+            if res.roles:                       # 牧羊犬網格態勢：協商 τ + sprint/cruise/weave 分布
                 n_sp = sum(1 for v in res.roles.values() if v == 'sprint')
                 n_cr = sum(1 for v in res.roles.values() if v == 'cruise')
-                n_bn = sum(1 for v in res.roles.values() if v == 'burn')
-                shep = f'τ={res.tgo_s:.0f}s 衝{n_sp}/巡{n_cr}/盤{n_bn} '
+                n_wv = sum(1 for v in res.roles.values() if v in ('weave', 'burn'))
+                shep = f'τ={res.tgo_s:.0f}s 衝{n_sp}/巡{n_cr}/S{n_wv} '
             msg = (f'[TSYNC t={t:5.1f}] {res.phase} 就位{len(res.staged)}/{ts["n"]} '
                    f'命中{len(res.impacted)}/{ts["n"]} 見{len(res.seen_sysids)}機 '
                    f'{shep}minSep={sep}m 等待{gate} {res.note}')

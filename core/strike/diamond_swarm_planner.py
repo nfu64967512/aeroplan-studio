@@ -70,8 +70,7 @@ from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
 from core.strike.geometry import (
-    haversine, bearing_deg, destination, dubins_shortest_length,
-    dubins_path_samples,
+    haversine, bearing_deg, destination, dubins_path_samples,
 )
 # 與既有 SwarmStrikePlanner 共用同一個 MissionItem 結構
 from core.strike.swarm_strike_planner import MissionItem, FeasibilityStatus
@@ -428,9 +427,6 @@ class DiamondSwarmStrikePlanner:
 
         # 爬升相關常數（依 takeoff_pitch 計算各機水平爬升距離）
         takeoff_pitch_rad = math.radians(max(cfg.takeoff_pitch_deg, 5.0))
-        climb_alt_diff = max(cfg.cruise_alt_m - 0.0, 1.0)
-        horizontal_climb_dist = climb_alt_diff / math.tan(takeoff_pitch_rad)
-        climb_dist_3d = math.hypot(horizontal_climb_dist, climb_alt_diff)
 
         # leader 爬升結束點（無 slot 偏移） — 用作菱形編隊起點基準。
         # 為避免 V 字回頭轉折，必須同時補償兩個因素：
@@ -532,7 +528,7 @@ class DiamondSwarmStrikePlanner:
         # 中心對稱排列：N=4 → local_x ∈ {-1.5, -0.5, +0.5, +1.5} × runway_spacing_m
         # 相當於以「leader 居中、其他左右交替」的 lineup，模擬機場跑道並排起飛。
         # 爬升結束後才過渡到菱形編隊位置開始巡航。
-        # （horizontal_climb_dist / climb_alt_diff / leader_climb_end_* 已在 STOT 區段算好）
+        # （leader_climb_end_* 已在 STOT 區段算好）
         for slot_idx, (slot, bearing_idx) in enumerate(zip(slots, attack_assignment)):
             (p_lat, p_lon, ang) = pre_pts[bearing_idx]
             (d_lat, d_lon) = dive_pts[bearing_idx]
@@ -566,7 +562,9 @@ class DiamondSwarmStrikePlanner:
             #   GROUND — NAV_DELAY 在地面延遲，較近的 UAV 較晚起飛 → 不空轉燃油、隱蔽
             #   AIR    — NAV_LOITER_TIME 在 P_pre 盤旋 → 原本行為，需要空中集結時用
             total_delay = max(loiter_times[slot_idx], 0.0)
-            if cfg.delay_strategy.upper() == 'AIR':
+            strat = cfg.delay_strategy.upper()
+            if strat in ('AIR', 'SMANEUVER'):
+                # AIR=盤旋圈補時；SMANEUVER=S 形蛇行補時（皆把待消耗時間放在空中）
                 plan.takeoff_delay_s = 0.0
                 plan.loiter_time_s = total_delay
             else:  # 'GROUND' (預設)
@@ -758,34 +756,49 @@ class DiamondSwarmStrikePlanner:
                 comment=f'Phase 1 {phase} [{i+1}/{len(traj_pts)}] '
                         f'{plan.role} alt={alt:.0f}m',
             ))
-        # 4) NAV_LOITER_TIME @ 預備點 ─ STOT/DTOT 補時
-        # ArduPilot LOITER_TIME 參數：param1=time(s), param3=radius(m, +CCW/-CW)
-        if plan.loiter_time_s > 0.5:
-            m.append(MissionItem(
-                cmd=MAV_CMD_NAV_LOITER_TIME,
-                lat=plan.pre_strike_lat, lon=plan.pre_strike_lon,
-                alt=plan_cruise_alt,
-                param1=float(plan.loiter_time_s),
-                param3=cfg.loiter_radius_m,
-                comment=f'NAV_LOITER_TIME {plan.loiter_time_s:.1f}s '
-                        f'@bearing {plan.attack_bearing_deg:.0f}° '
-                        f'({cfg.timing_mode} 補時)',
-            ))
-        else:
-            # 雖然不需補時，但仍需經過預備點再進入俯衝（避免銳角）
+        # 4) 補時段：S 形蛇行(SMANEUVER) / 盤旋圈(AIR) / 直接過預備點(GROUND/基準機)
+        if cfg.delay_strategy.upper() == 'SMANEUVER' and plan.loiter_time_s > 0.5:
+            # 預備點 → 俯衝起點 之間做 S 形 weave，把路徑拉長以消耗 loiter_time_s
+            from core.strike.maneuver_path import generate_s_maneuver_path
+            sweave = generate_s_maneuver_path(
+                plan.pre_strike_lat, plan.pre_strike_lon,
+                plan.dive_lat, plan.dive_lon,
+                cfg.cruise_speed_mps, plan.loiter_time_s,
+                cfg.min_turn_radius_m, plan_cruise_alt)
+            for j, (wla, wlo, wal) in enumerate(sweave[:-1]):
+                m.append(MissionItem(
+                    cmd=MAV_CMD_NAV_WAYPOINT, lat=wla, lon=wlo, alt=wal,
+                    comment=f'Phase 4 S 機動 weave [{j+1}] 補時 {plan.loiter_time_s:.0f}s '
+                            f'@bearing {plan.attack_bearing_deg:.0f}°'))
+            # weave 最後一點即俯衝起點
             m.append(MissionItem(
                 cmd=MAV_CMD_NAV_WAYPOINT,
-                lat=plan.pre_strike_lat, lon=plan.pre_strike_lon,
-                alt=plan_cruise_alt,
-                comment=f'Phase 4 預備點 (基準機，無需補時)',
-            ))
-        # 5) 俯衝起點（仍在該機巡航高度）
-        m.append(MissionItem(
-            cmd=MAV_CMD_NAV_WAYPOINT,
-            lat=plan.dive_lat, lon=plan.dive_lon, alt=plan_cruise_alt,
-            comment=f'Phase 5 俯衝起點 (bearing {plan.attack_bearing_deg:.0f}°, '
-                    f'r_dive={cfg.dive_initiation_m:.0f}m, alt={plan_cruise_alt:.0f}m)',
-        ))
+                lat=plan.dive_lat, lon=plan.dive_lon, alt=plan_cruise_alt,
+                comment=f'Phase 5 俯衝起點 (S 機動後, bearing {plan.attack_bearing_deg:.0f}°)'))
+        else:
+            # AIR=NAV_LOITER_TIME 盤旋；其餘=直接過預備點
+            if plan.loiter_time_s > 0.5:
+                m.append(MissionItem(
+                    cmd=MAV_CMD_NAV_LOITER_TIME,
+                    lat=plan.pre_strike_lat, lon=plan.pre_strike_lon,
+                    alt=plan_cruise_alt,
+                    param1=float(plan.loiter_time_s),
+                    param3=cfg.loiter_radius_m,
+                    comment=f'NAV_LOITER_TIME {plan.loiter_time_s:.1f}s '
+                            f'@bearing {plan.attack_bearing_deg:.0f}° '
+                            f'({cfg.timing_mode} 補時)'))
+            else:
+                m.append(MissionItem(
+                    cmd=MAV_CMD_NAV_WAYPOINT,
+                    lat=plan.pre_strike_lat, lon=plan.pre_strike_lon,
+                    alt=plan_cruise_alt,
+                    comment='Phase 4 預備點 (基準機，無需補時)'))
+            # 5) 俯衝起點（仍在該機巡航高度）
+            m.append(MissionItem(
+                cmd=MAV_CMD_NAV_WAYPOINT,
+                lat=plan.dive_lat, lon=plan.dive_lon, alt=plan_cruise_alt,
+                comment=f'Phase 5 俯衝起點 (bearing {plan.attack_bearing_deg:.0f}°, '
+                        f'r_dive={cfg.dive_initiation_m:.0f}m, alt={plan_cruise_alt:.0f}m)'))
         # 6) 終端目標（俯衝終點 + 撞擊點）
         # param2=30m acceptance — 對固定翼撞擊任務最實用的精度：
         #   太小 (3m)：飛機反覆嘗試精準命中 → S-turn / U-turn 鋸齒

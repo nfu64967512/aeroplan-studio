@@ -5562,6 +5562,15 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
     _TKOFF_CLIMB_TIMEOUT = 60     # 秒：長機爬升逾時保護
     _TKOFF_GUIDED_TIMEOUT = 12    # 秒：長機切 GUIDED 確認逾時（逾時仍放行僚機）
 
+    # ── 長機/僚機選取（單一事實來源，避免到處重複 min/sorted sysid）──────
+    def _sorted_links(self):
+        """SITL 連線依 sysid_label 由小到大排序（[0]=長機）。"""
+        return sorted(self._sitl_links, key=lambda l: getattr(l, 'sysid_label', 1))
+
+    def _get_leader_link(self):
+        """長機 = sysid 最小者（無連線回 None）。"""
+        return self._sorted_links()[0] if self._sitl_links else None
+
     def _send_guided_takeoff_swarm(self, lat: float, lon: float, alt: float = 60.0):
         """點地圖 → 長機帶領的「分階段」GUIDED 起飛（非整群同時）：
 
@@ -5571,7 +5580,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         """
         if not self._sitl_links:
             return
-        links = sorted(self._sitl_links, key=lambda l: getattr(l, 'sysid_label', 1))
+        links = self._sorted_links()
         leader, wingmen = links[0], links[1:]
         try:
             leader.guided_takeoff(alt)           # 階段1：長機單獨起飛
@@ -5597,7 +5606,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
             return
         st['ticks'] += 1
         leader = st['leader']
-        frame = leader._frames.get(getattr(leader, 'sysid_label', 1))
+        frame = leader.get_latest_telemetry()
         alt = frame.alt_rel if frame else 0.0
         mode = frame.mode if frame else '---'
 
@@ -5652,7 +5661,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         """送 GUIDED 飛到給長機（sysid 最小者）；僚機由蜂群節點追蹤其 geopose 跟隨。"""
         if not self._sitl_links:
             return
-        leader = min(self._sitl_links, key=lambda l: getattr(l, 'sysid_label', 1))
+        leader = self._get_leader_link()
         try:
             leader.guided_goto(lat, lon, alt)
             self.statusBar().showMessage(
@@ -5677,8 +5686,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         if not ok:
             return
         self._last_guided_alt = alt
-        leader = min(self._sitl_links, key=lambda l: getattr(l, 'sysid_label', 1))
-        frame = leader._frames.get(getattr(leader, 'sysid_label', 1))
+        leader = self._get_leader_link()
+        frame = leader.get_latest_telemetry()
         airborne = bool(frame and frame.armed and frame.alt_rel > 15.0)
         if airborne:
             self._send_guided_goto(lat, lon, alt)        # 已在空中 → 直接飛往
@@ -5688,7 +5697,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
     def _rclick_takeoff_goto(self, lat: float, lon: float, alt: float):
         """長機帶頭起飛（僚機 3s 內接續），長機升空後 GUIDED 飛往 (lat,lon,alt)。"""
         from PyQt6.QtCore import QTimer
-        links = sorted(self._sitl_links, key=lambda l: getattr(l, 'sysid_label', 1))
+        links = self._sorted_links()
         leader, wingmen = links[0], links[1:]
         try:
             leader.guided_takeoff(alt)
@@ -5722,7 +5731,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
             return
         pg['ticks'] += 1
         leader = pg['leader']
-        frame = leader._frames.get(getattr(leader, 'sysid_label', 1))
+        frame = leader.get_latest_telemetry()
         alt = frame.alt_rel if frame else 0.0
         if alt >= min(pg['alt'] * 0.7, 40.0):            # 升空到目標 7 成或 40m → 飛往目標
             try:

@@ -15,7 +15,7 @@ import time
 import queue
 import threading
 from dataclasses import dataclass, field
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
@@ -249,6 +249,10 @@ class SITLLink(QThread):
         """GUIDED 飛往 (lat, lon, alt_rel)。用 guided 航點（MISSION_ITEM_INT
         current=2），因為 ArduPlane 固定翼 GUIDED 不執行 SET_POSITION_TARGET。"""
         self._cmd_queue.put(('guided_goto', (float(lat), float(lon), float(alt))))
+
+    def get_latest_telemetry(self) -> Optional['TelemetryFrame']:
+        """本連線主 sysid 的最新遙測快照（無則 None）。供外部讀取，避免直接碰 _frames。"""
+        return self._frames.get(self.sysid_label)
     def upload_mission(self, waypoints: List[Tuple[float, float, float]]):
         """waypoints: [(lat, lon, alt_rel), ...]"""
         self._cmd_queue.put(('upload_mission', list(waypoints)))

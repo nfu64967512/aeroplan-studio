@@ -141,6 +141,10 @@ class FormationConfig:
                                      #            優點：不空轉燃油、降低空中暴露時間、命中時刻精確
                                      # 'AIR'    — 較近 UAV 在 P_pre 預備點 NAV_LOITER_TIME 盤旋
                                      #            原本行為，仍可用於需要空中集結的場景
+                                     # 'SMANEUVER' — 以 S 形蛇行消耗時間（見 maneuver_path）
+    launch_stagger_s: float = 0.0    # SMANEUVER 用：依 sysid（長機 UAV1 先）微錯開起飛間隔（s）。
+                                     # 跑道並排起飛不再同秒擠在一起；命中時刻仍對齊——
+                                     # 每機 S 機動補時自動吸收自己的起飛延遲（base 整體 +最大錯開量）。
 
     # ── 攻擊弧度（同側半圈扇面攻擊） ─────────────────────────────
     # 攻擊方位以「back_bearing = cruise_heading + 180°」為中心，
@@ -565,8 +569,16 @@ class DiamondSwarmStrikePlanner:
             strat = cfg.delay_strategy.upper()
             if strat in ('AIR', 'SMANEUVER'):
                 # AIR=盤旋圈補時；SMANEUVER=S 形蛇行補時（皆把待消耗時間放在空中）
-                plan.takeoff_delay_s = 0.0
-                plan.loiter_time_s = total_delay
+                if strat == 'SMANEUVER' and cfg.launch_stagger_s > 0.0:
+                    # 跑道安全：依 sysid（長機 UAV1=0）微錯開起飛，避免並排同秒擠在一起。
+                    # base 整體 +最大錯開量，每機 S 機動補時 = 原補時 + 最大錯開 - 自己的起飛延遲，
+                    # 故 arrival = base + 最大錯開 對所有機相同（命中時刻仍對齊），且補時恆 ≥ 0。
+                    max_stag = cfg.launch_stagger_s * (max(cfg.n_uavs, 1) - 1)
+                    plan.takeoff_delay_s = cfg.launch_stagger_s * (plan.sysid - 1)
+                    plan.loiter_time_s = total_delay + max_stag - plan.takeoff_delay_s
+                else:
+                    plan.takeoff_delay_s = 0.0
+                    plan.loiter_time_s = total_delay
             else:  # 'GROUND' (預設)
                 plan.takeoff_delay_s = total_delay
                 plan.loiter_time_s = 0.0

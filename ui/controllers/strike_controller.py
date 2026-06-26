@@ -827,6 +827,7 @@ class StrikeControllerMixin:
             coord = TerminalSyncCoordinator(
                 target.lat, target.lon, push, approach,
                 v_min=v_min, v_max=v_max,
+                v_eff=v_cruise,                 # 能耗最小速度（t_go 協商目標）= 巡航速
                 arrive_m=max(stage_m * 0.18, 200.0),
                 target_radius_m=150.0, impact_buffer_s=4.0,
             )
@@ -910,9 +911,15 @@ class StrikeControllerMixin:
             ts['last_log'] = t
             gate = f'UAV{res.gating_sysid}' if res.gating_sysid else '─'
             sep = ('%.0f' % res.min_separation_m) if res.min_separation_m < 1e8 else '∞'
+            shep = ''
+            if res.roles:                       # 牧羊犬網格態勢：協商 τ + sprint/cruise/burn 分布
+                n_sp = sum(1 for v in res.roles.values() if v == 'sprint')
+                n_cr = sum(1 for v in res.roles.values() if v == 'cruise')
+                n_bn = sum(1 for v in res.roles.values() if v == 'burn')
+                shep = f'τ={res.tgo_s:.0f}s 衝{n_sp}/巡{n_cr}/盤{n_bn} '
             msg = (f'[TSYNC t={t:5.1f}] {res.phase} 就位{len(res.staged)}/{ts["n"]} '
                    f'命中{len(res.impacted)}/{ts["n"]} 見{len(res.seen_sysids)}機 '
-                   f'minSep={sep}m 等待{gate} {res.note}')
+                   f'{shep}minSep={sep}m 等待{gate} {res.note}')
             logger.info(msg)
             self.statusBar().showMessage(msg, 3000)
 

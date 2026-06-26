@@ -24,7 +24,10 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Tuple
 
 from core.strike.geometry import haversine
-from core.strike.tot_controller import TimeOnTargetController, AircraftState
+from core.strike.tot_controller import TimeOnTargetController
+from core.strike.tgo_coordination import (
+    negotiate_tgo, ROLE_SPRINT, ROLE_CRUISE, ROLE_BURN,
+)
 
 # ── 階段常數 ──────────────────────────────────────────────────────────────
 PHASE_STAGE = 'STAGE'
@@ -68,6 +71,11 @@ class StepResult:
     gating_sysid: Optional[int] = None     # 目前在拖累釋放/命中時刻的機（態勢互通的證據）
     seen_sysids: Set[int] = field(default_factory=set)
     note: str = ''
+    # ── 牧羊犬網格 / t_go 協商態勢（供顯示）──
+    tgo_s: float = 0.0                                   # 當前共同剩餘時間 τ = t* − t_now
+    impact_time_s: Optional[float] = None               # 協商鎖定的共同命中時刻 t*
+    roles: Dict[int, str] = field(default_factory=dict)  # sysid → sprint/cruise/burn
+    energy: float = 0.0                                  # 協商 τ* 的總能量（相對）
 
 
 class TerminalSyncCoordinator:
@@ -95,8 +103,10 @@ class TerminalSyncCoordinator:
         approach_alt: Dict[int, float],
         *,
         v_min: float = 12.0, v_max: float = 22.0,
+        v_eff: float = 0.0,                  # 最佳續航速度（能耗最小點）；0=自動取 (v_min+v_max)/2
         arrive_m: float = 250.0,
         target_radius_m: float = 150.0,
+        final_lock_m: float = 350.0,         # 進入此半徑即鎖定直撲（不再盤旋，避免盤旋圈掃進目標）
         impact_buffer_s: float = 4.0,
         stage_timeout_s: float = 240.0,
         resend_goto_s: float = 5.0,
@@ -118,12 +128,21 @@ class TerminalSyncCoordinator:
         self.sysids: Set[int] = set(self.push)
         self.arrive_m = float(arrive_m)
         self.target_radius_m = float(target_radius_m)
+        self.final_lock_m = float(final_lock_m)
         self.resend_goto_s = float(resend_goto_s)
         self.speed_interval_s = float(speed_interval_s)
         self.stage_timeout_s = float(stage_timeout_s)
         self.min_air_alt_m = float(min_air_alt_m)
         self.lost_timeout_s = float(lost_timeout_s)
+        if not (0 < v_min < v_max):
+            raise ValueError(f"need 0 < v_min < v_max, got {v_min}, {v_max}")
+        self.v_min = float(v_min)
+        self.v_max = float(v_max)
+        self.v_eff = float(v_eff) if v_eff > 0 else 0.5 * (v_min + v_max)
+        self.impact_buffer_s = float(impact_buffer_s)
 
+        # 保留 ToT 控制器（向後相容；驅動端讀 coord.tot.v_min/v_max）。終端制導已改用
+        # t_go 協商 + 牧羊犬網格（見 _step_release/_step_correct）。
         self.tot = TimeOnTargetController(
             self.tlat, self.tlon, v_min=v_min, v_max=v_max,
             terminal_range_m=self._stage_radius() + 600.0,
@@ -139,6 +158,8 @@ class TerminalSyncCoordinator:
         self._released: Set[int] = set()
         self._last_speed_t: float = -1e9
         self._last_seen: Dict[int, float] = {}   # sysid → 最近一次有遙測的 t（失聯判斷）
+        self._t_star: Optional[float] = None     # 協商鎖定的共同命中時刻 t*（絕對秒）
+        self._energy: float = 0.0                # 協商 τ* 的總能量（顯示用）
 
     # ── 幾何小工具 ────────────────────────────────────────────────────────
     def _stage_radius(self) -> float:
@@ -181,7 +202,12 @@ class TerminalSyncCoordinator:
             if sid in self.impacted:
                 continue
             seen = self._last_seen.get(sid)
-            if seen is None or (t_now - seen) > self.lost_timeout_s:
+            if seen is None:
+                # 啟動寬限：開機初期遙測尚未灌入時，不可把「從未見過」當失聯
+                # （否則第一個 tick 全機被當失聯 → STAGE→…→DONE 空轉收尾）。
+                if t_now > self.lost_timeout_s:
+                    out.add(sid)
+            elif (t_now - seen) > self.lost_timeout_s:
                 out.add(sid)
         return out
 
@@ -251,18 +277,46 @@ class TerminalSyncCoordinator:
         else:
             res.note = f'進站中 {len(self.staged)}/{len(self.sysids)}，等待 UAV{worst_sid}'
 
-    # ── RELEASE：同一刻全機平飛(分層)直撲目標 ──────────────────────────────
-    def _step_release(self, states, t_now, res: StepResult) -> None:
+    # ── t_go 協商小工具 ────────────────────────────────────────────────────
+    def _remaining_distances(self, states) -> Dict[int, float]:
+        """非命中、有遙測機到目標的剩餘距離 {sysid: r}（t_go 協商輸入）。"""
+        out: Dict[int, float] = {}
         for sid in self.sysids:
-            res.commands.append(StrikeCommand(
-                sysid=sid, kind='goto', lat=self.tlat, lon=self.tlon,
-                alt=self.alt[sid], reason='release'))
-            self._last_goto_t[sid] = t_now
-            self._released.add(sid)
-        self.phase = PHASE_CORRECT
-        res.note = '已同步釋放，進入 ToT 速度修正'
+            if sid in self.impacted:
+                continue
+            st = states.get(sid)
+            if st is not None:
+                out[sid] = self._dist_to_target(st)
+        return out
 
-    # ── CORRECT：ToT 修正各機空速 → 收斂同一命中時刻；偵測命中 ──────────────
+    def _negotiate_lock(self, states, t_now) -> None:
+        """協商「能量最省」的共同剩餘時間 τ*（協同變數），鎖定 t* = t_now + τ*。"""
+        rs = self._remaining_distances(states)
+        if not rs:
+            return
+        plan = negotiate_tgo(rs, self.v_min, self.v_max, self.v_eff)
+        self._t_star = t_now + plan.tgo_common_s
+        self._energy = plan.energy
+
+    def _ensure_feasible(self, rs: Dict[int, float], t_now) -> None:
+        """維持可達性：若 t* 已逼近到「最遠機全速也來不及」，把 t* 往後推。"""
+        if self._t_star is None or not rs:
+            return
+        floor = t_now + max(r / self.v_max for r in rs.values())
+        if floor > self._t_star:
+            self._t_star = floor
+
+    # ── RELEASE：以 t_go 協商出能量最省的共同命中時刻 t*（協同變數），鎖定後入網格 ──
+    def _step_release(self, states, t_now, res: StepResult) -> None:
+        self._negotiate_lock(states, t_now)
+        self.phase = PHASE_CORRECT
+        if self._t_star is not None:
+            res.note = (f'已協商能量最省的共同命中 t*（τ={self._t_star - t_now:.0f}s）'
+                        f'→ 牧羊犬網格收斂')
+        else:
+            res.note = '尚無遙測可協商，待 CORRECT 階段補算'
+
+    # ── CORRECT：牧羊犬網格 —— 遠機全速直線衝刺、近機盤旋耗時，全機收斂到協商 t* ──
     def _step_correct(self, states, t_now, res: StepResult) -> None:
         lost = self._lost(t_now)
         # 命中偵測 + gating（最遠、未命中、未失聯者）
@@ -284,25 +338,68 @@ class TerminalSyncCoordinator:
             res.note = '；'.join(hits)            # 同一 tick 多機命中皆保留，不互相覆蓋
         res.gating_sysid = worst_sid
 
-        # 重送目標 goto（鎖定終端目標，防丟包/被打斷）
-        for sid in self.sysids:
-            if sid in self.impacted:
-                continue
-            if self._want_goto(sid, t_now):
-                res.commands.append(StrikeCommand(
-                    sysid=sid, kind='goto', lat=self.tlat, lon=self.tlon,
-                    alt=self.alt[sid], reason='release'))
-                self._last_goto_t[sid] = t_now
+        # t* 鎖定（首次補算）+ 維持可達性
+        rs = self._remaining_distances(states)
+        if self._t_star is None:
+            self._negotiate_lock(states, t_now)
+        self._ensure_feasible(rs, t_now)
 
-        # ToT 速度修正（節流；只算在空中、未命中者）
-        if (t_now - self._last_speed_t) >= self.speed_interval_s:
+        do_speed = (t_now - self._last_speed_t) >= self.speed_interval_s
+        if do_speed:
             self._last_speed_t = t_now
-            ac = [AircraftState(sid, states[sid].lat, states[sid].lon, states[sid].alt_rel)
-                  for sid in self.sysids
-                  if sid not in self.impacted and sid in states
-                  and states[sid].alt_rel > self.min_air_alt_m]
-            for sid, v in self.tot.compute_speeds(ac, t_now).items():
-                res.commands.append(StrikeCommand(sysid=sid, kind='speed', speed=v, reason='tot'))
+
+        if self._t_star is not None:
+            tau = max(self._t_star - t_now, 0.5)
+            res.tgo_s = tau
+            res.impact_time_s = self._t_star
+            res.energy = self._energy
+            for sid in self.sysids:
+                if sid in self.impacted or sid in lost:
+                    continue
+                st = states.get(sid)
+                if st is None or st.alt_rel <= self.min_air_alt_m:
+                    continue
+                r = self._dist_to_target(st)
+                v_req = r / tau
+                # dash / loiter 判定（遲滯避免在 v_min 附近抖動）：
+                #   • 已進終端鎖定半徑 → 一律直撲（盤旋圈會掃進目標、不可再盤旋）
+                #   • v_req ≥ v_min        → 直撲（時間不夠，全速/巡航）
+                #   • v_req < 0.9·v_min    → 盤旋耗時（明顯超前進度）
+                #   • 之間                  → 維持上一狀態（遲滯）
+                if r <= self.final_lock_m or v_req >= self.v_min:
+                    dash = True
+                elif v_req < self.v_min * 0.9:
+                    dash = False
+                else:
+                    dash = sid in self._released
+                if dash:
+                    # 直線撲向目標（遠機 sprint、適中 cruise）
+                    newly = sid not in self._released
+                    self._released.add(sid)
+                    if newly or self._want_goto(sid, t_now):
+                        res.commands.append(StrikeCommand(
+                            sysid=sid, kind='goto', lat=self.tlat, lon=self.tlon,
+                            alt=self.alt[sid], reason='release'))
+                        self._last_goto_t[sid] = t_now
+                    res.roles[sid] = ROLE_SPRINT if v_req > self.v_eff * 1.02 else ROLE_CRUISE
+                    if do_speed:
+                        v = min(self.v_max, max(self.v_min, v_req))
+                        res.commands.append(StrikeCommand(
+                            sysid=sid, kind='speed', speed=v, reason='tot'))
+                else:
+                    # 超前進度 → 原地盤旋耗時（守在當前位置；非退回 push point，避免大幅折返）
+                    self._released.discard(sid)
+                    if self._want_goto(sid, t_now):
+                        res.commands.append(StrikeCommand(
+                            sysid=sid, kind='goto', lat=st.lat, lon=st.lon,
+                            alt=self.alt[sid], reason='loiter'))
+                        self._last_goto_t[sid] = t_now
+                    res.roles[sid] = ROLE_BURN
+
+        if (self.impacted | lost) >= self.sysids:
+            self.phase = PHASE_DONE
+            res.note = (f'全機收尾：命中 {len(self.impacted)}/{len(self.sysids)}'
+                        + (f'，失聯 {sorted(lost)}' if lost else '')) or res.note
 
         # 收尾：命中 ∪ 失聯 ⊇ 全體（失聯機不得卡死整隊；命中數另由驅動端統計散度）
         if (self.impacted | lost) >= self.sysids:

@@ -544,6 +544,7 @@ class DualMapWidget(MapWidgetBase):
                     flat.append((float(p[0]), float(p[1]), a))
         if len(flat) < 2:
             self.map_3d.clear_geofence()
+            self._clear_fence_2d()
             self._last_fence_bundle = None
             self.fence_built.emit(None)
             return
@@ -557,17 +558,29 @@ class DualMapWidget(MapWidgetBase):
         self._last_fence_bundle = bundle
         if self._fence_visible:
             self.map_3d.set_geofence(bundle.geofence)
+            self._set_fence_2d(bundle.geofence)
         logger.info(bundle.summary())
         self.fence_built.emit(bundle)
+
+    # ── 2D 圍籬渲染（map_2d 若支援 set_geofence/clear_geofence 才呼叫）──
+    def _set_fence_2d(self, geofence) -> None:
+        if hasattr(self.map_2d, 'set_geofence'):
+            self.map_2d.set_geofence(geofence)
+
+    def _clear_fence_2d(self) -> None:
+        if hasattr(self.map_2d, 'clear_geofence'):
+            self.map_2d.clear_geofence()
 
     def _on_fence_toggle(self):
         self._fence_visible = self._btn_fence.isChecked()
         if self._fence_visible and getattr(self, '_last_fence_bundle', None):
             self.map_3d.set_geofence(self._last_fence_bundle.geofence)
+            self._set_fence_2d(self._last_fence_bundle.geofence)
             self._btn_fence.setStyleSheet(_btn_qss(active=True))
             self._btn_fence.setText('圍籬')
         else:
             self.map_3d.clear_geofence()
+            self._clear_fence_2d()
             self._btn_fence.setStyleSheet(_btn_qss())
             self._btn_fence.setText('圍籬 (隱藏)')
 
@@ -605,10 +618,60 @@ class DualMapWidget(MapWidgetBase):
     def display_swarm_coverage(self, swarm_mission, coverage_paths=None):
         self.map_2d.display_swarm_coverage(swarm_mission, coverage_paths)
         self.map_3d.display_swarm_coverage(swarm_mission, coverage_paths)
+        # 強制飛安：群飛協同覆蓋路徑也綁定矩形圍籬（與 display_paths 一致）
+        try:
+            self._auto_build_fence(
+                self._coverage_to_paths(swarm_mission, coverage_paths),
+                buffer_m=60.0)
+        except Exception as e:
+            logger.warning(f'[Geofence] 群飛覆蓋圍籬建構略過: {e}')
 
     def display_swarm_raw(self, swarm_data: dict):
         self.map_2d.display_swarm_raw(swarm_data)
         self.map_3d.display_swarm_raw(swarm_data)
+        # 強制飛安：DCCPP / 蜂群結果同樣綁定圍籬，涵蓋所有 UAV 作業 + 轉場路徑。
+        # 先前此路徑未建構圍籬 → _last_fence_bundle=None → 無法顯示/上傳/匯出圍籬。
+        try:
+            self._auto_build_fence(
+                self._swarm_raw_to_paths(swarm_data), buffer_m=60.0)
+        except Exception as e:
+            logger.warning(f'[Geofence] DCCPP/蜂群圍籬建構略過: {e}')
+
+    # ── 蜂群資料 → 路徑串列（供 _auto_build_fence 包圍籬）─────────────
+    @staticmethod
+    def _swarm_raw_to_paths(swarm_data) -> list:
+        """從 display_swarm_raw 的 swarm_data 取出所有 UAV 路徑（list of paths）。
+
+        相容鍵：``operation_paths`` / ``transfer_paths``（皆為 list-of-paths）
+        以及單一 ``path``。每個點為 (lat, lon[, alt])。
+        """
+        paths = []
+        for d in (swarm_data or {}).get('drones', []) or []:
+            if not isinstance(d, dict):
+                continue
+            for key in ('operation_paths', 'transfer_paths'):
+                for p in (d.get(key) or []):
+                    if p:
+                        paths.append(p)
+            if d.get('path'):
+                paths.append(d['path'])
+        return paths
+
+    @staticmethod
+    def _coverage_to_paths(swarm_mission, coverage_paths) -> list:
+        """從群飛覆蓋資料取出路徑串列（優先用顯式 coverage_paths）。"""
+        if coverage_paths:
+            if isinstance(coverage_paths, dict):
+                return [p for p in coverage_paths.values() if p]
+            return [p for p in coverage_paths if p]
+        paths = []
+        drones = (getattr(swarm_mission, 'drones', None)
+                  or getattr(swarm_mission, 'missions', None) or [])
+        for d in drones:
+            p = getattr(d, 'path', None) or getattr(d, 'waypoints', None)
+            if p:
+                paths.append(p)
+        return paths
 
     def display_survey(self, survey_mission):
         self.map_2d.display_survey(survey_mission)

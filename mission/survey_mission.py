@@ -6,14 +6,13 @@ Survey 任務模組
 
 import sys
 from pathlib import Path
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List, Tuple, Dict, Any
 
 # 添加專案根目錄到路徑
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from mission.mission_manager import Mission
-from mission.waypoint import WaypointSequence
 
 
 # ==========================================
@@ -95,7 +94,7 @@ class SurveyMission(Mission):
         
         # 計算基於相機的航線間距
         try:
-            from sensors import CameraDatabase, CameraCalculator, SurveyParameters
+            from sensors import CameraDatabase, SurveyParameters
 
             camera = CameraDatabase.get_camera(camera_name)
             if camera:
@@ -193,79 +192,14 @@ class SurveyMission(Mission):
         返回:
             是否成功
         """
-        try:
-            from waypoint_generator import OptimizedWaypointGenerator
-            from config import FlightParameters
-            from collision_avoidance import CollisionAvoidanceSystem
-            
-            # 生成子區域
-            if not self.sub_regions:
-                self.generate_sub_regions()
-            
-            if not self.sub_regions:
-                print("無法生成子區域")
-                return False
-            
-            # 創建航點生成器
-            generator = OptimizedWaypointGenerator()
-            
-            # 建立飛行參數
-            flight_params = FlightParameters(
-                altitude=self.params['altitude'],
-                angle=self.survey_params['scan_angle'],
-                spacing=self.survey_params['line_spacing'],
-                speed=self.params['speed'],
-                yaw_speed=self.params.get('yaw_speed', 60.0),
-                safety_distance=self.params.get('safety_distance', 5.0)
-            )
-            
-            # 清空現有航點
-            self.waypoints.clear()
-            
-            # 為每個子區域生成航點
-            all_lines = []
-            total_regions = len(self.sub_regions)
-            
-            for idx, region_corners in enumerate(self.sub_regions):
-                # 確定起始方向
-                start_from_left = (
-                    (idx % 2 == 0) if self.survey_params['reduce_overlap']
-                    else self.survey_params['start_from_left']
-                )
-                
-                # 生成完整任務
-                lines, waypoints = generator.generate_complete_mission(
-                    region_corners,
-                    flight_params,
-                    idx,
-                    total_regions,
-                    start_from_left,
-                    loiter_time=0.0
-                )
-                
-                # 如果是多區域，合併航點
-                if total_regions > 1:
-                    if idx == 0:
-                        all_lines = lines
-                    else:
-                        # 移除重複的標頭和 HOME 點
-                        all_lines.extend(lines[2:])
-            
-            # 轉換為 WaypointSequence
-            if total_regions == 1:
-                self.waypoints = WaypointSequence.from_qgc_format(all_lines)
-            else:
-                # 多區域需要更新序列號
-                self.waypoints = WaypointSequence.from_qgc_format(all_lines)
-                self.waypoints._update_sequence_numbers()
-            
-            print(f"成功生成 Survey 航點: {len(self.waypoints)} 個")
-            return True
-        except Exception as e:
-            print(f"生成 Survey 航點失敗: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
+        # 註：此方法依賴的 OptimizedWaypointGenerator（原 waypoint_generator 模組）
+        # 已不存在於專案中；原 try-block 連同 config.FlightParameters（實際在
+        # config.schemas）與 collision_avoidance.CollisionAvoidanceSystem 皆無法解析
+        # → runtime 一律走 except、回傳 False（survey 航點從未由此 legacy 路徑產生）。
+        # 已移除無法解析的死 import 與死碼，保留 always-False 行為。
+        # production 的覆蓋航點產生走 core.global_planner.CoveragePlanner /
+        # SwarmCoordinator.plan_coverage_dccpp；若要復活此 legacy 路徑需重新實作 generator。
+        return False
     
     def calculate_coverage_area(self) -> float:
         """
@@ -281,7 +215,7 @@ class SurveyMission(Mission):
             
             # 使用 Shoelace 公式計算多邊形面積
             # 需要先將經緯度轉換為平面座標
-            from math_utils import latlon_to_meters
+            from utils.math_utils import latlon_to_meters  # 修正壞 import（原裸 math_utils）
             
             if not corners:
                 return 0.0

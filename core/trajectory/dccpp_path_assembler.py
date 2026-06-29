@@ -391,10 +391,6 @@ class DCCPPPathAssembler:
         sh_rad = math.radians(sh)
         eh_rad = math.radians(eh)
 
-        # 起點/終點的方向向量 (NED: dx=cos(h), dy=sin(h))
-        s_dx, s_dy = math.cos(sh_rad), math.sin(sh_rad)
-        e_dx, e_dy = math.cos(eh_rad), math.sin(eh_rad)
-
         # ── 選擇最佳轉彎方向（LSL/RSR 簡化）──
         # 起點左/右轉圓心
         # 右轉圓心: 航向右方 90°

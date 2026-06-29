@@ -5,7 +5,7 @@ A* 路徑規劃算法
 
 import math
 import heapq
-from typing import List, Tuple, Optional, Set, Dict, Callable
+from typing import List, Tuple, Optional, Set, Dict
 from dataclasses import dataclass, field
 
 from ..geometry import CoordinateTransform

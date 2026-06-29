@@ -36,12 +36,10 @@ from typing import List, Optional, Tuple
 from core.strike.swarm_strike_planner import (
     UAV, Target, MissionItem, MAVCmd,
     dubins_shortest_length,
-    _haversine, _bearing_deg, _destination, _angular_diff,
-    _MAV_FRAME_REL,
+    _haversine, _bearing_deg, _destination, _MAV_FRAME_REL,
 )
 from core.strike.geometry import assign_omnidirectional_slots  # 0-5 去重共用函式
 from core.strike.mission_export import export_missions_qgc      # 0-4 去重共用匯出
-from utils.file_io import create_waypoint_line, write_waypoints
 from utils.logger import get_logger
 
 logger = get_logger()

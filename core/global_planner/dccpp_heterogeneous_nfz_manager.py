@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import copy
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional, Sequence, Tuple
 
@@ -46,12 +46,10 @@ from shapely.geometry import Polygon
 # 重用既有模組的核心元件 — 投影、helper、A* 規劃器、Waypoint
 from core.global_planner.heterogeneous_nfz_planner import (
     FixedWingDubinsPlanner,
-    HeterogeneousNFZPlanner,
     MultirotorAStarPlanner,
     PlannerConfig,
     Waypoint,
     _LocalProjection,
-    _crosses_polygon_interior,
 )
 
 # ──────────────────────────────────────────────────────────────────────
@@ -625,28 +623,28 @@ class DCCPP_Heterogeneous_NFZ_Manager:
 
         # ── 共用 header ──
         header = [
-            f'# AeroPlan Studio — ArduPilot fence export',
+            '# AeroPlan Studio — ArduPilot fence export',
             f'# Generated: {ts}',
             f'# NFZ vertices: {n_verts}',
-            f'#',
-            f'# ╔══════════════════════════════════════════════════════════╗',
-            f'# ║  REQUIRED ArduPilot fence parameters (set first!):      ║',
-            f'# ╚══════════════════════════════════════════════════════════╝',
-            f'# FENCE_ENABLE     = 1',
+            '#',
+            '# ╔══════════════════════════════════════════════════════════╗',
+            '# ║  REQUIRED ArduPilot fence parameters (set first!):      ║',
+            '# ╚══════════════════════════════════════════════════════════╝',
+            '# FENCE_ENABLE     = 1',
             f'# FENCE_ACTION     = {self._ap.fence_action}  '
             f'# (1=RTL, 2=Land, 4=Brake)',
-            f'# FENCE_TYPE       = 7  # (1=MaxAlt | 2=Circle | 4=Polygon)',
+            '# FENCE_TYPE       = 7  # (1=MaxAlt | 2=Circle | 4=Polygon)',
             f'# FENCE_TOTAL      = {n_verts}',
             f'# FENCE_ALT_MAX    = {self._ap.fence_alt_max:.0f}',
-            f'#',
+            '#',
         ]
 
         if as_mission_item:
             # ── 現代格式 (MAV_MISSION_TYPE_FENCE)，相容 ArduPilot 4.0+ ──
             lines = list(header) + [
-                f'# Format: MAVLink mission items, cmd=5000 (return) + '
-                f'cmd=5002 (exclusion polygon vertex)',
-                f'QGC WPL 110',
+                '# Format: MAVLink mission items, cmd=5000 (return) + '
+                'cmd=5002 (exclusion polygon vertex)',
+                'QGC WPL 110',
             ]
             # seq 0 = return point
             ret = Waypoint(
@@ -669,10 +667,10 @@ class DCCPP_Heterogeneous_NFZ_Manager:
         else:
             # ── 傳統 fencepoint 格式（每行 lat lon）──
             lines = list(header) + [
-                f'# Format: legacy fencepoint (lat lon per line)',
-                f'# First line = return point; following lines = polygon vertices.',
-                f'# Polygon should be closed: last line should equal second line.',
-                f'',
+                '# Format: legacy fencepoint (lat lon per line)',
+                '# First line = return point; following lines = polygon vertices.',
+                '# Polygon should be closed: last line should equal second line.',
+                '',
                 f'{return_point[0]:.7f} {return_point[1]:.7f}',
             ]
             for lat, lon in nfz_polygon:
@@ -795,7 +793,7 @@ if __name__ == '__main__':
     print('\n場景：')
     print(f'  起點 = {start}')
     print(f'  目標 = {target}')
-    print(f'  NFZ  = 正方形 4 頂點 (~660m × 1100m)')
+    print('  NFZ  = 正方形 4 頂點 (~660m × 1100m)')
 
     mgr = DCCPP_Heterogeneous_NFZ_Manager(ap)
 

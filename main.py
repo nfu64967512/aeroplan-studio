@@ -31,8 +31,21 @@ from pathlib import Path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-from config import init_settings, get_settings
-from utils import get_logger, setup_logger
+# ── 強制標準輸出/錯誤為 UTF-8 ────────────────────────────────────────
+# Windows 預設 console 編碼為 cp950（繁中）。本 App 各處 print() 含 emoji
+# （Cesium JS console 回報、地圖點擊 log 等）；當 stdout 被導向檔案、或在
+# cp950 終端執行時，輸出非 cp950 字元會拋 UnicodeEncodeError。若該例外
+# 發生在 Qt callback（如 ClickCapturePage.javaScriptConsoleMessage）內，
+# PyQt6 會直接 abort（程式以 exit code 9 崩潰）。提早於進入點把標準輸出
+# 重設為 UTF-8 + errors='replace'，根治整類編碼崩潰（含子行程繼承）。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding='utf-8', errors='replace')  # type: ignore[union-attr]
+    except (AttributeError, ValueError):
+        pass  # 已被包裝/重導向、無 reconfigure 的串流：略過即可
+
+from config import init_settings
+from utils import setup_logger
 
 
 def parse_arguments():
@@ -106,7 +119,7 @@ def initialize_system(args):
 
     logger.info("=" * 60)
     logger.info("AeroPlan Studio — Collaborative UAV Mission Planning Suite")
-    logger.info("版本: 2.5.0")
+    logger.info("版本: 2.8.1")
     logger.info("=" * 60)
     
     # 初始化配置
@@ -161,7 +174,7 @@ def run_gui_mode(logger, settings, vehicle_profiles, args=None):
             # 重要：在創建 QApplication 之前導入 WebEngine
             # 這是 PyQt6 WebEngine 的已知要求
             try:
-                from PyQt6.QtWebEngineWidgets import QWebEngineView
+                from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa: F401 — 可用性偵測
                 logger.info("QtWebEngineWidgets 載入成功")
             except ImportError:
                 logger.warning("QtWebEngineWidgets 未安裝，地圖功能可能受限")
@@ -263,7 +276,7 @@ def run_cli_mode(logger, settings, vehicle_profiles):
     return 0
 
 
-def _run_subcommand(subcmd: str) -> int:
+def _run_subcommand() -> int:
     """ADOS 風格子指令分派（aeroplan sitl / aeroplan demo）。
 
     無子指令時 sys.argv 不會走到此分支；本函式只在 argv[1] 為已知子指令時被呼叫。
@@ -297,7 +310,7 @@ def main():
     # 偵測子指令
     _SUBCMDS = {"sitl", "demo"}
     if len(sys.argv) > 1 and sys.argv[1] in _SUBCMDS:
-        return _run_subcommand(sys.argv[1])
+        return _run_subcommand()
 
     # 解析參數
     args = parse_arguments()

@@ -12,13 +12,12 @@
 import os
 import re
 import io
-import tempfile
 from typing import List, Tuple, Optional
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QMessageBox, QSizePolicy
+from PyQt6.QtWidgets import QVBoxLayout, QMessageBox, QSizePolicy
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
-from PyQt6.QtCore import pyqtSignal, QUrl, Qt
+from PyQt6.QtCore import QUrl, Qt
 from urllib.parse import unquote
 
 import folium
@@ -26,6 +25,7 @@ from folium import plugins
 
 from config import get_settings
 from utils.logger import get_logger
+from ui.widgets.map_base import MapWidgetBase
 
 settings = get_settings()
 logger = get_logger()
@@ -100,16 +100,11 @@ class ClickCapturePage(QWebEnginePage):
         return True
 
 
-class MapWidget(QWidget):
+class MapWidget(MapWidgetBase):
     """地圖組件 - folium + PyQt6 WebEngine"""
 
-    corner_added = pyqtSignal(float, float)
-    corner_moved = pyqtSignal(int, float, float)
-    # 拖曳定義圓形完成：發送 (lat, lon, radius_m)
-    circle_defined = pyqtSignal(float, float, float)
-    # NFZ 地圖繪製完成信號
-    nfz_polygon_drawn = pyqtSignal(list)           # list of (lat, lon) tuples
-    nfz_circle_drawn = pyqtSignal(float, float, float)  # lat, lon, radius_m
+    # (1-1) corner_added/corner_moved/circle_defined/nfz_polygon_drawn/
+    #       nfz_circle_drawn 已上移至 MapWidgetBase；本類無專屬 signal。
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1606,7 +1601,6 @@ body > div {{ width:100% !important; height:100% !important; }}
 
         drones = self._swarm_data.get('drones', [])
         areas  = self._swarm_data.get('areas', [])
-        stats  = self._swarm_data.get('stats', {})
 
         js_parts = ["""
 (function(){
@@ -1821,9 +1815,9 @@ body > div {{ width:100% !important; height:100% !important; }}
             )
         elif stats.get('total_distance'):
             stat_lines += (
-                f'<div style="font-size:11px;color:#69F0AE;margin-top:4px;">'
-                f'✅ 無衝突'
-                f'</div>'
+                '<div style="font-size:11px;color:#69F0AE;margin-top:4px;">'
+                '✅ 無衝突'
+                '</div>'
             )
 
         return f'''

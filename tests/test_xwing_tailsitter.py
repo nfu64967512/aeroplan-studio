@@ -7,7 +7,6 @@ import os
 import re
 import tempfile
 
-import pytest
 
 from mission.xwing_tailsitter_params import (
     XWingSITLParamGenerator, XWingTailsitterConfig,

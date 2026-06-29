@@ -3,7 +3,6 @@
 實時避障和局部路徑調整
 """
 
-import math
 from typing import List, Tuple, Optional, Callable
 from dataclasses import dataclass
 import numpy as np
@@ -155,7 +154,7 @@ class APFLocalPlanner:
             
             prev_distance = current_distance
         
-        print(f"達到最大迭代次數，未到達目標")
+        print("達到最大迭代次數，未到達目標")
         return path if len(path) > 1 else None
     
     def _calculate_attractive_force(self,

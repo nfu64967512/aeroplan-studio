@@ -7,9 +7,8 @@ import math
 import pytest
 
 from core.strike.time_coordination import (
-    TimingMode, DtotOrder, FeasibilityStatus,
-    TimingSlot, LoiterPlanOutput,
-    compute_tot_schedule, fill_loiter_turns,
+    FeasibilityStatus,
+    TimingSlot, compute_tot_schedule, fill_loiter_turns,
     compute_loiter_plan, coordinate,
 )
 

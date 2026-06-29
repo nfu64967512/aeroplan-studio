@@ -44,9 +44,7 @@ from enum import Enum
 from typing import Dict, List, Optional, Tuple
 
 from core.strike.swarm_strike_planner import (
-    MissionItem, dubins_shortest_length,
-    _haversine, _bearing_deg, _destination, _angular_diff,
-    _MAV_FRAME_REL,
+    MissionItem, _haversine, _destination, _MAV_FRAME_REL,
 )
 # 0-3 去重：ENU/3D 向量工具改用 core.strike.geometry 的權威實作。
 # 以別名保留原私有名稱（_latlon_to_enu 等），呼叫端一行不動；
@@ -61,7 +59,6 @@ from core.strike.geometry import (
     assign_omnidirectional_slots,  # 0-5 去重共用函式
 )
 from core.strike.mission_export import export_missions_qgc  # 0-4 去重共用匯出
-from utils.file_io import create_waypoint_line, write_waypoints
 from utils.logger import get_logger
 
 logger = get_logger()
@@ -870,12 +867,12 @@ if __name__ == '__main__':
     print('\n' + '═' * 80)
     print(' 動態聯盟構成 (Dynamic Coalition)')
     print('═' * 80)
-    print(f'  入選 UAV     : '
+    print('  入選 UAV     : '
           + ', '.join(uav_states[uid].name for uid in report.selected_uav_ids))
-    print(f'  未入選 UAV   : '
+    print('  未入選 UAV   : '
           + ', '.join(uav_states[uid].name for uid in report.rejected_uav_ids))
     print(f'  基準 TOT     : {report.tot_sec:.2f} s')
-    print(f'\n  高度層分配：')
+    print('\n  高度層分配：')
     for uid, alt in report.altitude_layers.items():
         print(f'    {uav_states[uid].name:<12s} → {alt:.0f} m')
 

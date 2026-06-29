@@ -5,7 +5,7 @@ RRT (Rapidly-exploring Random Tree) 路徑規劃器
 
 import math
 import random
-from typing import List, Tuple, Optional, Callable
+from typing import List, Tuple, Optional
 from dataclasses import dataclass
 
 from ..collision import CollisionChecker

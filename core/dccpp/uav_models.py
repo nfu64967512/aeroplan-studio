@@ -20,7 +20,7 @@ method for complex areas》第 2.1 節。
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Tuple, Optional
 

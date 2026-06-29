@@ -10,7 +10,7 @@
 """
 
 import math
-from typing import List, Tuple, Dict, Optional
+from typing import List, Tuple
 from dataclasses import dataclass, field
 
 from core.strike.geometry import haversine, bearing_deg, destination
@@ -443,7 +443,6 @@ class TerminalStrikePlanner:
     def plan(self,
              uavs: List[StrikeUAV],
              targets: List[StrikeTarget],
-             rally_point: Optional[Tuple[float, float, float]] = None,
              ) -> List[StrikeTrajectory]:
         """
         執行蜂群打擊規劃
@@ -451,7 +450,6 @@ class TerminalStrikePlanner:
         參數:
             uavs:        UCAV 列表（集結狀態）
             targets:     地面目標列表
-            rally_point: 集結點 (lat, lon, alt)；若 None 則取 UAV 群的質心
 
         回傳:
             List[StrikeTrajectory]：每架 UAV 的完整打擊軌跡

@@ -8,9 +8,8 @@ from PyQt6.QtWidgets import (
     QLabel, QComboBox, QDoubleSpinBox, QPushButton,
     QGroupBox, QTextEdit, QMessageBox
 )
-from PyQt6.QtCore import Qt
 
-from sensors import CameraDatabase, CameraCalculator, SurveyParameters
+from sensors import CameraDatabase, CameraCalculator
 from ui.resources.aeroplan_theme.widgets import IconButton
 from utils.logger import get_logger
 

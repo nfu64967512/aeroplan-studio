@@ -1,0 +1,4 @@
+mode,n_vehicles,groups,fps,cpu_sum_pct,machine_pct,rss_mb
+baseline,1,1,nan,1.60,0.08,64.6
+baseline,6,1,nan,3.10,0.15,65.8
+baseline,12,2,nan,6.20,0.31,67.4

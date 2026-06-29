@@ -187,7 +187,7 @@ def setup_undo_stack(main_window: Any) -> None:
 
     呼叫端在 create_menus() 之後呼叫此函式即可。
     """
-    from PyQt6.QtGui import QUndoStack, QKeySequence, QAction
+    from PyQt6.QtGui import QUndoStack, QKeySequence
 
     stack = QUndoStack(main_window)
     stack.setUndoLimit(100)   # 最多保留 100 步

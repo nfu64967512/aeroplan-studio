@@ -4,7 +4,7 @@ MPC (Model Predictive Control) 模型預測控制局部路徑規劃器
 """
 
 import math
-from typing import List, Tuple, Optional, Callable
+from typing import List, Tuple, Optional
 from dataclasses import dataclass
 import numpy as np
 from scipy.optimize import minimize

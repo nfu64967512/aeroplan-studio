@@ -32,7 +32,7 @@ from enum import Enum
 
 from PyQt6.QtCore import QRectF, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import (
-    QBrush, QColor, QFont, QFontMetrics, QPainter, QPaintEvent, QPen,
+    QBrush, QColor, QFontMetrics, QPainter, QPaintEvent, QPen,
 )
 from PyQt6.QtWidgets import QFrame, QSizePolicy, QWidget
 

@@ -15,7 +15,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
@@ -217,7 +217,7 @@ class ParametersBrowser(QWidget):
         for name in self._params:
             head = name.split("_", 1)[0] if "_" in name else name
             prefixes[head] = prefixes.get(head, 0) + 1
-        all_item = self._categories.addItem(f"All ({len(self._params)})")
+        self._categories.addItem(f"All ({len(self._params)})")
         for head in sorted(prefixes):
             self._categories.addItem(f"{head}_* ({prefixes[head]})")
         self._categories.setCurrentRow(0)

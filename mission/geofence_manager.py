@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass
 from functools import wraps
 from pathlib import Path
 from typing import (
@@ -749,7 +749,7 @@ def _demo() -> None:
     assert isinstance(decorated_result, MissionBundle), \
         "裝飾器應回傳 MissionBundle"
     print(f"  {decorated_result.summary()}")
-    print(f"  裝飾後圍籬 4 頂點:")
+    print("  裝飾後圍籬 4 頂點:")
     for i, (lat, lon) in enumerate(decorated_result.geofence.vertices, 1):
         print(f"    V{i}  {lat:10.6f}  {lon:11.6f}")
     print()

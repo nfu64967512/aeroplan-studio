@@ -196,10 +196,8 @@ class FleetDashboard(QWidget):
         link = FleetRegistry.instance().get_link(callsign)
         sysid = 0
         if link is not None:
-            try:
-                sysid = int(getattr(link, "_frame").sysid)
-            except Exception:
-                sysid = 0
+            # 公開 sysid 來自 link.sysid_label，非不存在的 _frame 屬性。
+            sysid = int(getattr(link, "sysid_label", 0) or 0)
         card = FleetCard(callsign, sysid=sysid, parent=self)
         card.clicked.connect(self._on_card_clicked)
         card.context_action.connect(self._on_context_action)

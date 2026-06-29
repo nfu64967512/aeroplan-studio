@@ -13,25 +13,25 @@ import numpy as np
 class FixedWingConstraints:
     """固定翼飛行器約束參數"""
     
-    # 速度約束
-    min_speed: float = 10.0          # 最小速度（失速速度）[m/s]
-    max_speed: float = 30.0          # 最大速度 [m/s]
-    cruise_speed: float = 18.0       # 巡航速度 [m/s]
-    
+    # 速度約束（預設：FMS Ranger 1220mm）
+    min_speed: float = 7.0           # 最小速度（失速速度）[m/s]
+    max_speed: float = 26.0          # 最大速度 [m/s]
+    cruise_speed: float = 13.0       # 巡航速度 [m/s]
+
     # 轉彎約束
-    max_bank_angle: float = 45.0     # 最大滾轉角 [度]
-    min_turn_radius: float = 50.0    # 最小轉彎半徑 [m]
-    
+    max_bank_angle: float = 40.0     # 最大滾轉角 [度]
+    min_turn_radius: float = 25.0    # 最小轉彎半徑 [m]（@cruise 13 m/s, bank 40°）
+
     # 爬升約束
-    max_climb_rate: float = 5.0      # 最大爬升率 [m/s]
+    max_climb_rate: float = 4.0      # 最大爬升率 [m/s]
     max_descent_rate: float = 3.0    # 最大下降率 [m/s]
-    max_climb_angle: float = 20.0    # 最大爬升角 [度]
-    
+    max_climb_angle: float = 18.0    # 最大爬升角 [度]
+
     # 加速度約束
     max_acceleration: float = 2.0    # 最大加速度 [m/s²]
-    
+
     # 高度約束
-    min_altitude: float = 30.0       # 最小飛行高度 [m]
+    min_altitude: float = 20.0       # 最小飛行高度 [m]
     max_altitude: float = 500.0      # 最大飛行高度 [m]
     
     def __post_init__(self):
@@ -323,9 +323,7 @@ class FixedWingModel:
         
         # 第一段圓弧的結束點
         t1 = alpha + beta
-        x_tangent1 = cx1 + r * math.cos(t1)
-        y_tangent1 = cy1 + r * math.sin(t1)
-        
+
         # 第二段圓弧的起始點
         t2 = alpha + beta
         x_tangent2 = cx2 + r * math.cos(t2)

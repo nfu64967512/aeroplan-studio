@@ -24,8 +24,7 @@ from enum import Enum, auto
 
 from utils.math_utils import (
     deg_to_rad, rad_to_deg, haversine_distance,
-    bearing_between_points, latlon_to_meters, meters_to_latlon,
-    normalize_angle
+    latlon_to_meters, normalize_angle
 )
 
 
@@ -133,12 +132,12 @@ class FixedWingConstraints:
 
     def __init__(
         self,
-        cruise_airspeed_mps: float = 18.0,
-        max_bank_angle_deg: float = 45.0,
+        cruise_airspeed_mps: float = 13.0,   # 預設 FMS Ranger 1220mm 巡航空速
+        max_bank_angle_deg: float = 40.0,    # 教練機舒適傾角（結構上限仍可更大）
         gravity: float = 9.81,
         safety_factor: float = 1.2,
-        stall_speed_mps: float = 12.0,
-        max_speed_mps: float = 25.0,
+        stall_speed_mps: float = 7.0,        # 1220mm/1kg 泡棉教練機失速速度
+        max_speed_mps: float = 26.0,         # 最大平飛/俯衝空速
     ) -> None:
         if cruise_airspeed_mps <= 0:
             raise ValueError(f"巡航空速必須 > 0, 收到 {cruise_airspeed_mps}")

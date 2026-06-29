@@ -25,9 +25,8 @@ from __future__ import annotations
 import math
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple
 
-import numpy as np
 
 from core.dccpp.area_processor import AreaProcessingResult, ScanLine
 

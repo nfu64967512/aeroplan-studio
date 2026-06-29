@@ -4,12 +4,11 @@
 支援 SVG、PNG、ICO 等格式
 """
 
-from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor
+from PyQt6.QtGui import QIcon, QPixmap, QPainter
 from PyQt6.QtSvg import QSvgRenderer
-from PyQt6.QtCore import Qt, QByteArray, QSize
+from PyQt6.QtCore import Qt, QByteArray
 from pathlib import Path
 from typing import Dict, Optional
-import os
 
 
 class IconManager:

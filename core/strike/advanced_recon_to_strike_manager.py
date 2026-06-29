@@ -44,8 +44,7 @@ from typing import Dict, List, Optional, Tuple
 
 from core.strike.swarm_strike_planner import (
     MissionItem, dubins_shortest_length,
-    _haversine, _bearing_deg, _destination, _angular_diff,
-    _R_EARTH,
+    _haversine, _bearing_deg, _destination, _R_EARTH,
 )
 from utils.logger import get_logger
 
@@ -790,7 +789,6 @@ class AdvancedReconToStrikeManager:
             return F, False
 
         V = max(me.ground_speed_mps, self.stall_speed_mps)
-        psi_current = math.radians(me.heading_deg)
         # math 角：由東軸逆時針 = atan2(fy, fx)
         psi_des_math = math.atan2(fy, fx)
         # 轉為羅盤：bearing = (90 − psi_math) mod 360
@@ -877,7 +875,7 @@ class AdvancedReconToStrikeManager:
         使用 'index_order' 排序策略而非 'longest_first'。
         """
         from core.strike.time_coordination import (
-            compute_tot_schedule, fill_loiter_turns,
+            compute_tot_schedule,
         )
 
         # 依當前 slot_index 排序 (Leader 已在 slot 0)
@@ -953,7 +951,7 @@ class AdvancedReconToStrikeManager:
         mission.append(MissionItem(
             cmd=MAVCmd.DO_SET_HOME,
             lat=u.lat, lon=u.lon, alt=u.alt,
-            comment=f'Home @ 切換時 pose',
+            comment='Home @ 切換時 pose',
         ))
 
         # Leader 專屬：DO_REPOSITION 先讓飛控平滑回 GUIDED 再進 AUTO

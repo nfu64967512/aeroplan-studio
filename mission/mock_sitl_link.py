@@ -26,9 +26,8 @@ MockSITLLink — 不需 ArduPilot 即可測試 MAVLink 任務上傳的替身
 """
 from __future__ import annotations
 
-import time
-from dataclasses import dataclass, field
-from typing import List, Optional, Tuple, Any
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
 
 
 @dataclass

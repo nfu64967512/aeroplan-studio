@@ -5,7 +5,7 @@
 
 import numpy as np
 from dataclasses import dataclass
-from typing import Tuple, Optional
+from typing import Tuple
 import math
 
 from utils.math_utils import EARTH_RADIUS_M  # 0-2 標準化：WGS84 單一來源

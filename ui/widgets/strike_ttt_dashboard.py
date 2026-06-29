@@ -35,13 +35,11 @@ StrikeTTTDashboard — 蜂群末端飽和打擊「STOT 同步狀態卡」儀表�
 """
 from __future__ import annotations
 
-import math
 import time
 from dataclasses import dataclass
 from typing import List, Optional, Sequence
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy,
     QVBoxLayout, QWidget,
@@ -324,7 +322,8 @@ class StrikeTTTDashboard(QWidget):
     """
 
     impact_reached = pyqtSignal(int)
-    launch_requested = pyqtSignal()    # 按下 KAMIKAZE LAUNCH 按鈕
+    launch_requested = pyqtSignal()    # 按下 KAMIKAZE LAUNCH 按鈕（開環：mission + 排程起飛）
+    terminal_sync_requested = pyqtSignal()  # 按下 TERMINAL SYNC 按鈕（閉環：同步釋放 + ToT 修正）
     abort_requested = pyqtSignal()     # 按下 ABORT 按鈕（停止倒數）
     DEFAULT_MAX_CARDS: int = 12
 
@@ -379,6 +378,21 @@ class StrikeTTTDashboard(QWidget):
         )
         self._btn_launch.clicked.connect(self.launch_requested.emit)
         header.addWidget(self._btn_launch)
+
+        # ── TERMINAL SYNC 按鈕（閉環同步打擊）──────────────────
+        # 各機已在空中巡航後按此 → GCS 以 FleetRegistry 共享黑板讀全機態勢，
+        # 等距 push point 同步釋放 + 飛行中 ToT 速度修正 → 命中散度壓到秒級。
+        # 與 KAMIKAZE LAUNCH（開環起飛排程）互補：先 LAUNCH 起飛巡航，再 SYNC 收尾。
+        self._btn_tsync = IconButton('fly_to', 'TERMINAL  SYNC', tone='primary')
+        self._btn_tsync.setFont(TF.condensed(10, bold=True, letter_spacing=2.0))
+        self._btn_tsync.setEnabled(False)
+        self._btn_tsync.setToolTip(
+            "閉環終端同步打擊：讀 FleetRegistry 全機態勢 →\n"
+            "等距 push point 同步釋放 + 飛行中 ToT 速度修正 → 同時命中\n"
+            "（各機指令皆為全機狀態函數，確保資訊互通）"
+        )
+        self._btn_tsync.clicked.connect(self.terminal_sync_requested.emit)
+        header.addWidget(self._btn_tsync)
 
         # ── ABORT 按鈕（停止倒數，使用者可重新規劃） ──
         self._btn_abort = QPushButton("ABORT")
@@ -451,8 +465,9 @@ class StrikeTTTDashboard(QWidget):
         else:
             self._lbl_mode.setStyleSheet(f"color:{TC.FRIENDLY};")
 
-        # 規劃完成 → 啟用 LAUNCH 按鈕（ABORT 仍維持 disabled，倒數啟動後才啟用）
+        # 規劃完成 → 啟用 LAUNCH / TERMINAL SYNC 按鈕（ABORT 仍維持 disabled）
         self._btn_launch.setEnabled(True)
+        self._btn_tsync.setEnabled(True)
         self._btn_abort.setEnabled(False)
 
         # 配給卡片
@@ -490,9 +505,8 @@ class StrikeTTTDashboard(QWidget):
                 if c.isVisible():
                     c.start_countdown(self._countdown_start)
             self._timer.start()
-        # 倒數中：LAUNCH 按鈕禁用、ABORT 啟用
-        self._btn_launch.setEnabled(False)
-        self._btn_abort.setEnabled(True)
+        # 倒數中（開環打擊執行）：鎖住 LAUNCH + TERMINAL SYNC、開 ABORT（兩模式互斥）
+        self.set_strike_running(True)
 
     def stop_countdown(self) -> None:
         """停止倒數計時。"""
@@ -501,10 +515,24 @@ class StrikeTTTDashboard(QWidget):
         self._countdown_start = None
         for c in self._cards:
             c.stop_countdown()
-        # 重新啟用 LAUNCH (規劃尚在)；ABORT 禁用
-        any_visible = any(c.isVisible() for c in self._cards)
-        self._btn_launch.setEnabled(any_visible)
-        self._btn_abort.setEnabled(False)
+        # 結束 → 還原（規劃尚在則重新啟用兩個啟動鈕；ABORT 禁用）
+        self.set_strike_running(False)
+
+    def set_strike_running(self, running: bool) -> None:
+        """打擊執行中（開環倒數 或 閉環終端同步）→ 鎖住兩個啟動鈕、開 ABORT；結束 → 還原。
+
+        確保 KAMIKAZE LAUNCH 與 TERMINAL SYNC 互斥：一個正在跑時不會誤觸另一個
+        （否則 AUTO 任務與 GUIDED 指令會互相打架）。
+        """
+        if running:
+            self._btn_launch.setEnabled(False)
+            self._btn_tsync.setEnabled(False)
+            self._btn_abort.setEnabled(True)
+        else:
+            any_visible = any(c.isVisible() for c in self._cards)
+            self._btn_launch.setEnabled(any_visible)
+            self._btn_tsync.setEnabled(any_visible)
+            self._btn_abort.setEnabled(False)
 
     def clear(self) -> None:
         """清除全部卡片回到 IDLE 狀態。"""
@@ -515,6 +543,7 @@ class StrikeTTTDashboard(QWidget):
         self._lbl_mode.setText("mode: ─    N: ─    sync: ─")
         self._lbl_mode.setStyleSheet(f"color:{TC.FG_SECONDARY};")
         self._btn_launch.setEnabled(False)
+        self._btn_tsync.setEnabled(False)
         self._btn_abort.setEnabled(False)
 
     # ─────────────────────────────────────────────────────────────

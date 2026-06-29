@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import math
 from functools import lru_cache
-from typing import Any, List, Optional, Tuple
+from typing import Any, Iterable, List, Optional, Tuple
 
 from utils.math_utils import EARTH_RADIUS_M
 
@@ -330,8 +330,6 @@ def dubins_cache_info():
 # 使用場景：N×M 配對矩陣 (N 架 UCAV × M 個目標候選 IP)。
 # 單核 Python 純計算，當 N·M > 200 時值得用 ProcessPool 平行化。
 # ═══════════════════════════════════════════════════════════════════════
-
-from typing import Iterable, List
 
 _PairPose = Tuple[
     float, float, float,   # start lat/lon/heading

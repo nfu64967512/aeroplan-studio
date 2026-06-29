@@ -4,7 +4,7 @@
 """
 
 import math
-from typing import List, Tuple, Optional, Union
+from typing import List, Tuple, Optional
 from dataclasses import dataclass
 from abc import ABC, abstractmethod
 

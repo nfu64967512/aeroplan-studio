@@ -26,7 +26,6 @@
 from __future__ import annotations
 
 import math
-import numpy as np
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple, Sequence
 
@@ -35,7 +34,7 @@ from core.trajectory.dubins_trajectory import DubinsTrajectoryGenerator, Pose3D,
 from sensors.camera_model import CameraInfo as CameraSpec, CameraCalculator, CameraDatabase
 from utils.math_utils import (
     deg_to_rad, rad_to_deg, normalize_angle,
-    latlon_to_meters, meters_to_latlon, polygon_area, polygon_centroid
+    latlon_to_meters, polygon_area
 )
 
 

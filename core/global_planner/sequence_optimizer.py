@@ -11,7 +11,7 @@
 import sys
 import math
 from pathlib import Path
-from typing import List, Tuple, TYPE_CHECKING
+from typing import List, Tuple
 
 # 將專案根目錄加入路徑，以便直接執行此檔案時也能匯入
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))

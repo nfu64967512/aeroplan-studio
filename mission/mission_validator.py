@@ -218,7 +218,7 @@ if __name__ == '__main__':
     print('[GOOD mission]')
     r = validate_mission(good)
     print(f'  ok={r.ok}, errors={r.errors}, warnings={r.warnings}')
-    print(f'[BAD mission]')
+    print('[BAD mission]')
     r = validate_mission(bad)
     print(f'  ok={r.ok}, errors={len(r.errors)}:')
     for e in r.errors:

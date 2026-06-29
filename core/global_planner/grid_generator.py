@@ -8,7 +8,7 @@ Survey Grid 網格生成器
 
 import numpy as np
 from dataclasses import dataclass, field
-from typing import List, Tuple, Optional, Union
+from typing import List, Tuple, Optional
 from enum import Enum, auto
 import time
 
@@ -16,7 +16,7 @@ from ..base.planner_base import (
     GlobalPlanner, GlobalPlannerConfig, PlannerType,
     PlannerResult, PlannerStatus, PlannerFactory
 )
-from ..geometry.coordinate import CoordinateTransformer, GeoPoint
+from ..geometry.coordinate import CoordinateTransformer
 from ..geometry.polygon import PolygonUtils
 
 

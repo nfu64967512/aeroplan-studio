@@ -32,17 +32,15 @@ import math
 import os
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 # 復用 swarm_strike_planner 的 Dubins 與地理工具
 from core.strike.swarm_strike_planner import (
     MissionItem, dubins_shortest_length,
-    _haversine, _bearing_deg, _destination, _angular_diff,
-    _MAV_FRAME_REL, _R_EARTH,
+    _bearing_deg, _destination, _MAV_FRAME_REL, _R_EARTH,
 )
 from core.strike.geometry import assign_omnidirectional_slots  # 0-5 去重共用函式
 from core.strike.mission_export import export_missions_qgc      # 0-4 去重共用匯出
-from utils.file_io import create_waypoint_line, write_waypoints
 from utils.logger import get_logger
 
 logger = get_logger()
@@ -860,7 +858,7 @@ class VTOLSwarmStrikePlanner:
                     + '\n')
             f.write(f'目標           ：{self.target.name} '
                     f'({self.target.lat:.6f}, {self.target.lon:.6f})\n')
-            f.write(f'目標類型       ：'
+            f.write('目標類型       ：'
                     + ('靜態' if self.target.is_stationary() else
                        f'動態 (v_enu={self.target.vx_mps:.1f},'
                        f'{self.target.vy_mps:.1f},{self.target.vz_mps:.1f} m/s)')
@@ -868,14 +866,14 @@ class VTOLSwarmStrikePlanner:
             f.write(f'CEP           ：{self.target.cep_m:.1f} m\n')
             f.write(f'UCAV 數量      ：{len(self._plans)}\n\n')
 
-            f.write(f'=== 速度輪廓 ===\n')
+            f.write('=== 速度輪廓 ===\n')
             f.write(f'  Phase 2 巡航   : {self.cruise_speed_kts:.0f} kts '
                     f'= {self.cruise_speed_mps:.2f} m/s\n')
             f.write(f'  Phase 3 末端   : {self.terminal_speed_kts:.0f} kts '
                     f'= {self.terminal_speed_mps:.2f} m/s\n')
             f.write(f'  失速下限       : {self.stall_speed_mps:.1f} m/s\n\n')
 
-            f.write(f'=== VTOL / 邊界 ===\n')
+            f.write('=== VTOL / 邊界 ===\n')
             f.write(f'  VTOL 轉換高度  : {self.vtol_transition_alt_m:.0f} m '
                     f'(T_vtol={self.t_vtol_sec:.1f} s)\n')
             f.write(f'  2 km 邊界距離  : {self.terminal_boundary_m:.0f} m\n')
@@ -997,6 +995,6 @@ if __name__ == '__main__':
     for f in files:
         print(f'  • {os.path.basename(f)}')
 
-    print(f'\n[未來移動目標擴充方式]')
-    print(f'  只需將 Target 建構時填入 vx_mps/vy_mps/vz_mps != 0')
-    print(f'  即啟用 _refresh_intercept_if_moving() 自動預測攔截點。')
+    print('\n[未來移動目標擴充方式]')
+    print('  只需將 Target 建構時填入 vx_mps/vy_mps/vz_mps != 0')
+    print('  即啟用 _refresh_intercept_if_moving() 自動預測攔截點。')

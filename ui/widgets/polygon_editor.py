@@ -6,15 +6,14 @@
 
 import os
 import sys
-import tempfile
 import json
-from typing import List, Tuple, Optional, Callable
+from typing import List, Tuple, Callable
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
-    QMessageBox, QFileDialog, QSpinBox, QGroupBox, QSplitter,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QMessageBox, QFileDialog, QGroupBox, QSplitter,
     QTableWidget, QTableWidgetItem, QHeaderView, QApplication,
-    QMainWindow, QStatusBar, QToolBar, QComboBox
+    QMainWindow, QStatusBar, QToolBar
 )
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings

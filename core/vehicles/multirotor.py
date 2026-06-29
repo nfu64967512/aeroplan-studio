@@ -4,12 +4,12 @@
 """
 
 import numpy as np
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 from dataclasses import dataclass
 
 from core.base.vehicle_base import (
     VehicleModel, VehicleFactory, VehicleType, VehicleConfig,
-    VehicleState, VehicleConstraints, DEFAULT_MULTIROTOR_CONFIG
+    VehicleState, DEFAULT_MULTIROTOR_CONFIG
 )
 
 

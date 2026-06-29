@@ -26,17 +26,16 @@ from __future__ import annotations
 import math
 import heapq
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple, Dict, Set, Sequence
+from typing import List, Optional, Tuple, Dict, Sequence
 from enum import Enum, auto
 
 from shapely.geometry import (
-    Polygon, MultiPolygon, LineString, Point, MultiPoint
+    Polygon, MultiPolygon, LineString, Point
 )
 from shapely.ops import unary_union
-import numpy as np
 
 from core.base.fixed_wing_constraints import FixedWingConstraints
-from utils.math_utils import deg_to_rad, latlon_to_meters, meters_to_latlon
+from utils.math_utils import latlon_to_meters
 
 
 # ==========================================
@@ -549,7 +548,7 @@ class FixedWingNFZPlanner:
 
     def info(self) -> str:
         lines = [
-            f"═══ 禁航區規劃器 ═══",
+            "═══ 禁航區規劃器 ═══",
             f"  R_min:        {self._r_min:.1f} m",
             f"  膨脹係數:     {self._buffer_factor:.1f}×",
             f"  膨脹距離:     {self.buffer_distance:.1f} m",

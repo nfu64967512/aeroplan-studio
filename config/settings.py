@@ -7,7 +7,7 @@ import os
 import json
 from pathlib import Path
 from dataclasses import dataclass, asdict, field
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 
 
 @dataclass
@@ -208,6 +208,36 @@ class SITLLaunchSettings:
     instances: list = field(default_factory=list)
 
 
+@dataclass
+class EmbeddedSwarmSettings:
+    """嵌入式蜂群連線的持久化設定。
+
+    用途：記住「連線到嵌入式裝置（Jetson 原生 SITL）監看 N 機」
+         的上次設定，下次開啟對話框時自動回填，免重打。
+
+    對應固定翼蜂群文件 §4.1（模式 A1）：
+        AeroPlan Studio 當監看 GCS，透過 TCP 連原生 ArduPlane SITL 的 TCP server
+        （每個實例 -I<N> 開 `5760 + 10*N` → 5760 / 5770 / 5780 / 5790，每機一條），
+        導引由嵌入式 ROS 蜂群負責，本端只做顯示。
+    """
+    # 嵌入式裝置（Jetson）LAN IP — direction='dial' 時 AeroPlan 主動連往此位址
+    host: str = ''
+    # 監看機數（SITL 實例數量）
+    count: int = 4
+    # 基準 TCP port（第 0 機）；第 i 機 = base_port + i * port_stride
+    base_port: int = 5760
+    # 相鄰機之間的 port 間隔（SITL 慣例：5760 / 5770 / 5780 → stride=10）
+    port_stride: int = 10
+    # SYSID 起始值（原生 SITL -I0..N 慣例：sysid = 1..N+1 → sysid_base=1）
+    sysid_base: int = 1
+    # 連線方向：
+    #   'dial'   = AeroPlan 主動連往對端 TCP server (tcp:<host>:<port>)，
+    #              對端為原生 ArduPlane SITL -I<N>，或 mavproxy --out tcpin:0.0.0.0:<port>
+    #   'listen' = AeroPlan 當 TCP server (tcpin:0.0.0.0:<port>)，
+    #              需 mavproxy 端 --out tcp:<Windows_IP>:<port> 主動連入
+    direction: str = 'dial'
+
+
 class GlobalSettings:
     """全局配置管理器"""
     
@@ -226,6 +256,7 @@ class GlobalSettings:
         self.safety = SafetySettings()
         self.ui = UISettings()
         self.sitl_launch = SITLLaunchSettings()
+        self.embedded_swarm = EmbeddedSwarmSettings()
 
         # 配置文件路徑
         self.config_file = config_file or os.path.join(
@@ -263,6 +294,11 @@ class GlobalSettings:
                 if 'sitl_launch' in config_data:
                     # SITL 啟動彈窗設定 — instances 維持 list[dict]，不再包裝
                     self.sitl_launch = SITLLaunchSettings(**config_data['sitl_launch'])
+                if 'embedded_swarm' in config_data:
+                    # 嵌入式蜂群連線設定（模式 A1：AeroPlan 當監看 GCS）
+                    self.embedded_swarm = EmbeddedSwarmSettings(
+                        **config_data['embedded_swarm']
+                    )
 
                 return True
         except Exception as e:
@@ -286,6 +322,7 @@ class GlobalSettings:
                 'safety': asdict(self.safety),
                 'ui': asdict(self.ui),
                 'sitl_launch': asdict(self.sitl_launch),
+                'embedded_swarm': asdict(self.embedded_swarm),
             }
 
             os.makedirs(os.path.dirname(self.config_file), exist_ok=True)
@@ -307,6 +344,7 @@ class GlobalSettings:
         self.safety = SafetySettings()
         self.ui = UISettings()
         self.sitl_launch = SITLLaunchSettings()
+        self.embedded_swarm = EmbeddedSwarmSettings()
 
     def get_dict(self) -> Dict[str, Any]:
         """獲取配置字典"""
@@ -318,6 +356,7 @@ class GlobalSettings:
             'safety': asdict(self.safety),
             'ui': asdict(self.ui),
             'sitl_launch': asdict(self.sitl_launch),
+            'embedded_swarm': asdict(self.embedded_swarm),
         }
 
 

@@ -12,16 +12,16 @@ Cesium 3D 地圖組件
 """
 
 import json
-import math
 from typing import List, Tuple, Optional
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout
+from PyQt6.QtWidgets import QVBoxLayout
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
 from PyQt6.QtCore import pyqtSignal, QUrl, Qt
 from urllib.parse import unquote
 
 from utils.logger import get_logger
+from ui.widgets.map_base import MapWidgetBase
 from ui.resources.tactical_theme import TacticalColors as TC
 
 logger = get_logger()
@@ -107,22 +107,28 @@ class CesiumPage(QWebEnginePage):
             except Exception as e:
                 print(f'❌ [Cesium] 解析 NFZ 圓形失敗: {e}')
             return False
+        if url_str.startswith('pyqt://rclick/'):
+            try:
+                parts = url_str.replace('pyqt://rclick/', '').split('/')
+                if len(parts) >= 2:
+                    self.widget.on_map_rclick(float(parts[0]), float(parts[1]))
+            except Exception as e:
+                print(f'❌ [Cesium] 解析右鍵 GUIDED 失敗: {e}')
+            return False
         return True
 
 
 # ══════════════════════════════════════════════════════════════════════
 #  CesiumMapWidget
 # ══════════════════════════════════════════════════════════════════════
-class CesiumMapWidget(QWidget):
+class CesiumMapWidget(MapWidgetBase):
     """3D 地圖組件，介面與 MapWidget 相容"""
 
-    # ── 與 MapWidget 相同的信號 ───────────────────────────────────────
-    corner_added       = pyqtSignal(float, float)
-    corner_moved       = pyqtSignal(int, float, float)
-    circle_defined     = pyqtSignal(float, float, float)
-    nfz_polygon_drawn  = pyqtSignal(list)
-    nfz_circle_drawn   = pyqtSignal(float, float, float)
+    # (1-1) 5 個交集 signal（corner_added/corner_moved/circle_defined/
+    #       nfz_polygon_drawn/nfz_circle_drawn）已上移至 MapWidgetBase；
+    #       以下為本類專屬 signal。
     strike_target_added = pyqtSignal(float, float)  # 打擊目標標記
+    guided_goto_requested = pyqtSignal(float, float)  # 右鍵 GUIDED 飛到此點（lat, lon）
 
     # ── Cesium Ion Token（可在設定中覆寫）────────────────────────────
     CESIUM_TOKEN: str = ''   # 留空 = 無地形 Token，衛星影像仍正常
@@ -195,7 +201,6 @@ class CesiumMapWidget(QWidget):
         layout.addWidget(self.web_view)
 
     def _load_cesium(self):
-        import os
         from pathlib import Path
 
         # 讀取 2D 地圖預設座標保持一致
@@ -217,12 +222,10 @@ class CesiumMapWidget(QWidget):
         if local_js.exists() and local_css.exists():
             cesium_js  = local_js.as_uri()
             cesium_css = local_css.as_uri()
-            base_url   = QUrl.fromLocalFile(str(local_cesium) + os.sep)
             logger.info(f'[Cesium] 使用本地資源: {local_cesium}')
         else:
             cesium_js  = 'https://cesium.com/downloads/cesiumjs/releases/1.115/Build/Cesium/Cesium.js'
             cesium_css = 'https://cesium.com/downloads/cesiumjs/releases/1.115/Build/Cesium/Widgets/widgets.css'
-            base_url   = QUrl('https://cesium.com/')
             logger.info('[Cesium] 使用 CDN 線上資源')
 
         # ── GLB 3D 模型路徑 ──
@@ -352,6 +355,10 @@ class CesiumMapWidget(QWidget):
         # 在 3D 地圖上即時畫出角點（與 2D MapWidget 行為一致，避免點擊後看不到標記）
         self.add_corner(lat, lon)
         self.corner_added.emit(lat, lon)
+
+    def on_map_rclick(self, lat: float, lon: float):
+        """3D 地圖右鍵 → GUIDED 飛到此點（Mission Planner 風格，由上層跳高度框）"""
+        self.guided_goto_requested.emit(lat, lon)
 
     def on_circle_draw_complete(self, lat: float, lon: float, radius: float):
         self.circle_defined.emit(lat, lon, radius)

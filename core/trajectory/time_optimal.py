@@ -45,9 +45,7 @@ class TimeOptimalPlanner:
         
         # 計算路徑段長度
         distances = self._compute_segment_distances(path)
-        cumulative_distances = np.cumsum([0] + distances)
-        total_distance = cumulative_distances[-1]
-        
+
         # 計算最大允許速度（基於曲率）
         max_velocities = self._compute_curvature_velocities(path)
         

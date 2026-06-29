@@ -3,8 +3,7 @@
 提供多種平滑化算法
 """
 
-import math
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 import numpy as np
 
 

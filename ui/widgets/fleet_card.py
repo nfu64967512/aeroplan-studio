@@ -20,7 +20,6 @@ from PyQt6.QtWidgets import (
     QMenu,
     QProgressBar,
     QSizePolicy,
-    QVBoxLayout,
     QWidget,
 )
 

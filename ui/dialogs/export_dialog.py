@@ -6,18 +6,17 @@
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QFormLayout,
-    QComboBox, QCheckBox, QLineEdit, QPushButton, QFileDialog,
-    QLabel, QSpinBox, QDoubleSpinBox, QTextEdit, QTabWidget,
+    QCheckBox, QLineEdit, QPushButton, QFileDialog,
+    QLabel, QSpinBox, QTabWidget,
     QWidget, QRadioButton, QButtonGroup, QListWidget, QMessageBox
 )
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
-from typing import Optional, List, Dict, Any
+from PyQt6.QtCore import pyqtSignal
+from typing import Optional, List
 from pathlib import Path
 import os
 
 from mission.mission_manager import Mission
-from mission.mavlink_exporter import MAVLinkExporter, ExportFormat, ExportHelper
+from mission.mavlink_exporter import MAVLinkExporter, ExportFormat
 from ui.resources.aeroplan_theme.widgets import IconButton
 
 
@@ -388,9 +387,6 @@ class ExportDialog(QDialog):
         
         if not self.missions:
             return
-        
-        # 獲取輸出目錄
-        output_dir = self.output_dir_edit.text() or "未指定目錄"
         
         # 獲取選中的格式
         selected_formats = [

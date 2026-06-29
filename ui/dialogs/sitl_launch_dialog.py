@@ -29,17 +29,15 @@
 
 from __future__ import annotations
 
-import re
 from typing import Optional, List
 
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel,
-    QSpinBox, QLineEdit, QCheckBox, QPushButton, QGroupBox,
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+    QSpinBox, QCheckBox, QPushButton, QGroupBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QTextEdit,
     QMessageBox, QWidget,
 )
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QRegularExpressionValidator
 from PyQt6.QtCore import QRegularExpression
 
 from config.settings import get_settings

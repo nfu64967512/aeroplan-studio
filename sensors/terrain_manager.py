@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-import math
 import logging
 
 # 設定 Logger

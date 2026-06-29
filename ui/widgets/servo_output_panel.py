@@ -16,17 +16,16 @@ Disabled 通道（FUNCTION=0 或 PWM=0）顯示為 BG_ELEVATED 灰底。
 
 from __future__ import annotations
 
-from typing import Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal, QRectF
-from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QFontMetrics
+from PyQt6.QtGui import QPainter, QColor, QPen
 from PyQt6.QtWidgets import (
-    QWidget, QFrame, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
-    QCheckBox, QComboBox, QSpinBox, QSizePolicy,
+    QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel,
+    QSpinBox, QSizePolicy,
 )
 
 from ui.resources.tactical_theme import TacticalColors as TC, TacticalFonts as TF
-from mission.sitl_link import SERVO_FUNCTIONS, servo_function_name
+from mission.sitl_link import servo_function_name
 
 
 # ══════════════════════════════════════════════════════════════════════

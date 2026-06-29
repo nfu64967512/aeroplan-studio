@@ -42,7 +42,7 @@ def main():
 
         # 檢查 PyQt6-WebEngine 是否可用
         try:
-            from PyQt6.QtWebEngineWidgets import QWebEngineView
+            from PyQt6.QtWebEngineWidgets import QWebEngineView  # noqa: F401 — 可用性偵測
         except ImportError:
             print("錯誤: PyQt6-WebEngine 未安裝")
             print("請執行: pip install PyQt6-WebEngine")
@@ -50,7 +50,7 @@ def main():
 
         # 檢查 folium 是否可用
         try:
-            import folium
+            import folium  # noqa: F401 — 可用性偵測
         except ImportError:
             print("錯誤: folium 未安裝")
             print("請執行: pip install folium")

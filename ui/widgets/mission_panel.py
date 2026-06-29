@@ -8,7 +8,6 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QProgressBar, QFrame, QGridLayout
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont, QColor
 
 from utils.logger import get_logger
 from ui.resources.aeroplan_theme.widgets import IconButton

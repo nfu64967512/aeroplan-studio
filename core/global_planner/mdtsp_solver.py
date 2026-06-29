@@ -22,7 +22,7 @@ import math
 import itertools
 from dataclasses import dataclass, field
 from typing import (
-    List, Tuple, Optional, Dict, Any, Sequence, Callable,
+    List, Tuple, Optional, Dict, Any, Callable,
 )
 from enum import Enum, auto
 
@@ -478,9 +478,6 @@ class IDPSolver:
         R: Dict[int, List[int]] = {u.uav_id: [] for u in uavs}
         # dis_{i}: 各 UAV 已累計路徑長度
         dis: Dict[int, float] = {u.uav_id: 0.0 for u in uavs}
-        # 各 UAV 當前狀態（位置 + 航向）
-        states: Dict[int, UAVState] = {u.uav_id: u for u in uavs}
-
         # L^{NAD}_k: 尚未分配的作業路徑索引集合
         L_nad: set = set(range(n))
         # S^{CUR}_k: 各 UAV 當前所在的狀態索引（-1 = 初始位置）
@@ -771,7 +768,6 @@ class AltitudePlanner:
                 # J(h) = c1 |h_j - h_{j-1}| + c2 |h_{j+1} - 2h_j + h_{j-1}|
                 # ∂J/∂h_j ≈ c1·sign(h_j - h_{j-1}) + 2·c2·(2h_j - h_{j-1} - h_{j+1})
                 d1 = smoothed[j] - smoothed[j - 1]
-                d2 = smoothed[j + 1] - 2 * smoothed[j] + smoothed[j - 1]
                 sign_d1 = (1.0 if d1 > 0 else (-1.0 if d1 < 0 else 0.0))
                 grad[j] = self.c1 * sign_d1 + 2.0 * self.c2 * (2.0 * smoothed[j]
                            - smoothed[j - 1] - smoothed[j + 1])
@@ -801,7 +797,6 @@ class AltitudePlanner:
     ) -> List[Tuple[float, float]]:
         """以均勻步長 δd 沿路徑插值離散點"""
         result = [path[0]]
-        accumulated = 0.0
         for i in range(1, len(path)):
             seg_len = _haversine(path[i - 1], path[i])
             if seg_len < 1e-3:

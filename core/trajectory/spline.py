@@ -3,7 +3,6 @@
 提供三次樣條和 Catmull-Rom 樣條插值
 """
 
-import math
 from typing import List, Tuple
 import numpy as np
 

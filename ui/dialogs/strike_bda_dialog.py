@@ -158,7 +158,6 @@ class StrikeBDADialog(QDialog):
         mean_miss = float(summary.get('meanMissM', 0.0))
         max_miss = float(summary.get('maxMissM', 0.0))
         tt_spread = float(summary.get('ttSpreadS', 0.0))
-        impact_pct = (n_impacted / n_uavs * 100.0) if n_uavs > 0 else 0.0
 
         row.addWidget(_kpi(
             "IMPACT RATE",

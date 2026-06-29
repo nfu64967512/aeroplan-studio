@@ -31,7 +31,6 @@
 from __future__ import annotations
 
 import math
-import numpy as np
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple, Sequence
 from enum import Enum, auto
@@ -124,6 +123,7 @@ class AdvancedScanResult:
             f"  掃描總長:     {self.total_scan_length:.0f} m\n"
             f"  過渡總長:     {self.total_transition_length:.0f} m\n"
             f"  路徑總長:     {self.total_length:.0f} m\n"
+            f"  預估時間:     {mins:.1f} min\n"
             f"  最小曲率半徑: {self.min_curvature_radius:.1f} m\n"
             f"  可行性:       {'✓' if self.is_feasible else '✗'}\n"
             f"  航點數:       {len(self.poses)}\n"

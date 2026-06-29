@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import os
 import math
-from typing import Dict, List, Optional, Tuple
+from typing import List
 
 from utils.file_io import create_waypoint_line, write_waypoints
 from utils.logger import get_logger
@@ -265,7 +265,7 @@ class VTOLMissionExporter:
         with open(briefing_path, 'w', encoding='utf-8') as f:
             f.write("VTOL (4+1 QuadPlane) 群飛任務簡報\n")
             f.write("=" * 45 + "\n\n")
-            f.write(f"匯出模式：4+1 VTOL 混飛模式\n")
+            f.write("匯出模式：4+1 VTOL 混飛模式\n")
             f.write(f"無人機數量：{len(assembled_paths)}\n")
             f.write(f"巡航高度：{altitude:.0f}m\n")
             f.write(f"巡航速度：{speed:.1f}m/s\n")

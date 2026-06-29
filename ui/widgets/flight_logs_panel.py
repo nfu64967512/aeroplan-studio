@@ -12,26 +12,22 @@ severity → 顏色（1472H 對齊）：
 """
 from __future__ import annotations
 
-import time
 from datetime import datetime
 from typing import Optional
 
 from PyQt6.QtCore import Qt, pyqtSlot
 from PyQt6.QtWidgets import (
     QComboBox,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
 from mission.fleet_registry import FleetRegistry
-from mission.sitl_link import SITLLink, TelemetryFrame
 from ui.resources.aeroplan_theme import tokens as T
 from ui.resources.aeroplan_theme.buttons import (
     ButtonSize,

@@ -17,8 +17,8 @@ Migration 策略：新程式優先使用這些 dataclass；舊程式透過 `.fro
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field, fields
-from typing import Any, Dict, Optional, Tuple
+from dataclasses import asdict, dataclass, fields
+from typing import Any, Dict, Optional
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -183,7 +183,7 @@ class SITLParameters(_BaseSchema):
         if self.vehicle not in ('plane', 'copter', 'vtol'):
             raise ValueError(f'vehicle={self.vehicle} 不在支援清單')
         if self.instance_count < 1 or self.instance_count > 32:
-            raise ValueError(f'instance_count 需在 1-32')
+            raise ValueError('instance_count 需在 1-32')
         if self.heartbeat_rate_hz <= 0:
             raise ValueError('heartbeat_rate_hz 必須 > 0')
 

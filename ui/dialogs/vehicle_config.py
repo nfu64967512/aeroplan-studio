@@ -5,11 +5,10 @@
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QLabel, QComboBox, QDoubleSpinBox, QPushButton,
+    QComboBox, QDoubleSpinBox, QPushButton,
     QGroupBox, QTextEdit, QMessageBox, QTabWidget,
     QWidget
 )
-from PyQt6.QtCore import Qt
 from pathlib import Path
 
 from ui.resources.aeroplan_theme.widgets import IconButton

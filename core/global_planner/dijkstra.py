@@ -5,7 +5,7 @@ Dijkstra 和 A* 路徑規劃器
 
 import math
 import heapq
-from typing import List, Tuple, Optional, Dict, Set, Callable
+from typing import List, Tuple, Optional, Dict, Set
 from dataclasses import dataclass, field
 
 from ..collision import CollisionChecker

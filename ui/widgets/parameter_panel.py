@@ -346,15 +346,6 @@ class ParameterPanel(QWidget):
         本方法每呼叫一次回傳新的獨立 QGroupBox（不可共用 — Qt parent 限制）。
         Tab 切換時都會看到同一介面，提供一致性 UX。
         """
-        try:
-            from ui.resources.tactical_theme import TacticalColors as TC, TacticalFonts as TF
-        except Exception:
-            class TC:  # type: ignore
-                FG_PRIMARY='#E0E1DD'; FG_SECONDARY='#A8B2BD'; FG_EMPHASIS='#FFB703'
-                NEUTRAL='#00B4D8'; WARNING='#FFB703'; BG_SECONDARY='#0D1B2A'
-                BORDER_DEFAULT='#2A3D54'
-            TF = None
-
         # 全域 QSS 已套用 QGroupBox 基底樣式；標題保留中文，不再帶 emoji。
         group = QGroupBox('電子圍籬 (Geofence)')
         layout = QVBoxLayout(group)

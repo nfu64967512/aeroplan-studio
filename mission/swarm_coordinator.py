@@ -7,7 +7,7 @@
 import sys
 from pathlib import Path
 from typing import List, Tuple, Optional, Dict, Any
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import math
 import logging
 
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 from mission.mission_manager import Mission
 from mission.survey_mission import SurveyMission
-from mission.waypoint import Waypoint, WaypointSequence, MAVCommand
+from mission.waypoint import MAVCommand
 from mission.coverage_path import CoveragePath, OperationSegment
 
 

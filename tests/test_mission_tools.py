@@ -11,7 +11,7 @@ import tempfile
 import pytest
 
 from mission.mock_sitl_link import MockSITLLink, make_mock_fleet
-from mission.mission_validator import validate_mission, ValidationResult
+from mission.mission_validator import validate_mission
 from mission.project_io import (
     AeroPlanProject, save_project, load_project,
 )

@@ -7,7 +7,7 @@
 import math
 from enum import Enum
 from typing import List, Tuple, Optional
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 
 from ..geometry import RotatedCoordinateSystem, CoordinateTransform
 from ..collision import CollisionChecker
@@ -448,7 +448,6 @@ class CoveragePlanner:
             ring_alt = base_alt + ring_index * alt_step
 
             # 每圈航點數計算
-            circumference = 2.0 * math.pi * current_radius
             if is_fw:
                 # 固定翼：最大 20° 轉彎角/航點，確保飛機不需超過 20° 側傾即可追蹤航線
                 # ceil(360°/20°) = 18 點/圈，不受半徑影響（角度決定）
@@ -1003,7 +1002,7 @@ class CoveragePlanner:
             from core.trajectory.dubins_trajectory import (
                 DubinsTrajectoryGenerator, Pose3D
             )
-        except Exception as e:
+        except Exception:
             # 模組缺失時退回舊行為
             return path
 
@@ -1082,7 +1081,6 @@ class CoveragePlanner:
             return path
 
         center_lat = sum(p[0] for p in polygon) / len(polygon)
-        center_lon = sum(p[1] for p in polygon) / len(polygon)
 
         radius_lat = turn_radius / 111111.0
         radius_lon = turn_radius / (111111.0 * math.cos(math.radians(center_lat)))

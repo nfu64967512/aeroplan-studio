@@ -34,7 +34,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional, Tuple
 
-from utils.file_io import create_waypoint_line, write_waypoints
 from utils.logger import get_logger
 
 logger = get_logger()
@@ -56,13 +55,14 @@ class MAVCmd:
 
 # ── 共用幾何常數/函式，統一從 core.strike.geometry 匯入 ────────
 # (2026 重構：原本本檔內定義，為消除重複已遷移至 geometry 模組)
+# 注意：_R_EARTH 在本檔內未使用，但下游 advanced_recon / vtol planner 仍
+# `from swarm_strike_planner import _R_EARTH`，故以 noqa 保留 re-export。
 from core.strike.geometry import (
-    R_EARTH as _R_EARTH,
+    R_EARTH as _R_EARTH,  # noqa: F401 — 相容性 re-export，勿刪
     MAV_FRAME_REL as _MAV_FRAME_REL,
     haversine as _haversine,
     bearing_deg as _bearing_deg,
     destination as _destination,
-    angular_diff as _angular_diff,
     dubins_shortest_length,
     assign_omnidirectional_slots,
 )
@@ -597,16 +597,6 @@ class SwarmStrikePlanner:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  小工具
-# ═══════════════════════════════════════════════════════════════════════
-
-def _angular_diff(a_deg: float, b_deg: float) -> float:
-    """兩角度的最短差值 (0 ≤ result ≤ 180°)"""
-    d = abs((a_deg - b_deg) % 360.0)
-    return min(d, 360.0 - d)
-
-
-# ═══════════════════════════════════════════════════════════════════════
 #  Main Demo — 3 架 Shahed-136 類 OWA-UAV 從異地同時命中台北目標
 # ═══════════════════════════════════════════════════════════════════════
 if __name__ == '__main__':
@@ -673,6 +663,6 @@ if __name__ == '__main__':
     print(f'\n已匯出 {len(files)} 份航點檔至 {out_dir}')
     for f in files:
         print(f'  • {os.path.basename(f)}')
-    print(f'\n[ArduPilot SITL 使用方式]')
-    print(f'  Mission Planner → Ctrl+F → Load WP → 選擇對應 .waypoints')
-    print(f'  切換 AUTO 模式 → ARM → 自動執行蜂群打擊')
+    print('\n[ArduPilot SITL 使用方式]')
+    print('  Mission Planner → Ctrl+F → Load WP → 選擇對應 .waypoints')
+    print('  切換 AUTO 模式 → ARM → 自動執行蜂群打擊')

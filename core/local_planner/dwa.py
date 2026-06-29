@@ -9,7 +9,7 @@ DWA (Dynamic Window Approach) 局域路徑規劃器
 """
 
 import numpy as np
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Tuple, Optional, Any
 import time
 

@@ -17,8 +17,8 @@
 """
 
 import math
-from dataclasses import dataclass, field
-from typing import List, Tuple, Dict, Optional
+from dataclasses import dataclass
+from typing import List, Tuple, Dict
 
 from utils.math_utils import EARTH_RADIUS_M  # 0-2 標準化：WGS84 單一來源
 

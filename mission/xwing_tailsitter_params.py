@@ -493,7 +493,6 @@ def main() -> int:
     abs_default = gen.export(default_path)
 
     # ── ② 客製化：較保守轉場 + 較高巡航速 ─────────────────
-    from dataclasses import replace  # 方便複製後微調
     custom_cfg = XWingTailsitterConfig(
         q_tailsit_angle=55.0,            # 55° 更保守
         q_tailsit_rat_fw=25.0,           # 低頭慢一點

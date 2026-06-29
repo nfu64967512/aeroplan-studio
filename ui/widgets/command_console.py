@@ -21,16 +21,13 @@ from typing import Optional
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QFrame,
     QHBoxLayout,
     QLabel,
-    QSizePolicy,
     QSplitter,
     QVBoxLayout,
     QWidget,
 )
 
-from mission.fleet_registry import FleetRegistry
 from ui.resources.aeroplan_theme import tokens as T
 from ui.widgets.drone_detail_panel import DroneDetailPanel
 from ui.widgets.fleet_rail import FleetRail

@@ -13,7 +13,8 @@ Mission Planner-style Head-Up Display：依 MIL-STD-1472H 5.12.6.5.1
 """
 
 import math
-from PyQt6.QtCore import Qt, pyqtSignal, QRectF, QPointF
+from typing import Optional
+from PyQt6.QtCore import Qt, pyqtSignal, QRectF, QPointF, QSize
 from PyQt6.QtGui import QPainter, QColor, QPen, QPolygonF, QFontMetrics
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton,
@@ -630,18 +631,31 @@ class MissionPlannerHud(QWidget):
 #  UavInfoCard — 單台 UAV 的資訊欄（姿態球 + 遙測）
 # ══════════════════════════════════════════════════════════════════════
 class UavInfoCard(QFrame):
-    """單台無人機的卡片：標題 + 姿態球 + 簡要遙測"""
+    """單台無人機的卡片：標題 + 姿態球 + 簡要遙測。
+
+    額外互動（多機指揮）：
+      - 點擊卡片本體 → 發出 ``selected(sysid)``，讓 SITLHud 將其設為「指令對象」。
+      - 標題列右側「✕」鈕 → 發出 ``disconnect_requested(sysid)``，單獨斷線此機。
+      - ``set_selected(bool)`` 切換選取高亮邊框（FG_EMPHASIS 琥珀）。
+    """
+
+    # 卡片被點選（要求成為指令對象）；參數為 sysid
+    selected = pyqtSignal(int)
+    # 要求單獨斷線此機；參數為 sysid
+    disconnect_requested = pyqtSignal(int)
 
     def __init__(self, sysid: int, parent=None):
         super().__init__(parent)
-        self.sysid = sysid
+        self.sysid: int = sysid
+        self._selected: bool = False          # 是否為目前指令對象
         # 卡片寬 290 容得下完整 HUD；全直角設計（border-radius:0）
         self.setFixedWidth(290)
-        self.setStyleSheet(
-            f'QFrame{{background:{TC.BG_PRIMARY};'
-            f'border:1px solid {TC.BORDER_DEFAULT};border-radius:0;}}'
-            f'QLabel{{background:transparent;border:none;}}'
-        )
+        # objectName 化 → 邊框樣式只作用在卡片本身，不外溢到子 QFrame（標題/座標列）
+        self.setObjectName('uavCard')
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # 點選行為提示（toggle 取消不易自我說明 → 用 tooltip 揭露）
+        self.setToolTip('點擊選取此 UAV 為指令對象；再點一下取消（回全部）。')
+        self._apply_card_style()
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
@@ -655,7 +669,7 @@ class UavInfoCard(QFrame):
         )
         title_bar.setFixedHeight(20)
         tb = QHBoxLayout(title_bar)
-        tb.setContentsMargins(8, 0, 8, 0)
+        tb.setContentsMargins(8, 0, 4, 0)
         tb.setSpacing(6)
         self.lbl_title = QLabel(f'UAV{sysid} — Head-Up Display')
         self.lbl_title.setStyleSheet(
@@ -664,6 +678,25 @@ class UavInfoCard(QFrame):
         )
         tb.addWidget(self.lbl_title)
         tb.addStretch()
+
+        # 單獨斷線鈕（icon-only，HOSTILE 語意：移除此連線）
+        self.btn_disconnect = QPushButton()
+        self.btn_disconnect.setIcon(get_icon('unlink', color=TC.HOSTILE, size=12))
+        self.btn_disconnect.setIconSize(QSize(12, 12))
+        # 22x18：放大點擊目標降低誤觸（標題列 20px，仍容得下）
+        self.btn_disconnect.setFixedSize(22, 18)
+        self.btn_disconnect.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_disconnect.setToolTip(f'單獨斷線 UAV{sysid}（不影響其他機）')
+        # hover 用 BG_ELEVATED（深色提亮），而非 HOSTILE 填滿 —
+        # 否則紅色 unlink icon 疊在紅底上會看不見。
+        self.btn_disconnect.setStyleSheet(
+            'QPushButton{background:transparent;border:none;border-radius:0;}'
+            f'QPushButton:hover{{background:{TC.BG_ELEVATED};}}'
+        )
+        # 用 lambda 帶入 sysid；按鈕本身吃掉點擊，不會誤觸卡片選取
+        self.btn_disconnect.clicked.connect(
+            lambda: self.disconnect_requested.emit(self.sysid))
+        tb.addWidget(self.btn_disconnect)
         v.addWidget(title_bar)
 
         # MIL-STD-1472H 完整 HUD
@@ -705,13 +738,48 @@ class UavInfoCard(QFrame):
         # 只剩座標列在 HUD 之外更新
         self.lbl_pos.setText(f'📍 {frame.lat:.5f},{frame.lon:.5f}')
 
+    # ── 選取（指令對象）視覺狀態 ─────────────────────────────────
+    def _apply_card_style(self) -> None:
+        """依 ``_selected`` 套用卡片外框。
+
+        選取 → FG_EMPHASIS 琥珀 2px 粗框；未選 → 1px 預設框，且 hover 時邊框轉
+        NEUTRAL 青提示「可點選」（選取態不加 hover 規則，以免覆蓋選取框）。
+        """
+        if self._selected:
+            frame_rule = (f'QFrame#uavCard{{background:{TC.BG_PRIMARY};'
+                          f'border:2px solid {TC.FG_EMPHASIS};border-radius:0;}}')
+        else:
+            frame_rule = (f'QFrame#uavCard{{background:{TC.BG_PRIMARY};'
+                          f'border:1px solid {TC.BORDER_DEFAULT};border-radius:0;}}'
+                          f'QFrame#uavCard:hover{{border:1px solid {TC.NEUTRAL};}}')
+        self.setStyleSheet(
+            frame_rule + 'QLabel{background:transparent;border:none;}'
+        )
+
+    def set_selected(self, selected: bool) -> None:
+        """設定本卡片是否為目前指令對象（切換高亮邊框與標題色）。"""
+        self._selected = bool(selected)
+        self._apply_card_style()
+        # 標題列：選取時改用琥珀重點色，未選回中性次要色
+        self.lbl_title.setStyleSheet(
+            f'color:{TC.FG_EMPHASIS if self._selected else TC.FG_SECONDARY};'
+            f'font-size:10px;font-family:{TF.css_condensed()};letter-spacing:1px;'
+        )
+
+    def mousePressEvent(self, evt):
+        """點擊卡片任一處（斷線鈕除外）→ 要求成為指令對象。"""
+        if evt.button() == Qt.MouseButton.LeftButton:
+            self.selected.emit(self.sysid)
+        super().mousePressEvent(evt)
+
 
 class SITLHud(QWidget):
     """SITL 連線 + HUD 顯示面板"""
 
     connect_requested    = pyqtSignal(str)   # 連線字串
     connect_embedded_requested = pyqtSignal()  # 連線到嵌入式蜂群（模式 A1 監看）
-    disconnect_requested = pyqtSignal()
+    disconnect_requested = pyqtSignal()       # 斷開全部連線
+    uav_disconnect_requested = pyqtSignal(int)  # 單獨斷線指定 sysid（卡片快速斷線鈕）
     launch_sitl_requested = pyqtSignal(str, int)   # vehicle, count
     stop_sitl_requested   = pyqtSignal()
     # MAVLink 命令
@@ -734,6 +802,9 @@ class SITLHud(QWidget):
         super().__init__(parent)
         self._connected = False
         self._sitl_running = False
+        # 目前「指令對象」sysid；None = 全部 UAV（廣播）。
+        # 由卡片點選設定，main_window._sitl_broadcast 會讀取以決定派送範圍。
+        self._selected_sysid: Optional[int] = None
         self._init_ui()
 
     def _init_ui(self):
@@ -946,7 +1017,30 @@ class SITLHud(QWidget):
         cmd_outer.setContentsMargins(8, 6, 8, 6)
         cmd_outer.setSpacing(5)
 
-        cmd_outer.addWidget(self._lbl('飛控指令', TC.NEUTRAL, bold=True))
+        # 標題列：左「飛控指令」+ 右「指令對象」指示（全部 / 單機）
+        cmd_header = QHBoxLayout()
+        cmd_header.setSpacing(6)
+        cmd_header.addWidget(self._lbl('飛控指令', TC.NEUTRAL, bold=True))
+        cmd_header.addStretch()
+        cmd_header.addWidget(self._lbl('指令對象:', TC.FG_SECONDARY))
+        # 指令對象值標籤（全部 → 琥珀；單機 → NEUTRAL 青框，見 _update_target_label）
+        self.lbl_cmd_target = self._lbl('全部 UAV', TC.FG_EMPHASIS, bold=True)
+        cmd_header.addWidget(self.lbl_cmd_target)
+        # 「全部」復位鈕：把指令對象切回全部 UAV
+        self.btn_target_all = QPushButton('全部')
+        self.btn_target_all.setFixedHeight(20)
+        self.btn_target_all.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_target_all.setToolTip('指令對象切回「全部 UAV」（取消單機選取）')
+        self.btn_target_all.setStyleSheet(
+            f'QPushButton{{background:{TC.BG_SUNKEN};color:{TC.FG_SECONDARY};'
+            f'border:1px solid {TC.BORDER_DEFAULT};border-radius:0;'
+            f'padding:0 8px;font-size:10px;font-family:{TF.css_condensed()};'
+            f'letter-spacing:1px;}}'
+            f'QPushButton:hover{{background:{TC.BORDER_STRONG};color:{TC.FG_PRIMARY};}}'
+        )
+        self.btn_target_all.clicked.connect(lambda: self._set_target(None))
+        cmd_header.addWidget(self.btn_target_all)
+        cmd_outer.addLayout(cmd_header)
 
         # ARM/DISARM 列
         arm_row = QHBoxLayout()
@@ -1320,6 +1414,8 @@ class SITLHud(QWidget):
 
     def on_disconnected(self, reason: str = ''):
         self._connected = False
+        # 全部斷線 → 清掉所有 UAV 卡片並復位指令對象（避免殘留離線卡片）
+        self.clear_cards()
         # 回到「連線」狀態：primary tone + link icon
         self.btn_connect.setText('連線')
         self.btn_connect.setIcon(get_icon('link', color='#FFFFFF', size=16))
@@ -1474,9 +1570,15 @@ class SITLHud(QWidget):
         card = self._uav_cards.get(sysid)
         if card is None:
             card = UavInfoCard(sysid, self)
+            card.selected.connect(self._on_card_selected)
+            card.disconnect_requested.connect(self.uav_disconnect_requested.emit)
+            # ── 依 sysid 數字大小插入（與連線順序無關）→ 卡片永遠按編號排列 ──
+            # 插入索引 = 既有卡片中 sysid 比它小的數量（stretch 永遠在最後）。
+            insert_idx = sum(1 for sid in self._uav_cards if sid < sysid)
             self._uav_cards[sysid] = card
-            # 插在最後 stretch 之前
-            self._cards_row.insertWidget(self._cards_row.count() - 1, card)
+            self._cards_row.insertWidget(insert_idx, card)
+            # 套用目前選取高亮（新卡片預設未選，除非剛好等於目前指令對象）
+            card.set_selected(sysid == self._selected_sysid)
         return card
 
     def clear_cards(self):
@@ -1484,6 +1586,63 @@ class SITLHud(QWidget):
             card.setParent(None)
             card.deleteLater()
         self._uav_cards.clear()
+        # 卡片清空 → 指令對象一併復位為「全部」
+        self._selected_sysid = None
+        if hasattr(self, 'lbl_cmd_target'):
+            self._update_target_label()
+
+    def remove_card(self, sysid: int) -> None:
+        """移除單一 UAV 卡片（單獨斷線時呼叫）。
+
+        若被移除者正是目前指令對象 → 指令對象自動復位為「全部」，
+        避免指令繼續指向已離線的機。
+        """
+        card = self._uav_cards.pop(sysid, None)
+        if card is not None:
+            card.setParent(None)
+            card.deleteLater()
+        if self._selected_sysid == sysid:
+            self._set_target(None)
+
+    # ── 指令對象（單機 / 全部）選取 ──────────────────────────────
+    def _on_card_selected(self, sysid: int) -> None:
+        """卡片被點選：再次點同一台 → 取消（回全部）；否則選取該台。"""
+        new_target = None if self._selected_sysid == sysid else sysid
+        self._set_target(new_target)
+
+    def _set_target(self, sysid: Optional[int]) -> None:
+        """設定指令對象 sysid（None = 全部），同步所有卡片高亮與標籤。"""
+        self._selected_sysid = sysid
+        for sid, card in self._uav_cards.items():
+            card.set_selected(sid == sysid)
+        self._update_target_label()
+
+    def _update_target_label(self) -> None:
+        """更新「指令對象」標籤文字與語意色。
+
+        全部 → FG_EMPHASIS 琥珀；單機 → NEUTRAL 青（advisory/mode，非告警語意，
+        符合 MIL-STD-1472H TABLE XL），並加底色框出，與右側「全部」鈕成對。
+        """
+        if self._selected_sysid is None:
+            self.lbl_cmd_target.setText('全部 UAV')
+            self.lbl_cmd_target.setStyleSheet(
+                f'color:{TC.FG_EMPHASIS};font-size:11px;font-weight:600;'
+                f'font-family:{TF.css_sans()};'
+            )
+        else:
+            self.lbl_cmd_target.setText(f'UAV{self._selected_sysid}（單獨）')
+            self.lbl_cmd_target.setStyleSheet(
+                f'color:{TC.NEUTRAL};font-size:11px;font-weight:600;'
+                f'font-family:{TF.css_sans()};'
+                f'background:{TC.BG_ELEVATED};padding:1px 6px;'
+            )
+
+    def get_target_sysid(self) -> Optional[int]:
+        """目前指令對象 sysid；None 代表「全部 UAV」。
+
+        供 main_window._sitl_broadcast / 上傳處理判斷指令派送範圍使用。
+        """
+        return self._selected_sysid
 
     def on_telemetry(self, frame):
         # 多機：每個 sysid 一個卡片

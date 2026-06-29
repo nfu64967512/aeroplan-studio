@@ -19,9 +19,8 @@ HUD green `#00ff41`、字 JetBrains Mono、sky/ground 採 ADOS 配色。
 from __future__ import annotations
 
 import logging
-import math
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import List, Optional
 
 from PyQt6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, QTimer

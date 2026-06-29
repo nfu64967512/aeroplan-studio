@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import math
 import logging
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple
 
 import numpy as np
 

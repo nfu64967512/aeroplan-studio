@@ -12,13 +12,12 @@
 import os
 import re
 import io
-import tempfile
 from typing import List, Tuple, Optional
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QMessageBox, QSizePolicy
+from PyQt6.QtWidgets import QVBoxLayout, QMessageBox, QSizePolicy
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
-from PyQt6.QtCore import pyqtSignal, QUrl, Qt
+from PyQt6.QtCore import QUrl, Qt
 from urllib.parse import unquote
 
 import folium
@@ -1602,7 +1601,6 @@ body > div {{ width:100% !important; height:100% !important; }}
 
         drones = self._swarm_data.get('drones', [])
         areas  = self._swarm_data.get('areas', [])
-        stats  = self._swarm_data.get('stats', {})
 
         js_parts = ["""
 (function(){
@@ -1817,9 +1815,9 @@ body > div {{ width:100% !important; height:100% !important; }}
             )
         elif stats.get('total_distance'):
             stat_lines += (
-                f'<div style="font-size:11px;color:#69F0AE;margin-top:4px;">'
-                f'✅ 無衝突'
-                f'</div>'
+                '<div style="font-size:11px;color:#69F0AE;margin-top:4px;">'
+                '✅ 無衝突'
+                '</div>'
             )
 
         return f'''

@@ -29,7 +29,7 @@ import sys
 import time
 import zipfile
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 
 import numpy as np
 
@@ -349,7 +349,7 @@ def main():
 
     tiles = tiles_for_bbox(bbox)
     print('=' * 64)
-    print(f'  AeroPlan Studio — Taiwan DEM Downloader')
+    print('  AeroPlan Studio — Taiwan DEM Downloader')
     print('=' * 64)
     print(f'  範圍 ({scope}): '
           f'[{bbox["lon_min"]:.2f}, {bbox["lat_min"]:.2f}] – '

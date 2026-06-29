@@ -531,6 +531,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         self.sitl_hud.connect_requested.connect(self.on_sitl_connect)
         self.sitl_hud.connect_embedded_requested.connect(self.on_embedded_swarm_connect)
         self.sitl_hud.disconnect_requested.connect(self.on_sitl_disconnect)
+        self.sitl_hud.uav_disconnect_requested.connect(self.on_sitl_disconnect_one)
         self.sitl_hud.launch_sitl_requested.connect(self.on_sitl_launch)
         self.sitl_hud.stop_sitl_requested.connect(self.on_sitl_stop_local)
         self.sitl_hud.cmd_arm.connect(lambda: self._sitl_broadcast('arm'))
@@ -5396,7 +5397,9 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         link = SITLLink(conn_str, sysid_label=sysid_label,
                         vehicle_hint=vehicle_hint, parent=self)
         link.connected.connect(self.sitl_hud.on_connected)
-        link.disconnected.connect(self._on_sitl_disconnected)
+        # 帶入 link 身分 → 逐機斷線清理（手動快速斷線 / 自然斷線皆走此路）
+        link.disconnected.connect(
+            lambda reason, l=link: self._on_sitl_link_disconnected(l, reason))
         link.telemetry.connect(self._on_sitl_telemetry)
         link.status_text.connect(self.sitl_hud.on_status_text)
         link.error.connect(self.sitl_hud.on_error)
@@ -5485,6 +5488,11 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         except Exception:
             pass
         for link in self._sitl_links:
+            # 先切斷 disconnected → 避免逐機清理 handler 在全域斷線時重入
+            try:
+                link.disconnected.disconnect()
+            except Exception:
+                pass
             try:
                 link.stop()
                 link.wait(2000)
@@ -5492,12 +5500,61 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
                 pass
         self._sitl_links.clear()
         self._sitl_link = None
-        self.sitl_hud.on_disconnected('使用者中斷')
+        self.sitl_hud.on_disconnected('使用者中斷')   # 內含 clear_cards + 復位指令對象
         if hasattr(self.map_widget, 'clear_uav'):
             self.map_widget.clear_uav()
 
-    def _on_sitl_disconnected(self, reason: str):
-        self.sitl_hud.on_disconnected(reason)
+    def on_sitl_disconnect_one(self, sysid: int):
+        """單獨斷開指定 sysid 的 SITL 連線（HUD 卡片快速斷線鈕）。
+
+        僅停止該機鏈路，其餘連線維持。實際清理（移除卡片 / 反註冊 FleetRegistry /
+        指令對象復位）由該鏈路結束時發出的 disconnected 信號統一交給
+        _on_sitl_link_disconnected 處理，避免重複清理。
+        """
+        link = next((l for l in self._sitl_links
+                     if int(getattr(l, 'sysid_label', 1)) == int(sysid)), None)
+        if link is None:
+            return
+        logger.info(f'[SITL] 單獨斷線 UAV-{sysid}')
+        try:
+            link.stop()
+            link.wait(2000)
+        except Exception as e:
+            logger.error(f'[SITL] 單獨斷線失敗 sysid={sysid}: {e}')
+
+    def _on_sitl_link_disconnected(self, link, reason: str):
+        """單一 SITL 鏈路結束（手動快速斷線 / 連線自然中斷）→ 僅清理該機。
+
+        全域斷線（on_sitl_disconnect）已預先切斷 disconnected 信號，故不會走到這裡。
+        """
+        sysid = int(getattr(link, 'sysid_label', 1))
+        if link in self._sitl_links:
+            self._sitl_links.remove(link)
+        # FleetRegistry 反註冊（callsign 與註冊時一致）
+        try:
+            from mission.fleet_registry import FleetRegistry
+            FleetRegistry.instance().unregister(f'UAV-{sysid}')
+        except Exception:
+            pass
+        # 移除該機 HUD 卡片 + 地圖圖標（僅該 sysid）
+        try:
+            self.sitl_hud.remove_card(sysid)
+        except Exception:
+            pass
+        if hasattr(self.map_widget, 'clear_uav'):
+            try:
+                self.map_widget.clear_uav(sysid)
+            except Exception:
+                pass
+        # 維護主鏈路指標（向後相容）
+        if self._sitl_link is link:
+            self._sitl_link = self._sitl_links[0] if self._sitl_links else None
+        # 全部離線 → 還原全域連線狀態；否則僅於 log 區提示
+        if not self._sitl_links:
+            self.sitl_hud.on_disconnected(reason)
+        else:
+            self.sitl_hud.lbl_status.setText(
+                f'🔌 UAV-{sysid} 已斷線（剩餘 {len(self._sitl_links)} 台連線）')
 
     def _on_sitl_telemetry(self, frame):
         """收到一幀遙測 → 更新 HUD + 推到 3D 地圖（多機支援）"""
@@ -5522,12 +5579,34 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
                 sysid=frame.sysid,
             )
 
+    def _target_links(self) -> list:
+        """指令派送對象鏈路：依 HUD「指令對象」選取決定範圍。
+
+        HUD 選取單機 → 只回該 sysid 的鏈路；未選（全部）→ 回全部鏈路。
+        供 _sitl_broadcast / 圍籬上傳等「快捷操作」共用，達成
+        「選中某台 → 下方快捷操作只單獨操作他」。
+        """
+        sid = None
+        try:
+            sid = self.sitl_hud.get_target_sysid()
+        except Exception:
+            sid = None
+        if sid is None:
+            return list(self._sitl_links)
+        return [l for l in self._sitl_links
+                if int(getattr(l, 'sysid_label', 1)) == int(sid)]
+
     def _sitl_broadcast(self, cmd: str, arg=None):
-        """廣播指令到所有 SITL 連線"""
+        """派送指令到 SITL 連線（依 HUD 指令對象：單機或全部）"""
         if not self._sitl_links:
             QMessageBox.information(self, 'SITL', '尚未連線任何 SITL')
             return
-        for link in self._sitl_links:
+        links = self._target_links()
+        if not links:
+            QMessageBox.information(
+                self, 'SITL', '所選的指令對象 UAV 已離線，請改選其他機或「全部」')
+            return
+        for link in links:
             try:
                 if cmd == 'arm':       link.arm()
                 elif cmd == 'disarm':  link.disarm()
@@ -5579,6 +5658,27 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         """長機 = sysid 最小者（無連線回 None）。"""
         return self._sorted_links()[0] if self._sitl_links else None
 
+    def _resolve_flight_target(self):
+        """點圖 GUIDED 指令的飛行對象解析（與下方快捷操作一致地尊重 HUD 選取）。
+
+        回傳 (target_link, wingmen)：
+          - HUD 選取單機 → (該機, [])：只操作該機，不帶僚機（純單機 GUIDED）。
+          - 未選（全部）  → (長機, 其餘)：維持長機帶隊、僚機 V 編隊跟隨。
+        target_link 為 None 代表已連線但選取的機剛好離線（呼叫端應提示並中止）。
+        """
+        links = self._sorted_links()
+        if not links:
+            return None, []
+        try:
+            sid = self.sitl_hud.get_target_sysid()
+        except Exception:
+            sid = None
+        if sid is None:
+            return links[0], links[1:]            # 全部 → 長機帶隊
+        target = next((l for l in links
+                       if int(getattr(l, 'sysid_label', 1)) == int(sid)), None)
+        return target, []                          # 單機 → 無僚機
+
     def _send_guided_takeoff_swarm(self, lat: float, lon: float, alt: float = 60.0):
         """點地圖 → 長機帶領的「分階段」GUIDED 起飛（非整群同時）：
 
@@ -5588,8 +5688,12 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         """
         if not self._sitl_links:
             return
-        links = self._sorted_links()
-        leader, wingmen = links[0], links[1:]
+        # 尊重 HUD 指令對象：選單機 → 只起飛該機（wingmen=[]）；全部 → 長機帶隊
+        leader, wingmen = self._resolve_flight_target()
+        if leader is None:
+            QMessageBox.information(
+                self, 'GUIDED', '所選的指令對象 UAV 已離線，請改選其他機或「全部」')
+            return
         try:
             leader.guided_takeoff(alt)           # 階段1：長機單獨起飛
         except Exception as e:
@@ -5666,15 +5770,21 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
             if enabled else '點圖飛到已關閉', 5000)
 
     def _send_guided_goto(self, lat: float, lon: float, alt: float = 60.0):
-        """送 GUIDED 飛到給長機（sysid 最小者）；僚機由蜂群節點追蹤其 geopose 跟隨。"""
+        """送 GUIDED 飛到。尊重 HUD 指令對象：選單機 → 只該機飛往；
+        全部 → 送長機（sysid 最小者），僚機由蜂群節點追蹤其 geopose 跟隨。"""
         if not self._sitl_links:
             return
-        leader = self._get_leader_link()
+        leader, wingmen = self._resolve_flight_target()
+        if leader is None:
+            QMessageBox.information(
+                self, 'GUIDED', '所選的指令對象 UAV 已離線，請改選其他機或「全部」')
+            return
         try:
             leader.guided_goto(lat, lon, alt)
+            tail = '，僚機跟隨' if wingmen else '（單機）'
             self.statusBar().showMessage(
-                f'🎯 長機 UAV-{getattr(leader, "sysid_label", 1)} GUIDED 飛往 '
-                f'({lat:.5f},{lon:.5f}) @ {alt:.0f}m，僚機跟隨', 6000)
+                f'🎯 UAV-{getattr(leader, "sysid_label", 1)} GUIDED 飛往 '
+                f'({lat:.5f},{lon:.5f}) @ {alt:.0f}m{tail}', 6000)
         except Exception as e:
             logger.error(f'[GUIDED] guided_goto 失敗: {e}')
 
@@ -5694,8 +5804,13 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         if not ok:
             return
         self._last_guided_alt = alt
-        leader = self._get_leader_link()
-        frame = leader.get_latest_telemetry()
+        # 尊重 HUD 指令對象：以「選取機（或長機）」的遙測判斷是否已升空
+        target, _ = self._resolve_flight_target()
+        if target is None:
+            QMessageBox.information(
+                self, 'GUIDED', '所選的指令對象 UAV 已離線，請改選其他機或「全部」')
+            return
+        frame = target.get_latest_telemetry()
         airborne = bool(frame and frame.armed and frame.alt_rel > 15.0)
         if airborne:
             self._send_guided_goto(lat, lon, alt)        # 已在空中 → 直接飛往
@@ -5703,10 +5818,14 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
             self._rclick_takeoff_goto(lat, lon, alt)     # 地面 → 帶頭起飛後飛往
 
     def _rclick_takeoff_goto(self, lat: float, lon: float, alt: float):
-        """長機帶頭起飛（僚機 3s 內接續），長機升空後 GUIDED 飛往 (lat,lon,alt)。"""
+        """長機帶頭起飛（僚機 3s 內接續），長機升空後 GUIDED 飛往 (lat,lon,alt)。
+        尊重 HUD 指令對象：選單機 → 只該機起飛飛往（無僚機）。"""
         from PyQt6.QtCore import QTimer
-        links = self._sorted_links()
-        leader, wingmen = links[0], links[1:]
+        leader, wingmen = self._resolve_flight_target()
+        if leader is None:
+            QMessageBox.information(
+                self, 'GUIDED', '所選的指令對象 UAV 已離線，請改選其他機或「全部」')
+            return
         try:
             leader.guided_takeoff(alt)
         except Exception as e:
@@ -5826,13 +5945,19 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
             QMessageBox.warning(self, 'SITL',
                 '尚無圍籬可上傳。\n建議：先規劃任何路徑，系統會自動建立圍籬，再點此上傳。')
             return
-        for link in self._sitl_links:
+        # 依 HUD 指令對象縮限範圍（選中單機 → 只上傳該機）
+        links = self._target_links()
+        if not links:
+            QMessageBox.information(
+                self, 'SITL', '所選的指令對象 UAV 已離線，請改選其他機或「全部」')
+            return
+        for link in links:
             try:
                 link.upload_fence(bundle)
             except Exception as e:
                 logger.error(f'[SITL] 上傳圍籬失敗 sysid={getattr(link,"sysid_label","?")}: {e}')
         self.statusBar().showMessage(
-            f'🛡️ 已送出圍籬上傳請求到 {len(self._sitl_links)} 台 SITL', 5000
+            f'🛡️ 已送出圍籬上傳請求到 {len(links)} 台 SITL', 5000
         )
 
     def on_sitl_upload_mission(self):

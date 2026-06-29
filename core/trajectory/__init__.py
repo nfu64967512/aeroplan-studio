@@ -4,7 +4,7 @@ Trajectory 軌跡處理模組
 """
 
 import numpy as np
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 from dataclasses import dataclass
 
 

@@ -1,12 +1,12 @@
 """
 AeroPlan Studio — Collaborative UAV Mission Planning Suite
-版本: 2.6.0
+版本: 2.8.1
 
 注意：本檔實際上沒有被 main.py 使用（main.py 採用 top-level import）。
 為相容性保留 lazy 載入，避免在 pytest / 工具掃描時因相對匯入失敗。
 """
 
-__version__ = "2.6.0"
+__version__ = "2.8.1"
 __author__ = "AeroPlan Studio"
 __license__ = "MIT"
 

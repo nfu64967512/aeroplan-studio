@@ -10,9 +10,13 @@ method for complex areas》Section 2.3 的 Operation Path Model。
 
 import math
 from dataclasses import dataclass, field
-from typing import List, Tuple, Optional, Dict
+from typing import List, Tuple, Optional, Dict, TYPE_CHECKING
 
 from utils.math_utils import EARTH_RADIUS_M  # 0-2 標準化：WGS84 單一來源
+
+if TYPE_CHECKING:
+    # 僅供型別註解使用；執行期於函式內延遲匯入（見 to_waypoint_sequence）
+    from mission.waypoint import WaypointSequence
 
 
 # ==========================================
@@ -376,11 +380,11 @@ if __name__ == '__main__':
         assert seqs == list(range(len(seqs))), f"seq 不連續: {seqs}"
         # 預期: HOME(0) + SPEED(1) + TAKEOFF(2) + 5*2 waypoints(3..12) + RTL(13) = 14 個
         assert len(seqs) == 14, f"預期 14 個航點，實際 {len(seqs)}"
-        print(f"  [OK] seq 連續性驗證通過")
+        print("  [OK] seq 連續性驗證通過")
 
         # 用 to_qgc_format() 輸出並列印前 5 行
         lines = wseq.to_qgc_format()
-        print(f"  QGC 格式前 5 行：")
+        print("  QGC 格式前 5 行：")
         for line in lines[:5]:
             print(f"    {line.rstrip()}")
 

@@ -2,7 +2,7 @@
 
 > 舊名：UAV Path Planner / DWA_path_planner
 
-**版本**: 2.7.0
+**版本**: 2.8.0
 **授權**: MIT
 **Python**: >= 3.10
 
@@ -32,7 +32,7 @@
 - **座標系轉換**: WGS84 / UTM / 本地 ENU 座標互轉
 - **地圖拖曳定圓**: 直接在地圖上拖曳定義螺旋/同心圓中心與半徑
 - **多邊形編輯器**: 精確輸入或編輯角點座標
-- **禁航區管理（NFZ）**: 多邊形/圓形禁航區視覺化與規劃迴避
+- **禁航區管理（NFZ）**: 多邊形/圓形禁航區視覺化與規劃迴避；DCCPP 偵察覆蓋以**覆蓋率優先**的 segment-aware 局部繞行 — 用 `LineString(lane).difference(buffered_NFZ)` 截斷掃描線、**保留 NFZ 外兩側所有覆蓋**，僅 NFZ 內缺口走 Visibility Graph 繞行 + Dubins fillet 平滑；不重排（保留覆蓋順序 / R_min / 邊界內）；繞行後**最終 NFZ gate** 確保絕不穿越；**含回程/降落巡航段**全程繞行、繞行航點維持巡航高度（不貼地）
 
 ## 快速開始
 
@@ -467,6 +467,28 @@ aeroplan-studio/
 | 配置 | PyYAML |
 
 ## 版本紀錄
+
+### v2.8.0 (Jun 2026)
+
+- 🛡 **DCCPP 禁航區（NFZ）回程繞行修正 — 回程不再穿越 NFZ**
+  - 問題：`MainWindow._apply_fence_avoidance_to_dccpp_result` 先前把**整段尾端 `LANDING` 航點**剝離後原樣接回以保住 `NAV_LAND`，但 DCCPP 任務的「回程」其實是「最後一個掃描出口 → 第一個 LANDING 航點（場周入口）」這條長巡航段，被夾在剝離邊界外，從未進入 NFZ 避障 → 回程直穿禁區
+  - 修法：新增 `MainWindow._split_landing_tail()` — 僅豁免「下降進場型態」（下降階梯 + 觸地 `NAV_LAND`），把**回程到達點（場周入口）併入避障前段**，使回程巡航段一併走 Visibility Graph 繞行 + Dubins fillet 平滑
+- 🛠 **NFZ 繞行段「路徑貼地」修正 — 繞行維持巡航高度**
+  - 問題：繞行航點經 Dubins fillet 倒角 / kink 修復重新離散化後，原 waypoint 索引失效，改用「幾何最近原始航點」推算高度；但繞 NFZ 的 detour 點在幾何上往往最靠近低高度的 takeoff 爬升 / landing 下降航點，遂繼承到接近地面的高度 → 繞行段貼地
+  - 修法：在 fillet 前擷取正確高度剖面，最後以新增的 `MainWindow._resample_alts_by_arclength()` 沿累積弧長比例還原各點高度，使繞行 detour 點維持其所屬巡航段的高度（climb/descent 僅發生在 home 附近，不受影響）
+- 🛡 **Legacy 固定翼 survey 回程繞行修正**
+  - 問題：`_auto_generate_path` 先前僅對掃描航線（`mission_latlon`）做 NFZ 修正，`takeoff_ll`（離場）與 `landing_ll`（回程 + 降落）直接串接、跳過檢查 → 離場/回程可能直穿 NFZ
+  - 修法：把「離場 + 已修正掃描段 + 進場入口（`landing_ll[0]`）」當成一條巡航包絡一起繞行（`_apply_nfz_correction_latlon`），僅豁免最終下降進場型態 `landing_ll[1:]`（保住下滑道/觸地 NAV_LAND）
+- 🛡 **多旋翼 / grid survey 回程繞行修正**
+  - 問題：回程僅靠匯出端 bare `MAV_CMD_NAV_RETURN_TO_LAUNCH`（cmd 20）；RTL 為韌體端直線飛回 home，本質上忽略 NFZ → 回程直穿禁區
+  - 修法：新增 `MainWindow._append_nfz_safe_return()` — 在 `self.waypoints` / 各 `sub_paths` 尾端以 Visibility Graph 算出「最後航點 → home」的繞行折線並顯式接上（圓心 / 多邊形單區 / 多分區多機皆套用），匯出端 RTL 退化為 home→home 無動作收尾；僅在直線回程確實穿越 NFZ 時才附加
+- 🛰 **DCCPP NFZ 避障「偵察覆蓋率保留」修正（covering-first）**
+  - 問題：`_segment_aware_fence_avoidance` 舊 Case A 在「掃描線中段/遠端落在 NFZ 內」時，會 `while _pt_in_any_poly: j += 1` 跳過所有 NFZ 內航點，連帶把該掃描線（甚至後續多條）在 NFZ **另一側**的覆蓋整段丟棄 → 多固定翼偵察任務的覆蓋區大量空洞
+  - 修法：改用 **difference-based 邊界截斷** — 每個 OPERATION 線段取 `LineString(lane).difference(buffered_NFZ)`，保留**所有** NFZ 外子段（含遠端側），僅 NFZ 內缺口用 `correct_path` VG 繞行銜接；**不重排**（保留起飛順序 / Dubins R_min / geofence）。另將 per-UAV 扇形 spread（12m×idx 純覆蓋犧牲）設為 0，多機改靠高度分層避撞
+  - 結果：NFZ 外覆蓋保留至最小安全 buffer 邊界（兩側皆覆蓋），NFZ 不穿越，飛安不變
+- 🛡 **最終 NFZ gate（DCCPP 繞行絕不穿越，含傾斜/壓邊界 NFZ）**：DCCPP 繞行後（含 Dubins fillet / kink）再掃一次，任何仍穿入 buffered NFZ 的段 → **difference 裁成 NFZ 外子段**（端點落邊界、非 buffer 內部），缺口先試 `correct_path`；若航點深入 NFZ 使 VG 無法從內部點起算而失敗，則**沿 buffered 外緣走較短弧繞行**（boundary-walk 後備，不依賴 VG 可視性容差）。確保傾斜/壓邊界等複雜 NFZ 形狀也絕不穿越
+- ℹ️ **NFZ 繞行策略決策**：曾評估 NFZ-aware「覆蓋分解」(重排整條覆蓋以求 Mission Planner 式乾淨貼邊)，但重排會打亂起飛接線、cell 轉場可能飛出 geofence、且以 fillet 取代 Dubins 導致轉彎半徑可能 < R_min（固定翼飛不過）。為保實飛安全，最終維持 **segment-aware 局部繞行 + difference-based 覆蓋保留**：保留原 DCCPP 覆蓋順序 + Dubins R_min + 邊界內，僅局部繞 NFZ
+- ✅ **新增回歸測試**：`tests/test_dccpp_return_leg_nfz.py`（DCCPP 回程繞行）、`tests/test_dccpp_reroute_altitude.py`（繞行高度不貼地）、`tests/test_survey_return_leg_nfz.py`（legacy survey + 多旋翼回程繞行）、`tests/test_dccpp_coverage_retention.py`（NFZ 兩側偵察覆蓋率保留 + 傾斜 NFZ 端到端不穿越）；全套 pytest 149 項通過
 
 ### v2.7.0 (Apr 2026)
 

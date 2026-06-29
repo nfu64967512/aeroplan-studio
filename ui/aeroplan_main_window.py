@@ -38,10 +38,10 @@ MIL-STD-1472H 條款對應
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Callable, Optional
+from typing import Optional
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QAction, QFont, QKeySequence, QShortcut
+from PyQt6.QtGui import QAction, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QFrame,
     QGroupBox,
@@ -53,7 +53,6 @@ from PyQt6.QtWidgets import (
     QSplitter,
     QStackedWidget,
     QStatusBar,
-    QToolBar,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -67,7 +66,7 @@ from ui.widgets.master_warning_panel import (
 )
 
 # ── ADOS 對齊新元件（Phase A/B/C/J/K/M/N） ─────────────────────────
-from ui.widgets.alert_banner import AlertBannerStack, BannerSeverity
+from ui.widgets.alert_banner import AlertBannerStack
 from ui.widgets.fleet_dashboard import FleetDashboard
 from ui.widgets.hud_composer import HudComposer, HudFrame
 from ui.widgets.parameters_browser import ParametersBrowser
@@ -671,7 +670,8 @@ class AeroPlanMainWindow(QMainWindow):
             link = FleetRegistry.instance().get_link(callsign)
             sysid = 0
             if link is not None:
-                sysid = int(getattr(link, "_frame").sysid)
+                # 公開 sysid 來自 link.sysid_label，非不存在的 _frame 屬性。
+                sysid = int(getattr(link, "sysid_label", 0) or 0)
             if sysid:
                 self.parameters_browser.set_current_sysid(sysid)
         except Exception:

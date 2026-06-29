@@ -10,7 +10,6 @@ SITL 本地啟動器
 
 from __future__ import annotations
 
-import os
 import sys
 import socket
 import subprocess

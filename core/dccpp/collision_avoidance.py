@@ -30,10 +30,14 @@ from __future__ import annotations
 
 import math
 import logging
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from utils.math_utils import EARTH_RADIUS_M  # 0-2 標準化：WGS84 單一來源
+
+if TYPE_CHECKING:
+    # 僅供型別註解使用，避免與 dccpp_path_builder 的執行期循環依賴
+    from core.dccpp.dccpp_path_builder import BuiltPath
 
 logger = logging.getLogger(__name__)
 
@@ -311,8 +315,6 @@ class CollisionAvoidance:
         conflicts: List[ConflictEvent],
     ) -> List[AvoidanceAction]:
         """高度錯開策略：衝突區段中，ID 較大的 UAV 升高 alt_offset_m"""
-        from core.dccpp.dccpp_path_builder import BuiltWaypoint, SegmentLabel
-
         actions = []
         # 收集每架 UAV 需要偏移的航點索引範圍
         uav_offsets: Dict[int, List[Tuple[int, int]]] = {}

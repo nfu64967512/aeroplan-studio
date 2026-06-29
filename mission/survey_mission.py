@@ -6,14 +6,13 @@ Survey 任務模組
 
 import sys
 from pathlib import Path
-from typing import List, Tuple, Optional, Dict, Any
+from typing import List, Tuple, Dict, Any
 
 # 添加專案根目錄到路徑
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 from mission.mission_manager import Mission
-from mission.waypoint import WaypointSequence
 
 
 # ==========================================
@@ -95,7 +94,7 @@ class SurveyMission(Mission):
         
         # 計算基於相機的航線間距
         try:
-            from sensors import CameraDatabase, CameraCalculator, SurveyParameters
+            from sensors import CameraDatabase, SurveyParameters
 
             camera = CameraDatabase.get_camera(camera_name)
             if camera:

@@ -31,13 +31,12 @@ from __future__ import annotations
 
 import heapq
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
 # Shapely — 多邊形幾何運算的標準（buffer、交集、外輪廓）
 try:
     from shapely.geometry import LineString, Point, Polygon
-    from shapely.ops import unary_union
 except ImportError as e:  # pragma: no cover
     raise ImportError(
         '本模組需要 shapely >= 2.0，請執行：pip install shapely'
@@ -777,7 +776,7 @@ if __name__ == '__main__':
 
     print(f'\n起點:   ({start[0]:.6f}, {start[1]:.6f})')
     print(f'目標:   ({target[0]:.6f}, {target[1]:.6f})')
-    print(f'NFZ:    正方形 4 頂點，約 1.1 km × 0.45 km')
+    print('NFZ:    正方形 4 頂點，約 1.1 km × 0.45 km')
 
     cfg = PlannerConfig(
         buffer_mr=20.0, buffer_fw=100.0,
@@ -787,7 +786,7 @@ if __name__ == '__main__':
     )
     planner = HeterogeneousNFZPlanner(cfg)
 
-    print(f'\n設定:')
+    print('\n設定:')
     print(f'  MR  buffer={cfg.buffer_mr}m  alt={cfg.alt_mr}m')
     print(f'  FW  buffer={cfg.buffer_fw}m  alt={cfg.alt_fw}m  R_min={cfg.r_min}m')
     print(f'  最近水平分離 (理論) >= {cfg.buffer_fw - cfg.buffer_mr}m')

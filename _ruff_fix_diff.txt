@@ -1,0 +1,1760 @@
+﻿diff --git a/__init__.py b/__init__.py
+index 75f6416..6ea9f87 100644
+--- a/__init__.py
++++ b/__init__.py
+@@ -3 +3 @@ AeroPlan Studio — Collaborative UAV Mission Planning Suite
+-版本: 2.6.0
++版本: 2.8.0
+@@ -9 +9 @@ AeroPlan Studio — Collaborative UAV Mission Planning Suite
+-__version__ = "2.6.0"
++__version__ = "2.8.0"
+diff --git a/config/schemas.py b/config/schemas.py
+index 048d116..08c1dbe 100644
+--- a/config/schemas.py
++++ b/config/schemas.py
+@@ -20,2 +20,2 @@ from __future__ import annotations
+-from dataclasses import asdict, dataclass, field, fields
+-from typing import Any, Dict, Optional, Tuple
++from dataclasses import asdict, dataclass, fields
++from typing import Any, Dict, Optional
+@@ -186 +186 @@ class SITLParameters(_BaseSchema):
+-            raise ValueError(f'instance_count 需在 1-32')
++            raise ValueError('instance_count 需在 1-32')
+diff --git a/config/settings.py b/config/settings.py
+index 989350d..2404a11 100644
+--- a/config/settings.py
++++ b/config/settings.py
+@@ -10 +10 @@ from dataclasses import dataclass, asdict, field
+-from typing import Dict, Any, Optional, List
++from typing import Dict, Any, Optional
+diff --git a/core/base/fixed_wing_constraints.py b/core/base/fixed_wing_constraints.py
+index 4f6cae2..56acd99 100644
+--- a/core/base/fixed_wing_constraints.py
++++ b/core/base/fixed_wing_constraints.py
+@@ -27,2 +27 @@ from utils.math_utils import (
+-    bearing_between_points, latlon_to_meters, meters_to_latlon,
+-    normalize_angle
++    latlon_to_meters, normalize_angle
+diff --git a/core/base/vehicle_base.py b/core/base/vehicle_base.py
+index e2383b7..a49a619 100644
+--- a/core/base/vehicle_base.py
++++ b/core/base/vehicle_base.py
+@@ -10 +10 @@ from enum import Enum, auto
+-from typing import List, Tuple, Optional, Dict, Any
++from typing import List, Tuple, Dict
+diff --git a/core/collision/collision_checker.py b/core/collision/collision_checker.py
+index c641439..f83bcd9 100644
+--- a/core/collision/collision_checker.py
++++ b/core/collision/collision_checker.py
+@@ -7 +7 @@ import math
+-from typing import List, Tuple, Optional, Union
++from typing import List, Tuple, Optional
+diff --git a/core/dccpp/collision_avoidance.py b/core/dccpp/collision_avoidance.py
+index 00e97a9..46a8700 100644
+--- a/core/dccpp/collision_avoidance.py
++++ b/core/dccpp/collision_avoidance.py
+@@ -33,2 +33,2 @@ import logging
+-from dataclasses import dataclass, field
+-from typing import Dict, List, Optional, Tuple
++from dataclasses import dataclass
++from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
+@@ -37,0 +38,4 @@ from utils.math_utils import EARTH_RADIUS_M  # 0-2 標準化：WGS84 單一來
++if TYPE_CHECKING:
++    # 僅供型別註解使用，避免與 dccpp_path_builder 的執行期循環依賴
++    from core.dccpp.dccpp_path_builder import BuiltPath
++
+@@ -314,2 +317,0 @@ class CollisionAvoidance:
+-        from core.dccpp.dccpp_path_builder import BuiltWaypoint, SegmentLabel
+-
+diff --git a/core/dccpp/dccpp_path_builder.py b/core/dccpp/dccpp_path_builder.py
+index 7676300..c1fa6fb 100644
+--- a/core/dccpp/dccpp_path_builder.py
++++ b/core/dccpp/dccpp_path_builder.py
+@@ -35 +34,0 @@ from typing import List, Optional, Sequence, Tuple
+-import numpy as np
+diff --git a/core/dccpp/idp_solver.py b/core/dccpp/idp_solver.py
+index 4ac5f54..7c8f2c2 100644
+--- a/core/dccpp/idp_solver.py
++++ b/core/dccpp/idp_solver.py
+@@ -28 +28 @@ from dataclasses import dataclass, field
+-from typing import Dict, List, Optional, Sequence, Tuple
++from typing import Dict, List, Sequence, Tuple
+@@ -30 +29,0 @@ from typing import Dict, List, Optional, Sequence, Tuple
+-import numpy as np
+diff --git a/core/dccpp/task_allocator.py b/core/dccpp/task_allocator.py
+index 64ae81a..75881ba 100644
+--- a/core/dccpp/task_allocator.py
++++ b/core/dccpp/task_allocator.py
+@@ -33 +33 @@ from dataclasses import dataclass, field
+-from typing import Dict, List, Optional, Tuple, Callable
++from typing import Dict, List, Tuple
+diff --git a/core/dccpp/uav_models.py b/core/dccpp/uav_models.py
+index a68cfd4..dd6b7e7 100644
+--- a/core/dccpp/uav_models.py
++++ b/core/dccpp/uav_models.py
+@@ -23 +23 @@ import math
+-from dataclasses import dataclass, field
++from dataclasses import dataclass
+diff --git a/core/geometry/coordinate.py b/core/geometry/coordinate.py
+index 6c596f2..e1ee36b 100644
+--- a/core/geometry/coordinate.py
++++ b/core/geometry/coordinate.py
+@@ -8 +8 @@ from dataclasses import dataclass
+-from typing import Tuple, Optional
++from typing import Tuple
+diff --git a/core/geometry/polygon.py b/core/geometry/polygon.py
+index 3696bca..4ef9032 100644
+--- a/core/geometry/polygon.py
++++ b/core/geometry/polygon.py
+@@ -627 +626,0 @@ if __name__ == '__main__':
+-        import math as _math
+diff --git a/core/global_planner/advanced_scan_patterns.py b/core/global_planner/advanced_scan_patterns.py
+index 1d87370..90a13d9 100644
+--- a/core/global_planner/advanced_scan_patterns.py
++++ b/core/global_planner/advanced_scan_patterns.py
+@@ -34 +33,0 @@ import math
+-import numpy as np
+diff --git a/core/global_planner/astar.py b/core/global_planner/astar.py
+index f6d4778..96d6943 100644
+--- a/core/global_planner/astar.py
++++ b/core/global_planner/astar.py
+@@ -8 +8 @@ import heapq
+-from typing import List, Tuple, Optional, Set, Dict, Callable
++from typing import List, Tuple, Optional, Set, Dict
+diff --git a/core/global_planner/coverage_path_planner.py b/core/global_planner/coverage_path_planner.py
+index 5917e7d..93eafdc 100644
+--- a/core/global_planner/coverage_path_planner.py
++++ b/core/global_planner/coverage_path_planner.py
+@@ -29 +28,0 @@ import math
+-import numpy as np
+@@ -38 +37 @@ from utils.math_utils import (
+-    latlon_to_meters, meters_to_latlon, polygon_area, polygon_centroid
++    latlon_to_meters, polygon_area
+diff --git a/core/global_planner/coverage_planner.py b/core/global_planner/coverage_planner.py
+index 310a28a..158db09 100644
+--- a/core/global_planner/coverage_planner.py
++++ b/core/global_planner/coverage_planner.py
+@@ -10 +10 @@ from typing import List, Tuple, Optional
+-from dataclasses import dataclass, field, replace
++from dataclasses import dataclass, replace
+diff --git a/core/global_planner/dccpp_heterogeneous_nfz_manager.py b/core/global_planner/dccpp_heterogeneous_nfz_manager.py
+index 5f871a4..dac7134 100644
+--- a/core/global_planner/dccpp_heterogeneous_nfz_manager.py
++++ b/core/global_planner/dccpp_heterogeneous_nfz_manager.py
+@@ -40 +40 @@ import math
+-from dataclasses import dataclass, field
++from dataclasses import dataclass
+@@ -49 +48,0 @@ from core.global_planner.heterogeneous_nfz_planner import (
+-    HeterogeneousNFZPlanner,
+@@ -54 +52,0 @@ from core.global_planner.heterogeneous_nfz_planner import (
+-    _crosses_polygon_interior,
+@@ -628 +626 @@ class DCCPP_Heterogeneous_NFZ_Manager:
+-            f'# AeroPlan Studio — ArduPilot fence export',
++            '# AeroPlan Studio — ArduPilot fence export',
+@@ -631,5 +629,5 @@ class DCCPP_Heterogeneous_NFZ_Manager:
+-            f'#',
+-            f'# ╔══════════════════════════════════════════════════════════╗',
+-            f'# ║  REQUIRED ArduPilot fence parameters (set first!):      ║',
+-            f'# ╚══════════════════════════════════════════════════════════╝',
+-            f'# FENCE_ENABLE     = 1',
++            '#',
++            '# ╔══════════════════════════════════════════════════════════╗',
++            '# ║  REQUIRED ArduPilot fence parameters (set first!):      ║',
++            '# ╚══════════════════════════════════════════════════════════╝',
++            '# FENCE_ENABLE     = 1',
+@@ -638 +636 @@ class DCCPP_Heterogeneous_NFZ_Manager:
+-            f'# FENCE_TYPE       = 7  # (1=MaxAlt | 2=Circle | 4=Polygon)',
++            '# FENCE_TYPE       = 7  # (1=MaxAlt | 2=Circle | 4=Polygon)',
+@@ -641 +639 @@ class DCCPP_Heterogeneous_NFZ_Manager:
+-            f'#',
++            '#',
+@@ -647,3 +645,3 @@ class DCCPP_Heterogeneous_NFZ_Manager:
+-                f'# Format: MAVLink mission items, cmd=5000 (return) + '
+-                f'cmd=5002 (exclusion polygon vertex)',
+-                f'QGC WPL 110',
++                '# Format: MAVLink mission items, cmd=5000 (return) + '
++                'cmd=5002 (exclusion polygon vertex)',
++                'QGC WPL 110',
+@@ -672,4 +670,4 @@ class DCCPP_Heterogeneous_NFZ_Manager:
+-                f'# Format: legacy fencepoint (lat lon per line)',
+-                f'# First line = return point; following lines = polygon vertices.',
+-                f'# Polygon should be closed: last line should equal second line.',
+-                f'',
++                '# Format: legacy fencepoint (lat lon per line)',
++                '# First line = return point; following lines = polygon vertices.',
++                '# Polygon should be closed: last line should equal second line.',
++                '',
+@@ -798 +796 @@ if __name__ == '__main__':
+-    print(f'  NFZ  = 正方形 4 頂點 (~660m × 1100m)')
++    print('  NFZ  = 正方形 4 頂點 (~660m × 1100m)')
+diff --git a/core/global_planner/dijkstra.py b/core/global_planner/dijkstra.py
+index d492784..9a5350b 100644
+--- a/core/global_planner/dijkstra.py
++++ b/core/global_planner/dijkstra.py
+@@ -8 +8 @@ import heapq
+-from typing import List, Tuple, Optional, Dict, Set, Callable
++from typing import List, Tuple, Optional, Dict, Set
+diff --git a/core/global_planner/fixed_wing_planner.py b/core/global_planner/fixed_wing_planner.py
+index 62b4e10..41e1f26 100644
+--- a/core/global_planner/fixed_wing_planner.py
++++ b/core/global_planner/fixed_wing_planner.py
+@@ -20,2 +20,2 @@ import math
+-from dataclasses import dataclass, field
+-from typing import List, Tuple, Dict, Optional
++from dataclasses import dataclass
++from typing import List, Tuple, Dict
+diff --git a/core/global_planner/grid_generator.py b/core/global_planner/grid_generator.py
+index 1fe9236..bcf0b6a 100644
+--- a/core/global_planner/grid_generator.py
++++ b/core/global_planner/grid_generator.py
+@@ -11 +11 @@ from dataclasses import dataclass, field
+-from typing import List, Tuple, Optional, Union
++from typing import List, Tuple, Optional
+@@ -19 +19 @@ from ..base.planner_base import (
+-from ..geometry.coordinate import CoordinateTransformer, GeoPoint
++from ..geometry.coordinate import CoordinateTransformer
+diff --git a/core/global_planner/heterogeneous_nfz_planner.py b/core/global_planner/heterogeneous_nfz_planner.py
+index ed022d9..19660c6 100644
+--- a/core/global_planner/heterogeneous_nfz_planner.py
++++ b/core/global_planner/heterogeneous_nfz_planner.py
+@@ -34 +34 @@ import math
+-from dataclasses import dataclass, field
++from dataclasses import dataclass
+@@ -780 +780 @@ if __name__ == '__main__':
+-    print(f'NFZ:    正方形 4 頂點，約 1.1 km × 0.45 km')
++    print('NFZ:    正方形 4 頂點，約 1.1 km × 0.45 km')
+@@ -790 +790 @@ if __name__ == '__main__':
+-    print(f'\n設定:')
++    print('\n設定:')
+diff --git a/core/global_planner/mdtsp_solver.py b/core/global_planner/mdtsp_solver.py
+index 23b66b9..bd9fb70 100644
+--- a/core/global_planner/mdtsp_solver.py
++++ b/core/global_planner/mdtsp_solver.py
+@@ -25 +25 @@ from typing import (
+-    List, Tuple, Optional, Dict, Any, Sequence, Callable,
++    List, Tuple, Optional, Dict, Any, Callable,
+diff --git a/core/global_planner/nfz_planner.py b/core/global_planner/nfz_planner.py
+index bed354f..865d448 100644
+--- a/core/global_planner/nfz_planner.py
++++ b/core/global_planner/nfz_planner.py
+@@ -29 +29 @@ from dataclasses import dataclass, field
+-from typing import List, Optional, Tuple, Dict, Set, Sequence
++from typing import List, Optional, Tuple, Dict, Sequence
+@@ -33 +33 @@ from shapely.geometry import (
+-    Polygon, MultiPolygon, LineString, Point, MultiPoint
++    Polygon, MultiPolygon, LineString, Point
+@@ -36 +35,0 @@ from shapely.ops import unary_union
+-import numpy as np
+@@ -39 +38 @@ from core.base.fixed_wing_constraints import FixedWingConstraints
+-from utils.math_utils import deg_to_rad, latlon_to_meters, meters_to_latlon
++from utils.math_utils import latlon_to_meters
+@@ -552 +551 @@ class FixedWingNFZPlanner:
+-            f"═══ 禁航區規劃器 ═══",
++            "═══ 禁航區規劃器 ═══",
+diff --git a/core/global_planner/rrt.py b/core/global_planner/rrt.py
+index 191d96f..bb010a8 100644
+--- a/core/global_planner/rrt.py
++++ b/core/global_planner/rrt.py
+@@ -8 +8 @@ import random
+-from typing import List, Tuple, Optional, Callable
++from typing import List, Tuple, Optional
+diff --git a/core/global_planner/sequence_optimizer.py b/core/global_planner/sequence_optimizer.py
+index aaa4e6f..8131c61 100644
+--- a/core/global_planner/sequence_optimizer.py
++++ b/core/global_planner/sequence_optimizer.py
+@@ -14 +14 @@ from pathlib import Path
+-from typing import List, Tuple, TYPE_CHECKING
++from typing import List, Tuple
+diff --git a/core/local_planner/apf.py b/core/local_planner/apf.py
+index 21baf76..09fddf1 100644
+--- a/core/local_planner/apf.py
++++ b/core/local_planner/apf.py
+@@ -6 +5,0 @@
+-import math
+@@ -158 +157 @@ class APFLocalPlanner:
+-        print(f"達到最大迭代次數，未到達目標")
++        print("達到最大迭代次數，未到達目標")
+diff --git a/core/local_planner/dwa.py b/core/local_planner/dwa.py
+index 4c93417..8e7fabb 100644
+--- a/core/local_planner/dwa.py
++++ b/core/local_planner/dwa.py
+@@ -12 +12 @@ import numpy as np
+-from dataclasses import dataclass, field
++from dataclasses import dataclass
+diff --git a/core/local_planner/mpc.py b/core/local_planner/mpc.py
+index f4f840b..376b95d 100644
+--- a/core/local_planner/mpc.py
++++ b/core/local_planner/mpc.py
+@@ -7 +7 @@ import math
+-from typing import List, Tuple, Optional, Callable
++from typing import List, Tuple, Optional
+diff --git a/core/strike/advanced_recon_to_strike_manager.py b/core/strike/advanced_recon_to_strike_manager.py
+index af4b25a..4cb8317 100644
+--- a/core/strike/advanced_recon_to_strike_manager.py
++++ b/core/strike/advanced_recon_to_strike_manager.py
+@@ -47,2 +47 @@ from core.strike.swarm_strike_planner import (
+-    _haversine, _bearing_deg, _destination, _angular_diff,
+-    _R_EARTH,
++    _haversine, _bearing_deg, _destination, _R_EARTH,
+@@ -880 +879 @@ class AdvancedReconToStrikeManager:
+-            compute_tot_schedule, fill_loiter_turns,
++            compute_tot_schedule,
+@@ -956 +955 @@ class AdvancedReconToStrikeManager:
+-            comment=f'Home @ 切換時 pose',
++            comment='Home @ 切換時 pose',
+diff --git a/core/strike/advanced_swarm_strike_planner.py b/core/strike/advanced_swarm_strike_planner.py
+index cbec368..a379a2f 100644
+--- a/core/strike/advanced_swarm_strike_planner.py
++++ b/core/strike/advanced_swarm_strike_planner.py
+@@ -39,2 +39 @@ from core.strike.swarm_strike_planner import (
+-    _haversine, _bearing_deg, _destination, _angular_diff,
+-    _MAV_FRAME_REL,
++    _haversine, _bearing_deg, _destination, _MAV_FRAME_REL,
+@@ -44 +42,0 @@ from core.strike.mission_export import export_missions_qgc      # 0-4 去重共
+-from utils.file_io import create_waypoint_line, write_waypoints
+diff --git a/core/strike/diamond_swarm_planner.py b/core/strike/diamond_swarm_planner.py
+index 27810d3..9c0992b 100644
+--- a/core/strike/diamond_swarm_planner.py
++++ b/core/strike/diamond_swarm_planner.py
+@@ -73,2 +73 @@ from core.strike.geometry import (
+-    haversine, bearing_deg, destination, dubins_shortest_length,
+-    dubins_path_samples,
++    haversine, bearing_deg, destination, dubins_path_samples,
+@@ -780 +779 @@ class DiamondSwarmStrikePlanner:
+-                comment=f'Phase 4 預備點 (基準機，無需補時)',
++                comment='Phase 4 預備點 (基準機，無需補時)',
+diff --git a/core/strike/dtot_coordinator.py b/core/strike/dtot_coordinator.py
+index 1e8b374..607eebd 100644
+--- a/core/strike/dtot_coordinator.py
++++ b/core/strike/dtot_coordinator.py
+@@ -45,2 +45,2 @@ import os
+-from dataclasses import dataclass, field
+-from typing import List, Optional, Tuple
++from dataclasses import dataclass
++from typing import List, Optional
+diff --git a/core/strike/geometry.py b/core/strike/geometry.py
+index fe413b6..ca79e68 100644
+--- a/core/strike/geometry.py
++++ b/core/strike/geometry.py
+@@ -24 +24 @@ from functools import lru_cache
+-from typing import Any, List, Optional, Tuple
++from typing import Any, Iterable, List, Optional, Tuple
+@@ -334,2 +333,0 @@ def dubins_cache_info():
+-from typing import Iterable, List
+-
+diff --git a/core/strike/recon_to_strike_manager.py b/core/strike/recon_to_strike_manager.py
+index 67eecb2..c48e951 100644
+--- a/core/strike/recon_to_strike_manager.py
++++ b/core/strike/recon_to_strike_manager.py
+@@ -47,3 +47 @@ from core.strike.swarm_strike_planner import (
+-    MissionItem, dubins_shortest_length,
+-    _haversine, _bearing_deg, _destination, _angular_diff,
+-    _MAV_FRAME_REL,
++    MissionItem, _haversine, _destination, _MAV_FRAME_REL,
+@@ -64 +61,0 @@ from core.strike.mission_export import export_missions_qgc  # 0-4 去重共用
+-from utils.file_io import create_waypoint_line, write_waypoints
+@@ -873 +870 @@ if __name__ == '__main__':
+-    print(f'  入選 UAV     : '
++    print('  入選 UAV     : '
+@@ -875 +872 @@ if __name__ == '__main__':
+-    print(f'  未入選 UAV   : '
++    print('  未入選 UAV   : '
+@@ -878 +875 @@ if __name__ == '__main__':
+-    print(f'\n  高度層分配：')
++    print('\n  高度層分配：')
+diff --git a/core/strike/swarm_strike_planner.py b/core/strike/swarm_strike_planner.py
+index 7e40b03..62f7793 100644
+--- a/core/strike/swarm_strike_planner.py
++++ b/core/strike/swarm_strike_planner.py
+@@ -37 +36,0 @@ from typing import List, Optional, Tuple
+-from utils.file_io import create_waypoint_line, write_waypoints
+@@ -58,0 +58,2 @@ class MAVCmd:
++# 注意：_R_EARTH 在本檔內未使用，但下游 advanced_recon / vtol planner 仍
++# `from swarm_strike_planner import _R_EARTH`，故以 noqa 保留 re-export。
+@@ -60 +61 @@ from core.strike.geometry import (
+-    R_EARTH as _R_EARTH,
++    R_EARTH as _R_EARTH,  # noqa: F401 — 相容性 re-export，勿刪
+@@ -65 +65,0 @@ from core.strike.geometry import (
+-    angular_diff as _angular_diff,
+@@ -599,10 +598,0 @@ class SwarmStrikePlanner:
+-# ═══════════════════════════════════════════════════════════════════════
+-#  小工具
+-# ═══════════════════════════════════════════════════════════════════════
+-
+-def _angular_diff(a_deg: float, b_deg: float) -> float:
+-    """兩角度的最短差值 (0 ≤ result ≤ 180°)"""
+-    d = abs((a_deg - b_deg) % 360.0)
+-    return min(d, 360.0 - d)
+-
+-
+@@ -676,3 +666,3 @@ if __name__ == '__main__':
+-    print(f'\n[ArduPilot SITL 使用方式]')
+-    print(f'  Mission Planner → Ctrl+F → Load WP → 選擇對應 .waypoints')
+-    print(f'  切換 AUTO 模式 → ARM → 自動執行蜂群打擊')
++    print('\n[ArduPilot SITL 使用方式]')
++    print('  Mission Planner → Ctrl+F → Load WP → 選擇對應 .waypoints')
++    print('  切換 AUTO 模式 → ARM → 自動執行蜂群打擊')
+diff --git a/core/strike/terminal_strike_planner.py b/core/strike/terminal_strike_planner.py
+index b331606..f019f5c 100644
+--- a/core/strike/terminal_strike_planner.py
++++ b/core/strike/terminal_strike_planner.py
+@@ -13 +13 @@ import math
+-from typing import List, Tuple, Dict, Optional
++from typing import List, Tuple, Optional
+diff --git a/core/strike/vtol_swarm_strike_planner.py b/core/strike/vtol_swarm_strike_planner.py
+index 4a616c3..9c9094e 100644
+--- a/core/strike/vtol_swarm_strike_planner.py
++++ b/core/strike/vtol_swarm_strike_planner.py
+@@ -35 +35 @@ from enum import Enum
+-from typing import List, Optional, Tuple
++from typing import List, Tuple
+@@ -40,2 +40 @@ from core.strike.swarm_strike_planner import (
+-    _haversine, _bearing_deg, _destination, _angular_diff,
+-    _MAV_FRAME_REL, _R_EARTH,
++    _bearing_deg, _destination, _MAV_FRAME_REL, _R_EARTH,
+@@ -45 +43,0 @@ from core.strike.mission_export import export_missions_qgc      # 0-4 去重共
+-from utils.file_io import create_waypoint_line, write_waypoints
+@@ -863 +861 @@ class VTOLSwarmStrikePlanner:
+-            f.write(f'目標類型       ：'
++            f.write('目標類型       ：'
+@@ -871 +869 @@ class VTOLSwarmStrikePlanner:
+-            f.write(f'=== 速度輪廓 ===\n')
++            f.write('=== 速度輪廓 ===\n')
+@@ -878 +876 @@ class VTOLSwarmStrikePlanner:
+-            f.write(f'=== VTOL / 邊界 ===\n')
++            f.write('=== VTOL / 邊界 ===\n')
+@@ -1000,3 +998,3 @@ if __name__ == '__main__':
+-    print(f'\n[未來移動目標擴充方式]')
+-    print(f'  只需將 Target 建構時填入 vx_mps/vy_mps/vz_mps != 0')
+-    print(f'  即啟用 _refresh_intercept_if_moving() 自動預測攔截點。')
++    print('\n[未來移動目標擴充方式]')
++    print('  只需將 Target 建構時填入 vx_mps/vy_mps/vz_mps != 0')
++    print('  即啟用 _refresh_intercept_if_moving() 自動預測攔截點。')
+diff --git a/core/trajectory/dubins_trajectory.py b/core/trajectory/dubins_trajectory.py
+index 39b4050..1d887ea 100644
+--- a/core/trajectory/dubins_trajectory.py
++++ b/core/trajectory/dubins_trajectory.py
+@@ -24 +23,0 @@ import math
+-import numpy as np
+diff --git a/core/trajectory/smoother.py b/core/trajectory/smoother.py
+index 2315d43..8a13c44 100644
+--- a/core/trajectory/smoother.py
++++ b/core/trajectory/smoother.py
+@@ -6,2 +6 @@
+-import math
+-from typing import List, Tuple, Optional
++from typing import List, Tuple
+diff --git a/core/trajectory/spline.py b/core/trajectory/spline.py
+index 7f85d3a..2126157 100644
+--- a/core/trajectory/spline.py
++++ b/core/trajectory/spline.py
+@@ -6 +5,0 @@
+-import math
+diff --git a/core/vehicles/multirotor.py b/core/vehicles/multirotor.py
+index 09edc4a..5cfd57b 100644
+--- a/core/vehicles/multirotor.py
++++ b/core/vehicles/multirotor.py
+@@ -7 +7 @@ import numpy as np
+-from typing import List, Tuple, Optional
++from typing import List, Tuple
+@@ -12 +12 @@ from core.base.vehicle_base import (
+-    VehicleState, VehicleConstraints, DEFAULT_MULTIROTOR_CONFIG
++    VehicleState, DEFAULT_MULTIROTOR_CONFIG
+diff --git a/download_taiwan_dem.py b/download_taiwan_dem.py
+index 9ab35f0..8cd2f85 100644
+--- a/download_taiwan_dem.py
++++ b/download_taiwan_dem.py
+@@ -32 +32 @@ from pathlib import Path
+-from typing import Iterable, Optional
++from typing import Optional
+@@ -352 +352 @@ def main():
+-    print(f'  AeroPlan Studio — Taiwan DEM Downloader')
++    print('  AeroPlan Studio — Taiwan DEM Downloader')
+diff --git a/main.py b/main.py
+index b988ae8..1c40683 100644
+--- a/main.py
++++ b/main.py
+@@ -34,2 +34,2 @@ sys.path.insert(0, str(project_root))
+-from config import init_settings, get_settings
+-from utils import get_logger, setup_logger
++from config import init_settings
++from utils import setup_logger
+@@ -109 +109 @@ def initialize_system(args):
+-    logger.info("版本: 2.5.0")
++    logger.info("版本: 2.8.0")
+diff --git a/mission/coverage_path.py b/mission/coverage_path.py
+index 4313c76..249e9c6 100644
+--- a/mission/coverage_path.py
++++ b/mission/coverage_path.py
+@@ -13 +13 @@ from dataclasses import dataclass, field
+-from typing import List, Tuple, Optional, Dict
++from typing import List, Tuple, Optional, Dict, TYPE_CHECKING
+@@ -16,0 +17,4 @@ from utils.math_utils import EARTH_RADIUS_M  # 0-2 標準化：WGS84 單一來
++if TYPE_CHECKING:
++    # 僅供型別註解使用；執行期於函式內延遲匯入（見 to_waypoint_sequence）
++    from mission.waypoint import WaypointSequence
++
+@@ -379 +383 @@ if __name__ == '__main__':
+-        print(f"  [OK] seq 連續性驗證通過")
++        print("  [OK] seq 連續性驗證通過")
+@@ -383 +387 @@ if __name__ == '__main__':
+-        print(f"  QGC 格式前 5 行：")
++        print("  QGC 格式前 5 行：")
+diff --git a/mission/geofence_manager.py b/mission/geofence_manager.py
+index 38941d9..d5b385d 100644
+--- a/mission/geofence_manager.py
++++ b/mission/geofence_manager.py
+@@ -36 +36 @@ import math
+-from dataclasses import dataclass, field, asdict
++from dataclasses import dataclass
+@@ -752 +752 @@ def _demo() -> None:
+-    print(f"  裝飾後圍籬 4 頂點:")
++    print("  裝飾後圍籬 4 頂點:")
+diff --git a/mission/mavlink_exporter.py b/mission/mavlink_exporter.py
+index f949745..9af12cf 100644
+--- a/mission/mavlink_exporter.py
++++ b/mission/mavlink_exporter.py
+@@ -9 +9 @@ import json
+-from typing import List, Optional, Dict, Any, Tuple
++from typing import List, Optional, Dict, Tuple
+@@ -11 +10,0 @@ from datetime import datetime
+-from pathlib import Path
+@@ -14 +12,0 @@ from mission.mission_manager import Mission
+-from mission.waypoint import Waypoint, WaypointSequence, MAVCommand
+diff --git a/mission/mission_manager.py b/mission/mission_manager.py
+index 609b622..8d7a04d 100644
+--- a/mission/mission_manager.py
++++ b/mission/mission_manager.py
+@@ -7 +6,0 @@
+-import os
+@@ -14,3 +13 @@ from mission.waypoint import (
+-    Waypoint, WaypointSequence, MAVCommand,
+-    create_home_waypoint, create_takeoff_waypoint,
+-    create_rtl_waypoint, create_change_speed_command
++    WaypointSequence
+diff --git a/mission/mission_validator.py b/mission/mission_validator.py
+index bfa4a25..81da41a 100644
+--- a/mission/mission_validator.py
++++ b/mission/mission_validator.py
+@@ -221 +221 @@ if __name__ == '__main__':
+-    print(f'[BAD mission]')
++    print('[BAD mission]')
+diff --git a/mission/mock_sitl_link.py b/mission/mock_sitl_link.py
+index 47d7e81..aad08cc 100644
+--- a/mission/mock_sitl_link.py
++++ b/mission/mock_sitl_link.py
+@@ -29,3 +29,2 @@ from __future__ import annotations
+-import time
+-from dataclasses import dataclass, field
+-from typing import List, Optional, Tuple, Any
++from dataclasses import dataclass
++from typing import List, Optional, Tuple
+diff --git a/mission/param_service.py b/mission/param_service.py
+index aed8cab..a590567 100644
+--- a/mission/param_service.py
++++ b/mission/param_service.py
+@@ -13 +13 @@ from dataclasses import dataclass, field
+-from typing import Dict, Optional, Tuple
++from typing import Dict, Optional
+diff --git a/mission/sitl_launcher.py b/mission/sitl_launcher.py
+index 0be4aed..4b38a82 100644
+--- a/mission/sitl_launcher.py
++++ b/mission/sitl_launcher.py
+@@ -13 +12,0 @@ from __future__ import annotations
+-import os
+diff --git a/mission/sitl_link.py b/mission/sitl_link.py
+index 64c7a46..02cb617 100644
+--- a/mission/sitl_link.py
++++ b/mission/sitl_link.py
+@@ -18 +18 @@ from dataclasses import dataclass, field
+-from typing import Optional, List, Tuple
++from typing import List, Tuple
+@@ -741 +740,0 @@ class SITLLink(QThread):
+-        from pymavlink import mavutil
+@@ -1031 +1029,0 @@ class SITLLink(QThread):
+-        from pymavlink import mavutil
+diff --git a/mission/survey_mission.py b/mission/survey_mission.py
+index add17af..80aa644 100644
+--- a/mission/survey_mission.py
++++ b/mission/survey_mission.py
+@@ -9 +9 @@ from pathlib import Path
+-from typing import List, Tuple, Optional, Dict, Any
++from typing import List, Tuple, Dict, Any
+@@ -16 +15,0 @@ from mission.mission_manager import Mission
+-from mission.waypoint import WaypointSequence
+diff --git a/mission/swarm_coordinator.py b/mission/swarm_coordinator.py
+index 66914ba..4fac3c2 100644
+--- a/mission/swarm_coordinator.py
++++ b/mission/swarm_coordinator.py
+@@ -10 +10 @@ from typing import List, Tuple, Optional, Dict, Any
+-from dataclasses import dataclass, field
++from dataclasses import dataclass
+@@ -24 +24 @@ from mission.survey_mission import SurveyMission
+-from mission.waypoint import Waypoint, WaypointSequence, MAVCommand
++from mission.waypoint import MAVCommand
+diff --git a/mission/vtol_mission_exporter.py b/mission/vtol_mission_exporter.py
+index 37bcca2..155b46d 100644
+--- a/mission/vtol_mission_exporter.py
++++ b/mission/vtol_mission_exporter.py
+@@ -24 +24 @@ import math
+-from typing import Dict, List, Optional, Tuple
++from typing import List
+@@ -268 +268 @@ class VTOLMissionExporter:
+-            f.write(f"匯出模式：4+1 VTOL 混飛模式\n")
++            f.write("匯出模式：4+1 VTOL 混飛模式\n")
+diff --git a/mission/xwing_tailsitter_params.py b/mission/xwing_tailsitter_params.py
+index 6615d1b..b8935cc 100644
+--- a/mission/xwing_tailsitter_params.py
++++ b/mission/xwing_tailsitter_params.py
+@@ -496 +495,0 @@ def main() -> int:
+-    from dataclasses import replace  # 方便複製後微調
+diff --git a/sensors/camera_model.py b/sensors/camera_model.py
+index bed3755..c728f33 100644
+--- a/sensors/camera_model.py
++++ b/sensors/camera_model.py
+@@ -2 +1,0 @@ import math
+-import numpy as np
+diff --git a/sensors/dem_terrain.py b/sensors/dem_terrain.py
+index a936d9c..1f5e3ac 100644
+--- a/sensors/dem_terrain.py
++++ b/sensors/dem_terrain.py
+@@ -15 +15 @@ import logging
+-from typing import Optional, Tuple, List
++from typing import Optional, Tuple
+diff --git a/sensors/terrain_manager.py b/sensors/terrain_manager.py
+index 6c51647..ebaddd3 100644
+--- a/sensors/terrain_manager.py
++++ b/sensors/terrain_manager.py
+@@ -2 +1,0 @@ from abc import ABC, abstractmethod
+-import math
+diff --git a/ui/aeroplan_main_window.py b/ui/aeroplan_main_window.py
+index c510922..1df69f9 100644
+--- a/ui/aeroplan_main_window.py
++++ b/ui/aeroplan_main_window.py
+@@ -41 +41 @@ from datetime import datetime, timezone
+-from typing import Callable, Optional
++from typing import Optional
+@@ -44 +44 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+-from PyQt6.QtGui import QAction, QFont, QKeySequence, QShortcut
++from PyQt6.QtGui import QAction, QKeySequence, QShortcut
+@@ -56 +55,0 @@ from PyQt6.QtWidgets import (
+-    QToolBar,
+@@ -70 +69 @@ from ui.widgets.master_warning_panel import (
+-from ui.widgets.alert_banner import AlertBannerStack, BannerSeverity
++from ui.widgets.alert_banner import AlertBannerStack
+diff --git a/ui/controllers/strike_controller.py b/ui/controllers/strike_controller.py
+index 2ac11c1..36abdfa 100644
+--- a/ui/controllers/strike_controller.py
++++ b/ui/controllers/strike_controller.py
+@@ -207,204 +206,0 @@ class StrikeControllerMixin:
+-        # ── Schema 驗證：在進入規劃邏輯前先確認參數合法 ────────
+-        # (2026 重構：以 config.schemas 做 fail-fast 驗證，取代散落的 if 檢查)
+-        try:
+-            from config.schemas import StrikeParameters
+-            schema_params = {
+-                'launch_mode':   params.get('mode', 'DTOT'),
+-                'timing_mode':   params.get('timing_mode', 'STOT'),
+-                'interval_sec':  params.get('interval_sec', 0.0),
+-                'cruise_alt':    params.get('cruise_alt', 500.0),
+-                'cruise_speed':  params.get('cruise_speed', 60.0),
+-                'altitude_step': params.get('altitude_step', 30.0),
+-                'max_dive_angle': params.get('max_dive_angle', 45.0),
+-                'dive_initiation_dist': params.get('dive_initiation_dist', 800.0),
+-                'max_speed':     params.get('max_speed', 85.0),
+-                'stall_speed':   params.get('stall_speed', 25.0),
+-                'min_turn_radius': params.get('min_turn_radius', 150.0),
+-            }
+-            sp = StrikeParameters.from_dict(schema_params)
+-            sp.validate()
+-        except ValueError as e:
+-            QMessageBox.warning(
+-                self, '蜂群打擊 — 參數錯誤',
+-                f'參數驗證失敗，請檢查設定:\n\n{e}'
+-            )
+-            logger.warning(f'[Strike] 參數驗證失敗: {e}')
+-            return
+-        except Exception as e:
+-            logger.warning(f'[Strike] Schema 檢查異常 (忽略): {e}')
+-
+-        # ── VTOL 模式分流 ──────────────────────────────────────
+-        vtol_params = self.parameter_panel.get_strike_vtol_params()
+-        if vtol_params.get('enabled', False):
+-            self._on_strike_execute_vtol(params, vtol_params)
+-            return
+-
+-        import json
+-        from core.strike.terminal_strike_planner import (
+-            TerminalStrikePlanner, StrikeTarget,
+-        )
+-
+-        if not self._strike_targets:
+-            QMessageBox.warning(self, '蜂群打擊', '請先標記至少一個打擊目標')
+-            return
+-
+-        # ── 讀取「發射位置」模式 (2026 重構：SAME/DIFF 取代 STOT/DTOT) ─
+-        # normalize_launch_mode 同時處理新值 (SAME/DIFF) 與 legacy (STOT/DTOT/中文)
+-        from core.strike.time_coordination import normalize_launch_mode
+-        launch_mode = normalize_launch_mode(
+-            params.get('launch_mode') or params.get('mode', 'DIFF')
+-        )
+-
+-        # ── 同地發射必須先設定共用發射基地 ──────────────────────
+-        if launch_mode == 'SAME' and self._strike_launch_base is None:
+-            QMessageBox.warning(
+-                self, '同地發射 (SAME) 所需基地未設定',
+-                '請先使用「📍 從地圖標記共用發射基地」按鈕設定起飛點。'
+-            )
+-            return
+-
+-        # 關閉任何進行中的標記模式
+-        if self._strike_marking_mode:
+-            self._on_strike_mark_targets()
+-        if self._strike_base_marking_mode:
+-            self._toggle_strike_base_marking(False)
+-
+-        cruise_alt = params.get('cruise_alt', 500.0)
+-        cruise_speed = params.get('cruise_speed', 60.0)
+-        max_dive = params.get('max_dive_angle', 45.0)
+-        dive_dist = params.get('dive_initiation_dist', 800.0)
+-        alt_step = params.get('altitude_step', 30.0)
+-        anim_speed = params.get('anim_speed', 3.0)
+-        turn_radius = params.get('min_turn_radius',
+-                                 max(cruise_speed ** 2 / (9.81 * math.tan(math.radians(30.0))), 80.0))
+-
+-        # 建立目標列表
+-        targets = []
+-        for i, (lat, lon) in enumerate(self._strike_targets):
+-            targets.append(StrikeTarget(target_id=i + 1, lat=lat, lon=lon))
+-
+-        # 建立規劃器（含起飛爬升 + Dubins 巡航 + 末端俯衝 三段）
+-        planner = TerminalStrikePlanner(
+-            max_dive_angle_deg=max_dive,
+-            dive_initiation_dist_m=dive_dist,
+-            cruise_alt_m=cruise_alt,
+-            cruise_speed_mps=cruise_speed,
+-            altitude_step_m=alt_step,
+-            takeoff_alt_m=0.0,
+-            climb_angle_deg=8.0,
+-            min_turn_radius_m=turn_radius,
+-            use_dubins_cruise=True,
+-        )
+-
+-        # ── 依發射位置分流規劃 ──────────────────────────────────
+-        if launch_mode == 'SAME':
+-            base_lat, base_lon = self._strike_launch_base
+-            trajectories = planner.plan_stot(
+-                targets,
+-                launch_lat=base_lat,
+-                launch_lon=base_lon,
+-                launch_alt=0.0,
+-            )
+-            logger.info(
+-                f'[Strike/SAME] 同地發射：base=({base_lat:.6f}, {base_lon:.6f}), '
+-                f'{len(targets)} 目標 → {len(trajectories)} 架 UCAV'
+-            )
+-        else:
+-            # DIFF (異地)：各 UCAV 依目標分散起飛
+-            trajectories = planner.plan_auto(targets, spawn_dist_m=1500.0)
+-            logger.info(
+-                f'[Strike/DIFF] 異地發射：{len(targets)} 目標 → {len(trajectories)} 架 UCAV'
+-            )
+-
+-        # 保留舊變數名以利後面程式碼最小修改 (mode == launch_mode)
+-        mode = launch_mode
+-
+-        if not trajectories:
+-            QMessageBox.warning(self, '蜂群打擊', '軌跡規劃失敗：無有效分配')
+-            return
+-
+-        # 轉換為 Cesium JSON 並送往前端
+-        cesium_data = planner.trajectories_to_cesium_data(trajectories, targets)
+-        data_json = json.dumps(cesium_data)
+-
+-        cesium = self._get_cesium_widget()
+-        if cesium:
+-            # 直接渲染靜態打擊路徑（起飛=黃 / 巡航=綠 / 俯衝=紅），
+-            # 不再播放飛行動畫，讓操作員可檢視整條預定航線
+-            cesium.strike_render_path(data_json)
+-
+-        # 快取結果 → 供「匯出打擊任務」按鈕使用 (含模式與基地資訊)
+-        # 使用 TypedDict 確保 schema 一致性 (core.strike.strike_result)
+-        from core.strike.strike_result import make_empty_strike_result
+-        self._strike_result = make_empty_strike_result(
+-            mode=mode,                                         # 'SAME' 同地 / 'DIFF' 異地
+-            launch_base=self._strike_launch_base,              # (lat, lon) 或 None
+-            trajectories=trajectories,
+-            targets=targets,
+-            params=dict(params),
+-        )
+-        self.parameter_panel.set_strike_export_enabled(True)
+-
+-        # ── 時空協同即時預算：依 timing_mode 計算各機 TOT 速度預覽 ──────
+-        # 架構說明：
+-        #   mode         = 發射位置 ('SAME' 同地 / 'DIFF' 異地) → 已於空間規劃階段處理
+-        #   timing_mode  = 時間協同 ('STOT' 同時 / 'DTOT' 間隔) → 此處決定 TOT 排程
+-        timing_mode = params.get('timing_mode', 'STOT')
+-        interval_sec = float(params.get('interval_sec', 0.0))
+-        try:
+-            from core.strike.dtot_coordinator import DTOTCoordinator
+-            stall_v = params.get('stall_speed',
+-                                 self.parameter_panel._strike_stall_speed.value())
+-            max_v = params.get('max_speed',
+-                               self.parameter_panel._strike_max_speed.value())
+-            turn_r = params.get('min_turn_radius',
+-                                self.parameter_panel._strike_turn_radius.value())
+-            coord = DTOTCoordinator(
+-                cruise_speed_mps=cruise_speed,
+-                max_speed_mps=max_v,
+-                stall_speed_mps=stall_v,
+-                min_turn_radius_m=turn_r,
+-            )
+-            plans = coord.coordinate(
+-                trajectories,
+-                mode=timing_mode,
+-                interval_sec=interval_sec if timing_mode == 'DTOT' else 0.0,
+-            )
+-            if plans:
+-                # STOT: 所有機同秒命中；DTOT: slot k 於 T+k·Δ 命中
+-                if timing_mode == 'STOT':
+-                    tot = plans[0].tot_sec
+-                    pv = [f'STOT — TOT = {tot:.1f}s (同秒命中)']
+-                else:
+-                    tots = sorted(p.tot_sec for p in plans)
+-                    pv = [f'DTOT Δ={interval_sec:.1f}s → 命中時刻 '
+-                          + ', '.join(f'{t:.1f}' for t in tots) + 's']
+-                for p in plans:
+-                    hold = f' +Loiter {p.holding_time_sec:.0f}s' if p.holding_time_sec > 0.5 else ''
+-                    flag = '' if p.feasible else ' [NG]'
+-                    pv.append(
+-                        f'{p.uav_name}: V={p.required_speed_mps:.1f}m/s '
+-                        f'@t={p.tot_sec:.0f}s{hold}{flag}'
+-                    )
+-                self.parameter_panel.update_dtot_preview('\n'.join(pv))
+-                # 快取計畫結果，供匯出/SITL 上傳時免重算
+-                self._strike_result['coord_plans'] = plans
+-                self._strike_result['timing_mode'] = timing_mode
+-                self._strike_result['interval_sec'] = interval_sec
+-        except Exception as e:
+-            logger.warning(f'[Strike] 時空協同預算失敗: {e}')
+-
+-        # 顯示結果摘要
+-        summary_lines = [
+-            f'蜂群打擊規劃完成 ({mode})：{len(trajectories)} 架 UCAV → '
+-            f'{len(targets)} 個目標（高度錯層 {alt_step:.0f}m）'
+-        ]
+-        for tr in trajectories:
+-            summary_lines.append(
+-                f'  {tr.uav_name} → {tr.target_name}: '
+-                f'{tr.total_distance_m:.0f}m, alt={tr.cruise_alt_m:.0f}m, '
+-                f'dive@WP{tr.dive_start_index}'
+-            )
+-        self.statusBar().showMessage(summary_lines[0], 5000)
+-        logger.info('\n'.join(summary_lines))
+-
+@@ -1196 +991,0 @@ class StrikeControllerMixin:
+-            import math as _math
+@@ -1269 +1064 @@ class StrikeControllerMixin:
+-                   f'{mode} 發射 / {timing_mode} 時間協同')
++                   f'{launch_mode} 發射 / {timing_mode} 時間協同')
+@@ -1539 +1333,0 @@ class StrikeControllerMixin:
+-        import os
+@@ -1664 +1457,0 @@ class StrikeControllerMixin:
+-        import math as _math
+@@ -1902 +1695 @@ class StrikeControllerMixin:
+-        timing_desc = (f'STOT 同秒命中' if timing_mode == 'STOT'
++        timing_desc = ('STOT 同秒命中' if timing_mode == 'STOT'
+@@ -2111 +1904 @@ class StrikeControllerMixin:
+-            conflict_txt += f'\n\nIAPF 避障調整:\n' + '\n'.join(
++            conflict_txt += '\n\nIAPF 避障調整:\n' + '\n'.join(
+diff --git a/ui/dialogs/camera_config.py b/ui/dialogs/camera_config.py
+index 272f007..6513337 100644
+--- a/ui/dialogs/camera_config.py
++++ b/ui/dialogs/camera_config.py
+@@ -11 +10,0 @@ from PyQt6.QtWidgets import (
+-from PyQt6.QtCore import Qt
+@@ -13 +12 @@ from PyQt6.QtCore import Qt
+-from sensors import CameraDatabase, CameraCalculator, SurveyParameters
++from sensors import CameraDatabase, CameraCalculator
+diff --git a/ui/dialogs/export_dialog.py b/ui/dialogs/export_dialog.py
+index 8489f6f..dc8a9a2 100644
+--- a/ui/dialogs/export_dialog.py
++++ b/ui/dialogs/export_dialog.py
+@@ -9,2 +9,2 @@ from PyQt6.QtWidgets import (
+-    QComboBox, QCheckBox, QLineEdit, QPushButton, QFileDialog,
+-    QLabel, QSpinBox, QDoubleSpinBox, QTextEdit, QTabWidget,
++    QCheckBox, QLineEdit, QPushButton, QFileDialog,
++    QLabel, QSpinBox, QTabWidget,
+@@ -13,3 +13,2 @@ from PyQt6.QtWidgets import (
+-from PyQt6.QtCore import Qt, pyqtSignal
+-from PyQt6.QtGui import QFont
+-from typing import Optional, List, Dict, Any
++from PyQt6.QtCore import pyqtSignal
++from typing import Optional, List
+@@ -20 +19 @@ from mission.mission_manager import Mission
+-from mission.mavlink_exporter import MAVLinkExporter, ExportFormat, ExportHelper
++from mission.mavlink_exporter import MAVLinkExporter, ExportFormat
+diff --git a/ui/dialogs/sitl_launch_dialog.py b/ui/dialogs/sitl_launch_dialog.py
+index 2334351..3e37ca8 100644
+--- a/ui/dialogs/sitl_launch_dialog.py
++++ b/ui/dialogs/sitl_launch_dialog.py
+@@ -32 +31,0 @@ from __future__ import annotations
+-import re
+@@ -36,2 +35,2 @@ from PyQt6.QtWidgets import (
+-    QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel,
+-    QSpinBox, QLineEdit, QCheckBox, QPushButton, QGroupBox,
++    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
++    QSpinBox, QCheckBox, QPushButton, QGroupBox,
+@@ -42 +40,0 @@ from PyQt6.QtCore import Qt
+-from PyQt6.QtGui import QRegularExpressionValidator
+diff --git a/ui/dialogs/vehicle_config.py b/ui/dialogs/vehicle_config.py
+index 14b83e5..7334f47 100644
+--- a/ui/dialogs/vehicle_config.py
++++ b/ui/dialogs/vehicle_config.py
+@@ -8 +8 @@ from PyQt6.QtWidgets import (
+-    QLabel, QComboBox, QDoubleSpinBox, QPushButton,
++    QComboBox, QDoubleSpinBox, QPushButton,
+@@ -12 +11,0 @@ from PyQt6.QtWidgets import (
+-from PyQt6.QtCore import Qt
+diff --git a/ui/main_window.py b/ui/main_window.py
+index c7451e1..001b9b3 100644
+--- a/ui/main_window.py
++++ b/ui/main_window.py
+@@ -6 +5,0 @@
+-import sys
+@@ -10,2 +9 @@ from PyQt6.QtWidgets import (
+-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+-    QSplitter, QStatusBar, QToolBar, QMessageBox,
++    QMainWindow, QWidget, QVBoxLayout, QSplitter, QStatusBar, QToolBar, QMessageBox,
+@@ -15 +13 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+-from PyQt6.QtGui import QAction, QIcon, QKeySequence, QShortcut
++from PyQt6.QtGui import QAction, QKeySequence, QShortcut
+@@ -30,2 +28 @@ from core.collision import CollisionChecker
+-from mission.swarm_coordinator import SwarmCoordinator, SwarmMission, DroneInfo
+-from mission.coverage_path import CoveragePath
++from mission.swarm_coordinator import SwarmCoordinator
+@@ -1472,0 +1470,5 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
++                    # 附加 NFZ 繞行回程（避免匯出 bare RTL 直線飛回 home 穿越禁區）。
++                    # 置於 trim 之後：回程航點不參與 spiral_alts 對位，匯出時自動以
++                    # 巡航高度填充。
++                    if self.nfz_zones:
++                        path = self._append_nfz_safe_return(path, c_lat, c_lon)
+@@ -1555,0 +1558,2 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
++                        # 各子區域：掃描段繞行 + 附加 NFZ 安全回程（每機回各自 sub_path[0]，
++                        # 匯出端逐 sub_path 加 RTL → 避免 bare RTL 穿越禁區）
+@@ -1557 +1561,5 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
+-                            self._apply_nfz_correction_multirotor_latlon(sp, _ref_lat, _ref_lon)
++                            self._append_nfz_safe_return(
++                                self._apply_nfz_correction_multirotor_latlon(
++                                    sp, _ref_lat, _ref_lon),
++                                _ref_lat, _ref_lon,
++                            )
+@@ -1575,0 +1584,2 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
++                        # 附加 NFZ 安全回程（避免匯出 bare RTL 直穿禁區）
++                        path = self._append_nfz_safe_return(path, _ref_lat, _ref_lon)
+@@ -2022,2 +2032,15 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
+-                        result['full_path'] = (
+-                            takeoff_ll + _corrected_ll + landing_ll
++                        # ── 回程/離場段也要繞 NFZ（鏡像 DCCPP _split_landing_tail）──
++                        # 先前 takeoff_ll（離場）與 landing_ll（回程+降落）直接串接，
++                        # 跳過 NFZ 檢查 → 離場/回程可能直穿禁區。
++                        # 修法：把 takeoff_ll + 已修正掃描段 + landing_ll[0]（進場入口）
++                        # 當成一條巡航包絡一起繞行；僅豁免最終下降進場型態 landing_ll[1:]
++                        # （VG 折線會破壞下滑道幾何、且須保住觸地 NAV_LAND）。
++                        if len(landing_ll) >= 2:
++                            _approach_entry = [landing_ll[0]]
++                            _descent_tail = list(landing_ll[1:])
++                        else:
++                            _approach_entry = list(landing_ll)
++                            _descent_tail = []
++                        _cruise_env = takeoff_ll + _corrected_ll + _approach_entry
++                        _cruise_corr = self._apply_nfz_correction_latlon(
++                            _cruise_env, center_lat, center_lon
+@@ -2024,0 +2048 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
++                        result['full_path'] = _cruise_corr + _descent_tail
+@@ -2677,0 +2702,42 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
++    def _append_nfz_safe_return(
++        self,
++        path: list,
++        ref_lat: float,
++        ref_lon: float,
++        fixed_wing: bool = False,
++    ) -> list:
++        """在掃描路徑尾端附加「回 home（path[0]）的 NFZ 繞行回程段」。
++
++        多旋翼 / survey 匯出僅在尾端加 bare RTL（cmd 20），韌體會直線飛回 home
++        → 直穿 NFZ。本方法以 Visibility Graph 繞行算出 path[-1] → home 的安全折線，
++        把中繼繞行點 + home 顯式接到 path 尾端；匯出時的 RTL 變成 home→home 的
++        無動作收尾。
++
++        僅在「直線回程確實穿越 NFZ（產生繞行）」時才附加；無 NFZ / 不穿越則原樣
++        回傳，維持既有行為（bare RTL 直線回程本就 NFZ-free）。
++
++        Args:
++            path: 掃描航點 [(lat, lon), ...]（path[0] 視為起飛/home 點）
++            ref_lat, ref_lon: 座標轉換參考原點
++            fixed_wing: True 用固定翼 buffer（R_min×1.5）；False 用多旋翼小 buffer
++
++        Returns:
++            附加回程後的新 path（未穿越時為原 path）
++        """
++        if not self.nfz_zones or len(path) < 2:
++            return path
++        home = path[0]
++        last = path[-1]
++        if abs(last[0] - home[0]) < 1e-9 and abs(last[1] - home[1]) < 1e-9:
++            return path  # 已在 home，無需回程
++        corrector = (self._apply_nfz_correction_latlon if fixed_wing
++                     else self._apply_nfz_correction_multirotor_latlon)
++        corrected = corrector([last, home], ref_lat, ref_lon)
++        if len(corrected) <= 2:
++            return path  # 直線回程未穿越 NFZ → 沿用 bare RTL，不附加多餘航點
++        logger.info(
++            f"NFZ 安全回程：附加 {len(corrected) - 1} 個繞行航點（避免 bare RTL 穿越禁區）"
++        )
++        # 去掉第一點（== last，重複），其餘繞行中繼點 + home 接到尾端
++        return list(path) + [tuple(p) for p in corrected[1:]]
++
+@@ -2832 +2898 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
+-        from utils.math_utils import latlon_to_meters, meters_to_latlon
++        from utils.math_utils import latlon_to_meters
+@@ -3338 +3404 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
+-                self.statusBar().showMessage(f"任務已儲存", 3000)
++                self.statusBar().showMessage("任務已儲存", 3000)
+@@ -3569 +3635 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
+-        <p>版本 2.5.0 · PyQt6 · MIT License</p>
++        <p>版本 2.8.0 · PyQt6 · MIT License</p>
+@@ -3798,21 +3863,0 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
+-        def _find_all_crossings(a, b):
+-            """找出線段 [a, b] 與所有 NFZ 邊界的所有交點，依與 a 的距離排序。
+-
+-            對單一凸 NFZ：通常回傳 0 或 2 點（in / out 配對）
+-            對多 NFZ 或非凸：可能 4 點、6 點等（多組 in / out 配對）
+-            """
+-            seg = LineString([a, b])
+-            points = []
+-            for poly in polys:
+-                inter = seg.intersection(poly.exterior)
+-                if inter.is_empty:
+-                    continue
+-                if inter.geom_type == 'Point':
+-                    points.append((inter.x, inter.y))
+-                elif inter.geom_type == 'MultiPoint':
+-                    for pt in inter.geoms:
+-                        points.append((pt.x, pt.y))
+-            # 依與 a 距離排序 → 第 0, 2, 4... 是 entry，第 1, 3, 5... 是 exit
+-            points.sort(key=lambda p: _m.hypot(p[0] - a[0], p[1] - a[1]))
+-            return points
+-
+@@ -3841,88 +3886,35 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
+-                # ── OPERATION 段：找出所有 NFZ 邊界交點，配對 in / out 處理 ──
+-                # 對每對 [in_pt, out_pt]：
+-                #   1. 加 in_pt（保留 NFZ 邊緣 scan 覆蓋）
+-                #   2. 用 VG 從 in_pt 繞到 out_pt（detour 中間點）
+-                #   3. 加 out_pt（恢復 scan 方向）
+-                #   4. 繼續到原 cur（保留 NFZ 出口後的 scan 覆蓋）
+-                crossings = _find_all_crossings(last_xy, cur_xy)
+-
+-                # 兩種情況：
+-                #   (A) cur_xy 也在 NFZ 內 → 交點數為奇數，最後一個是 entry
+-                #       退化為「entry + skip 到下個 outside wp + detour」
+-                #   (B) cur_xy 在 NFZ 外 → 交點數為偶數，可配對處理
+-                cur_inside = _pt_in_any_poly(cur_xy)
+-
+-                if cur_inside or len(crossings) < 2 or len(crossings) % 2 != 0:
+-                    # Case A：用原邏輯
+-                    if crossings:
+-                        out_xy.append(crossings[0])  # 第一個 entry
+-                        out_refs.append(last_ref)
+-                    j = i
+-                    while j < n and _pt_in_any_poly(metric_wps[j]):
+-                        j += 1
+-                    if j >= n:
+-                        break
+-                    try:
+-                        result = planner.correct_path(
+-                            [out_xy[-1] if crossings else last_xy, metric_wps[j]]
+-                        )
+-                        if result.is_modified and result.corrected_path:
+-                            for dpt in result.corrected_path[1:]:
+-                                out_xy.append(dpt)
+-                                out_refs.append(j)
+-                        else:
+-                            out_xy.append(metric_wps[j])
+-                            out_refs.append(j)
+-                    except Exception:
+-                        out_xy.append(metric_wps[j])
+-                        out_refs.append(j)
+-                    i = j + 1
+-                else:
+-                    # Case B：成對處理，scan strip 兩端都保留
+-                    # 沿原 scan 方向算單位向量（給「nudge 點」用）
+-                    seg_dx = cur_xy[0] - last_xy[0]
+-                    seg_dy = cur_xy[1] - last_xy[1]
+-                    seg_len = _m.hypot(seg_dx, seg_dy)
+-                    if seg_len > 1e-6:
+-                        ux, uy = seg_dx / seg_len, seg_dy / seg_len
+-                    else:
+-                        ux = uy = 0.0
+-                    # Nudge 距離 — 把 in/out 推離 NFZ buffered 邊界，避免
+-                    # 「端點 on boundary」造成 VG 數值不穩定 → detour 失敗
+-                    nudge_m = 5.0
+-
+-                    fallback_used = False
+-                    for k in range(0, len(crossings), 2):
+-                        in_pt_raw = crossings[k]
+-                        out_pt_raw = crossings[k + 1]
+-                        # in_pt 往「來向」推（last_xy 方向），out_pt 往「去向」推
+-                        in_pt = (
+-                            in_pt_raw[0] - ux * nudge_m,
+-                            in_pt_raw[1] - uy * nudge_m,
+-                        )
+-                        out_pt = (
+-                            out_pt_raw[0] + ux * nudge_m,
+-                            out_pt_raw[1] + uy * nudge_m,
+-                        )
+-
+-                        # 嘗試從 in_pt 繞到 out_pt
+-                        detour_ok = False
+-                        try:
+-                            r = planner.correct_path([in_pt, out_pt])
+-                            if r.is_modified and r.corrected_path:
+-                                out_xy.append(in_pt)
+-                                out_refs.append(last_ref)
+-                                for dpt in r.corrected_path[1:-1]:
+-                                    out_xy.append(dpt)
+-                                    out_refs.append(last_ref)
+-                                out_xy.append(out_pt)
+-                                out_refs.append(i)
+-                                detour_ok = True
+-                        except Exception:
+-                            pass
+-
+-                        if not detour_ok:
+-                            # ★ Fallback：in/out 配對 VG 失敗 → 整段退回原
+-                            # correct_path 處理（避免「直線穿越 NFZ」bug）
+-                            fallback_used = True
+-                            break
++                # ── OPERATION 段：difference-based 邊界截斷，保留「所有」NFZ 外掃描覆蓋 ──
++                # 偵察任務以「覆蓋率」為優先：用 lane.difference(buffered_NFZ) 取得此線段在
++                # NFZ 外的所有子段（依距 last_xy 排序），全部保留——即使 cur_xy 落在 NFZ 內，
++                # 仍保留入口側覆蓋直到邊界；子段之間的缺口（NFZ 內）用 correct_path VG 繞行。
++                #
++                # 取代舊「Case A：while skip-inside → 丟整條尾段 / 整批 lane」的覆蓋損失：
++                # 舊法在 lane 的遠端落在 NFZ 內時，會把該 lane（含其在 NFZ 另一側的覆蓋）整段
++                # 跳過 → 偵察區大量空洞。新法逐線段裁切、保留每一段 NFZ 外覆蓋，缺口才繞行。
++                # 不重排 / 不改順序（起飛接線、Dubins R_min、geofence 全部維持）。
++                seg_line = LineString([last_xy, cur_xy])
++                try:
++                    outside = seg_line.difference(merged)
++                except Exception:
++                    outside = None
++                pieces = []
++                if outside is not None and not outside.is_empty:
++                    geoms = (list(outside.geoms)
++                             if outside.geom_type == 'MultiLineString' else [outside])
++                    for g in geoms:
++                        if getattr(g, 'geom_type', '') != 'LineString' or g.length <= 0.5:
++                            continue
++                        cs = list(g.coords)
++                        a_pt = (cs[0][0], cs[0][1])
++                        b_pt = (cs[-1][0], cs[-1][1])
++                        da = _m.hypot(a_pt[0] - last_xy[0], a_pt[1] - last_xy[1])
++                        db = _m.hypot(b_pt[0] - last_xy[0], b_pt[1] - last_xy[1])
++                        if db < da:           # 端點依「距 last_xy」排：a=近端、b=遠端
++                            a_pt, b_pt, da = b_pt, a_pt, db
++                        pieces.append((da, a_pt, b_pt))
++                    pieces.sort(key=lambda t: t[0])
++
++                if not pieces:
++                    # 整段都在 NFZ 內 → 無 NFZ 外覆蓋可保留；不加點、不穿越，直接前進
++                    i += 1
++                    continue
+@@ -3930,12 +3922,20 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
+-                    if fallback_used:
+-                        # nudge 後 detour 失敗（極少數）：接受該段原樣
+-                        # （from out_xy[-1] to cur_xy 可能在 NFZ 邊緣略微擦過，
+-                        # 但不會出現 safe-skip 造成的長對角擺盪）。
+-                        out_xy.append(cur_xy)
+-                        out_refs.append(i)
+-                        i += 1
+-                    else:
+-                        # 加上原 cur，保留 NFZ 出口後的 scan 覆蓋
+-                        out_xy.append(cur_xy)
+-                        out_refs.append(i)
+-                        i += 1
++                for (_, a_pt, b_pt) in pieces:
++                    prev = out_xy[-1]
++                    # prev → 此覆蓋子段近端 a_pt：若中間跨 NFZ（缺口）→ correct_path VG 繞行
++                    if _m.hypot(a_pt[0] - prev[0], a_pt[1] - prev[1]) > 0.5:
++                        if _seg_crosses_any(prev, a_pt):
++                            try:
++                                r = planner.correct_path([prev, a_pt])
++                                if (r.is_modified and r.corrected_path
++                                        and len(r.corrected_path) >= 2):
++                                    for dpt in r.corrected_path[1:-1]:
++                                        out_xy.append(dpt)
++                                        out_refs.append(last_ref)
++                            except Exception:
++                                pass
++                        out_xy.append(a_pt)
++                        out_refs.append(last_ref)
++                    # 保留此 NFZ 外覆蓋子段的遠端（最大化偵察覆蓋）
++                    out_xy.append(b_pt)
++                    out_refs.append(i)
++                i += 1
+@@ -3964,0 +3965,98 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
++    @staticmethod
++    def _split_landing_tail(
++        waypoints: list,
++    ) -> tuple:
++        """剝離尾端「下降進場型態」供 NFZ 避障豁免，但把回程到達點併入避障前段。
++
++        DCCPP 固定翼路徑尾端是一串 ``SegmentLabel.LANDING`` 航點（場周入口 →
++        下降階梯 → 觸地 NAV_LAND），全部聚在 home 附近。真正會穿越 NFZ 的是
++        「最後一個作業點 → 第一個 LANDING 航點（場周入口）」這條長回程巡航段。
++
++        先前的實作把「整段」尾端 LANDING 一起豁免，連這條長回程巡航段都跳過
++        避障，導致回程直穿 NFZ（即使用者回報的 bug）。本方法改為：
++
++          1. 找出尾端連續的 LANDING 區段。
++          2. 把「第一個 LANDING 航點（場周入口／回程到達點）」併入前段 ``head``，
++             讓「最後作業點 → 場周入口」的長回程巡航段進入 NFZ 避障
++             （VG 繞行 + Dubins fillet）。
++          3. 其餘下降進場型態（下降階梯 + 觸地點）放進 ``exempt_tail`` 原樣豁免，
++             保住匯出時的 NAV_LAND 與既定下滑道幾何（VG 折線會破壞進場下滑道）。
++
++        Args:
++            waypoints: 單架 UAV 的完整 assembled 航點（含尾端 LANDING 段）。
++
++        Returns:
++            (head, exempt_tail)
++                head        : list — 需做 NFZ 避障的航點（已併入回程到達點）
++                exempt_tail : list — 豁免避障、原樣接回的下降進場航點
++        """
++        ls = len(waypoints)
++        while ls > 0 and getattr(
++            getattr(waypoints[ls - 1], 'segment_type', None), 'name', ''
++        ) == 'LANDING':
++            ls -= 1
++        landing_tail = list(waypoints[ls:])
++        head = list(waypoints[:ls])
++        if landing_tail:
++            # 回程到達點（第一個 LANDING 航點 = 場周入口）併入避障前段，
++            # 使長回程巡航段被 NFZ 避障涵蓋；其餘下降進場仍豁免。
++            head.append(landing_tail[0])
++            landing_tail = landing_tail[1:]
++        return head, landing_tail
++
++    @staticmethod
++    def _resample_alts_by_arclength(
++        query_xy: list,
++        ref_xy: list,
++        ref_alt: list,
++    ) -> list:
++        """沿累積弧長比例，把 (ref_xy, ref_alt) 高度剖面重採樣到 query_xy 各點。
++
++        用途：路徑經 Dubins fillet 倒角 / kink 修復重新離散化後，原 waypoint 索引
++        失效。若改用「幾何最近原始航點」推高度，繞 NFZ 的 detour 點會繼承到鄰近
++        低高度的 takeoff/landing 航點 → 路徑貼地。改以弧長比例內插，detour 點即可
++        保持其所屬巡航段的高度。
++
++        Args:
++            query_xy: 目標折線 [(x, y), ...]（最終 corrected_path，公尺）
++            ref_xy:   基準折線 [(x, y), ...]（fillet 前 corrected_path，公尺）
++            ref_alt:  基準折線各點高度（與 ref_xy 等長）
++
++        Returns:
++            query_xy 各點對應高度 list（長度與 query_xy 相同）
++        """
++        import math as _m
++        nq = len(query_xy)
++        nref = len(ref_xy)
++        if nref == 0 or not ref_alt:
++            return [0.0] * nq
++        if nref == 1:
++            return [ref_alt[0]] * nq
++
++        def _cum(path: list) -> list:
++            cum = [0.0]
++            for k in range(1, len(path)):
++                cum.append(cum[-1] + _m.hypot(
++                    path[k][0] - path[k - 1][0],
++                    path[k][1] - path[k - 1][1],
++                ))
++            return cum
++
++        ref_cum = _cum(ref_xy)
++        ref_total = ref_cum[-1] or 1.0
++        q_cum = _cum(query_xy)
++        q_total = q_cum[-1] or 1.0
++
++        out: list = []
++        j = 0
++        m = min(nref, len(ref_alt))
++        for k in range(nq):
++            target = (q_cum[k] / q_total) * ref_total   # 對應到 ref 的弧長位置
++            while j < m - 2 and ref_cum[j + 1] < target:
++                j += 1
++            seg = ref_cum[j + 1] - ref_cum[j]
++            t = 0.0 if seg <= 1e-9 else (target - ref_cum[j]) / seg
++            t = max(0.0, min(1.0, t))
++            out.append(ref_alt[j] + (ref_alt[j + 1] - ref_alt[j]) * t)
++        return out
++
+@@ -3977,0 +4076,2 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
++          • 回程：尾端 LANDING 進場型態原樣豁免，但「最後作業點 → 場周入口」
++            這條長回程巡航段會併入避障（見 _split_landing_tail），避免回程穿越 NFZ
+@@ -4062,9 +4162,6 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
+-        # ★★★ 修正一：per-UAV 索引偏置「扇形展開」 ★★★
+-        # 原本所有 UAV 共用同一個 planner（同一個 buffered NFZ），個別跑
+-        # Visibility Graph 都找「最短繞行」→ 都會選同一個最近 corner →
+-        # N 架機全部擠在窄走廊。
+-        # 修法：UAV_i 用 base buffer + i × spread_m 的擴大版 buffer，
+-        # 每架 UAV 的繞行向 NFZ 外推一段，自然形成「扇形分散」。
+-        # spread_m = 12m → 3 機分別 0/12/24m 額外推遠（緊湊扇形，
+-        # 減少 NFZ 周圍偵蒐死區，多機仍能避免擠成一團）
+-        spread_per_uav_m = 12.0
++        # ★★★ per-UAV 扇形展開（已停用以最大化覆蓋率）★★★
++        # 原為避免多機繞行擠在同一走廊，曾用 base buffer + i×12m 的擴大 buffer 做扇形分散；
++        # 但擴大 buffer 會把「截斷掃描覆蓋」的邊界也外推 → UAV_i 在 NFZ 周圍多損失 12×i m
++        # 的偵察覆蓋（純覆蓋犧牲、與飛安無關）。偵察任務以覆蓋率為優先，且多機已用高度分層
++        # （altitude_step）避撞，無需橫向扇形；故設 0，讓每架都用最小安全 buffer、保留最大覆蓋。
++        spread_per_uav_m = 0.0
+@@ -4115,3 +4212,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
+-            # ★ 降落段豁免：尾端連續的 LANDING 段是「在 home 降落」的必要航段，
+-            #   不可被 NFZ 避障繞掉/丟棄（否則匯出就沒有 NAV_LAND）。這裡把它剝離，
+-            #   避障只處理非降落段（TAKEOFF/ENTRY/OPERATION/TRANSFER），最後原樣接回。
++            # ★ 降落段豁免（修正回程穿越 NFZ）：
++            #   尾端連續的 LANDING 段是「飛回 home 降落」的進場型態；其下降階梯 +
++            #   觸地點 (NAV_LAND) 不可被 VG 繞掉/丟棄（否則匯出就沒有 NAV_LAND，
++            #   且 VG 折線會破壞進場下滑道幾何）。
++            #   但「最後一個作業點 → 第一個 LANDING 航點（場周入口）」這條長回程
++            #   巡航段先前被一起豁免，導致回程直穿 NFZ。_split_landing_tail 會把
++            #   場周入口併入避障前段，使回程巡航走 VG 繞行 + Dubins fillet，
++            #   其餘下降進場型態 (landing_tail) 仍原樣豁免接回。
+@@ -4119,7 +4221 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
+-            _ls = len(_full_wps)
+-            while _ls > 0 and getattr(
+-                getattr(_full_wps[_ls - 1], 'segment_type', None), 'name', ''
+-            ) == 'LANDING':
+-                _ls -= 1
+-            landing_tail = list(_full_wps[_ls:])
+-            wps = _full_wps[:_ls]
++            wps, landing_tail = self._split_landing_tail(_full_wps)
+@@ -4149,2 +4245,2 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
+-            # ★★★ Segment-aware avoidance（OPERATION 段截斷在 NFZ 邊緣）★★★
+-            # 讓掃描線「貼著 NFZ 牆邊」結束，保留 NFZ 周圍最大覆蓋。
++            # ★★★ Segment-aware avoidance（OPERATION 段截斷在 NFZ 邊緣，局部繞行）★★★
++            # 讓掃描線「貼著 NFZ 牆邊」結束，保留 NFZ 周圍最大覆蓋；其餘段 VG 繞行。
+@@ -4152,2 +4248,6 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
+-            # 註：移除 safe-skip fallback（會產生長對角擺盪）；若 nudge 後
+-            # detour 仍失敗，接受該段直接連接（極少數情況，視覺不嚴重）。
++            #
++            # 註：曾嘗試「NFZ-aware cell 覆蓋分解」(重排整條覆蓋以求 MP 式乾淨)，但重排
++            # 會打亂起飛接線、cell 轉場可能飛出 geofence、且以 fillet 取代 Dubins 導致
++            # 轉彎半徑可能 < R_min（固定翼飛不過）。為保實飛安全（起飛/邊界/轉彎半徑），
++            # 改回此 segment-aware 局部繞行：保留原 DCCPP 覆蓋順序 + Dubins R_min + 邊界內。
++            ref_indices = None
+@@ -4183,0 +4284,18 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
++            # ★★★ 高度剖面擷取（修正繞行段貼地）★★★
++            # segment-aware 後的 corrected_path/ref_indices 高度是「正確」的：
++            #   繞行(detour)點的 ref 指向巡航高度的目標 waypoint，截斷點指向 OPERATION。
++            # 但下方 safety-net / kink-repair / fillet 會重新離散化路徑並丟棄 ref_indices，
++            # 之後 ref-mapping 改用「最近原始航點」推高度 → 繞 NFZ 的 detour 點在幾何上
++            # 反而最靠近低高度的 takeoff 爬升 / landing 下降航點，繼承到接近地面的高度，
++            # 造成「路徑貼地」。故在此先記下 (xy, alt) 剖面，最後用弧長內插還原高度。
++            # 巡航高度 = head 航點高度最大值（climb 爬升到它、descent 從它下降）
++            _cruise_alt = max(
++                (getattr(w, 'alt', 0.0) for w in wps), default=0.0
++            )
++            _alt_prof_xy = list(corrected_path)
++            _alt_prof_z = [
++                getattr(wps[r], 'alt', _cruise_alt)
++                if 0 <= r < len(wps) else _cruise_alt
++                for r in ref_indices
++            ] if ref_indices else []
++
+@@ -4192 +4310 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
+-                from shapely.geometry import LineString as _LS, Point as _Pt
++                from shapely.geometry import LineString as _LS
+@@ -4296,0 +4415,143 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
++            # ★★★ 最終硬性 NFZ gate（絕不穿越）★★★
++            # fillet 倒角會「切入」轉角，可能把貼著 buffered 邊界的路徑切進禁區；
++            # 前面的 safety-net 在 fillet *之前* 跑，抓不到 fillet/kink 造成的殘留穿越。
++            # 這裡做最終 gate：對最終折線每對相鄰點，若仍穿入 NFZ → correct_path 重繞；
++            # 重繞後仍穿越則保留並警告（極少數，通常為端點落在禁區內的任務設計問題）。
++            try:
++                per_uav_planner._rebuild_merged()
++                _mg = per_uav_planner._merged_buffered
++                if _mg is not None and not _mg.is_empty and len(corrected_path) >= 2:
++                    from shapely.geometry import LineString as _LSg
++                    _plg = (list(_mg.geoms) if _mg.geom_type == 'MultiPolygon' else [_mg])
++
++                    def _pen_g(a, b):
++                        s = _LSg([a, b])
++                        for pg in _plg:
++                            if s.intersects(pg):
++                                it = s.intersection(pg)
++                                if (not it.is_empty
++                                        and it.geom_type not in ('Point', 'MultiPoint')
++                                        and getattr(it, 'length', 0.0) > 0.5):
++                                    return True
++                        return False
++
++                    import math as _mg2
++
++                    def _diff_pieces(a, b):
++                        """[a,b] 在 NFZ 外的子段，依距 a 排序 → [(near,far), ...]。"""
++                        try:
++                            outs = _LSg([a, b]).difference(_mg)
++                        except Exception:
++                            return None
++                        if outs is None or outs.is_empty:
++                            return []
++                        gs = (list(outs.geoms) if outs.geom_type == 'MultiLineString'
++                              else [outs])
++                        out = []
++                        for g in gs:
++                            if getattr(g, 'geom_type', '') != 'LineString' or g.length <= 0.5:
++                                continue
++                            cs = list(g.coords)
++                            p0 = (cs[0][0], cs[0][1]); p1 = (cs[-1][0], cs[-1][1])
++                            d0 = _mg2.hypot(p0[0]-a[0], p0[1]-a[1])
++                            d1 = _mg2.hypot(p1[0]-a[0], p1[1]-a[1])
++                            if d1 < d0:
++                                p0, p1, d0 = p1, p0, d1
++                            out.append((d0, p0, p1))
++                        out.sort(key=lambda t: t[0])
++                        return out
++
++                    def _walk_boundary(prev, nxt):
++                        """沿 buffered NFZ 外緣走較短弧繞過（頂點向外偏移 3m）— 不依賴 VG
++                        可視性，對「端點落在邊界」也保證繞開。回傳中繼點（不含端點）。"""
++                        from shapely.ops import substring as _sub
++                        from shapely.geometry import Point as _Pt
++                        best = None
++                        for pg in _plg:
++                            if not _LSg([prev, nxt]).intersects(pg):
++                                continue
++                            ring = pg.exterior
++                            L = ring.length
++                            ta = ring.project(_Pt(prev)); tb = ring.project(_Pt(nxt))
++                            lo, hi = (ta, tb) if ta <= tb else (tb, ta)
++                            if (hi - lo) <= (L - (hi - lo)):
++                                arc = _sub(ring, lo, hi)
++                                coords = list(arc.coords)
++                                if ta > tb:
++                                    coords = coords[::-1]
++                            else:
++                                a1 = list(_sub(ring, hi, L).coords)
++                                a2 = list(_sub(ring, 0, lo).coords)
++                                coords = a1 + a2
++                                if ta < tb:
++                                    coords = coords[::-1]
++                            cx, cy = pg.centroid.x, pg.centroid.y
++                            mids = []
++                            for (x, y) in coords[1:-1]:
++                                dx, dy = x - cx, y - cy
++                                d = _mg2.hypot(dx, dy) or 1.0
++                                mids.append((x + dx / d * 3.0, y + dy / d * 3.0))
++                            # 取繞行後不再穿越者
++                            if best is None or len(mids) < len(best):
++                                best = mids
++                        return best or []
++
++                    def _route_gap(prev, nxt):
++                        """prev→nxt 若跨 NFZ → 回傳中繼繞行點（不含端點）。
++                        先試 correct_path（VG）；失敗則沿外緣走邊界（保證繞開）。"""
++                        if not _pen_g(prev, nxt):
++                            return []
++                        try:
++                            rr = per_uav_planner.correct_path([prev, nxt])
++                            cp = rr.corrected_path if rr.is_modified else None
++                            if (cp and len(cp) >= 2
++                                    and not any(_pen_g(cp[t], cp[t+1]) for t in range(len(cp)-1))):
++                                return [tuple(p) for p in cp[1:-1]]
++                        except Exception:
++                            pass
++                        # 後備：沿 buffered 外緣走邊界
++                        bw = _walk_boundary(prev, nxt)
++                        return bw
++
++                    _gated = [corrected_path[0]]
++                    _ng = 0
++                    for _k in range(1, len(corrected_path)):
++                        _a = _gated[-1]
++                        _b = corrected_path[_k]
++                        if not _pen_g(_a, _b):
++                            _gated.append(_b)
++                            continue
++                        # 穿越 → difference 裁成 NFZ 外子段（端點落邊界、非 buffer 內部），
++                        # 缺口在邊界點之間用 correct_path 繞行（此時 VG 可運作）。
++                        _pcs = _diff_pieces(_a, _b)
++                        if not _pcs:
++                            # 整段在 NFZ 內（兩端皆內部，極少）→ 丟棄此段、保留連通性交給下一段
++                            continue
++                        _ng += 1
++                        for (_, _p0, _p1) in _pcs:
++                            _prev = _gated[-1]
++                            if _mg2.hypot(_p0[0]-_prev[0], _p0[1]-_prev[1]) > 0.5:
++                                _mid = _route_gap(_prev, _p0)
++                                if _mid is not None:
++                                    _gated.extend(_mid)
++                                # _mid is None（繞行失敗）→ 直接接 _p0（極少數，仍貼邊不深入）
++                                _gated.append(_p0)
++                            _gated.append(_p1)
++                    if _ng > 0:
++                        logger.info(
++                            f'[DCCPP-Fence] UAV {uav_id} 最終 NFZ gate：'
++                            f'重繞 {_ng} 段 fillet 後殘留穿越'
++                        )
++                        corrected_path = _gated
++                        ref_indices = None
++            except Exception as e:
++                logger.warning(f'[DCCPP-Fence] UAV {uav_id} 最終 NFZ gate 失敗: {e}')
++
++            # 高度用「弧長內插」還原（修正繞行段貼地）：
++            #   以 fillet 前擷取的正確高度剖面 (_alt_prof_xy/_z) 為基準，沿累積弧長
++            #   比例重採樣到最終 corrected_path。這樣繞 NFZ 的 detour 點維持巡航高度，
++            #   而非被「最近原始航點」誤判繼承到 takeoff/landing 的低高度。
++            interp_alts = self._resample_alts_by_arclength(
++                corrected_path, _alt_prof_xy, _alt_prof_z,
++            ) if _alt_prof_z else None
++
+@@ -4299 +4560,2 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
+-            #   否則（fillet 後）→ 用「最近原始 wp」fallback
++            #   否則（fillet 後）→ 用「最近原始 wp」fallback（僅用於 segment_type/heading 等屬性，
++            #   高度一律改用上面的弧長內插結果）
+@@ -4326,0 +4589,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
++                # 高度改用弧長內插（避免繞行段貼地）
++                if interp_alts is not None and k < len(interp_alts):
++                    try:
++                        new_wp.alt = interp_alts[k]
++                    except AttributeError:
++                        import dataclasses as _dc
++                        new_wp = _dc.replace(new_wp, alt=interp_alts[k])
+@@ -4328 +4597,2 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
+-            # ★ 降落段原樣接回（避障豁免）— 確保匯出時仍有 LANDING → NAV_LAND
++            # ★ 下降進場型態原樣接回（避障豁免）— 確保匯出時仍有 LANDING → NAV_LAND；
++            #   回程巡航段（到場周入口）已在上方 new_wps 中完成 NFZ 繞行。
+diff --git a/ui/resources/icon_manager.py b/ui/resources/icon_manager.py
+index 7e7fca1..dfefa3d 100644
+--- a/ui/resources/icon_manager.py
++++ b/ui/resources/icon_manager.py
+@@ -7 +7 @@
+-from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor
++from PyQt6.QtGui import QIcon, QPixmap, QPainter
+@@ -9 +9 @@ from PyQt6.QtSvg import QSvgRenderer
+-from PyQt6.QtCore import Qt, QByteArray, QSize
++from PyQt6.QtCore import Qt, QByteArray
+@@ -12 +11,0 @@ from typing import Dict, Optional
+-import os
+diff --git a/ui/resources/tactical_theme.py b/ui/resources/tactical_theme.py
+index ed220e0..543783a 100644
+--- a/ui/resources/tactical_theme.py
++++ b/ui/resources/tactical_theme.py
+@@ -39 +38,0 @@ from typing import Final
+-from PyQt6.QtCore import Qt
+diff --git a/ui/undo_commands.py b/ui/undo_commands.py
+index b3b14e4..f9e89a2 100644
+--- a/ui/undo_commands.py
++++ b/ui/undo_commands.py
+@@ -190 +190 @@ def setup_undo_stack(main_window: Any) -> None:
+-    from PyQt6.QtGui import QUndoStack, QKeySequence, QAction
++    from PyQt6.QtGui import QUndoStack, QKeySequence
+diff --git a/ui/widgets/cesium_map_widget.py b/ui/widgets/cesium_map_widget.py
+index d1d85ba..d1340e5 100644
+--- a/ui/widgets/cesium_map_widget.py
++++ b/ui/widgets/cesium_map_widget.py
+@@ -15 +14,0 @@ import json
+-import math
+@@ -18 +17 @@ from typing import List, Tuple, Optional
+-from PyQt6.QtWidgets import QWidget, QVBoxLayout
++from PyQt6.QtWidgets import QVBoxLayout
+diff --git a/ui/widgets/command_console.py b/ui/widgets/command_console.py
+index da0204b..ab63d9e 100644
+--- a/ui/widgets/command_console.py
++++ b/ui/widgets/command_console.py
+@@ -24 +23,0 @@ from PyQt6.QtWidgets import (
+-    QFrame,
+@@ -27 +25,0 @@ from PyQt6.QtWidgets import (
+-    QSizePolicy,
+@@ -33 +30,0 @@ from PyQt6.QtWidgets import (
+-from mission.fleet_registry import FleetRegistry
+diff --git a/ui/widgets/drone_detail_panel.py b/ui/widgets/drone_detail_panel.py
+index 215e14a..7e05dde 100644
+--- a/ui/widgets/drone_detail_panel.py
++++ b/ui/widgets/drone_detail_panel.py
+@@ -13,2 +12,0 @@ from __future__ import annotations
+-import time
+-from datetime import datetime
+@@ -27 +24,0 @@ from PyQt6.QtWidgets import (
+-    QPushButton,
+diff --git a/ui/widgets/dual_map_widget.py b/ui/widgets/dual_map_widget.py
+index 6a7b7a0..90f7b9f 100644
+--- a/ui/widgets/dual_map_widget.py
++++ b/ui/widgets/dual_map_widget.py
+@@ -7 +7 @@
+-from typing import List, Tuple, Optional
++from typing import List, Tuple
+@@ -10 +10 @@ from PyQt6.QtWidgets import (
+-    QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
++    QVBoxLayout, QHBoxLayout, QStackedWidget,
+@@ -14 +14 @@ from PyQt6.QtGui import QAction
+-from PyQt6.QtCore import pyqtSignal, Qt
++from PyQt6.QtCore import pyqtSignal
+diff --git a/ui/widgets/fleet_card.py b/ui/widgets/fleet_card.py
+index 08c6e86..c6f27c6 100644
+--- a/ui/widgets/fleet_card.py
++++ b/ui/widgets/fleet_card.py
+@@ -23 +22,0 @@ from PyQt6.QtWidgets import (
+-    QVBoxLayout,
+diff --git a/ui/widgets/fleet_rail.py b/ui/widgets/fleet_rail.py
+index bb019b4..7c395e8 100644
+--- a/ui/widgets/fleet_rail.py
++++ b/ui/widgets/fleet_rail.py
+@@ -17 +16,0 @@ from PyQt6.QtWidgets import (
+-    QSizePolicy,
+diff --git a/ui/widgets/flight_logs_panel.py b/ui/widgets/flight_logs_panel.py
+index 9b3a81b..8aaafb0 100644
+--- a/ui/widgets/flight_logs_panel.py
++++ b/ui/widgets/flight_logs_panel.py
+@@ -15 +14,0 @@ from __future__ import annotations
+-import time
+@@ -22 +20,0 @@ from PyQt6.QtWidgets import (
+-    QFrame,
+@@ -28 +25,0 @@ from PyQt6.QtWidgets import (
+-    QPushButton,
+@@ -34 +30,0 @@ from mission.fleet_registry import FleetRegistry
+-from mission.sitl_link import SITLLink, TelemetryFrame
+diff --git a/ui/widgets/hud_composer.py b/ui/widgets/hud_composer.py
+index 94ef50f..3515754 100644
+--- a/ui/widgets/hud_composer.py
++++ b/ui/widgets/hud_composer.py
+@@ -22 +21,0 @@ import logging
+-import math
+@@ -24 +23 @@ import time
+-from dataclasses import dataclass, field
++from dataclasses import dataclass
+diff --git a/ui/widgets/map_widget.py b/ui/widgets/map_widget.py
+index d47c79f..866153f 100644
+--- a/ui/widgets/map_widget.py
++++ b/ui/widgets/map_widget.py
+@@ -15 +14,0 @@ import io
+-import tempfile
+@@ -18 +17 @@ from typing import List, Tuple, Optional
+-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QMessageBox, QSizePolicy
++from PyQt6.QtWidgets import QVBoxLayout, QMessageBox, QSizePolicy
+@@ -21 +20 @@ from PyQt6.QtWebEngineCore import QWebEnginePage, QWebEngineSettings
+-from PyQt6.QtCore import pyqtSignal, QUrl, Qt
++from PyQt6.QtCore import QUrl, Qt
+@@ -1820,3 +1819,3 @@ body > div {{ width:100% !important; height:100% !important; }}
+-                f'<div style="font-size:11px;color:#69F0AE;margin-top:4px;">'
+-                f'✅ 無衝突'
+-                f'</div>'
++                '<div style="font-size:11px;color:#69F0AE;margin-top:4px;">'
++                '✅ 無衝突'
++                '</div>'
+diff --git a/ui/widgets/mil_std_message.py b/ui/widgets/mil_std_message.py
+index a856866..37c8164 100644
+--- a/ui/widgets/mil_std_message.py
++++ b/ui/widgets/mil_std_message.py
+@@ -41 +41 @@ from PyQt6.QtCore import Qt
+-from PyQt6.QtGui import QFont, QPixmap
++from PyQt6.QtGui import QFont
+diff --git a/ui/widgets/mission_panel.py b/ui/widgets/mission_panel.py
+index b6d65a1..56bde4b 100644
+--- a/ui/widgets/mission_panel.py
++++ b/ui/widgets/mission_panel.py
+@@ -11 +10,0 @@ from PyQt6.QtCore import Qt, pyqtSignal
+-from PyQt6.QtGui import QFont, QColor
+diff --git a/ui/widgets/parameters_browser.py b/ui/widgets/parameters_browser.py
+index 9d95af6..2f24e08 100644
+--- a/ui/widgets/parameters_browser.py
++++ b/ui/widgets/parameters_browser.py
+@@ -18 +18 @@ from pathlib import Path
+-from typing import Dict, List, Optional
++from typing import Dict, Optional
+diff --git a/ui/widgets/polygon_editor.py b/ui/widgets/polygon_editor.py
+index ea9632e..119f402 100644
+--- a/ui/widgets/polygon_editor.py
++++ b/ui/widgets/polygon_editor.py
+@@ -9 +8,0 @@ import sys
+-import tempfile
+@@ -11 +10 @@ import json
+-from typing import List, Tuple, Optional, Callable
++from typing import List, Tuple, Callable
+@@ -14,2 +13,2 @@ from PyQt6.QtWidgets import (
+-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
+-    QMessageBox, QFileDialog, QSpinBox, QGroupBox, QSplitter,
++    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
++    QMessageBox, QFileDialog, QGroupBox, QSplitter,
+@@ -17 +16 @@ from PyQt6.QtWidgets import (
+-    QMainWindow, QStatusBar, QToolBar, QComboBox
++    QMainWindow, QStatusBar, QToolBar
+diff --git a/ui/widgets/servo_output_panel.py b/ui/widgets/servo_output_panel.py
+index 48d385b..d739943 100644
+--- a/ui/widgets/servo_output_panel.py
++++ b/ui/widgets/servo_output_panel.py
+@@ -19 +18,0 @@ from __future__ import annotations
+-from typing import Optional
+@@ -22 +21 @@ from PyQt6.QtCore import Qt, pyqtSignal, QRectF
+-from PyQt6.QtGui import QPainter, QColor, QPen, QFont, QFontMetrics
++from PyQt6.QtGui import QPainter, QColor, QPen
+@@ -24,2 +23,2 @@ from PyQt6.QtWidgets import (
+-    QWidget, QFrame, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
+-    QCheckBox, QComboBox, QSpinBox, QSizePolicy,
++    QWidget, QFrame, QVBoxLayout, QHBoxLayout, QLabel,
++    QSpinBox, QSizePolicy,
+@@ -29 +28 @@ from ui.resources.tactical_theme import TacticalColors as TC, TacticalFonts as T
+-from mission.sitl_link import SERVO_FUNCTIONS, servo_function_name
++from mission.sitl_link import servo_function_name
+diff --git a/ui/widgets/sitl_hud.py b/ui/widgets/sitl_hud.py
+index 92e84d7..1b988a2 100644
+--- a/ui/widgets/sitl_hud.py
++++ b/ui/widgets/sitl_hud.py
+@@ -16,2 +16,2 @@ import math
+-from PyQt6.QtCore import Qt, pyqtSignal, QRectF, QPointF, QRect
+-from PyQt6.QtGui import QFont, QPainter, QColor, QPen, QBrush, QPolygonF, QFontMetrics
++from PyQt6.QtCore import Qt, pyqtSignal, QRectF, QPointF
++from PyQt6.QtGui import QPainter, QColor, QPen, QPolygonF, QFontMetrics
+@@ -194 +193,0 @@ class MissionPlannerHud(QWidget):
+-        import time as _t
+diff --git a/ui/widgets/strike_ttt_dashboard.py b/ui/widgets/strike_ttt_dashboard.py
+index 277c7de..d9e2e64 100644
+--- a/ui/widgets/strike_ttt_dashboard.py
++++ b/ui/widgets/strike_ttt_dashboard.py
+@@ -38 +37,0 @@ from __future__ import annotations
+-import math
+@@ -44 +42,0 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+-from PyQt6.QtGui import QFont
+diff --git a/ui/widgets/tactical_swarm_strike_panel.py b/ui/widgets/tactical_swarm_strike_panel.py
+index 8e9df3a..d0aea6f 100644
+--- a/ui/widgets/tactical_swarm_strike_panel.py
++++ b/ui/widgets/tactical_swarm_strike_panel.py
+@@ -23 +23 @@ import os
+-from dataclasses import dataclass, field
++from dataclasses import dataclass
+@@ -25 +24,0 @@ from enum import Enum
+-from typing import Optional
+@@ -27 +26 @@ from typing import Optional
+-from PyQt6.QtCore import QPoint, QRect, QSize, Qt, QTimer, pyqtSignal
++from PyQt6.QtCore import QPoint, QRect, Qt, QTimer, pyqtSignal
+@@ -29 +28 @@ from PyQt6.QtGui import (
+-    QBrush, QColor, QFont, QFontMetrics, QPainter, QPaintEvent, QPen,
++    QBrush, QColor, QPainter, QPaintEvent, QPen,
+diff --git a/ui/widgets/tactical_uav_card.py b/ui/widgets/tactical_uav_card.py
+index 8c9b33f..b063731 100644
+--- a/ui/widgets/tactical_uav_card.py
++++ b/ui/widgets/tactical_uav_card.py
+@@ -35 +35 @@ from PyQt6.QtGui import (
+-    QBrush, QColor, QFont, QFontMetrics, QPainter, QPaintEvent, QPen,
++    QBrush, QColor, QFontMetrics, QPainter, QPaintEvent, QPen,
+diff --git a/utils/temp_cache.py b/utils/temp_cache.py
+index 556773f..9f25022 100644
+--- a/utils/temp_cache.py
++++ b/utils/temp_cache.py
+@@ -30 +29,0 @@ from __future__ import annotations
+-import os
+@@ -33 +31,0 @@ from pathlib import Path
+-from typing import Optional

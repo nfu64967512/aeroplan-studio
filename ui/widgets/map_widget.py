@@ -125,6 +125,8 @@ class MapWidget(MapWidgetBase):
         self._home_point: Optional[Tuple[float, float]] = None
         # 禁航區清單（持久化，由 display_nfz_zones() 設定）
         self._nfz_zones: list = []
+        # 電子圍籬 Geofence（inclusion 矩形，持久化，由 set_geofence() 設定）
+        self._geofence = None
         # NFZ 地圖繪製模式
         self._nfz_poly_draw_mode: bool = False
         self._nfz_poly_vertices: list = []  # [(lat, lon), ...]
@@ -360,6 +362,25 @@ class MapWidget(MapWidgetBase):
                     tooltip=f'NFZ: {nfz_name}',
                 ).add_to(m)
 
+        # 電子圍籬 Geofence（inclusion，琥珀虛線矩形 — 與紅色 NFZ 排除區明確區隔）
+        if self._geofence is not None:
+            try:
+                gverts = [[float(la), float(lo)]
+                          for (la, lo) in self._geofence.vertices]
+                if len(gverts) >= 3:
+                    folium.Polygon(
+                        locations=gverts,
+                        color='#FFB703', weight=2, dash_array='8,6',
+                        fill=True, fill_color='#FFB703', fill_opacity=0.05,
+                        popup=(f'🛡 電子圍籬（{getattr(self._geofence, "method", "aabb")}，'
+                               f'{len(gverts)} 頂點，alt '
+                               f'{self._geofence.alt_min_m:.0f}–'
+                               f'{self._geofence.alt_max_m:.0f} m）'),
+                        tooltip='電子圍籬 Geofence',
+                    ).add_to(m)
+            except Exception as _e:
+                logger.warning(f'[Geofence] 2D 繪製略過: {_e}')
+
         # 起飛點 Home Point 標記
         if self._home_point is not None:
             h_lat, h_lon = self._home_point
@@ -372,6 +393,12 @@ class MapWidget(MapWidgetBase):
 
         # === 群飛覆蓋路徑渲染 ===
         if self._swarm_data:
+            # folium 的 location 只吃 (lat, lon)；DCCPP/蜂群航點常為 (lat, lon, alt)
+            # 三元組 → 統一截成二元組，否則 folium 會丟
+            # "Expected two (lat, lon) values" 而整張地圖渲染失敗。
+            def _ll(seq):
+                return [(float(p[0]), float(p[1])) for p in (seq or []) if len(p) >= 2]
+
             for drone_info in self._swarm_data.get('drones', []):
                 drone_id = drone_info['drone_id']
                 color = self._DRONE_COLORS[(drone_id - 1) % len(self._DRONE_COLORS)]
@@ -380,7 +407,7 @@ class MapWidget(MapWidgetBase):
                 for tk_path in drone_info.get('takeoff_paths', []):
                     if len(tk_path) >= 2:
                         folium.PolyLine(
-                            locations=tk_path,
+                            locations=_ll(tk_path),
                             color='#2e7d32', weight=5, opacity=0.95,
                             tooltip=f'Drone {drone_id} 起飛',
                         ).add_to(m)
@@ -389,7 +416,7 @@ class MapWidget(MapWidgetBase):
                 for en_path in drone_info.get('entry_paths', []):
                     if len(en_path) >= 2:
                         folium.PolyLine(
-                            locations=en_path,
+                            locations=_ll(en_path),
                             color='#26c6da', weight=3, opacity=0.9,
                             dash_array='2,6',
                             tooltip=f'Drone {drone_id} 進入段',
@@ -399,7 +426,7 @@ class MapWidget(MapWidgetBase):
                 for op_path in drone_info.get('operation_paths', []):
                     if len(op_path) >= 2:
                         folium.PolyLine(
-                            locations=op_path,
+                            locations=_ll(op_path),
                             color=color, weight=5, opacity=0.95,
                             tooltip=f'Drone {drone_id} 作業段',
                         ).add_to(m)
@@ -408,7 +435,7 @@ class MapWidget(MapWidgetBase):
                 for tr_path in drone_info.get('transfer_paths', []):
                     if len(tr_path) >= 2:
                         folium.PolyLine(
-                            locations=tr_path,
+                            locations=_ll(tr_path),
                             color=color, weight=2, opacity=0.55,
                             dash_array='12,8',
                             tooltip=f'Drone {drone_id} 轉移段',
@@ -418,7 +445,7 @@ class MapWidget(MapWidgetBase):
                 for ld_path in drone_info.get('landing_paths', []):
                     if len(ld_path) >= 2:
                         folium.PolyLine(
-                            locations=ld_path,
+                            locations=_ll(ld_path),
                             color='#ef6c00', weight=4, opacity=0.95,
                             dash_array='10,5,2,5',
                             tooltip=f'Drone {drone_id} 降落',
@@ -428,7 +455,7 @@ class MapWidget(MapWidgetBase):
                 start_pos = drone_info.get('start_position')
                 if start_pos:
                     folium.Marker(
-                        location=start_pos,
+                        location=(float(start_pos[0]), float(start_pos[1])),
                         popup=f'Drone {drone_id} 起點',
                         icon=folium.DivIcon(
                             html=(
@@ -448,7 +475,7 @@ class MapWidget(MapWidgetBase):
                 poly = area_info.get('polygon', [])
                 if len(poly) >= 3:
                     folium.Polygon(
-                        locations=poly,
+                        locations=_ll(poly),
                         color='#FFC107', weight=2,
                         fill=True, fill_color='#FFC107', fill_opacity=0.08,
                         tooltip=f"區域 {area_info.get('area_id', '?')}",
@@ -1487,6 +1514,20 @@ body > div {{ width:100% !important; height:100% !important; }}
         """清除圓心掃描範圍並重建地圖"""
         self._circle_center = None
         self._circle_radius_m = 0.0
+        self._render_map()
+
+    def set_geofence(self, geofence) -> None:
+        """設定 2D 電子圍籬（矩形 inclusion）並重建地圖。
+
+        geofence: mission.geofence_manager.Geofence（vertices + alt_min/max）。
+        傳 None 等同清除。與 3D Cesium 的 set_geofence 對應，使 2D/3D 同步顯示圍籬。
+        """
+        self._geofence = geofence
+        self._render_map()
+
+    def clear_geofence(self) -> None:
+        """清除 2D 電子圍籬並重建地圖。"""
+        self._geofence = None
         self._render_map()
 
     def set_home_point_overlay(self, lat: float, lon: float):

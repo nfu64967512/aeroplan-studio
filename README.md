@@ -34,6 +34,32 @@
 - **多邊形編輯器**: 精確輸入或編輯角點座標
 - **禁航區管理（NFZ）**: 多邊形/圓形禁航區視覺化與規劃迴避；DCCPP 偵察覆蓋以**覆蓋率優先**的 segment-aware 局部繞行 — 用 `LineString(lane).difference(buffered_NFZ)` 截斷掃描線、**保留 NFZ 外兩側所有覆蓋**，僅 NFZ 內缺口走 Visibility Graph 繞行 + Dubins fillet 平滑；不重排（保留覆蓋順序 / R_min / 邊界內）；繞行後**最終 NFZ gate** 確保絕不穿越；**含回程/降落巡航段**全程繞行、繞行航點維持巡航高度（不貼地）
 
+## 畫面預覽
+
+### 2D 衛星圖 — 覆蓋路徑規劃
+
+![2D 衛星圖覆蓋路徑規劃](docs/images/01_2d_coverage.jpg)
+
+在衛星底圖上左鍵點選邊界角點，一鍵生成 Grid 覆蓋路徑；右側面板即時顯示航跡數、覆蓋面積、飛行距離與預估飛行時間，並自動綁定 4 頂點矩形電子圍籬。
+
+### 3D Cesium — 立體地形與任務視覺化
+
+![3D Cesium 立體地形視角](docs/images/02_3d_cesium.jpg)
+
+一鍵切換 3D Cesium：支援傾斜視角、地形吸附、2D / 3D / 哥倫布投影與 UAV 即時追蹤；左上「圖層通道」可分別開關 飛機 / 軌跡 / 路徑 / 航點標記 / 邊界 / DEM。
+
+### DCCPP 多機協同覆蓋 + 強制電子圍籬
+
+![DCCPP 多機覆蓋與電子圍籬](docs/images/04_dccpp_geofence.jpg)
+
+DCCPP 最佳化規劃為多架 UAV 分工(U1/U2/U3 分色),並**自動綁定 4 頂點矩形電子圍籬**(黃色虛線框,涵蓋全蜂群路徑);右側「電子圍籬」面板顯示 `已建構 4 頂點 AABB 矩形 / alt / buffer`,可直接匯出 QGC `.plan` / Mission Planner `.fen` 或上傳 SITL。圍籬同步顯示於 2D 與 3D。
+
+### SITL HUD — 多機 per-UAV 操作
+
+![SITL HUD 多機選取／數字排序／單獨斷線](docs/images/03_sitl_hud_multiuav.png)
+
+Mission Planner 風格多機 HUD：UAV 卡片依 sysid **數字排序**；點選單機後（琥珀高亮框）下方**快捷操作只對該機**，每張卡片右上可**單獨快速斷線**；「指令對象」標示目前指令派送範圍（全部 / 單機）。
+
 ## 快速開始
 
 ### 1. 安裝依賴

@@ -141,6 +141,11 @@ class TotNode(Node):
             mavutil.mavlink.MAV_CMD_DO_REPOSITION, 0, 0, -1.0, 0.0, 0.0,
             float("nan"), int(lat * 1e7), int(lon * 1e7), float(alt))
 
+    def _alt(self, i):
+        """每 slot 專屬高度層(防撞):slot_id 對稱分佈於 talt ± (n-1)/2·layer。
+        S 型機動時就算兩機水平路徑逼近,也差 ≥layer_m 垂直 → 不碰撞。"""
+        return self.talt + self.layer * (self.slot_id[i] - (self.n - 1) / 2.0)
+
     def _assign_and_plan(self):
         """slot 指派(依橫向、航跡不交叉)+ 共同抵達時刻。"""
         ids = sorted(self.pos)
@@ -180,13 +185,13 @@ class TotNode(Node):
                         f"UAV{i}→slot{self.slot_id[i]} @+{now-self.t0:.1f}s "
                         f"(偏差 {now-self.T_arr:+.1f}s)")
                 if i in self.arr:
-                    mode = "hold"; self._goto(i, *self.slot_of[i], self.talt, self.vmin)
+                    mode = "hold"; self._goto(i, *self.slot_of[i], self._alt(i), self.vmin)
                 else:
                     v_req = d / max(t_rem, 0.1)
                     if v_req > self.vmax:
-                        mode = "max"; self._goto(i, *self.slot_of[i], self.talt, self.vmax)
+                        mode = "max"; self._goto(i, *self.slot_of[i], self._alt(i), self.vmax)
                     elif v_req >= self.vmin:
-                        mode = "straight"; self._goto(i, *self.slot_of[i], self.talt, v_req)
+                        mode = "straight"; self._goto(i, *self.slot_of[i], self._alt(i), v_req)
                     else:
                         # S 型機動:以航向偏角 θ 精確控制「前向閉合率」= v_req。
                         # 飛機以 vmin 空速朝偏 slot 方位 ±θ 的點飛 → 前向 = vmin·cosθ。
@@ -198,7 +203,7 @@ class TotNode(Node):
                         sign = 1.0 if math.sin(2 * math.pi * (now - self.t0) / 22.0) >= 0 else -1.0
                         bs = bearing(self.pos[i][:2], self.slot_of[i])
                         aim = dest(self.pos[i][0], self.pos[i][1], bs + sign * theta, 120.0)
-                        self._goto(i, aim[0], aim[1], self.talt, self.vmin)
+                        self._goto(i, aim[0], aim[1], self._alt(i), self.vmin)
                 stat[i] = {"mode": mode, "d": round(d),
                            "arr": round(self.arr[i] - self.t0, 1) if i in self.arr else None}
                 sl = self.slot_of[i]

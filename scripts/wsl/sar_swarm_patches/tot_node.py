@@ -12,7 +12,11 @@ I/O:機體狀態與指令走 MAVLink 分流(6760+10i;pymavlink)。協同狀態�
   pub /swarm/tot_status  std_msgs/String  {phase, T_arr, uavs:{id:{mode,d,arr}}}
 (state-in 亦可改走 MAVROS/uavN/global_position 以求全一致;此處為自足直讀分流。)
 
-狀態機:ALIGN(TOT 對齊扇形 slot)→ SALVO(自 slot 沿切線同時衝 T,高度分層防撞)。
+狀態機(視覺震撼終端俯衝版):
+  ALIGN  — TOT 對齊扇形 slot(快機 S 型燒時間、慢機直線加速),同步抵扇形。
+  PERCH  — 各機沿切線內切到 pushover 環,同步爬升到 perch_alt 高點佔位。
+  DIVE   — 全員同步 pushover,全速俯衝(終端加速)收斂目標 T;微高度分層防撞、
+           時間校正 → ~同時衝擊(1m 級)。
 """
 import csv, json, math, time
 
@@ -53,7 +57,20 @@ class TotNode(Node):
         g("n", 6); g("tlat", 25.1406); g("tlon", 121.2325); g("talt", 90.0)
         g("approach_from", 180.0); g("r_fan", 2000.0); g("half_angle", 30.0)
         g("vmin", 14.0); g("vmax", 30.0); g("plan_frac", 0.9); g("margin", 40.0)
-        g("reach", 120.0); g("salvo_reach", 150.0); g("layer_m", 12.0)
+        g("reach", 120.0); g("layer_m", 12.0)
+        # ── 終端俯衝(視覺震撼):爬到 perch_alt 高點 → 同步 pushover → 全速俯衝 ──
+        g("perch_alt", 280.0)     # 高點佔位高度(配 pushover_r 讓俯衝約在 T 觸底)
+        g("pushover_r", 480.0)    # pushover 環半徑(距 T;越小俯衝越陡)
+        g("dive_alt", 5.0)        # 俯衝瞄準高度(壓低 → 持續最大俯角、穿越 T 時貼地)
+        g("dive_layer", 4.0)      # 終端微高度分層(防撞):各機差 4m 垂直
+        g("overshoot", 800.0)     # 穿越瞄準:瞄 T 後方 overshoot m,直線俯衝「穿過」T
+                                  # (非到 T 繞圈 → 固定翼 loiter 半徑 ~66m 打不到點)
+        g("switch_r", 130.0)      # 兩段俯衝:d>switch_r 瞄準 T(俯衝「砸向」T、貼地),
+                                  # d<switch_r 才改瞄穿越點穿過去(未進 loiter 半徑前切換)
+        g("dive_speed", 42.0)     # 俯衝指令空速(> 泡棉頂速 → TECS 壓機頭追速 = 俯衝+終端加速);
+                                  # 機體端須配 AIRSPEED_MAX 放寬 + TECS_SINK_MAX + PTCH_LIM_MIN 陡
+        g("perch_reach", 70.0)    # 認定「已就位 pushover 環」的半徑
+        g("impact_reach", 40.0)   # 認定「已穿越 T(衝擊)」的水平半徑(另有通過最近點判定)
         g("csv", "/tmp/tot_node")
         p = self.get_parameter
         self.n = int(p("n").value)
@@ -66,20 +83,34 @@ class TotNode(Node):
         self.plan_frac = float(p("plan_frac").value)
         self.margin = float(p("margin").value)
         self.reach = float(p("reach").value)
-        self.salvo_reach = float(p("salvo_reach").value)
         self.layer = float(p("layer_m").value)
+        self.perch_alt = float(p("perch_alt").value)
+        self.pushover_r = float(p("pushover_r").value)
+        self.dive_alt = float(p("dive_alt").value)
+        self.dive_layer = float(p("dive_layer").value)
+        self.overshoot = float(p("overshoot").value)
+        self.switch_r = float(p("switch_r").value)
+        self.dive_speed = float(p("dive_speed").value)
+        self.perch_reach = float(p("perch_reach").value)
+        self.impact_reach = float(p("impact_reach").value)
 
-        # ── 扇形 slot(以 T 為圓心、r_fan、approach±half)──
-        self.slots = []
+        # ── 扇形 slot + pushover 環 + 穿越點(T 後方 overshoot,直線穿過 T)──
+        self.slots, self.pp, self.thru = [], [], []
         for k in range(self.n):
             off = -self.half + 2 * self.half * k / (self.n - 1)
-            self.slots.append(dest(self.T[0], self.T[1],
-                                   (self.approach + off) % 360.0, self.r_fan))
+            brg = (self.approach + off) % 360.0
+            self.slots.append(dest(self.T[0], self.T[1], brg, self.r_fan))
+            self.pp.append(dest(self.T[0], self.T[1], brg, self.pushover_r))
+            self.thru.append(dest(self.T[0], self.T[1],
+                                  (brg + 180.0) % 360.0, self.overshoot))
         self.spacing = self.r_fan * math.radians(2 * self.half) / (self.n - 1)
+        self.dmin = {}   # 各機對 T 的最近水平距(記錄真實穿越)
+        self.commit = {}  # 各機是否已鎖定穿越(進 switch_r 後不再翻回瞄 T)
 
         # ── ① MAVLink 分流連線(每機一條)──
         self.link, self.pos, self.gs = {}, {}, {}
         self.slot_of, self.slot_id, self.arr = {}, {}, {}
+        self.perch_arr, self.impact = {}, {}
         self.last_v, self.last_v_t = {}, {}
         for i in range(1, self.n + 1):
             c = mavutil.mavlink_connection(f"tcp:127.0.0.1:{6760 + 10 * (i - 1)}",
@@ -93,6 +124,7 @@ class TotNode(Node):
         self.phase = "INIT"
         self.t0 = None
         self.T_arr = None
+        self.dive_go = None
         self.csv_path = str(p("csv").value)
         self._csv = open(self.csv_path + ".csv", "w", newline="")
         self._cw = csv.writer(self._csv)
@@ -103,13 +135,16 @@ class TotNode(Node):
         gw.writerow(["target", self.T[0], self.T[1]])
         for k, s in enumerate(self.slots):
             gw.writerow([f"slot{k}", s[0], s[1]])
+        for k, s in enumerate(self.pp):
+            gw.writerow([f"pp{k}", s[0], s[1]])
         gf.close()
         self._publish_gate()
         self.create_timer(0.33, self._tick)   # 3 Hz 協同迴圈
         self.create_timer(1.0, self._publish_gate)  # latched 定期補發
         self.get_logger().info(
             f"tot_node up：扇形 R={self.r_fan:.0f} ±{self.half:.0f}° {self.n} slot "
-            f"間隔 {self.spacing:.0f}m → 目標 {self.T}")
+            f"間隔 {self.spacing:.0f}m；pushover R={self.pushover_r:.0f} perch={self.perch_alt:.0f}m "
+            f"→ 俯衝 → 目標 {self.T}")
 
     def _publish_gate(self):
         self.gate_pub.publish(String(data=json.dumps({
@@ -142,9 +177,13 @@ class TotNode(Node):
             float("nan"), int(lat * 1e7), int(lon * 1e7), float(alt))
 
     def _alt(self, i):
-        """每 slot 專屬高度層(防撞):slot_id 對稱分佈於 talt ± (n-1)/2·layer。
+        """每 slot 專屬高度層(對齊階段防撞):slot_id 對稱分佈於 talt ± (n-1)/2·layer。
         S 型機動時就算兩機水平路徑逼近,也差 ≥layer_m 垂直 → 不碰撞。"""
         return self.talt + self.layer * (self.slot_id[i] - (self.n - 1) / 2.0)
+
+    def _dive_alt(self, i):
+        """終端俯衝微高度分層(防撞):收斂同一水平點 T,但各機差 dive_layer 垂直。"""
+        return self.dive_alt + self.dive_layer * (self.slot_id[i] - (self.n - 1) / 2.0)
 
     def _assign_and_plan(self):
         """slot 指派(依橫向、航跡不交叉)+ 共同抵達時刻。"""
@@ -166,6 +205,12 @@ class TotNode(Node):
             f"ALIGN：T_arr=+{self.T_arr - self.t0:.0f}s；各機距 slot "
             f"{ {i: round(dist_m(self.pos[i][:2], self.slot_of[i])) for i in ids} }")
 
+    def _row(self, now, i, d, mode, tgt):
+        self._cw.writerow([round(now - self.t0, 1), i, self.pos[i][0],
+                           self.pos[i][1], self.pos[i][2], round(self.gs.get(i, 0), 1),
+                           round(d), mode, round(self.last_v[i], 1),
+                           tgt[0], tgt[1], self.phase])
+
     def _tick(self):
         self._pump()
         if len(self.pos) < self.n:
@@ -175,6 +220,7 @@ class TotNode(Node):
             self.phase = "ALIGN"
         now = time.time()
         stat = {}
+
         if self.phase == "ALIGN":
             for i in sorted(self.pos):
                 d = dist_m(self.pos[i][:2], self.slot_of[i])
@@ -194,9 +240,7 @@ class TotNode(Node):
                         mode = "straight"; self._goto(i, *self.slot_of[i], self._alt(i), v_req)
                     else:
                         # S 型機動:以航向偏角 θ 精確控制「前向閉合率」= v_req。
-                        # 飛機以 vmin 空速朝偏 slot 方位 ±θ 的點飛 → 前向 = vmin·cosθ。
-                        # 令 cosθ = v_req/vmin ⇒ θ = acos(v_req/vmin),則平均前向剛好
-                        # v_req,恰在 T_arr 抵達(舊版固定側擺→前向失控、太早到 86s)。
+                        # 令 cosθ = v_req/vmin ⇒ θ = acos(v_req/vmin),平均前向剛好 v_req。
                         mode = "weave"
                         ratio = max(0.05, min(0.985, v_req / self.vmin))
                         theta = math.degrees(math.acos(ratio))
@@ -206,39 +250,94 @@ class TotNode(Node):
                         self._goto(i, aim[0], aim[1], self._alt(i), self.vmin)
                 stat[i] = {"mode": mode, "d": round(d),
                            "arr": round(self.arr[i] - self.t0, 1) if i in self.arr else None}
-                sl = self.slot_of[i]
-                self._cw.writerow([round(now - self.t0, 1), i, self.pos[i][0],
-                                   self.pos[i][1], self.pos[i][2], round(self.gs.get(i, 0), 1),
-                                   round(d), mode, round(self.last_v[i], 1),
-                                   sl[0], sl[1], self.phase])
-            if len(self.arr) == self.n and self.phase == "ALIGN":
+                self._row(now, i, d, mode, self.slot_of[i])
+            self._csv.flush()
+            if len(self.arr) == self.n:
                 got = [self.arr[i] - self.t0 for i in self.arr]
                 self.get_logger().warn(
-                    f"★ 全員抵扇形。抵達散布 = {max(got)-min(got):.1f}s → SALVO")
-                self.phase = "SALVO"; self.salvo_t0 = now
-                # 齊射:自 slot 沿切線同時衝 T(等距→等速→同時);高度分層防撞
-                self.salvo_T_arr = now + self.r_fan / (self.plan_frac * self.vmax) + 8.0
-        elif self.phase == "SALVO":
+                    f"★ 全員抵扇形。抵達散布 = {max(got)-min(got):.1f}s → PERCH(對準內切)")
+                self.phase = "PERCH"; self.perch_t0 = now
+                v_plan = self.plan_frac * self.vmax
+                # 內切到 pushover 環的剩餘航程 ≈ (距T - pushover_r)
+                tmax = max((dist_m(self.pos[i][:2], self.T) - self.pushover_r) / v_plan
+                           for i in self.pos)
+                self.perch_T = now + tmax + 6.0
+
+        elif self.phase == "PERCH":
+            # 對準內切:朝「穿越點」(T 後方)飛 → 航向已對準穿過 T 的直線(轟炸航線),
+            # 爬到 perch_alt、速度同步在 perch_T 抵 pushover 環。就位不繞圈(續朝內、
+            # 保持對準)→ DIVE 是「已對準的直線俯衝穿越」,不再轉彎偏開 T。
+            for i in sorted(self.pos):
+                thru = self.thru[self.slot_id[i]]
+                d = dist_m(self.pos[i][:2], self.T)      # 距 T
+                if i not in self.perch_arr and d < self.pushover_r:
+                    self.perch_arr[i] = now              # 已越 pushover 環、對準內切
+                    self.get_logger().info(
+                        f"UAV{i} 就位對準環 @+{now-self.t0:.1f}s (alt {self.pos[i][2]:.0f}m)")
+                if i in self.perch_arr:
+                    mode = "aligned"; self._goto(i, *thru, self.perch_alt, self.vmin)
+                else:
+                    t_rem = self.perch_T - now
+                    v = max(self.vmin, min(self.vmax, (d - self.pushover_r) / max(t_rem, 0.1)))
+                    mode = "runup"; self._goto(i, *thru, self.perch_alt, v)
+                stat[i] = {"mode": mode, "d": round(d), "z": round(self.pos[i][2])}
+                self._row(now, i, d, mode, thru)
+            self._csv.flush()
+            if len(self.perch_arr) == self.n:
+                zs = {i: round(self.pos[i][2]) for i in self.pos}
+                self.get_logger().warn(
+                    f"★ 全員對準內切(alt {zs})→ DIVE 直線俯衝穿越!")
+                self.phase = "DIVE"; self.dive_go = now
+                dmax = max(dist_m(self.pos[i][:2], self.T) for i in self.pos)
+                # ⚠️ 配速要用「實際可達俯衝速度」(泡棉俯衝 ~0.8·dive_speed),不能用
+                # dive_speed 本身:否則 t_rem 立刻歸零、全員爆 v_req=dive_speed → 無法
+                # 讓前機等後機 = 落單。用可達速配 → 近機 v_req 偏低被放慢 → 等齊。
+                self.dive_pace = 0.8 * self.dive_speed
+                self.dive_T = now + dmax / self.dive_pace + 1.0
+
+        elif self.phase == "DIVE":
             done = 0
             for i in sorted(self.pos):
                 d = dist_m(self.pos[i][:2], self.T)
-                alt = self.talt + self.layer * (self.slot_id[i] - (self.n - 1) / 2.0)
-                if d < self.salvo_reach:
-                    done += 1; mode = "strike"
-                    self._goto(i, *self.T, alt, self.vmin)
+                alt = self._dive_alt(i)
+                thru = self.thru[self.slot_id[i]]   # 穿越瞄準點(T 後方)
+                if d < self.dmin.get(i, 1e9):
+                    self.dmin[i] = d                # 追蹤真實最近水平距
+                # 一旦進入 switch_r 就「鎖定穿越」(committed):此後永遠瞄穿越點,
+                # 不因穿過後 d 回升 > switch_r 又翻回瞄 T → 修掉繞圈 re-attack。
+                if not self.commit.get(i) and d < self.switch_r:
+                    self.commit[i] = True
+                aimpt = thru if self.commit.get(i) else self.T
+                # 衝擊判定:進 impact_reach,或已 committed 且通過最近點(d 回升)→ 記為穿越
+                passed = self.commit.get(i) and d > self.dmin[i] + 8.0
+                if i not in self.impact and (d < self.impact_reach or passed):
+                    self.impact[i] = now
+                    self.get_logger().info(
+                        f"UAV{i} 穿越 T @+{now-self.dive_go:.2f}s (最近 {self.dmin[i]:.0f}m "
+                        f"alt {self.pos[i][2]:.0f}m gs {self.gs.get(i,0):.0f}m/s)")
+                if i in self.impact:
+                    # 已穿越 → 續飛穿越點 egress(俯衝速度),不繞 T
+                    done += 1; mode = "impact"; self._goto(i, *thru, alt, self.dive_speed)
                 else:
-                    t_rem = self.salvo_T_arr - now
-                    v = max(self.vmin, min(self.vmax, d / max(t_rem, 0.1)))
-                    mode = "salvo"; self._goto(i, *self.T, alt, v)
-                stat[i] = {"mode": mode, "d": round(d), "alt": round(alt)}
-                self._cw.writerow([round(now - self.t0, 1), i, self.pos[i][0],
-                                   self.pos[i][1], self.pos[i][2], round(self.gs.get(i, 0), 1),
-                                   round(d), mode, round(self.last_v[i], 1),
-                                   self.T[0], self.T[1], self.phase])
+                    # 俯衝砸向 T:指令上限 dive_speed(> 頂速 → TECS 壓機頭俯衝加速);
+                    # 近機(會早到)v_req 偏低 → 放慢到最低 0.62·dive_speed 等後機(仍在俯衝)
+                    t_rem = self.dive_T - now
+                    v_req = d / max(t_rem, 0.05)
+                    v = max(0.62 * self.dive_speed, min(self.dive_speed, v_req))
+                    mode = "dive"; self._goto(i, *aimpt, alt, v)
+                stat[i] = {"mode": mode, "d": round(d), "alt": round(alt),
+                           "z": round(self.pos[i][2]), "gs": round(self.gs.get(i, 0))}
+                self._row(now, i, d, mode, self.T)
             self._csv.flush()
             if done == self.n:
-                self.get_logger().warn("★★ 齊射:全員抵達目標 T。")
+                imp = [self.impact[i] - self.dive_go for i in self.impact]
+                spread = max(imp) - min(imp)
+                dmins = {i: round(self.dmin[i], 1) for i in sorted(self.impact)}
+                self.get_logger().warn(
+                    f"★★ 俯衝齊射:全員穿越目標 T。穿越時間散布 = {spread:.2f}s "
+                    f"(≈{spread*self.dive_speed:.1f}m 縱向間隔);各機最近水平距 T = {dmins} m")
                 self.phase = "DONE"
+
         self.status_pub.publish(String(data=json.dumps(
             {"phase": self.phase,
              "T_arr": round(self.T_arr - self.t0, 1) if self.T_arr else None,

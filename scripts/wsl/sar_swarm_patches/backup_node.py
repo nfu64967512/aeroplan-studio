@@ -101,6 +101,7 @@ class BackupNode(Node):
         self._last_speed = 0.0
         self._last_speed_t = 0.0
         self._last_guided_t = 0.0
+        self._operator_override = False  # RTL/AUTO 操作者接管中
         self.my_fix = None     # 自己經緯（算 V 尾編隊誤差用）
         self.status_pub = self.create_publisher(String, "/swarm/formation_status",
                                                 HEARTBEAT_QOS)
@@ -140,6 +141,8 @@ class BackupNode(Node):
         self._acting_was_formed = False
         self._acting_speed = 0.0
         self._acting_speed_t = 0.0
+        self._acting_hdg = None        # 接管後凍結的隊形航向(直線續航用)
+        self._acting_wp_t = 0.0
         self.create_timer(1.0, self._acting_tick)
 
         self.create_subscription(GeoPoseStamped, f"/uav{self.master_id}/geopose",
@@ -207,10 +210,21 @@ class BackupNode(Node):
         self._keep_guided(now)
 
     def _keep_guided(self, now):
-        """起飛後若被切出 GUIDED（操作員手動 TAKEOFF/AUTO），重新宣告 GUIDED 讓導引航點生效。"""
+        """起飛後若被切出 GUIDED（操作員手動 TAKEOFF/AUTO），重新宣告 GUIDED 讓導引航點生效。
+        RTL/AUTO 白名單 = 操作者接管(同 wingman):不搶模式、停發 WP。"""
         p = self.mav.position()
+        mode = self.mav.mode()
+        if mode in ("RTL", "AUTO"):
+            if not self._operator_override:
+                self._operator_override = True
+                self.get_logger().warn(
+                    f"UAV{self.uav_id}: operator mode {mode} — standing down")
+            return
+        if self._operator_override:
+            self._operator_override = False
+            self.get_logger().info(f"UAV{self.uav_id}: back from operator mode — rejoining")
         if (p is not None and p[2] > self._guided_min_alt
-                and self.mav.mode() != "GUIDED" and (now - self._last_guided_t) > 2.0):
+                and mode != "GUIDED" and (now - self._last_guided_t) > 2.0):
             self.mav.set_mode_async("GUIDED")
             self._last_guided_t = now
             self.get_logger().info(f"UAV{self.uav_id}: re-asserting GUIDED for formation")
@@ -250,6 +264,8 @@ class BackupNode(Node):
             return                          # no leader reference yet
         self._formation_control(tlat, tlon)   # 速度匹配 + 回報 + 保持 GUIDED（每 tick）
         now = self._now()
+        if self._operator_override:
+            return          # 操作者接管中:DO_REPOSITION 會強切 GUIDED,停發
         moved = (self._last_wp is None
                  or dist_m(self._last_wp, (wlat, wlon)) > self._wp_move_thresh)
         if moved and (now - self._last_wp_t) >= self._wp_interval:
@@ -325,9 +341,11 @@ class BackupNode(Node):
             f"master UAV{self.master_id} heartbeat healthy again — "
             f"UAV{self.uav_id} yielding leadership back")
         self.master.deactivate()
+        self.master.heading_override = None
         self.taken_over = False
         self._yield_since = None
         self._acting_was_formed = False
+        self._acting_hdg = None
         self.last_hb = self._now()           # 重新武裝 watchdog(乾淨起算)
         self.seen_hb = True
         self.switch_pub.publish(String(data=json.dumps(
@@ -364,11 +382,35 @@ class BackupNode(Node):
                     f"(gps_ok={gps_ok} batt={batt})")
 
     def _acting_tick(self):
-        """修法 3:代理長機手風琴 — worst 僚機誤差 > 釋放門檻 → 降到 wait 等隊;
-        全員新鮮且 ≤ 成形門檻 → 回 nominal(與 master_node 同款遲滯邏輯)。"""
+        """代理長機:(a) 手風琴速度控制(同 master 遲滯邏輯);(b) **持續帶隊**
+        — 凍結接管當下的隊形航向、沿其直線續航(每 ~8 s 推前方 1500 m 航點)。
+        沒有 (b) 時代理長機的 FCU 抱著舊航點原地盤旋 → 廣播航向持續旋轉 →
+        slot 繞著它轉 → 僚機永遠在 1×slot 距圓環上追(驗收 P4 實測);
+        對應 spec §3.3「接任後先直線」。"""
         if not self.taken_over:
             return
+        mav0 = getattr(self, "mav", None)
+        if mav0 is not None and mav0.mode() in ("RTL", "AUTO"):
+            return          # 代理長機本身被操作者接管(返航/降落)→ 停帶隊
         now = self._now()
+        # ── (b) 直線續航 ──
+        if self._acting_hdg is None:       # 接管後第一拍:凍結最後隊形航向
+            if self.leader is not None:
+                self._acting_hdg = float(self.leader.get("heading", 0.0))
+            else:
+                self._acting_hdg = float(getattr(self.master, "_heading_deg", 0.0))
+            self.master.heading_override = self._acting_hdg
+            self.get_logger().info(
+                f"acting-leader: continuing straight on frozen heading "
+                f"{self._acting_hdg:.0f}° (§3.3 直線續航)")
+        if (now - self._acting_wp_t) > 8.0 and self.my_fix is not None:
+            tgt = advance_along_heading(self.my_fix[0], self.my_fix[1],
+                                        self._acting_hdg, 1500.0)
+            mav = getattr(self, "mav", None)
+            if mav is not None and mav.send_guided_waypoint(
+                    tgt[0], tgt[1], self.formation_alt):
+                self._acting_wp_t = now
+        # ── (a) 手風琴 ──
         fresh = [e for (t, e) in self._heard.values()
                  if e >= 0 and (now - t) <= 5.0]
         worst = max(fresh) if fresh else None

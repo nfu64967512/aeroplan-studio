@@ -97,6 +97,7 @@ class WingmanNode(Node):
         self._last_speed = 0.0
         self._last_speed_t = 0.0
         self._last_guided_t = 0.0
+        self._operator_override = False  # RTL/AUTO 操作者接管中(不發 WP、不搶模式)
         # 高度分層：每架不同高，V 垂直分離、不碰撞（收斂 RTL 亦然）
         self.formation_alt = (float(g("formation_alt").value)
                               + (self.uav_id - 2) * float(g("layer_sep").value))
@@ -253,10 +254,24 @@ class WingmanNode(Node):
         self._keep_guided(now)
 
     def _keep_guided(self, now):
-        """手動/自動起飛後若不在 GUIDED 就切回，否則 guided 航點不生效（會空盤旋）。"""
+        """手動/自動起飛後若不在 GUIDED 就切回，否則 guided 航點不生效（會空盤旋）。
+        **RTL/AUTO 白名單**:操作者/GCS 蓄意下的返航或任務(如降落)視為
+        「操作者接管」— 不搶回 GUIDED(舊版每 2 s 搶回,降落/RTL 前必須整層
+        殺節點;白名單後單機可被 GCS 隨時接管,回 GUIDED 即自動歸隊)。"""
         p = self.mav.position()
+        mode = self.mav.mode()
+        if mode in ("RTL", "AUTO"):
+            if not self._operator_override:
+                self._operator_override = True
+                self.get_logger().warn(
+                    f"UAV{self.uav_id}: operator mode {mode} — standing down "
+                    f"(formation resumes when GUIDED returns)")
+            return
+        if self._operator_override:
+            self._operator_override = False
+            self.get_logger().info(f"UAV{self.uav_id}: back from operator mode — rejoining")
         if (p is not None and p[2] > self._guided_min_alt
-                and self.mav.mode() != "GUIDED" and (now - self._last_guided_t) > 2.0):
+                and mode != "GUIDED" and (now - self._last_guided_t) > 2.0):
             self.mav.set_mode_async("GUIDED")
             self._last_guided_t = now
             self.get_logger().info(f"UAV{self.uav_id}: re-asserting GUIDED for formation")
@@ -343,6 +358,8 @@ class WingmanNode(Node):
         # 導引 WP 用前饋外推點（有的話）——飛向未來的 slot、誤差照舊對真 slot 量
         wlat, wlon = self._ff_target if self._ff_target is not None else (tlat, tlon)
         now = self.get_clock().now().nanoseconds * 1e-9
+        if self._operator_override:
+            return          # 操作者接管中:DO_REPOSITION 會強切 GUIDED,必須停發
         moved = (self._last_wp is None
                  or dist_m(self._last_wp, (wlat, wlon)) > self._wp_move_thresh)
         if moved and (now - self._last_wp_t) >= self._wp_interval:

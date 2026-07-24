@@ -564,6 +564,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         #   - "HUD / Servo"：既有 SITLHud（保留 SERVO OUTPUT、legacy 按鈕等）
         from PyQt6.QtWidgets import QTabWidget
         from ui.widgets.sitl_command_panel import SitlCommandPanel
+        from ui.widgets.hil_connect_panel import HILConnectPanel
 
         sitl_inner_tabs = QTabWidget()
 
@@ -577,6 +578,12 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         self.sitl_command_panel = SitlCommandPanel()
         sitl_inner_tabs.addTab(self.sitl_command_panel, "Command")
 
+        # 「HIL」：實體飛控多機連線（最多 6 顆，序列埠 / udp / tcp）
+        self.hil_panel = HILConnectPanel()
+        self.hil_panel.connect_requested.connect(self._on_hil_connect_all)
+        self.hil_panel.disconnect_requested.connect(self._on_hil_disconnect_all)
+        sitl_inner_tabs.addTab(self.hil_panel, "HIL")
+
         self.parameter_panel._tabs.addTab(sitl_inner_tabs, "🛰 SITL")
 
         # 任務操作面板隨分頁切換可見元件：只有「基本演算法」分頁才顯示完整預覽/匯出
@@ -585,6 +592,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
 
         self._sitl_link = None        # 主鏈路（向後相容）
         self._sitl_links: list = []   # 多機鏈路列表
+        self._hil_links: list = []    # HIL 實體飛控鏈路（_sitl_links 的子集）
         self._sitl_launcher = None
         
         # 連接信號
@@ -5500,9 +5508,72 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
                 pass
         self._sitl_links.clear()
         self._sitl_link = None
+        # HIL 鏈路是 _sitl_links 子集，一併視為已斷線
+        if self._hil_links:
+            self._hil_links.clear()
+            self.hil_panel.on_disconnected()
         self.sitl_hud.on_disconnected('使用者中斷')   # 內含 clear_cards + 復位指令對象
         if hasattr(self.map_widget, 'clear_uav'):
             self.map_widget.clear_uav()
+
+    # ─────────────────────────────────────────────────────────────────
+    # HIL：實體飛控多機連線（SITL 分頁 HIL 內頁）
+    # ─────────────────────────────────────────────────────────────────
+    def _on_hil_connect_all(self, rows: list):
+        """一次建立多顆實體飛控的 MAVLink 鏈路（上限 6，與 SITL 共用管線）。
+
+        rows: [{'conn': 'COM7,115200', 'sysid': 1, 'vehicle_hint': ''}, ...]
+        """
+        ok = 0
+        for row in rows:
+            before = len(self._sitl_links)
+            try:
+                self.on_sitl_connect(
+                    row['conn'],
+                    int(row.get('sysid', 1)),
+                    row.get('vehicle_hint', ''),
+                )
+            except Exception as e:
+                logger.error(f'[HIL] 建立鏈路失敗 {row.get("conn")}: {e}')
+                continue
+            if len(self._sitl_links) > before:
+                self._hil_links.append(self._sitl_links[-1])
+                ok += 1
+        self.hil_panel.on_connect_result(ok, len(rows))
+        self.statusBar().showMessage(f'[HIL] 已建立 {ok}/{len(rows)} 條飛控鏈路', 6000)
+
+    def _on_hil_disconnect_all(self):
+        """只斷開 HIL 鏈路，保留內建 SITL / 嵌入式蜂群連線。"""
+        try:
+            from mission.fleet_registry import FleetRegistry
+            reg = FleetRegistry.instance()
+        except Exception:
+            reg = None
+        for link in self._hil_links:
+            if reg is not None:
+                try:
+                    reg.unregister(f'UAV-{int(getattr(link, "sysid_label", 1))}')
+                except Exception:
+                    pass
+            # 先切斷 disconnected → 避免逐機清理 handler 重入
+            try:
+                link.disconnected.disconnect()
+            except Exception:
+                pass
+            try:
+                link.stop()
+                link.wait(2000)
+            except Exception:
+                pass
+            try:
+                self._sitl_links.remove(link)
+            except ValueError:
+                pass
+        self._hil_links.clear()
+        if self._sitl_link is not None and self._sitl_link not in self._sitl_links:
+            self._sitl_link = self._sitl_links[0] if self._sitl_links else None
+        self.hil_panel.on_disconnected()
+        self.statusBar().showMessage('[HIL] 已斷開所有實體飛控鏈路', 5000)
 
     def on_sitl_disconnect_one(self, sysid: int):
         """單獨斷開指定 sysid 的 SITL 連線（HUD 卡片快速斷線鈕）。
@@ -6390,6 +6461,26 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
                 logger.info('[SITL] 使用者取消啟動')
                 self.sitl_hud.on_sitl_stopped()
                 return
+
+            # ── 出生地點預設覆寫 ─────────────────────────────────
+            # 使用者在對話框選了常用地點（虎尾 / 桃園機場…）→ 覆寫生成點。
+            # 但任務（DCCPP / 蜂群打擊）的每架獨立起飛點優先，不被覆寫，
+            # 以免飛機生在遠離任務的地方 AUTO 後暴衝墜機。
+            home_override = dlg_result.get('home_override')
+            if home_override and not per_uav_homes:
+                lat, lon, spawn_heading = (
+                    float(home_override[0]), float(home_override[1]),
+                    float(home_override[2]),
+                )
+                origin_src = f'出生地點預設 {dlg_result.get("home_preset", "")}'
+                logger.info(
+                    f'[SITL] 依出生地點預設覆寫生成座標: '
+                    f'({lat:.6f}, {lon:.6f}) heading={spawn_heading:.1f}°'
+                )
+            elif home_override and per_uav_homes:
+                logger.info(
+                    '[SITL] 已有任務每架起飛點，忽略出生地點預設覆寫（任務原點優先）'
+                )
 
             # 從 dialog 取出 fan-out 與防火牆設定（停用 fan-out 時 instance_configs=None）
             enable_fanout = bool(dlg_result.get('enable_fanout'))

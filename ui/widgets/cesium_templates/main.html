@@ -131,7 +131,23 @@ const viewer = new Cesium.Viewer('cesiumContainer', {
   skyBox: false,
   skyAtmosphere: new Cesium.SkyAtmosphere(),
   requestRenderMode: false,
+  // GPU 加速：要求 high-performance WebGL context（雙顯卡機器選獨顯）
+  contextOptions: {
+    webgl: {
+      powerPreference: 'high-performance',
+      antialias: true,
+      failIfMajorPerformanceCaveat: false,
+    },
+  },
 });
+
+// 印出實際渲染用的 GPU（驗證硬體加速是否生效）
+try {
+  const _gl = viewer.scene.context._gl;
+  const _dbg = _gl.getExtension('WEBGL_debug_renderer_info');
+  const _renderer = _dbg ? _gl.getParameter(_dbg.UNMASKED_RENDERER_WEBGL) : _gl.getParameter(_gl.RENDERER);
+  console.log('[Cesium][GPU] renderer =', _renderer);
+} catch (e) { console.warn('[Cesium][GPU] 無法讀取 renderer 資訊', e); }
 
 // 深色背景
 viewer.scene.backgroundColor = Cesium.Color.fromCssColorString('#0d1117');

@@ -96,3 +96,6 @@ sitl/plane/terrain/
 # Local web assets (downloaded by setup)
 assets/cesium/
 assets/leaflet/
+
+# stray SITL artifact if arduplane ever run from repo root
+/eeprom.bin

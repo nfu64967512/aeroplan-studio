@@ -210,7 +210,7 @@ class CesiumMapWidget(MapWidgetBase):
             init_lat = s.map.default_lat
             init_lon = s.map.default_lon
         except Exception:
-            init_lat, init_lon = 23.702732, 120.419333
+            init_lat, init_lon = 25.0777, 121.2325   # 桃園國際機場 RCTP（fallback）
         init_height = 2000.0
 
         # ── 本地 / CDN 路徑解析 ──

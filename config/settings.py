@@ -57,9 +57,9 @@ class PathSettings:
 @dataclass
 class MapSettings:
     """地圖配置"""
-    # 預設位置
-    default_lat: float = 23.702732
-    default_lon: float = 120.419333
+    # 預設位置（2D Leaflet 與 3D Cesium 初始置中點）— 桃園國際機場 RCTP
+    default_lat: float = 25.0777
+    default_lon: float = 121.2325
     default_zoom: int = 20  # 預設縮放 20 倍
     max_zoom: int = 22      # 最大縮放
     
@@ -128,6 +128,13 @@ class PerformanceSettings:
     # 多執行緒
     enable_multiprocessing: bool = True
     max_workers: int = 4
+
+    # GPU 加速（SITL 3D 視覺化 / WebEngine 渲染管線）
+    # 啟用時在 QApplication 建立前注入 Chromium GPU 旗標：
+    # GPU rasterization / zero-copy / WebGL high-performance context，
+    # 讓 Cesium 3D 地圖與 SITL 即時追蹤走獨顯硬體渲染。
+    # 注意：ArduPilot SITL 物理模擬本身為 CPU 程序，不受此旗標影響。
+    enable_gpu_acceleration: bool = True
 
 
 @dataclass
@@ -200,6 +207,9 @@ class SITLLaunchSettings:
     enable_fanout: bool = False
     # 啟動 SITL 時是否自動嘗試新增 Windows Firewall 入站規則（首次會跳 UAC）
     auto_firewall: bool = True
+    # 上次選的「出生地點」預設 key（config.spawn_presets.SPAWN_PRESETS）；
+    # 空字串 = 自動（任務原點 / settings.map 預設），不覆寫生成座標。
+    home_preset: str = ''
     # 每台 SITL 的設定列表，list[dict]，每個 dict 包含：
     #   sysid: int           — 覆寫 SYSID_THISMAV，讓嵌入式 tgt_system 對得上
     #   embedded_ip: str     — 嵌入式裝置 LAN IP，例如 '192.168.1.50'
@@ -238,6 +248,22 @@ class EmbeddedSwarmSettings:
     direction: str = 'dial'
 
 
+@dataclass
+class HILSettings:
+    """HIL（Hardware-in-the-Loop）連線面板的持久化設定。
+    用途：記住使用者上次填的每顆飛控連線埠 / 鮑率 / SYSID，
+         下次開啟 SITL 分頁的 HIL 頁時自動回填。
+    """
+    # 每顆飛控一列，list[dict]，每個 dict 包含：
+    #   enabled: bool        — 此列是否參與「全部連線」
+    #   port: str            — 'COM7' 或 'udp:0.0.0.0:14550' / 'tcp:...' 完整連線字串
+    #   baud: int            — 序列埠鮑率（udp/tcp 連線忽略）
+    #   sysid: int           — 期望的 MAVLink system id（顯示用 callsign）
+    #   vehicle_hint: str    — '' 自動 / 'PLANE' / 'COPTER' / 'VTOL'
+    # 與 SITLLaunchSettings 相同，刻意存 list[dict] 避免 asdict 遞迴複雜度
+    instances: list = field(default_factory=list)
+
+
 class GlobalSettings:
     """全局配置管理器"""
     
@@ -257,6 +283,7 @@ class GlobalSettings:
         self.ui = UISettings()
         self.sitl_launch = SITLLaunchSettings()
         self.embedded_swarm = EmbeddedSwarmSettings()
+        self.hil = HILSettings()
 
         # 配置文件路徑
         self.config_file = config_file or os.path.join(
@@ -299,6 +326,8 @@ class GlobalSettings:
                     self.embedded_swarm = EmbeddedSwarmSettings(
                         **config_data['embedded_swarm']
                     )
+                if 'hil' in config_data:
+                    self.hil = HILSettings(**config_data['hil'])
 
                 return True
         except Exception as e:
@@ -323,6 +352,7 @@ class GlobalSettings:
                 'ui': asdict(self.ui),
                 'sitl_launch': asdict(self.sitl_launch),
                 'embedded_swarm': asdict(self.embedded_swarm),
+                'hil': asdict(self.hil),
             }
 
             os.makedirs(os.path.dirname(self.config_file), exist_ok=True)
@@ -345,6 +375,7 @@ class GlobalSettings:
         self.ui = UISettings()
         self.sitl_launch = SITLLaunchSettings()
         self.embedded_swarm = EmbeddedSwarmSettings()
+        self.hil = HILSettings()
 
     def get_dict(self) -> Dict[str, Any]:
         """獲取配置字典"""
@@ -357,6 +388,7 @@ class GlobalSettings:
             'ui': asdict(self.ui),
             'sitl_launch': asdict(self.sitl_launch),
             'embedded_swarm': asdict(self.embedded_swarm),
+            'hil': asdict(self.hil),
         }
 
 

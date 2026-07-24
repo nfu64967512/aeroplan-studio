@@ -1592,10 +1592,10 @@ class ParameterPanel(QWidget):
         # AutoLand 為高風險動作，保留 ORANGE 強調 — 屬「特殊狀態指示」。
         self.fw_autoland_check.setStyleSheet(
             f"QCheckBox {{ font-weight: bold; color: {T.ORANGE};"
-            "  font-size: 12px; padding: 4px 0px; }}"
+            "  font-size: 12px; padding: 4px 0px; }"
             "QCheckBox::indicator { width: 18px; height: 18px; }"
             f"QCheckBox::indicator:checked {{ background-color: {T.ORANGE};"
-            "  border: 2px solid #BF360C; }}"
+            "  border: 2px solid #BF360C; }"
         )
         self.fw_autoland_check.setToolTip(
             "【開啟】匯出時跳過五邊電路，在最後任務點後直接插入\n"

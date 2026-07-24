@@ -154,6 +154,63 @@ def initialize_system(args):
     return logger, settings, vehicle_profiles
 
 
+def _install_qt_message_filter() -> None:
+    """過濾已知無害的 Qt 字型警告洗版，其餘 Qt 訊息照常輸出到 stderr。
+
+    `QFont::setPointSize: Point size <= 0 (-1), must be greater than 0`：
+    部分以 px 字級（pixelSize）樣式化的 widget（QSS `font-size:11px`）其
+    `pointSize()` 回 -1；當全域 QSS 重新 polish 整個 widget 樹時（例如新增
+    含 cell widget 的 QTableWidget 觸發的重繪），Qt 內部會拿這個 -1 呼叫
+    setPointSize → 印警告，但**會忽略該無效值、字級不受影響**（純視覺無損）。
+    這類警告在建構含表格/下拉的面板時會一次噴數十條洗版 console，故在此吞掉，
+    只放行其餘 Qt 訊息（真正的警告/錯誤仍會顯示）。
+    """
+    try:
+        from PyQt6.QtCore import qInstallMessageHandler
+    except Exception:
+        return
+
+    def _handler(_mode, _ctx, msg):
+        if 'setPointSize' in msg or 'Point size <= 0' in msg:
+            return  # 吞掉無害洗版
+        try:
+            sys.stderr.write(msg + '\n')
+        except Exception:
+            pass
+
+    qInstallMessageHandler(_handler)
+
+
+def _apply_gpu_acceleration(logger, settings) -> None:
+    """依 settings.performance.enable_gpu_acceleration 注入 Chromium GPU 旗標。
+
+    必須在 QApplication / QWebEngineView 建立「之前」設定環境變數才會生效。
+    旗標作用於 QtWebEngine（Cesium 3D / Leaflet 地圖）的渲染管線：
+      --ignore-gpu-blocklist      忽略驅動黑名單，強制走硬體 GPU
+      --enable-gpu-rasterization  頁面 rasterization 交給 GPU
+      --enable-zero-copy          rasterizer 直寫 GPU 記憶體（省一次拷貝）
+      --enable-accelerated-video-decode  影片解碼硬體加速
+    ArduPilot SITL 物理模擬為獨立 CPU 程序，不在此加速範圍。
+    """
+    import os
+    if not getattr(settings.performance, 'enable_gpu_acceleration', True):
+        logger.info('[GPU] 已停用 GPU 加速（settings.performance.enable_gpu_acceleration = false）')
+        return
+
+    gpu_flags = (
+        '--ignore-gpu-blocklist '
+        '--enable-gpu-rasterization '
+        '--enable-zero-copy '
+        '--enable-accelerated-video-decode'
+    )
+    existing = os.environ.get('QTWEBENGINE_CHROMIUM_FLAGS', '')
+    if existing:
+        os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = f'{existing} {gpu_flags}'
+    else:
+        os.environ['QTWEBENGINE_CHROMIUM_FLAGS'] = gpu_flags
+    logger.info(f'[GPU] WebEngine GPU 加速旗標已注入: {gpu_flags}')
+
+
 def run_gui_mode(logger, settings, vehicle_profiles, args=None):
     """運行GUI模式
 
@@ -165,7 +222,10 @@ def run_gui_mode(logger, settings, vehicle_profiles, args=None):
     """
     try:
         logger.info("啟動 GUI 模式...")
-        
+
+        # GPU 加速旗標 — 必須先於任何 Qt / WebEngine 模組初始化
+        _apply_gpu_acceleration(logger, settings)
+
         # 檢查PyQt6是否可用
         try:
             from PyQt6.QtWidgets import QApplication
@@ -183,7 +243,10 @@ def run_gui_mode(logger, settings, vehicle_profiles, args=None):
             logger.error("PyQt6 未安裝，無法啟動 GUI 模式")
             logger.info("請安裝: pip install PyQt6 PyQt6-WebEngine")
             return 1
-        
+
+        # 過濾無害的 QFont::setPointSize 警告洗版（須在建立 widget 前安裝）
+        _install_qt_message_filter()
+
         # 設置 OpenGL 共享上下文（WebEngine 需要）
         try:
             QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)

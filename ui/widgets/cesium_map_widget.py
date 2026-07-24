@@ -317,6 +317,37 @@ class CesiumMapWidget(MapWidgetBase):
         self._js('clearGeofence()')
 
     # ─────────────────────────────────────────────────────────────────
+    # TOT 扇形閘門（蜂群同時抵達；與 sar_swarm/tot_node 同幾何）
+    # ─────────────────────────────────────────────────────────────────
+    def set_tot_gate(self, target_lat: float, target_lon: float,
+                     target_alt: float = 90.0, r_fan: float = 2000.0,
+                     half_angle: float = 30.0, approach_from: float = 180.0,
+                     n: int = 6) -> None:
+        """在地圖上畫目標前的扇形閘門 + N 個 slot + 切線。
+        slot 幾何與 tot_node 完全一致（以 T 為圓心、r_fan、approach±half）。"""
+        import math
+        EARTH = 111320.0
+        slots = []
+        for k in range(n):
+            off = -half_angle + (2 * half_angle) * k / (n - 1)
+            brg = math.radians((approach_from + off) % 360.0)
+            slots.append({
+                'id': k,
+                'lat': target_lat + r_fan * math.cos(brg) / EARTH,
+                'lon': target_lon + r_fan * math.sin(brg)
+                       / (EARTH * math.cos(math.radians(target_lat))),
+            })
+        payload = {
+            'target': {'lat': target_lat, 'lon': target_lon, 'alt': target_alt},
+            'r_fan': r_fan, 'half_angle': half_angle,
+            'approach_from': approach_from, 'slots': slots,
+        }
+        self._js(f'setTotGate({json.dumps(json.dumps(payload))})')
+
+    def clear_tot_gate(self) -> None:
+        self._js('clearTotGate()')
+
+    # ─────────────────────────────────────────────────────────────────
     # 地形跟隨（Terrain Following at constant AGL）
     # ─────────────────────────────────────────────────────────────────
     def set_dem_manager(self, dem_manager):
@@ -351,6 +382,14 @@ class CesiumMapWidget(MapWidgetBase):
     def on_map_clicked(self, lat: float, lon: float):
         if self._strike_marking:
             self.strike_target_added.emit(lat, lon)
+            # 標記蜂群打擊/TOT 目標時,順手畫出目標前的扇形閘門 + 6 slot + 切線
+            # (與 sar_swarm/tot_node 同幾何;純疊圖,不影響既有打擊規劃)。
+            if getattr(self, '_tot_gate_auto', True):
+                try:
+                    self.set_tot_gate(lat, lon,
+                                      approach_from=getattr(self, '_tot_approach', 180.0))
+                except Exception:
+                    pass
             return
         # 在 3D 地圖上即時畫出角點（與 2D MapWidget 行為一致，避免點擊後看不到標記）
         self.add_corner(lat, lon)

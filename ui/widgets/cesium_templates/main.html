@@ -536,6 +536,76 @@ function clearGeofence() {
   geofenceEntities.forEach(e => { try { viewer.entities.remove(e); } catch(_){} });
   geofenceEntities = [];
 }
+
+// ── TOT 扇形閘門疊圖(蜂群同時抵達的目標前扇形 + slot + 切線)──────────────
+let totGateEntities = [];
+function clearTotGate() {
+  totGateEntities.forEach(e => { try { viewer.entities.remove(e); } catch(_){} });
+  totGateEntities = [];
+}
+function _dest(lat, lon, brgDeg, distM) {          // 沿方位 brg 前進 dist m
+  const EARTH = 111320.0, b = brgDeg * Math.PI / 180.0;
+  return [lat + distM * Math.cos(b) / EARTH,
+          lon + distM * Math.sin(b) / (EARTH * Math.cos(lat * Math.PI / 180.0))];
+}
+function setTotGate(jsonStr) {
+  clearTotGate();
+  let g; try { g = JSON.parse(jsonStr); } catch(_) { return; }
+  if (!g || !g.target || !g.slots) return;
+  const T = g.target, C = '#ff5252';   // 目標紅
+  const rf = g.r_fan || 2000, half = g.half_angle || 30, appr = g.approach_from || 180;
+  // 1) 扇形填充:目標 → 弧(appr±half)→ 目標
+  const arc = [T.lon, T.lat];
+  const steps = 40;
+  for (let i = 0; i <= steps; i++) {
+    const brg = appr - half + (2 * half) * i / steps;
+    const p = _dest(T.lat, T.lon, brg, rf);
+    arc.push(p[1], p[0]);
+  }
+  arc.push(T.lon, T.lat);
+  totGateEntities.push(viewer.entities.add({
+    name: 'TOT-sector',
+    polygon: {
+      hierarchy: Cesium.Cartesian3.fromDegreesArray(arc),
+      material: hexColor(C, 0.08), outline: true,
+      outlineColor: hexColor(C, 0.55), outlineWidth: 1,
+      classificationType: Cesium.ClassificationType.TERRAIN,
+    },
+  }));
+  // 2) slot 點 + 切線(slot → T,虛線概念用細實線)
+  g.slots.forEach(s => {
+    totGateEntities.push(viewer.entities.add({
+      name: 'TOT-slot',
+      position: Cesium.Cartesian3.fromDegrees(s.lon, s.lat, (T.alt || 90) + 2),
+      point: { pixelSize: 11, color: Cesium.Color.TRANSPARENT,
+               outlineColor: hexColor(C, 0.95), outlineWidth: 2 },
+      label: { text: 'S' + s.id, font: '11px sans-serif',
+               fillColor: hexColor(C, 0.95), showBackground: false,
+               pixelOffset: new Cesium.Cartesian2(9, -9),
+               scaleByDistance: new Cesium.NearFarScalar(1e3, 1.0, 5e5, 0.4) },
+    }));
+    totGateEntities.push(viewer.entities.add({
+      name: 'TOT-tangent',
+      polyline: {
+        positions: Cesium.Cartesian3.fromDegreesArrayHeights(
+          [s.lon, s.lat, (T.alt || 90), T.lon, T.lat, (T.alt || 90)]),
+        width: 1.2, material: new Cesium.PolylineDashMaterialProperty(
+          { color: hexColor(C, 0.5), dashLength: 12 }),
+      },
+    }));
+  });
+  // 3) 目標星標
+  totGateEntities.push(viewer.entities.add({
+    name: 'TOT-target',
+    position: Cesium.Cartesian3.fromDegrees(T.lon, T.lat, (T.alt || 90) + 5),
+    point: { pixelSize: 16, color: hexColor(C, 0.95),
+             outlineColor: Cesium.Color.WHITE, outlineWidth: 2 },
+    label: { text: '★ 目標 T', font: 'bold 13px sans-serif',
+             fillColor: hexColor(C, 1.0), showBackground: true,
+             backgroundColor: Cesium.Color.BLACK.withAlpha(0.5),
+             pixelOffset: new Cesium.Cartesian2(0, -22) },
+  }));
+}
 function setGeofence(jsonStr) {
   clearGeofence();
   let g;

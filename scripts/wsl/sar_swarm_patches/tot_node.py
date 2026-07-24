@@ -269,12 +269,15 @@ class TotNode(Node):
             # 保持對準)→ DIVE 是「已對準的直線俯衝穿越」,不再轉彎偏開 T。
             for i in sorted(self.pos):
                 thru = self.thru[self.slot_id[i]]
+                pp = self.pp[self.slot_id[i]]
                 d = dist_m(self.pos[i][:2], self.T)      # 距 T
                 if i not in self.perch_arr and d < self.pushover_r:
-                    self.perch_arr[i] = now              # 已越 pushover 環、對準內切
+                    self.perch_arr[i] = now              # 已越 pushover 環
                     self.get_logger().info(
                         f"UAV{i} 就位對準環 @+{now-self.t0:.1f}s (alt {self.pos[i][2]:.0f}m)")
                 if i in self.perch_arr:
+                    # 就位後續朝穿越點慢飛(保持對準內切、不繞圈)→ DIVE 為已對準直線穿越。
+                    # (曾試「守在環上盤旋等齊」→ 噴射盤旋掉高、穿越偏 320m,反而更糟。)
                     mode = "aligned"; self._goto(i, *thru, self.perch_alt, self.vmin)
                 else:
                     t_rem = self.perch_T - now

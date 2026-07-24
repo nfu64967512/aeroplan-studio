@@ -396,7 +396,14 @@ class CesiumMapWidget(MapWidgetBase):
         self.corner_added.emit(lat, lon)
 
     def on_map_rclick(self, lat: float, lon: float):
-        """3D 地圖右鍵 → GUIDED 飛到此點（Mission Planner 風格，由上層跳高度框）"""
+        """3D 地圖右鍵 → GUIDED 飛到此點（Mission Planner 風格，由上層跳高度框）。
+        並在此點預覽蜂群 TOT 扇形閘門(與 sar_swarm/tot_node 同幾何);純疊圖。"""
+        if getattr(self, '_tot_gate_auto', True):
+            try:
+                self.set_tot_gate(lat, lon,
+                                  approach_from=getattr(self, '_tot_approach', 180.0))
+            except Exception:
+                pass
         self.guided_goto_requested.emit(lat, lon)
 
     def on_circle_draw_complete(self, lat: float, lon: float, radius: float):

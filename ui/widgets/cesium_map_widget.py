@@ -320,11 +320,13 @@ class CesiumMapWidget(MapWidgetBase):
     # TOT 扇形閘門（蜂群同時抵達；與 sar_swarm/tot_node 同幾何）
     # ─────────────────────────────────────────────────────────────────
     def set_tot_gate(self, target_lat: float, target_lon: float,
-                     target_alt: float = 90.0, r_fan: float = 2000.0,
-                     half_angle: float = 30.0, approach_from: float = 180.0,
+                     target_alt: float = 130.0, r_fan: float = 4000.0,
+                     half_angle: float = 25.0, approach_from: float = 180.0,
                      n: int = 6) -> None:
-        """在地圖上畫目標前的扇形閘門 + N 個 slot + 切線。
-        slot 幾何與 tot_node 完全一致（以 T 為圓心、r_fan、approach±half）。"""
+        """在地圖上畫目標前的扇形閘門 + N 個 slot + 切線(含 STOT 紅心靶)。
+        slot 幾何與 tot_node 完全一致（以 T 為圓心、r_fan、approach±half）。
+        預設值對齊噴射尺度(plane-jet 為標準機體:R=4km ±25°、巡航層 130m);
+        泡棉尺度請自行傳 r_fan=2000, half_angle=30, target_alt=90。"""
         import math
         EARTH = 111320.0
         slots = []

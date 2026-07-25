@@ -94,6 +94,11 @@ class TotNode(Node):
                                   # 那條「紅心徑向線」才准俯衝 —— 對正在 STOT 之前做完,
                                   # 終端就不必再修正,才能又快又準。
                                   # (只靠終端捕獲去修 → 要嘛慢速盤旋才準,要嘛快但偏。)
+        g("dive_pace", 0.0)       # 俯衝配速 (m/s)。0 = 自動取 0.8·dive_speed。
+                                  # ⚠️ 要填「實際可達的俯衝地速」而不是指令空速:
+                                  # 配速太樂觀(100 vs 實際 28-76)→ t_rem 立刻歸零 →
+                                  # 全員爆全速、失去等待餘裕 → 命中散布 14.5s。
+                                  # 配保守一點(≈vmin)才有餘裕讓近機慢下來等遠機。
         g("dive_radius", 30.0)    # 俯衝航點的 param3 繞圈半徑(見 _reposition)
         g("dive_spdweight", 0.0)  # 進俯衝時推給飛控的 TECS_SPDWEIGHT。
                                   # 0 = pitch 只追高度(俯得凶,但空速沒人管會衰減:
@@ -129,6 +134,7 @@ class TotNode(Node):
         self.perch_gate = float(p("perch_alt_gate").value)
         self.track_frac = max(0.2, min(1.0, float(p("track_frac").value)))
         self.dive_radius = float(p("dive_radius").value)
+        self.pace_cfg = float(p("dive_pace").value)
         self.dive_spdw = float(p("dive_spdweight").value)
         self.align_tol = float(p("align_tol").value)
         self.ground_alt = float(p("ground_alt").value)
@@ -406,15 +412,24 @@ class TotNode(Node):
                 if xt <= self.align_tol:
                     self.align_ok[i] = True
                 x_ok = self.align_ok.get(i, False)
+                # ⚠️ 距離閘門要用「離環點 pp 多近」而不是「已越過環」:只要越過環就
+                #    放行的話,各機開始俯衝時距 T 可差好幾百公尺 → 起跑點不等距 →
+                #    再怎麼配速也壓不掉命中散布(實測卡在 3.3s)。收斂到 pp 才等距。
+                # ⚠️ 距離閘門不能收得比「固定翼站位精度」還緊:曾用「離環點 <130m」
+                #    當閘門,結果 3/6 永遠進不來(噴射迴轉半徑 ~275m,對定點只能繞)。
+                #    所以這裡仍用「已越過環」,起跑點不等距的問題改用「錯開放行」解
+                #    (見 DIVE 的 release_t):近的晚放,大家用同速飛 → 同時命中。
                 if i not in self.perch_arr and d < self.pushover_r and z_ok and x_ok:
-                    self.perch_arr[i] = now              # 高度 + 距離 + 對正 三閘門
+                    self.perch_arr[i] = now              # 距離 + 高度 + 對正 三閘門
                     self.get_logger().info(
                         f"UAV{i} 就位對準環 @+{now-self.t0:.1f}s "
                         f"(alt {z:.0f}m 橫偏 {xt:.0f}m)")
                 if i in self.perch_arr:
-                    # 就位後續朝穿越點慢飛(保持對準內切、不繞圈)→ DIVE 為已對準直線穿越。
-                    # (曾試「守在環上盤旋等齊」→ 噴射盤旋掉高、穿越偏 320m,反而更糟。)
-                    mode = "aligned"; self._goto(i, *thru, self.perch_alt, self.vmin)
+                    # 就位後「守在自己徑向線上的環點 pp」等其他機,而不是繼續內切。
+                    # ⚠️ 舊版就位後仍朝 thru 慢飛 → 先就位的一路內漂,等最後一架好時
+                    #    各機距 T 已經差很多 → 俯衝起跑點不等距 → 命中散布 26.7s。
+                    #    瞄 pp 同時保住「半徑」和「對正」(pp 就在自己的徑向線上)。
+                    mode = "hold_ring"; self._goto(i, *pp, self.perch_alt, self.vmin)
                 elif not z_ok or not x_ok:
                     # 高度不夠或還沒對正 → 先退回扇形 slot(4000m 外、就在徑向線上)
                     # 邊飛邊爬邊對正;飛向 slot 本身就會把飛機拉回徑向線。
@@ -444,12 +459,25 @@ class TotNode(Node):
                     lk.mav.param_set_send(lk.target_system or j, 1,
                                           b"TECS_SPDWEIGHT", self.dive_spdw,
                                           mavutil.mavlink.MAV_PARAM_TYPE_REAL32)
+                # 共同命中時刻:用「最遠的那架 × 可達俯衝速」定 T_impact,近機照這個
+                # 時刻放慢配速 → 六機同時到。配速用實際可達速(非 dive_speed 指令值),
+                # 否則 t_rem 立刻歸零、全員全速、失去等待餘裕。
                 dmax = max(dist_m(self.pos[i][:2], self.T) for i in self.pos)
-                # ⚠️ 配速要用「實際可達俯衝速度」(泡棉俯衝 ~0.8·dive_speed),不能用
-                # dive_speed 本身:否則 t_rem 立刻歸零、全員爆 v_req=dive_speed → 無法
-                # 讓前機等後機 = 落單。用可達速配 → 近機 v_req 偏低被放慢 → 等齊。
-                self.dive_pace = 0.8 * self.dive_speed
-                self.dive_T = now + dmax / self.dive_pace + 1.0
+                self.dive_pace = self.pace_cfg if self.pace_cfg > 1.0 else min(
+                    self.vmax, 0.8 * self.dive_speed)
+                self.dive_T = now + dmax / self.dive_pace + 2.0
+                # 錯開放行:近的先在環上多等一會兒,之後大家用同一個配速飛。
+                # ⚠️ 這是「不靠減速」達成同時命中的關鍵 —— 靠減速行不通,因為近機
+                #    需要的速度會低於噴射可持續下限 vmin(45),被夾住就一定早到
+                #    (實測早到 14.5s;把 vmin 壓到 38 又會失速亂飛)。
+                self.release_t = {}
+                for j in self.pos:
+                    dj = dist_m(self.pos[j][:2], self.T)
+                    self.release_t[j] = now + (dmax - dj) / self.dive_pace
+                lag = {j: round(self.release_t[j] - now, 1) for j in sorted(self.release_t)}
+                self.get_logger().info(
+                    f"DIVE 配速:最遠 {dmax:.0f}m / {self.dive_pace:.0f} m/s "
+                    f"→ 共同命中 T+{self.dive_T-now:.0f}s;錯開放行 {lag}")
 
         elif self.phase == "DIVE":
             done = 0
@@ -478,6 +506,14 @@ class TotNode(Node):
                         f"UAV{i} 命中紅心 @+{now-self.dive_go:.2f}s (最近 {self.dmin[i]:.0f}m "
                         f"命中高度 {self.hit_alt[i]:+.0f}m(離紅心地表) "
                         f"gs {self.gs.get(i,0):.0f}m/s)")
+                if now < getattr(self, "release_t", {}).get(i, 0.0):
+                    # 還沒輪到:在自己的環點上等,保持高度與對正
+                    mode = "wait"
+                    self._goto(i, *self.pp[self.slot_id[i]], self.perch_alt, self.vmin)
+                    stat[i] = {"mode": mode, "d": round(d),
+                               "wait": round(self.release_t[i] - now, 1)}
+                    self._row(now, i, d, mode, self.T)
+                    continue
                 if i in self.impact:
                     done += 1; mode = "expended" if self.expend else "impact"
                     if not self.expend:
@@ -487,9 +523,12 @@ class TotNode(Node):
                 else:
                     # 俯衝砸向 T:指令上限 dive_speed(> 頂速 → TECS 壓機頭俯衝加速);
                     # 近機(會早到)v_req 偏低 → 放慢到最低 0.62·dive_speed 等後機(仍在俯衝)
+                    # 俯衝段也要做時間對齊(這是 STOT 的 S):近機必須能「慢下來等」。
+                    # ⚠️ 舊版速度下限是 0.62·dive_speed(=87 m/s,比可達速還高)→ 全員
+                    #    永遠全速 → 完全沒有等待餘裕 → 命中散布 26.7s。下限放到 vmin。
                     t_rem = self.dive_T - now
                     v_req = d / max(t_rem, 0.05)
-                    v = max(0.62 * self.dive_speed, min(self.dive_speed, v_req))
+                    v = max(self.vmin, min(self.dive_speed, v_req))
                     mode = "dive"
                     # 鎖存:整段俯衝只發一次航點,讓 ArduPlane 把 prev_WP→next_WP 的
                     # 高度斜坡整條飛完 = 真正的直線俯衝。

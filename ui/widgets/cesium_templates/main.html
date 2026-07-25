@@ -626,6 +626,92 @@ function setTotGate(jsonStr) {
              pixelOffset: new Cesium.Cartesian2(0, -26) },
   }));
 }
+// ── 命中爆炸動畫(各機命中紅心時放一發)────────────────────────────────
+// 純前端動畫:一顆由小變大再淡出的火球 + 向外擴散的震波環 + 短暫的命中標籤。
+// 用 CallbackProperty 讓 Cesium 每幀重算大小/透明度,結束後自動移除實體。
+let explosionEntities = [];
+function clearExplosions() {
+  explosionEntities.forEach(e => { try { viewer.entities.remove(e); } catch(_){} });
+  explosionEntities = [];
+}
+function explodeAt(lat, lon, alt, label) {
+  const t0 = Cesium.JulianDate.now();
+  const DUR = 2.2;                       // 動畫總長(秒)
+  const RMAX = 140.0;                    // 火球最大半徑(m)
+  const SHOCK = 420.0;                   // 震波環最大半徑(m)
+  const h = (alt === undefined || alt === null) ? 0 : alt;
+  const pos = Cesium.Cartesian3.fromDegrees(lon, lat, h);
+
+  function age(time) {
+    return Cesium.JulianDate.secondsDifference(time, t0);
+  }
+  // 1) 火球:半徑 0→RMAX(先快後慢),顏色 白→黃→橙→紅,同時淡出
+  const ball = viewer.entities.add({
+    name: 'BOOM-ball',
+    position: pos,
+    ellipsoid: {
+      radii: new Cesium.CallbackProperty(time => {
+        const k = Math.min(1, Math.max(0, age(time) / DUR));
+        const r = RMAX * Math.pow(k, 0.45);      // 前期擴張快
+        return new Cesium.Cartesian3(r, r, r * 0.75);
+      }, false),
+      material: new Cesium.ColorMaterialProperty(
+        new Cesium.CallbackProperty(time => {
+          const k = Math.min(1, Math.max(0, age(time) / DUR));
+          // 白 → 黃 → 橙 → 紅
+          const c = k < 0.15 ? Cesium.Color.WHITE
+                  : k < 0.35 ? Cesium.Color.YELLOW
+                  : k < 0.65 ? Cesium.Color.ORANGE
+                             : Cesium.Color.RED;
+          return c.withAlpha(0.85 * (1 - k));
+        }, false)),
+    },
+  });
+  // 2) 地面震波環:半徑 0→SHOCK,快速淡出
+  const shock = viewer.entities.add({
+    name: 'BOOM-shock',
+    position: Cesium.Cartesian3.fromDegrees(lon, lat),
+    ellipse: {
+      semiMajorAxis: new Cesium.CallbackProperty(time => {
+        const k = Math.min(1, Math.max(0, age(time) / DUR));
+        return Math.max(1, SHOCK * Math.pow(k, 0.6));
+      }, false),
+      semiMinorAxis: new Cesium.CallbackProperty(time => {
+        const k = Math.min(1, Math.max(0, age(time) / DUR));
+        return Math.max(1, SHOCK * Math.pow(k, 0.6));
+      }, false),
+      material: new Cesium.ColorMaterialProperty(
+        new Cesium.CallbackProperty(time => {
+          const k = Math.min(1, Math.max(0, age(time) / DUR));
+          return Cesium.Color.ORANGERED.withAlpha(0.40 * (1 - k));
+        }, false)),
+      outline: true, outlineColor: Cesium.Color.ORANGE.withAlpha(0.8),
+      classificationType: Cesium.ClassificationType.TERRAIN,
+    },
+  });
+  // 3) 命中標籤(短暫)
+  const tag = viewer.entities.add({
+    name: 'BOOM-tag',
+    position: Cesium.Cartesian3.fromDegrees(lon, lat, h + 90),
+    label: {
+      text: '💥 ' + (label || 'HIT'),
+      font: 'bold 15px sans-serif', fillColor: Cesium.Color.WHITE,
+      showBackground: true, backgroundColor: hexColor('#c02000', 0.85),
+      pixelOffset: new Cesium.Cartesian2(0, -10),
+      scaleByDistance: new Cesium.NearFarScalar(5e2, 1.2, 4e4, 0.5),
+    },
+  });
+  const born = [ball, shock, tag];
+  explosionEntities.push(...born);
+  setTimeout(() => {
+    born.forEach(e => {
+      try { viewer.entities.remove(e); } catch(_) {}
+      const k = explosionEntities.indexOf(e);
+      if (k >= 0) explosionEntities.splice(k, 1);
+    });
+  }, DUR * 1000 + 200);
+}
+
 function setGeofence(jsonStr) {
   clearGeofence();
   let g;

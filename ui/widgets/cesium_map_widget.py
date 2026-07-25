@@ -345,9 +345,46 @@ class CesiumMapWidget(MapWidgetBase):
             'approach_from': approach_from, 'slots': slots,
         }
         self._js(f'setTotGate({json.dumps(json.dumps(payload))})')
+        # 記住紅心位置並清空命中記錄 → check_bullseye_hit 才知道要炸在哪
+        self._tot_target = (target_lat, target_lon)
+        self._hit_done = set()
 
     def clear_tot_gate(self) -> None:
         self._js('clearTotGate()')
+        self._tot_target = None
+        self._hit_done = set()
+
+    # ── 命中爆炸動畫 ────────────────────────────────────────────────
+    def explode_at(self, lat: float, lon: float, alt: float = 0.0,
+                   label: str = 'HIT') -> None:
+        """在指定點放一發爆炸動畫(火球 + 地面震波環 + 命中標籤)。"""
+        self._js(f'explodeAt({float(lat)}, {float(lon)}, {float(alt)}, '
+                 f'{json.dumps(str(label))})')
+
+    def clear_explosions(self) -> None:
+        self._js('clearExplosions()')
+
+    def check_bullseye_hit(self, sysid: int, lat: float, lon: float,
+                           alt: float = 0.0, radius: float = 60.0) -> bool:
+        """UAV 位置更新時呼叫:靠近已標記的紅心就自動放爆炸(每機只放一次)。
+
+        radius 用「已命中判定半徑」而非 0,因為 GPS/更新率下不可能剛好取樣在
+        正中心;實測 tot_node 的命中最近距是 6-17m,60m 門檻可穩定觸發一次。"""
+        tgt = getattr(self, '_tot_target', None)
+        if not tgt:
+            return False
+        if sysid in getattr(self, '_hit_done', set()):
+            return False
+        EARTH = 111320.0
+        dy = (lat - tgt[0]) * EARTH
+        dx = (lon - tgt[1]) * EARTH * math.cos(math.radians(tgt[0]))
+        if math.hypot(dx, dy) > radius:
+            return False
+        if not hasattr(self, '_hit_done'):
+            self._hit_done = set()
+        self._hit_done.add(sysid)
+        self.explode_at(lat, lon, alt, f'UAV{sysid} 命中')
+        return True
 
     # ─────────────────────────────────────────────────────────────────
     # 地形跟隨（Terrain Following at constant AGL）
@@ -973,6 +1010,11 @@ class CesiumMapWidget(MapWidgetBase):
             f'updateUAVPosition({lat},{lon},{alt},{heading_deg},{speed_ms},'
             f'{sysid},{mode_js},{armed_js},{vt_js},{pitch_deg},{roll_deg})'
         )
+        # 有標記紅心時,飛到靶心就自動放一發爆炸(每機一次)
+        try:
+            self.check_bullseye_hit(sysid, lat, lon, alt)
+        except Exception:
+            pass
 
     def clear_uav(self, sysid: int = None):
         """清除 UAV 位置標記（不指定 sysid 則清全部）"""

@@ -1,0 +1,23 @@
+# Catapult-launch params for ArduPlane SITL, layered by start_sitl_swarm.sh when
+# LAUNCH=catapult (frame plane-catapult). Loaded AFTER models/plane.parm (accel cal)
+# and sitl_extra.parm (BATT_CAPACITY etc.).
+#
+# TKOFF_THR_MINACC is the forward accel [m/s/s] that un-suppresses the motor in
+# TAKEOFF mode — i.e. how hard the launch must be to start the engine. mission.yaml
+# launch.trigger_accel = 15 is the *catapult* spec; the SITL plane-catapult model
+# applies exactly 15, so the *detection threshold* must sit BELOW that to fire
+# reliably (a threshold == applied accel is marginal). On real hardware, where the
+# catapult exceeds its 15 spec, set this to the mission's 15.
+TKOFF_THR_MINACC 10
+TKOFF_THR_DELAY  2      # 0.2 s motor-start delay after the accel trips (clear the rail)
+ARSPD_USE        1      # auto-takeoff throttle logic needs airspeed
+TKOFF_ROTATE_SPD 0      # catapult: no ground roll, rotate immediately
+TKOFF_TDRAG_ELEV 0      # no taildragger tail-hold
+TKOFF_ALT        100    # climb-out target [m] before the node switches to GUIDED
+
+# ── SITL 彈射器觸發鏈 ──────────────────────────────────────────────
+# SIM_Plane.cpp:410  bool launch_triggered = input.servos[6] > 1700;
+# 彈射器是看「伺服輸出通道 7」的 PWM,不是看 RC 輸入。所以要把 SERVO7 設成
+# 0(Disabled=手動),DO_SET_SERVO 才壓得住輸出(有指派功能的通道每迴圈會被蓋回)。
+# 少了這行 → have_launcher 雖為 true 但永遠不觸發 → 只能跑道滾行。
+SERVO7_FUNCTION 0

@@ -58,14 +58,40 @@ esac
 # 飛到模型物理極限而非被參數卡住。實際上限由 plane-jet 氣動/推力決定（~80-100）。
 JET_BASE="$HOME/ardupilot/Tools/autotest/default_params/plane-jet.parm"
 if [ "${JET:-0}" = "1" ]; then
-  MODEL="plane-jet"
-  CAP="${AIRSPEED_MAX_CAP:-120}"
+  # SIM_Plane 用獨立的 strstr 解析 frame 字串（-jet / -catapult 各自成立），
+  # 所以噴射＋彈射要合成 "plane-jet-catapult"。
+  # ⚠️ 舊版此處直接 MODEL="plane-jet"，會把 LAUNCH=catapult 選到的模型蓋掉 →
+  #    彈射器 silently 消失（have_launcher=false），只能跑道滾行起飛。
+  if [ "$LT" = "catapult" ]; then MODEL="plane-jet-catapult"; else MODEL="plane-jet"; fi
+  CAP="${AIRSPEED_MAX_CAP:-150}"
+  # 姿態限制解除（噴射機不該被泡棉級的角度上限綁住）。DIVE=0 可關掉這段。
+  # ⚠️ 用 .parm 在 SITL 啟動時載入，而非事後 param_set —— 分流讀回參數不可靠，
+  #    「送出去了但沒吃進去」曾讓終端俯衝只掉 10 m/s（該有 ~71 m/s）而高空掠過。
+  DIVE_PITCH_MIN="${DIVE_PITCH_MIN:--80}"   # 最大低頭角（負值；-80 = 幾乎垂直俯衝）
+  DIVE_PITCH_MAX="${DIVE_PITCH_MAX:-45}"
+  DIVE_ROLL_MAX="${DIVE_ROLL_MAX:-80}"
+  DIVE_SINK_MAX="${DIVE_SINK_MAX:-120}"     # 45° @100 m/s 需 ~71 m/s 下沉率
   cat > "$BASE/jet_fast.parm" <<EOF
 # 由 swarm_sitl_up.sh JET=1 產生 — 解除空速上限，飛到模型物理極限
 AIRSPEED_MAX $CAP
 ARSPD_FBW_MAX $CAP
 ARSPD_USE 1
 EOF
+  if [ "${DIVE:-1}" = "1" ]; then
+    cat >> "$BASE/jet_fast.parm" <<EOF
+# ── 終端俯衝：解除角度/下沉限制（參數名已對照本 build 原始碼確認）──
+PTCH_LIM_MIN_DEG $DIVE_PITCH_MIN
+PTCH_LIM_MAX_DEG $DIVE_PITCH_MAX
+ROLL_LIMIT_DEG $DIVE_ROLL_MAX
+STALL_PREVENTION 0
+TECS_SINK_MAX $DIVE_SINK_MAX
+TECS_SINK_MIN 5
+TECS_PITCH_MIN $DIVE_PITCH_MIN
+TECS_PITCH_MAX $DIVE_PITCH_MAX
+TECS_SPDWEIGHT 0
+THR_MIN 0
+EOF
+  fi
 fi
 
 # ── MAXV=1（泡棉專用）：解除 30 m/s 參數上限，配 ROS2 層 PRESET=max ─────────
@@ -87,7 +113,11 @@ fi
 # 再疊 jet_fast（解上限）；否則用 plane.parm（加速度校正）。
 DEF_LIST=""
 if [ "${JET:-0}" = "1" ]; then
-  for f in "$JET_BASE" "$BR/sitl_extra.parm" "$BASE/sitl_overrides.parm" "$BASE/jet_fast.parm"; do
+  # ⚠️ models/plane.parm 必須先疊:它帶 12 行 INS_ACC* 加速度校正,而
+  #    plane-jet.parm 一行都沒有。少了它 → 「PreArm: 3D Accel calibration needed」
+  #    → 六機全部解不了鎖(彈射/起飛靜默失敗)。之後才疊 plane-jet 的噴射氣動調參。
+  for f in "$HOME/ardupilot/Tools/autotest/models/plane.parm" \
+           "$JET_BASE" "$BR/sitl_extra.parm" "$BASE/sitl_overrides.parm" "$BASE/jet_fast.parm"; do
     [ -f "$f" ] && DEF_LIST="${DEF_LIST:+$DEF_LIST,}$f"
   done
 else

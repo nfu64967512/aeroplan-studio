@@ -68,8 +68,11 @@ class TotNode(Node):
                                   # (非到 T 繞圈 → 固定翼 loiter 半徑 ~66m 打不到點)
         g("switch_r", 130.0)      # 兩段俯衝:d>switch_r 瞄準 T(俯衝「砸向」T、貼地),
                                   # d<switch_r 才改瞄穿越點穿過去(未進 loiter 半徑前切換)
-        g("dive_speed", 42.0)     # 俯衝指令空速(> 泡棉頂速 → TECS 壓機頭追速 = 俯衝+終端加速);
+        g("dive_speed", 42.0)     # 俯衝指令空速(> 頂速 → TECS 壓機頭追速 = 俯衝+終端加速);
                                   # 機體端須配 AIRSPEED_MAX 放寬 + TECS_SINK_MAX + PTCH_LIM_MIN 陡
+        g("dive_angle", 45.0)     # 俯衝角(度)。指令高度沿下滑線 alt = d·tan(角度) → 直線
+                                  # 俯衝「正好在紅心觸地」,而非平飛到目標上空才開始降。
+        g("expend_on_impact", True)  # 命中即視為消耗(不再下令、不脫離)
         g("perch_reach", 70.0)    # 認定「已就位 pushover 環」的半徑
         g("impact_reach", 40.0)   # 認定「已穿越 T(衝擊)」的水平半徑(另有通過最近點判定)
         g("csv", "/tmp/tot_node")
@@ -92,6 +95,8 @@ class TotNode(Node):
         self.overshoot = float(p("overshoot").value)
         self.switch_r = float(p("switch_r").value)
         self.dive_speed = float(p("dive_speed").value)
+        self.dive_angle = float(p("dive_angle").value)
+        self.expend = bool(p("expend_on_impact").value)
         self.perch_reach = float(p("perch_reach").value)
         self.impact_reach = float(p("impact_reach").value)
 
@@ -107,6 +112,7 @@ class TotNode(Node):
         self.spacing = self.r_fan * math.radians(2 * self.half) / (self.n - 1)
         self.dmin = {}   # 各機對 T 的最近水平距(記錄真實穿越)
         self.commit = {}  # 各機是否已鎖定穿越(進 switch_r 後不再翻回瞄 T)
+        self.hit_alt = {}  # 各機命中當下的高度(驗證是俯衝命中而非高空掠過)
 
         # ── ① MAVLink 分流連線(每機一條)──
         self.link, self.pos, self.gs = {}, {}, {}
@@ -192,6 +198,20 @@ class TotNode(Node):
     def _dive_alt(self, i):
         """終端俯衝微高度分層(防撞):收斂同一水平點 T,但各機差 dive_layer 垂直。"""
         return self.dive_alt + self.dive_layer * (self.slot_id[i] - (self.n - 1) / 2.0)
+
+    def _line_alt(self, i, d_aim):
+        """瞄準點在 dive_angle 下滑線上的高度。
+        d_aim = 瞄準點與 T 的水平距(T 本身 = 0;穿越點在 T 後方 → 傳負值)。
+
+        ⚠️ 關鍵:高度要算「瞄準點自己位置」的線上高度,不是「飛機當下位置」的。
+        用飛機當下的 d 去算(alt = d·tan45 ≈ 現在高度)等於命令「飛到瞄準點時
+        保持現在高度」= 幾乎平飛,飛機浮在線上方、到近端才被迫暴拉 → 正是
+        「高空掠過紅心」的真因。瞄準點在線上時,ArduPlane GUIDED 的高度斜坡
+        (prev_WP=當前位置 → next_WP)本身就是那條 45° 直線,落後時斜率自動變陡。"""
+        lay = self.dive_layer * (self.slot_id[i] - (self.n - 1) / 2.0)
+        a = self.dive_alt + lay + d_aim * math.tan(math.radians(self.dive_angle))
+        # 相對高度剛好 0.0 會被 Location::sanitize() 判為「未設定」→ 指令被拒
+        return a if abs(a) > 0.5 else -0.5
 
     def _assign_and_plan(self):
         """slot 指派(依橫向、航跡不交叉)+ 共同抵達時刻。"""
@@ -310,7 +330,6 @@ class TotNode(Node):
             done = 0
             for i in sorted(self.pos):
                 d = dist_m(self.pos[i][:2], self.T)
-                alt = self._dive_alt(i)
                 thru = self.thru[self.slot_id[i]]   # 穿越瞄準點(T 後方)
                 if d < self.dmin.get(i, 1e9):
                     self.dmin[i] = d                # 追蹤真實最近水平距
@@ -318,17 +337,26 @@ class TotNode(Node):
                 # 不因穿過後 d 回升 > switch_r 又翻回瞄 T → 修掉繞圈 re-attack。
                 if not self.commit.get(i) and d < self.switch_r:
                     self.commit[i] = True
-                aimpt = thru if self.commit.get(i) else self.T
+                # 瞄準點與其「線上高度」必須成對決定:只換瞄準點卻沿用舊高度,
+                # 會把 45° 下滑線壓平成 ~9°(切換瞬間目標變遠、高度沒跟著降)。
+                if self.commit.get(i):
+                    aimpt = thru; alt = self._line_alt(i, -self.overshoot)
+                else:
+                    aimpt = self.T; alt = self._line_alt(i, 0.0)
                 # 衝擊判定:進 impact_reach,或已 committed 且通過最近點(d 回升)→ 記為穿越
                 passed = self.commit.get(i) and d > self.dmin[i] + 8.0
                 if i not in self.impact and (d < self.impact_reach or passed):
                     self.impact[i] = now
+                    self.hit_alt[i] = self.pos[i][2]   # 命中高度(判定是否真俯衝到紅心)
                     self.get_logger().info(
-                        f"UAV{i} 穿越 T @+{now-self.dive_go:.2f}s (最近 {self.dmin[i]:.0f}m "
-                        f"alt {self.pos[i][2]:.0f}m gs {self.gs.get(i,0):.0f}m/s)")
+                        f"UAV{i} 命中紅心 @+{now-self.dive_go:.2f}s (最近 {self.dmin[i]:.0f}m "
+                        f"命中高度 {self.pos[i][2]:.0f}m gs {self.gs.get(i,0):.0f}m/s)")
                 if i in self.impact:
-                    # 已穿越 → 續飛穿越點 egress(俯衝速度),不繞 T
-                    done += 1; mode = "impact"; self._goto(i, *thru, alt, self.dive_speed)
+                    done += 1; mode = "expended" if self.expend else "impact"
+                    if not self.expend:
+                        # 保留機體 → 續飛穿越點 egress(俯衝速度),不繞 T
+                        self._goto(i, *thru, alt, self.dive_speed)
+                    # expend_on_impact:命中即視為消耗,停止下令(不脫離、不拉起)
                 else:
                     # 俯衝砸向 T:指令上限 dive_speed(> 頂速 → TECS 壓機頭俯衝加速);
                     # 近機(會早到)v_req 偏低 → 放慢到最低 0.62·dive_speed 等後機(仍在俯衝)
@@ -344,9 +372,11 @@ class TotNode(Node):
                 imp = [self.impact[i] - self.dive_go for i in self.impact]
                 spread = max(imp) - min(imp)
                 dmins = {i: round(self.dmin[i], 1) for i in sorted(self.impact)}
+                halts = {i: round(self.hit_alt.get(i, -1)) for i in sorted(self.impact)}
                 self.get_logger().warn(
-                    f"★★ 俯衝齊射:全員穿越目標 T。穿越時間散布 = {spread:.2f}s "
-                    f"(≈{spread*self.dive_speed:.1f}m 縱向間隔);各機最近水平距 T = {dmins} m")
+                    f"★★ 俯衝命中紅心:全員命中。命中時間散布 = {spread:.2f}s "
+                    f"(≈{spread*self.dive_speed:.1f}m 縱向間隔);最近水平距 = {dmins} m;"
+                    f"命中高度 = {halts} m(俯衝角 {self.dive_angle:.0f}°)")
                 self.phase = "DONE"
 
         self.status_pub.publish(String(data=json.dumps(

@@ -14,7 +14,7 @@
 
 用法: python3 jet_show_cruise.py [cruise_speed] [v_spacing]
 """
-import sys, math, time
+import sys, math, time, csv
 from pymavlink import mavutil
 
 EARTH = 111320.0
@@ -123,9 +123,24 @@ def v_slot(lead, hdg, rank, spacing):
     return dest(p[0], p[1], (hdg + 90.0) % 360.0, lat_off)      # 側向
 
 
+REC = "/tmp/show_track.csv"
+
+
 def main():
     v_cruise = float(sys.argv[1]) if len(sys.argv) > 1 else 70.0
     spacing = float(sys.argv[2]) if len(sys.argv) > 2 else 300.0
+    rec = open(REC, "w", newline="")
+    rw = csv.writer(rec)
+    rw.writerow(["t", "sysid", "lat", "lon", "alt", "phase"])
+    t_rec0 = time.time()
+
+    def snap(phase, links_):
+        for k, cc in links_.items():
+            p = pos_of(cc, window=0.02)
+            if p:
+                rw.writerow([round(time.time() - t_rec0, 1), k,
+                             p[0], p[1], round(p[2], 1), phase])
+        rec.flush()
     links = {i: conn(i) for i in range(1, N + 1)}
     for i, c in links.items():                              # 確保 GUIDED
         c.mav.set_mode_send(c.target_system,
@@ -171,6 +186,7 @@ def main():
             if p:
                 worst = max(worst, dist_m(p[:2], s))
             goto(links[i], s[0], s[1], CRUISE_ALT, v_cruise)
+        snap("GATHER", links)
         if worst < 700:
             print(f"[GATHER] 靠攏完成 @+{time.time()-t0:.0f}s worst={worst:.0f}m", flush=True)
             break
@@ -212,6 +228,7 @@ def main():
             v_cmd = v_cruise + KP_ALONG * along
             v_cmd = max(V_MIN, min(V_MAX, v_cmd))
             goto(links[i], s_aim[0], s_aim[1], CRUISE_ALT, v_cmd)
+        snap("CRUISE", links)
         if errs and s_along > join_d:
             graded.append((max(errs), sum(errs) / len(errs)))
         if int(el) % 20 == 0 and errs:
@@ -246,6 +263,7 @@ def main():
             p = pos_of(links[i])
             if p and dist_m(p[:2], slots[r]) < 350:
                 done += 1
+        snap("SCATTER", links)
         if done == N:
             break
         time.sleep(1.0)

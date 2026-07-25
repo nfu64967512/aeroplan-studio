@@ -85,7 +85,21 @@ class TotNode(Node):
                                   # 15°→10°)。所以航點高度要照 角度/track_frac 去要,
                                   # 才會真的沿著幾何下滑線落到紅心(等效:瞄準點壓到地面
                                   # 以下)。不補這個係數 → 永遠在紅心上空 220-250m 掠過。
+        g("ground_alt", 0.0)      # 紅心所在地表的「相對起飛點高度」(m)。SITL 的
+                                  # relative_alt 是相對 HOME,目標區地勢不見得同高:
+                                  # 實測撞地時讀到 -39~-55m,代表紅心地表約在 -45m。
+                                  # 設好它 → 下滑線終點落在真正的地表,且命中高度會以
+                                  # 「離紅心地表多高」回報,真正命中 = 0。
+        g("align_tol", 30.0)      # 進俯衝前的「橫向對正」門檻(m)。飛機必須先貼上自己
+                                  # 那條「紅心徑向線」才准俯衝 —— 對正在 STOT 之前做完,
+                                  # 終端就不必再修正,才能又快又準。
+                                  # (只靠終端捕獲去修 → 要嘛慢速盤旋才準,要嘛快但偏。)
         g("dive_radius", 30.0)    # 俯衝航點的 param3 繞圈半徑(見 _reposition)
+        g("dive_spdweight", 0.0)  # 進俯衝時推給飛控的 TECS_SPDWEIGHT。
+                                  # 0 = pitch 只追高度(俯得凶,但空速沒人管會衰減:
+                                  #     實測終端 gs 掉到 31-39 m/s、俯衝拖成 250s、
+                                  #     同時性散布 19.8s —— 變成慢速盤旋而不是俯衝)。
+                                  # 1 = 高度/空速平衡(保速、夠快、同時性好)。
         g("line_tol", 80.0)       # 高於下滑線這麼多就重發一次航點(重新建立較陡的斜坡)
         g("resend_min_dt", 3.0)   # 重發最小間隔(秒)。無限制重發會一直重設高度斜坡。
         g("expend_on_impact", True)  # 命中即視為消耗(不再下令、不脫離)
@@ -115,6 +129,11 @@ class TotNode(Node):
         self.perch_gate = float(p("perch_alt_gate").value)
         self.track_frac = max(0.2, min(1.0, float(p("track_frac").value)))
         self.dive_radius = float(p("dive_radius").value)
+        self.dive_spdw = float(p("dive_spdweight").value)
+        self.align_tol = float(p("align_tol").value)
+        self.ground_alt = float(p("ground_alt").value)
+        # 下滑線的終點高度 = 紅心地表(+dive_alt 微量餘裕),而不是相對 HOME 的 0
+        self.dive_alt = self.ground_alt + self.dive_alt
         self.line_tol = float(p("line_tol").value)
         self.resend_dt = float(p("resend_min_dt").value)
         self.expend = bool(p("expend_on_impact").value)
@@ -144,6 +163,7 @@ class TotNode(Node):
         self.hit_alt = {}  # 各機命中當下的高度(驗證是俯衝命中而非高空掠過)
         self.wp_key = {}   # 俯衝航點鎖存鍵(同 key 不重發 → 不重設高度斜坡)
         self.wp_t = {}     # 上次重發時刻(節制重發頻率)
+        self.align_ok = {}  # 是否已在遠端對正過徑向線(鎖存,避免極限環)
 
         # ── ① MAVLink 分流連線(每機一條)──
         self.link, self.pos, self.gs = {}, {}, {}
@@ -256,6 +276,18 @@ class TotNode(Node):
         """終端俯衝微高度分層(防撞):收斂同一水平點 T,但各機差 dive_layer 垂直。"""
         return self.dive_alt + self.dive_layer * (self.slot_id[i] - (self.n - 1) / 2.0)
 
+    def _xtrack(self, i):
+        """飛機偏離「自己那條紅心徑向線」的橫向距離(m)。
+        徑向線 = 由 T 沿本機 slot 方位射出的直線;偏差 = 距T · |sin(方位差)|。
+        這是「有沒有正對紅心」的量化指標:0 = 完全對正,俯衝下去就是直線命中。"""
+        if i not in self.pos or i not in self.slot_id:
+            return 0.0
+        off = -self.half + 2 * self.half * self.slot_id[i] / (self.n - 1)
+        brg_radial = (self.approach + off) % 360.0
+        d = dist_m(self.T, self.pos[i][:2])
+        b = bearing(self.T, self.pos[i][:2])
+        return abs(d * math.sin(math.radians(b - brg_radial)))
+
     def _line_alt(self, i, d_aim):
         """瞄準點在 dive_angle 下滑線上的高度。
         d_aim = 瞄準點與 T 的水平距(T 本身 = 0;穿越點在 T 後方 → 傳負值)。
@@ -367,16 +399,25 @@ class TotNode(Node):
                 # ⚠️ 距離 + 高度雙閘門。舊版只看距離 → 還沒爬到高點就被判定就位,
                 # 俯衝從 778-1187m(而非指令 1500m)起跳,下滑角自然不足 → 掉不到底。
                 z_ok = z >= self.perch_alt * self.perch_gate
-                if i not in self.perch_arr and d < self.pushover_r and z_ok:
-                    self.perch_arr[i] = now              # 已越 pushover 環且爬到高度
+                xt = self._xtrack(i)                     # 橫向偏離徑向線
+                # ⚠️ 對正要「鎖存」,不能每 tick 重判:否則會形成極限環 ——
+                #    飛出去對正 → 內切 → 稍微飄掉 → 又被趕出去,永遠進不了俯衝
+                #    (實測 15 分鐘只有 2/6 通過閘門)。一旦在遠端對正過就放行。
+                if xt <= self.align_tol:
+                    self.align_ok[i] = True
+                x_ok = self.align_ok.get(i, False)
+                if i not in self.perch_arr and d < self.pushover_r and z_ok and x_ok:
+                    self.perch_arr[i] = now              # 高度 + 距離 + 對正 三閘門
                     self.get_logger().info(
-                        f"UAV{i} 就位對準環 @+{now-self.t0:.1f}s (alt {z:.0f}m)")
+                        f"UAV{i} 就位對準環 @+{now-self.t0:.1f}s "
+                        f"(alt {z:.0f}m 橫偏 {xt:.0f}m)")
                 if i in self.perch_arr:
                     # 就位後續朝穿越點慢飛(保持對準內切、不繞圈)→ DIVE 為已對準直線穿越。
                     # (曾試「守在環上盤旋等齊」→ 噴射盤旋掉高、穿越偏 320m,反而更糟。)
                     mode = "aligned"; self._goto(i, *thru, self.perch_alt, self.vmin)
-                elif not z_ok:
-                    # 高度不夠 → 先退回扇形 slot(4000m 外)邊飛邊爬,爬到才准內切。
+                elif not z_ok or not x_ok:
+                    # 高度不夠或還沒對正 → 先退回扇形 slot(4000m 外、就在徑向線上)
+                    # 邊飛邊爬邊對正;飛向 slot 本身就會把飛機拉回徑向線。
                     # ⚠️ 曾用「守在 pushover 環上爬」,但環就在附近,飛機憑慣性/迴轉半徑
                     #    仍持續內漂:實測 6 機有 5 機爬到高度時已經只剩 320-707m,
                     #    需要 54-71° 才打得到 → 物理上不可能 → 全部從紅心上空飛過。
@@ -401,7 +442,7 @@ class TotNode(Node):
                 for j in self.link:
                     lk = self.link[j]
                     lk.mav.param_set_send(lk.target_system or j, 1,
-                                          b"TECS_SPDWEIGHT", 0.0,
+                                          b"TECS_SPDWEIGHT", self.dive_spdw,
                                           mavutil.mavlink.MAV_PARAM_TYPE_REAL32)
                 dmax = max(dist_m(self.pos[i][:2], self.T) for i in self.pos)
                 # ⚠️ 配速要用「實際可達俯衝速度」(泡棉俯衝 ~0.8·dive_speed),不能用
@@ -431,10 +472,12 @@ class TotNode(Node):
                 passed = self.commit.get(i) and d > self.dmin[i] + 8.0
                 if i not in self.impact and (d < self.impact_reach or passed):
                     self.impact[i] = now
-                    self.hit_alt[i] = self.pos[i][2]   # 命中高度(判定是否真俯衝到紅心)
+                    # 以「離紅心地表多高」回報:真正砸中 = 0
+                    self.hit_alt[i] = self.pos[i][2] - self.ground_alt
                     self.get_logger().info(
                         f"UAV{i} 命中紅心 @+{now-self.dive_go:.2f}s (最近 {self.dmin[i]:.0f}m "
-                        f"命中高度 {self.pos[i][2]:.0f}m gs {self.gs.get(i,0):.0f}m/s)")
+                        f"命中高度 {self.hit_alt[i]:+.0f}m(離紅心地表) "
+                        f"gs {self.gs.get(i,0):.0f}m/s)")
                 if i in self.impact:
                     done += 1; mode = "expended" if self.expend else "impact"
                     if not self.expend:

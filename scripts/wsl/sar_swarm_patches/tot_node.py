@@ -113,6 +113,7 @@ class TotNode(Node):
         self.dmin = {}   # 各機對 T 的最近水平距(記錄真實穿越)
         self.commit = {}  # 各機是否已鎖定穿越(進 switch_r 後不再翻回瞄 T)
         self.hit_alt = {}  # 各機命中當下的高度(驗證是俯衝命中而非高空掠過)
+        self.wp_key = {}   # 俯衝航點鎖存鍵(同 key 不重發 → 不重設高度斜坡)
 
         # ── ① MAVLink 分流連線(每機一條)──
         self.link, self.pos, self.gs = {}, {}, {}
@@ -184,11 +185,33 @@ class TotNode(Node):
                                     mavutil.mavlink.MAV_CMD_DO_CHANGE_SPEED, 0,
                                     0, float(v), -1, 0, 0, 0, 0)
             self.last_v[i] = v; self.last_v_t[i] = now
+        self._reposition(i, lat, lon, alt)
+
+    def _reposition(self, i, lat, lon, alt):
+        c = self.link[i]
         c.mav.command_int_send(
             c.target_system or i, 1,
             mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
             mavutil.mavlink.MAV_CMD_DO_REPOSITION, 0, 0, -1.0, 0.0, 0.0,
             float("nan"), int(lat * 1e7), int(lon * 1e7), float(alt))
+
+    def _goto_latched(self, i, lat, lon, alt, v, key):
+        """俯衝專用:DO_REPOSITION 只在 key 改變時發一次,速度照常每 tick 更新。
+
+        ⚠️ 這是「俯衝不下來」的真因:ArduPlane 的 GUIDED 高度是沿 prev_WP→next_WP
+        線性斜坡(ALT_SLOPE_MIN 生效)。每 tick 重發 DO_REPOSITION 會把 prev_WP 重設
+        成「現在位置＋現在高度」→ 斜坡每 0.33 s 重新從當前高度起算,下降需求永遠
+        累積不起來,結果只掉 ~100 m 就飛過目標(實測命中高度 862-1060 m)。
+        改成鎖存:整段俯衝只發一次航點,讓飛控自己把那條 45° 斜坡飛完。"""
+        c = self.link[i]; now = time.time()
+        if abs(v - self.last_v[i]) > 0.5 or (now - self.last_v_t[i]) > 2.0:
+            c.mav.command_long_send(c.target_system or i, 1,
+                                    mavutil.mavlink.MAV_CMD_DO_CHANGE_SPEED, 0,
+                                    0, float(v), -1, 0, 0, 0, 0)
+            self.last_v[i] = v; self.last_v_t[i] = now
+        if self.wp_key.get(i) != key:
+            self._reposition(i, lat, lon, alt)
+            self.wp_key[i] = key
 
     def _alt(self, i):
         """每 slot 專屬高度層(對齊階段防撞):slot_id 對稱分佈於 talt ± (n-1)/2·layer。
@@ -363,7 +386,11 @@ class TotNode(Node):
                     t_rem = self.dive_T - now
                     v_req = d / max(t_rem, 0.05)
                     v = max(0.62 * self.dive_speed, min(self.dive_speed, v_req))
-                    mode = "dive"; self._goto(i, *aimpt, alt, v)
+                    mode = "dive"
+                    # 鎖存:整段俯衝只發一次航點(key = 是否已 commit),讓 ArduPlane
+                    # 把 prev_WP→next_WP 的高度斜坡整條飛完 = 真正的 45° 直線俯衝
+                    self._goto_latched(i, *aimpt, alt, v,
+                                       key=("thru" if self.commit.get(i) else "T"))
                 stat[i] = {"mode": mode, "d": round(d), "alt": round(alt),
                            "z": round(self.pos[i][2]), "gs": round(self.gs.get(i, 0))}
                 self._row(now, i, d, mode, self.T)

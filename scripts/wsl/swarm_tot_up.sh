@@ -16,7 +16,13 @@ TLAT="${TLAT:-25.1406}"; TLON="${TLON:-121.2325}"; TALT="${TALT:-90}"
 APPROACH="${APPROACH:-180}"; RFAN="${RFAN:-2000}"; HALF="${HALF:-30}"
 VMIN="${VMIN:-14}"; VMAX="${VMAX:-30}"; PLAN="${PLAN:-0.9}"; MARGIN="${MARGIN:-40}"
 
-echo "[tot] 目標=$TLAT,$TLON  扇形 R=$RFAN ±$HALF°  進場自 $APPROACH°"
+# MAVLink 分流基準埠。⚠️ AeroPlan 前端也連 6760 家族時,MAVProxy 的 tcpin fan-out
+# 只把遙測餵給「先連上的那個」client → tot_node 後連會收不到 GLOBAL_POSITION_INT。
+# 要一邊 AeroPlan live 顯示、一邊 tot_node 帶隊,就把 tot_node 改走 6960(節點分流):
+#   LINK_BASE=6960 bash swarm_tot_up.sh
+LINK_BASE="${LINK_BASE:-6760}"
+
+echo "[tot] 目標=$TLAT,$TLON  扇形 R=$RFAN ±$HALF°  進場自 $APPROACH°  分流基準=$LINK_BASE"
 echo "[tot] ⚠️ 確保編隊節點層已停(pkill -x master_node wingman_node backup_node)"
 pkill -x tot_node 2>/dev/null || true
 sleep 1
@@ -25,4 +31,5 @@ f() { case "$1" in *.*) echo "$1";; *) echo "$1.0";; esac; }
 exec ros2 run sar_swarm tot_node --ros-args \
   -p tlat:="$(f "$TLAT")" -p tlon:="$(f "$TLON")" -p talt:="$(f "$TALT")" \
   -p approach_from:="$(f "$APPROACH")" -p r_fan:="$(f "$RFAN")" -p half_angle:="$(f "$HALF")" \
-  -p vmin:="$(f "$VMIN")" -p vmax:="$(f "$VMAX")" -p plan_frac:="$(f "$PLAN")" -p margin:="$(f "$MARGIN")"
+  -p vmin:="$(f "$VMIN")" -p vmax:="$(f "$VMAX")" -p plan_frac:="$(f "$PLAN")" -p margin:="$(f "$MARGIN")" \
+  -p link_base:="$LINK_BASE" -p link_stride:=10

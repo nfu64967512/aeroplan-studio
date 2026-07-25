@@ -55,6 +55,7 @@ class TotNode(Node):
         super().__init__("tot_node")
         g = self.declare_parameter
         g("n", 6); g("tlat", 25.1406); g("tlon", 121.2325); g("talt", 90.0)
+        g("link_base", 6760); g("link_stride", 10)  # MAVLink 分流(可改 6960 避開 AeroPlan 的 6760)
         g("approach_from", 180.0); g("r_fan", 2000.0); g("half_angle", 30.0)
         g("vmin", 14.0); g("vmax", 30.0); g("plan_frac", 0.9); g("margin", 40.0)
         g("reach", 120.0); g("layer_m", 12.0)
@@ -112,10 +113,17 @@ class TotNode(Node):
         self.slot_of, self.slot_id, self.arr = {}, {}, {}
         self.perch_arr, self.impact = {}, {}
         self.last_v, self.last_v_t = {}, {}
+        lbase = int(p("link_base").value); lstride = int(p("link_stride").value)
         for i in range(1, self.n + 1):
-            c = mavutil.mavlink_connection(f"tcp:127.0.0.1:{6760 + 10 * (i - 1)}",
+            c = mavutil.mavlink_connection(f"tcp:127.0.0.1:{lbase + lstride * (i - 1)}",
                                            source_system=233, dialect="ardupilotmega")
             c.wait_heartbeat(timeout=8)
+            # 明確要求資料流(同 AeroPlan 作法),避免晚連 client 收不到 GLOBAL_POSITION_INT
+            try:
+                c.mav.request_data_stream_send(c.target_system or i, 1,
+                                               mavutil.mavlink.MAV_DATA_STREAM_ALL, 5, 1)
+            except Exception:
+                pass
             self.link[i] = c
             self.last_v[i] = 0.0; self.last_v_t[i] = 0.0
 

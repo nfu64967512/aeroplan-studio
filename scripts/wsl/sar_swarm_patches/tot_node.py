@@ -70,8 +70,24 @@ class TotNode(Node):
                                   # d<switch_r 才改瞄穿越點穿過去(未進 loiter 半徑前切換)
         g("dive_speed", 42.0)     # 俯衝指令空速(> 頂速 → TECS 壓機頭追速 = 俯衝+終端加速);
                                   # 機體端須配 AIRSPEED_MAX 放寬 + TECS_SINK_MAX + PTCH_LIM_MIN 陡
-        g("dive_angle", 45.0)     # 俯衝角(度)。指令高度沿下滑線 alt = d·tan(角度) → 直線
-                                  # 俯衝「正好在紅心觸地」,而非平飛到目標上空才開始降。
+        g("dive_angle", 25.0)     # 設計俯衝角(度)。⚠️ 不是想要幾度就幾度:實測本機
+                                  # 持續可達 25.7-30.4°(瞬時可到 52-63°,但撐不住)。
+                                  # 硬綁 45° 的結果是掉不到底、從紅心上空 244-720m 飛過。
+                                  # 這個角度用來「反推 pushover 環半徑」,見 auto_ring。
+        g("auto_ring", True)      # True = 由 (perch_alt, dive_alt, dive_angle) 反推
+                                  # pushover_r = (perch_alt-dive_alt)/tan(dive_angle),
+                                  # 保證所需下滑角落在可達範圍內 → 真的砸得到紅心。
+        g("perch_alt_gate", 0.85) # PERCH→DIVE 也要看高度:需達 perch_alt 的這個比例。
+                                  # 舊版只看距離 → 還沒爬到就開始俯衝(實測只到 778-1187m
+                                  # 而非指令的 1500m),下滑角自然不夠。
+        g("track_frac", 0.65)     # 下滑線「實際追蹤率」。三次實測一致:飛機只做到指令
+                                  # 角度的 ~0.65 倍(指令45°→實得25.7-30.4°;25°→15.6°;
+                                  # 15°→10°)。所以航點高度要照 角度/track_frac 去要,
+                                  # 才會真的沿著幾何下滑線落到紅心(等效:瞄準點壓到地面
+                                  # 以下)。不補這個係數 → 永遠在紅心上空 220-250m 掠過。
+        g("dive_radius", 30.0)    # 俯衝航點的 param3 繞圈半徑(見 _reposition)
+        g("line_tol", 80.0)       # 高於下滑線這麼多就重發一次航點(重新建立較陡的斜坡)
+        g("resend_min_dt", 3.0)   # 重發最小間隔(秒)。無限制重發會一直重設高度斜坡。
         g("expend_on_impact", True)  # 命中即視為消耗(不再下令、不脫離)
         g("perch_reach", 70.0)    # 認定「已就位 pushover 環」的半徑
         g("impact_reach", 40.0)   # 認定「已穿越 T(衝擊)」的水平半徑(另有通過最近點判定)
@@ -96,7 +112,20 @@ class TotNode(Node):
         self.switch_r = float(p("switch_r").value)
         self.dive_speed = float(p("dive_speed").value)
         self.dive_angle = float(p("dive_angle").value)
+        self.perch_gate = float(p("perch_alt_gate").value)
+        self.track_frac = max(0.2, min(1.0, float(p("track_frac").value)))
+        self.dive_radius = float(p("dive_radius").value)
+        self.line_tol = float(p("line_tol").value)
+        self.resend_dt = float(p("resend_min_dt").value)
         self.expend = bool(p("expend_on_impact").value)
+        if bool(p("auto_ring").value):
+            # 由「可達的下滑角」反推環半徑,而不是硬給半徑再期待飛機做得到。
+            r_need = (self.perch_alt - self.dive_alt) / math.tan(
+                math.radians(self.dive_angle))
+            self.get_logger().info(
+                f"auto_ring：perch {self.perch_alt:.0f}m / 角度 {self.dive_angle:.0f}° "
+                f"→ pushover_r {self.pushover_r:.0f} → {r_need:.0f}m")
+            self.pushover_r = r_need
         self.perch_reach = float(p("perch_reach").value)
         self.impact_reach = float(p("impact_reach").value)
 
@@ -114,6 +143,7 @@ class TotNode(Node):
         self.commit = {}  # 各機是否已鎖定穿越(進 switch_r 後不再翻回瞄 T)
         self.hit_alt = {}  # 各機命中當下的高度(驗證是俯衝命中而非高空掠過)
         self.wp_key = {}   # 俯衝航點鎖存鍵(同 key 不重發 → 不重設高度斜坡)
+        self.wp_t = {}     # 上次重發時刻(節制重發頻率)
 
         # ── ① MAVLink 分流連線(每機一條)──
         self.link, self.pos, self.gs = {}, {}, {}
@@ -187,12 +217,15 @@ class TotNode(Node):
             self.last_v[i] = v; self.last_v_t[i] = now
         self._reposition(i, lat, lon, alt)
 
-    def _reposition(self, i, lat, lon, alt):
+    def _reposition(self, i, lat, lon, alt, radius=0.0):
+        """param3 = 繞圈半徑。⚠️ 傳 0 時 ArduPlane 用 WP_LOITER_RAD(實測 180m),
+        飛機一接近就被捕獲進 180m 的繞圈 → 水平距永遠壓不下去(實測卡在 124-140m)。
+        俯衝段要傳一個小半徑,才可能真的打到紅心中心。"""
         c = self.link[i]
         c.mav.command_int_send(
             c.target_system or i, 1,
             mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
-            mavutil.mavlink.MAV_CMD_DO_REPOSITION, 0, 0, -1.0, 0.0, 0.0,
+            mavutil.mavlink.MAV_CMD_DO_REPOSITION, 0, 0, -1.0, 0.0, float(radius),
             float("nan"), int(lat * 1e7), int(lon * 1e7), float(alt))
 
     def _goto_latched(self, i, lat, lon, alt, v, key):
@@ -210,8 +243,9 @@ class TotNode(Node):
                                     0, float(v), -1, 0, 0, 0, 0)
             self.last_v[i] = v; self.last_v_t[i] = now
         if self.wp_key.get(i) != key:
-            self._reposition(i, lat, lon, alt)
+            self._reposition(i, lat, lon, alt, radius=self.dive_radius)
             self.wp_key[i] = key
+            self.wp_t[i] = now
 
     def _alt(self, i):
         """每 slot 專屬高度層(對齊階段防撞):slot_id 對稱分佈於 talt ± (n-1)/2·layer。
@@ -232,9 +266,16 @@ class TotNode(Node):
         「高空掠過紅心」的真因。瞄準點在線上時,ArduPlane GUIDED 的高度斜坡
         (prev_WP=當前位置 → next_WP)本身就是那條 45° 直線,落後時斜率自動變陡。"""
         lay = self.dive_layer * (self.slot_id[i] - (self.n - 1) / 2.0)
-        a = self.dive_alt + lay + d_aim * math.tan(math.radians(self.dive_angle))
+        z_wp = self.dive_alt + lay + d_aim * math.tan(
+            math.radians(self.dive_angle))            # 幾何下滑線上的目標高度
+        z_ac = self.pos[i][2] if i in self.pos else None
+        if z_ac is not None and self.track_frac < 0.999:
+            # 飛機只做到指令斜率的 track_frac 倍 ⇒ 指令要「加倍陡」才會真的落到 z_wp。
+            # 由當下高度反推:demanded_drop = (z_ac - z_wp)/track_frac,
+            # 瞄準點高度 = z_ac - demanded_drop(通常會是負值 = 瞄到地面以下,正常)。
+            z_wp = z_ac - (z_ac - z_wp) / self.track_frac
         # 相對高度剛好 0.0 會被 Location::sanitize() 判為「未設定」→ 指令被拒
-        return a if abs(a) > 0.5 else -0.5
+        return z_wp if abs(z_wp) > 0.5 else -0.5
 
     def _assign_and_plan(self):
         """slot 指派(依橫向、航跡不交叉)+ 共同抵達時刻。"""
@@ -322,14 +363,26 @@ class TotNode(Node):
                 thru = self.thru[self.slot_id[i]]
                 pp = self.pp[self.slot_id[i]]
                 d = dist_m(self.pos[i][:2], self.T)      # 距 T
-                if i not in self.perch_arr and d < self.pushover_r:
-                    self.perch_arr[i] = now              # 已越 pushover 環
+                z = self.pos[i][2]
+                # ⚠️ 距離 + 高度雙閘門。舊版只看距離 → 還沒爬到高點就被判定就位,
+                # 俯衝從 778-1187m(而非指令 1500m)起跳,下滑角自然不足 → 掉不到底。
+                z_ok = z >= self.perch_alt * self.perch_gate
+                if i not in self.perch_arr and d < self.pushover_r and z_ok:
+                    self.perch_arr[i] = now              # 已越 pushover 環且爬到高度
                     self.get_logger().info(
-                        f"UAV{i} 就位對準環 @+{now-self.t0:.1f}s (alt {self.pos[i][2]:.0f}m)")
+                        f"UAV{i} 就位對準環 @+{now-self.t0:.1f}s (alt {z:.0f}m)")
                 if i in self.perch_arr:
                     # 就位後續朝穿越點慢飛(保持對準內切、不繞圈)→ DIVE 為已對準直線穿越。
                     # (曾試「守在環上盤旋等齊」→ 噴射盤旋掉高、穿越偏 320m,反而更糟。)
                     mode = "aligned"; self._goto(i, *thru, self.perch_alt, self.vmin)
+                elif not z_ok:
+                    # 高度不夠 → 先退回扇形 slot(4000m 外)邊飛邊爬,爬到才准內切。
+                    # ⚠️ 曾用「守在 pushover 環上爬」,但環就在附近,飛機憑慣性/迴轉半徑
+                    #    仍持續內漂:實測 6 機有 5 機爬到高度時已經只剩 320-707m,
+                    #    需要 54-71° 才打得到 → 物理上不可能 → 全部從紅心上空飛過。
+                    #    (唯一在 2070m 進入俯衝的 UAV2 只需 22.3°,就真的砸到 93m。)
+                    #    退到扇形 slot 可保證「爬完才開始內切」,進入距離 = 環半徑。
+                    mode = "climb"; self._goto(i, *self.slot_of[i], self.perch_alt, self.vmin)
                 else:
                     t_rem = self.perch_T - now
                     v = max(self.vmin, min(self.vmax, (d - self.pushover_r) / max(t_rem, 0.1)))
@@ -342,6 +395,14 @@ class TotNode(Node):
                 self.get_logger().warn(
                     f"★ 全員對準內切(alt {zs})→ DIVE 直線俯衝穿越!")
                 self.phase = "DIVE"; self.dive_go = now
+                # TECS_SPDWEIGHT 是相位相依的:俯衝要 0(pitch 只追高度 → 肯壓機頭),
+                # 但巡航要 1(=0 時 pitch 不管空速,速度只剩油門在撐,編隊追不上長機,
+                # 實測 slot 誤差從 289m 一路惡化到 722m)。所以只在進俯衝的當下切 0。
+                for j in self.link:
+                    lk = self.link[j]
+                    lk.mav.param_set_send(lk.target_system or j, 1,
+                                          b"TECS_SPDWEIGHT", 0.0,
+                                          mavutil.mavlink.MAV_PARAM_TYPE_REAL32)
                 dmax = max(dist_m(self.pos[i][:2], self.T) for i in self.pos)
                 # ⚠️ 配速要用「實際可達俯衝速度」(泡棉俯衝 ~0.8·dive_speed),不能用
                 # dive_speed 本身:否則 t_rem 立刻歸零、全員爆 v_req=dive_speed → 無法
@@ -387,10 +448,19 @@ class TotNode(Node):
                     v_req = d / max(t_rem, 0.05)
                     v = max(0.62 * self.dive_speed, min(self.dive_speed, v_req))
                     mode = "dive"
-                    # 鎖存:整段俯衝只發一次航點(key = 是否已 commit),讓 ArduPlane
-                    # 把 prev_WP→next_WP 的高度斜坡整條飛完 = 真正的 45° 直線俯衝
-                    self._goto_latched(i, *aimpt, alt, v,
-                                       key=("thru" if self.commit.get(i) else "T"))
+                    # 鎖存:整段俯衝只發一次航點,讓 ArduPlane 把 prev_WP→next_WP 的
+                    # 高度斜坡整條飛完 = 真正的直線俯衝。
+                    # 但若飛機浮在下滑線上方 > line_tol,就「有節制地」重發一次:
+                    # 重發會以當下位置為新起點 → 建立更陡的斜坡把它拉回線上。
+                    # (無限制重發 = 每 tick 重設斜坡 = 原本掉不下來的病根,故加最小間隔。)
+                    key = "thru" if self.commit.get(i) else "T"
+                    z_line = self.dive_alt + self.dive_layer * (
+                        self.slot_id[i] - (self.n - 1) / 2.0) + \
+                        d * math.tan(math.radians(self.dive_angle))
+                    if (self.pos[i][2] - z_line > self.line_tol and
+                            now - self.wp_t.get(i, 0.0) > self.resend_dt):
+                        key = f"{key}#{int(now)}"        # 換 key → 觸發一次重發
+                    self._goto_latched(i, *aimpt, alt, v, key=key)
                 stat[i] = {"mode": mode, "d": round(d), "alt": round(alt),
                            "z": round(self.pos[i][2]), "gs": round(self.gs.get(i, 0))}
                 self._row(now, i, d, mode, self.T)

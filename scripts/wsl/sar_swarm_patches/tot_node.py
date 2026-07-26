@@ -119,6 +119,13 @@ class TotNode(Node):
         g("resend_min_dt", 3.0)   # 重發最小間隔(秒)。無限制重發會一直重設高度斜坡。
         g("expend_on_impact", True)  # 命中即視為消耗(不再下令、不脫離)
         g("impact_settle", 4.0)   # 全員命中後仍續錄這麼多秒才結算(見 DIVE 收尾)
+        g("dive_hdem_tconst", 0.0)  # 進俯衝時推給飛控的 TECS_HDEM_TCONST(0 = 不動)。
+                                  # ⚠️ 高度需求的濾波時間常數,預設 3.0 s —— 這是
+                                  # 「俯衝角追不到」的機體側瓶頸:實測指令 10°,
+                                  # 六機只做到 5.4-7.2°(比例 0.54-0.72),而且指令
+                                  # 越陡比例越高(B3 指令 20° 做到 18.6°)⇒ 是**固定
+                                  # 滯後**不是固定比例,正是一階濾波的特徵。
+                                  # 只在俯衝段調小,巡航段不受影響。
         g("perch_reach", 70.0)    # 認定「已就位 pushover 環」的半徑
         g("impact_reach", 40.0)   # 認定「已穿越 T(衝擊)」的水平半徑(另有通過最近點判定)
         # ══ 終端比例導引(PN):最後一段改下姿態,繞開 L1/TECS ═══════════════
@@ -166,6 +173,7 @@ class TotNode(Node):
         self.dive_radius = float(p("dive_radius").value)
         self.pace_cfg = float(p("dive_pace").value)
         self.dive_spdw = float(p("dive_spdweight").value)
+        self.hdem_tconst = float(p("dive_hdem_tconst").value)
         self.align_tol = float(p("align_tol").value)
         self.ground_alt = float(p("ground_alt").value)
         # 下滑線的終點高度 = 紅心地表(+dive_alt 微量餘裕),而不是相對 HOME 的 0
@@ -824,6 +832,11 @@ class TotNode(Node):
                     lk.mav.param_set_send(lk.target_system or j, 1,
                                           b"TECS_SPDWEIGHT", self.dive_spdw,
                                           mavutil.mavlink.MAV_PARAM_TYPE_REAL32)
+                    if self.hdem_tconst > 0.0:
+                        lk.mav.param_set_send(
+                            lk.target_system or j, 1, b"TECS_HDEM_TCONST",
+                            self.hdem_tconst,
+                            mavutil.mavlink.MAV_PARAM_TYPE_REAL32)
                 # 共同命中時刻:用「最遠的那架 × 可達俯衝速」定 T_impact,近機照這個
                 # 時刻放慢配速 → 六機同時到。配速用實際可達速(非 dive_speed 指令值),
                 # 否則 t_rem 立刻歸零、全員全速、失去等待餘裕。

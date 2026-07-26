@@ -23,7 +23,8 @@ N_LAT="${N_LAT:-4.0}"
 N_VERT="${N_VERT:-3.0}"
 PN_LEAD="${PN_LEAD:-1.0}"
 DIVE_LAYER="${DIVE_LAYER:-12.0}"
-TRACK_FRAC="${TRACK_FRAC:-0.50}"
+TRACK_FRAC="${TRACK_FRAC:-1.0}"
+DIVE_SPDW="${DIVE_SPDW:-1.0}"
 ALIGN_TOL="${ALIGN_TOL:-40.0}"
 DIVE_ANGLE="${DIVE_ANGLE:-10.0}"
 LOG="${LOG:-/tmp/trial_${TRIAL}.log}"
@@ -36,6 +37,11 @@ if [ "$(pgrep -x arduplane | wc -l)" -ne 6 ]; then
 fi
 
 echo "═══ TRIAL $TRIAL  PN=$PN pace=$DIVE_PACE layer=$DIVE_LAYER track=$TRACK_FRAC ═══"
+# TOT_ONLY=1:蜂群已經在空中(上一趟沒打完就中止),只重跑 tot_node。
+# 省掉重啟 SITL + 彈射 + 四散的 ~10 分鐘,迭代導引邏輯時用這個。
+if [ "${TOT_ONLY:-0}" = "1" ]; then
+  echo "[1/1] 蜂群已在空中,直接跑 tot_node"
+else
 echo "[1/3] 彈射起飛…"
 ( cd "$SR" && timeout 260 python3 jet_catapult_launch.py 5 90 ) > /tmp/trial_launch.log 2>&1
 if ! grep -q "全員 GUIDED" /tmp/trial_launch.log; then
@@ -43,6 +49,7 @@ if ! grep -q "全員 GUIDED" /tmp/trial_launch.log; then
 fi
 echo "[2/3] 四散進扇形…"
 ( cd "$SR" && timeout 420 python3 jet_rescatter.py 300 ) > /tmp/trial_scatter.log 2>&1
+fi
 
 echo "[3/3] STOT + 俯衝 → $LOG"
 source /opt/ros/humble/setup.bash
@@ -54,7 +61,7 @@ setsid nohup ros2 run sar_swarm tot_node --ros-args \
   -p dive_alt:=0.0 -p dive_layer:="$DIVE_LAYER" -p dive_angle:="$DIVE_ANGLE" \
   -p auto_ring:=True -p perch_alt_gate:=0.9 -p align_tol:="$ALIGN_TOL" \
   -p track_frac:="$TRACK_FRAC" -p dive_radius:=5.0 -p dive_pace:="$DIVE_PACE" \
-  -p dive_spdweight:=0.0 -p overshoot:=300.0 -p switch_r:=300.0 \
+  -p dive_spdweight:="$DIVE_SPDW" -p overshoot:=300.0 -p switch_r:=300.0 \
   -p dive_speed:=140.0 -p reach:=260.0 -p layer_m:=25.0 -p perch_reach:=260.0 \
   -p impact_reach:=25.0 -p pn_enable:="$PN" -p gate_r:="$GATE_R" \
   -p pn_n_lat:="$N_LAT" -p pn_n_vert:="$N_VERT" -p pn_lead:="$PN_LEAD" \

@@ -80,7 +80,17 @@ class TotNode(Node):
         g("perch_alt_gate", 0.85) # PERCH→DIVE 也要看高度:需達 perch_alt 的這個比例。
                                   # 舊版只看距離 → 還沒爬到就開始俯衝(實測只到 778-1187m
                                   # 而非指令的 1500m),下滑角自然不夠。
-        g("track_frac", 0.65)     # 下滑線「實際追蹤率」。三次實測一致:飛機只做到指令
+        g("track_frac", 1.0)      # ⚠️ 2026-07-27 改回 1.0(原 0.65/0.50)。下面那套
+                                  # 「飛機只追得到指令的 0.5-0.65 倍」是在**航點每 tick
+                                  # 重發**的年代量的 —— 高度斜坡一直被 set_target_
+                                  # altitude_current() 重錨,飛機當然追不到,於是補了
+                                  # 一個 2 倍的過度補償。_goto 鎖存修好之後補償就過頭:
+                                  # 實測 B3 六機在**距目標 1000-1500 m 就已經觸地**
+                                  # (alt 一路等於各自的 z_g),然後貼地滑行進紅心 ——
+                                  # 「命中高度 0」是這樣來的假象,地面摩擦還把地速從
+                                  # 45-55 拖到 19-38 m/s,命中散布因此爆到 13 s。
+                                  # 下面保留原始記錄供對照:
+                                  # 下滑線「實際追蹤率」。三次實測一致:飛機只做到指令
                                   # 角度的 ~0.65 倍(指令45°→實得25.7-30.4°;25°→15.6°;
                                   # 15°→10°)。所以航點高度要照 角度/track_frac 去要,
                                   # 才會真的沿著幾何下滑線落到紅心(等效:瞄準點壓到地面
@@ -213,11 +223,14 @@ class TotNode(Node):
         self.truth_hit = {}   # 真值基準的命中高度(離紅心地表)
         self.dmin = {}   # 各機對 T 的最近水平距(記錄真實穿越)
         self.commit = {}  # 各機是否已鎖定穿越(進 switch_r 後不再翻回瞄 T)
+        self.thru_dyn = {}  # 鎖定當下算出的穿越點(在「本機→T」的延長線上)
         self.hit_alt = {}  # 各機命中當下的高度(驗證是俯衝命中而非高空掠過)
         self.wp_key = {}   # 俯衝航點鎖存鍵(同 key 不重發 → 不重設高度斜坡)
         self.wp_t = {}     # 上次重發時刻(節制重發頻率)
         self.wp_pt = {}    # 上次實際送出的航點 (lat, lon, alt),判斷「有沒有動」
         self.align_ok = {}  # 是否已在遠端對正過徑向線(鎖存,避免極限環)
+        self.ready = {}     # PERCH 就緒(高度+對正,鎖存;全員就緒才一起內切)
+        self.runup_t0 = None  # 同步內切的起始時刻(None = 還在 slot 上爬升對正)
 
         # ── ① MAVLink 分流連線(每機一條)──
         self.link, self.pos, self.gs = {}, {}, {}
@@ -740,8 +753,20 @@ class TotNode(Node):
                 #    當閘門,結果 3/6 永遠進不來(噴射迴轉半徑 ~275m,對定點只能繞)。
                 #    所以這裡仍用「已越過環」,起跑點不等距的問題改用「錯開放行」解
                 #    (見 DIVE 的 release_t):近的晚放,大家用同速飛 → 同時命中。
-                if i not in self.perch_arr and d < self.pushover_r and z_ok and x_ok:
-                    self.perch_arr[i] = now              # 距離 + 高度 + 對正 三閘門
+                # ⚠️ 「就緒」和對正一樣必須**鎖存**,而且要等**全員**就緒才一起內切。
+                #    舊版每 tick 重判 z_ok:高度一沉就把飛機從內切改回「退到 4000m
+                #    的 slot」,目標點一換就觸發一次 DO_REPOSITION,高度又被重錨
+                #    (見 _goto)—— 於是「沉→被趕出去→換航點→再沉」自我維持。
+                #    實測 B2:距離在 2834-4460 m、高度在 180-576 m、橫偏在 3-664 m
+                #    之間振盪,六機沒有一架進得了環。
+                if i not in self.ready and z_ok and x_ok:
+                    self.ready[i] = now
+                    self.get_logger().info(
+                        f"UAV{i} 就緒 @+{now-self.t0:.1f}s "
+                        f"(alt {z:.0f}m 橫偏 {xt:.0f}m)")
+                if self.runup_t0 is not None and i not in self.perch_arr \
+                        and d < self.pushover_r:
+                    self.perch_arr[i] = now
                     self.get_logger().info(
                         f"UAV{i} 就位對準環 @+{now-self.t0:.1f}s "
                         f"(alt {z:.0f}m 橫偏 {xt:.0f}m)")
@@ -751,7 +776,7 @@ class TotNode(Node):
                     #    各機距 T 已經差很多 → 俯衝起跑點不等距 → 命中散布 26.7s。
                     #    瞄 pp 同時保住「半徑」和「對正」(pp 就在自己的徑向線上)。
                     mode = "hold_ring"; self._goto(i, *pp, self.perch_alt, self.vmin)
-                elif not z_ok or not x_ok:
+                elif self.runup_t0 is None:
                     # 高度不夠或還沒對正 → 先退回扇形 slot(4000m 外、就在徑向線上)
                     # 邊飛邊爬邊對正;飛向 slot 本身就會把飛機拉回徑向線。
                     # ⚠️ 曾用「守在 pushover 環上爬」,但環就在附近,飛機憑慣性/迴轉半徑
@@ -771,6 +796,16 @@ class TotNode(Node):
                 stat[i] = {"mode": mode, "d": round(d), "z": round(self.pos[i][2])}
                 self._row(now, i, d, mode, thru)
             self._csv.flush()
+            # 全員就緒才一起放行內切 —— 起跑點齊、航線已對正,之後不再重判。
+            if self.runup_t0 is None and len(self.ready) == self.n:
+                self.runup_t0 = now
+                v_plan = self.plan_frac * self.vmax
+                tmax = max((dist_m(self.pos[i][:2], self.T) - self.pushover_r)
+                           / v_plan for i in self.pos)
+                self.perch_T = now + tmax + 6.0
+                zs = {i: round(self.pos[i][2]) for i in sorted(self.pos)}
+                self.get_logger().warn(
+                    f"★ 全員就緒(alt {zs})→ 同步內切到環,預計 {tmax+6.0:.0f}s")
             if len(self.perch_arr) == self.n:
                 zs = {i: round(self.pos[i][2]) for i in self.pos}
                 self.get_logger().warn(
@@ -838,10 +873,20 @@ class TotNode(Node):
                 # 不因穿過後 d 回升 > switch_r 又翻回瞄 T → 修掉繞圈 re-attack。
                 if not self.commit.get(i) and d < self.switch_r:
                     self.commit[i] = True
+                    # ⚠️ 穿越點要放在「本機當下位置 → T」的延長線上,不能用 slot
+                    #    徑向上那個固定點。飛機若還偏離徑向 δ,瞄固定 thru 的那條
+                    #    直線會從 T 旁邊 δ·overshoot/(overshoot+switch_r) 處通過
+                    #    (本組參數 = 0.5δ)—— 等於在最後 300 m 把辛苦收斂掉的
+                    #    橫偏又還回去一半。沿「本機→T」延長,這條線**定義上通過 T**,
+                    #    幾何誤差 0,而且一樣是「穿過去」不會被捕獲進 loiter。
+                    b = bearing(self.pos[i][:2], self.T)
+                    self.thru_dyn[i] = dest(self.T[0], self.T[1], b,
+                                            self.overshoot)
                 # 瞄準點與其「線上高度」必須成對決定:只換瞄準點卻沿用舊高度,
                 # 會把 45° 下滑線壓平成 ~9°(切換瞬間目標變遠、高度沒跟著降)。
                 if self.commit.get(i):
-                    aimpt = thru; alt = self._line_alt(i, -self.overshoot)
+                    aimpt = self.thru_dyn.get(i, thru)
+                    alt = self._line_alt(i, -self.overshoot)
                 else:
                     aimpt = self.T; alt = self._line_alt(i, 0.0)
                 # 衝擊判定:進 impact_reach,或已 committed 且通過最近點(d 回升)→ 記為穿越

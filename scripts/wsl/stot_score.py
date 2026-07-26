@@ -63,6 +63,8 @@ def main():
     ap.add_argument("--ground", type=float, default=None,
                     help="無 log 時的統一地表高度 fallback")
     ap.add_argument("--phase", default="DIVE", help="只算這個階段(預設 DIVE)")
+    ap.add_argument("--alt-max", type=float, default=30.0,
+                    help="命中高度門檻(m);沿用 _kpi_parse.py 的 ALT_MAX 預設 30")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
 
@@ -150,11 +152,20 @@ def main():
     print("─" * 70)
     print("六機最大水平誤差 = %.2f m   (門檻 5)" % summary["max_miss_m"])
     if summary["max_abs_alt_m"] is not None:
-        print("六機最大命中高度 = %.2f m   (門檻 ~0)" % summary["max_abs_alt_m"])
+        print("六機最大命中高度 = %.2f m   (門檻 %.0f)"
+              % (summary["max_abs_alt_m"], a.alt_max))
     print("命中時間散布     = %.2f s   (門檻 3.0)" % summary["spread_s"])
-    ok = (summary["max_miss_m"] <= 5.0 and summary["spread_s"] <= 3.0
-          and len(res) == 6)
-    print("判定:%s" % ("✅ 通過" if ok else "❌ 未達標"))
+    # ⚠️ 判定必須含命中高度。先前漏掉這一項,結果水平誤差和散布達標時就印「通過」,
+    #    而那一趟六機其實是從紅心上空 35-175 m 飛過 —— 三項要全過才算過。
+    miss_ok = summary["max_miss_m"] <= 5.0
+    spread_ok = summary["spread_s"] <= 3.0
+    alt_ok = (summary["max_abs_alt_m"] is not None
+              and summary["max_abs_alt_m"] <= a.alt_max)
+    ok = miss_ok and spread_ok and alt_ok and len(res) == 6
+    fails = [n for n, good in (("水平誤差", miss_ok), ("散布", spread_ok),
+                               ("命中高度", alt_ok), ("六機到齊", len(res) == 6))
+             if not good]
+    print("判定:%s" % ("✅ 三項全過" if ok else "❌ 未達標(%s)" % "、".join(fails)))
     return 0
 
 

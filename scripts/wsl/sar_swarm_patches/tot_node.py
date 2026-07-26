@@ -203,7 +203,14 @@ class TotNode(Node):
         self.frozen = {}      # 凍結後保持的指令
         self.fc = {}          # 直連飛控的連線
         self.home_amsl = {}   # 每機 home 海拔
-        self.zg = {}    # 每機自量的地表高度(相對 HOME)
+        self.zg = {}    # 每機自量的紅心地表高度(相對 HOME)
+        self.zg_amsl = {}  # 紅心地表的 AMSL(GPS 基準),換算真值高度用
+        self.home_ll = {}    # 每機 HOME 經緯(地表差的減數)
+        self.terr_bull = {}  # 紅心地表 AMSL(地形資料庫)
+        self.terr_home = {}  # 本機 HOME 地表 AMSL(同一資料庫,offset 才會抵消)
+        self.truth = {}       # SITL 真值位置(SIM_STATE);只量測,不進導引
+        self.truth_dmin = {}  # 真值基準的最近水平距
+        self.truth_hit = {}   # 真值基準的命中高度(離紅心地表)
         self.dmin = {}   # 各機對 T 的最近水平距(記錄真實穿越)
         self.commit = {}  # 各機是否已鎖定穿越(進 switch_r 後不再翻回瞄 T)
         self.hit_alt = {}  # 各機命中當下的高度(驗證是俯衝命中而非高空掠過)
@@ -230,6 +237,12 @@ class TotNode(Node):
                     c.target_system or i, 1,
                     mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL, 0,
                     30, 100000, 0, 0, 0, 0, 0)
+                # SIM_STATE(#108)= SITL 真值,用來對照遙測的命中誤差。
+                # 10 Hz 就夠(只是量測),遠離 25 ms 的 SET_MESSAGE_INTERVAL 上限。
+                c.mav.command_long_send(
+                    c.target_system or i, 1,
+                    mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL, 0,
+                    108, 100000, 0, 0, 0, 0, 0)
             except Exception:
                 pass
             self.link[i] = c
@@ -255,8 +268,11 @@ class TotNode(Node):
             gw.writerow([f"pp{k}", s[0], s[1]])
         gf.close()
         self._publish_gate()
+        self._terrain_probe()
         self.create_timer(0.05, self._tick)   # 20 Hz:終端 PN 需要高頻   # 3 Hz 協同迴圈
         self.create_timer(1.0, self._publish_gate)  # latched 定期補發
+        # 地形快取是逐步載入的:第一次問可能還沒 loaded(spacing=0),要持續問。
+        self.create_timer(3.0, self._terrain_probe)
         self.get_logger().info(
             f"tot_node up：扇形 R={self.r_fan:.0f} ±{self.half:.0f}° {self.n} slot "
             f"間隔 {self.spacing:.0f}m；pushover R={self.pushover_r:.0f} perch={self.perch_alt:.0f}m "
@@ -275,6 +291,11 @@ class TotNode(Node):
         #    self.fc(5762+10i)的,只讀 self.link(6960 分流)的話 self.att 會是
         #    舊值或空的,攻角估計 α = θ - γ 就整個錯,俯仰指令跟著錯 ——
         #    這正是 PN 版命中高度掉到 37-53m、誤差 21-24m 的原因。
+        # ⚠️ 順序有意義:兩條線寫的是**同一份** self.pos/vel/att,而分流線實測只有
+        #    5-20 Hz、直連才是 50 Hz。分流線一定要抽(不抽會在 MAVProxy 端累積
+        #    背壓),但要**先**抽,讓直連的新值最後落地 —— 否則每次分流吐一包,
+        #    50 Hz 的姿態就被慢半拍的值蓋掉一次。
+        self._pump_link()
         for i, c in self.fc.items():
             k = 0
             while k < 400:
@@ -292,13 +313,53 @@ class TotNode(Node):
                     self.home_amsl[i] = m.alt / 1000.0 - m.relative_alt / 1000.0
                 else:
                     self.att[i] = (m.roll, m.pitch, m.yaw)
-        self._pump_link()
+
+    def _terrain_probe(self):
+        """量紅心地表:對**紅心**和**本機 HOME** 各送一次 TERRAIN_CHECK。
+
+        ⚠️ 兩個獨立的坑,先前都踩著:
+
+        (1) **從來沒送過 TERRAIN_CHECK**。ArduPilot 只有收到 TERRAIN_CHECK 才會送
+            TERRAIN_REPORT(`AP_Terrain::handle_terrain_check` → `send_terrain_report`,
+            且把被查詢的 lat/lon 原樣帶回)。我們只被動收,拿到的其實是 MAVProxy
+            替「飛機正下方」查的點 —— 參考面整場隨飛行漂移,正是 memo 裡再三警告
+            不要用的那個量。實測啟動當下六機報 -28.79~-49.07 m,那是各自航路下方的
+            地表,不是紅心的。
+
+        (2) **相減的基準錯了**。舊式 `terrain_amsl(紅心) - home_amsl(GPS)` 混用了
+            兩個不同的高度基準:地形資料庫(SRTM)和 GPS/EKF 的 HOME 海拔在桃園
+            差了 10.9 m,不會抵消。而 SITL 物理引擎
+            (`SIM_Aircraft::ground_height_difference`)用的是
+            `terrain(current) - terrain(home)` —— **兩次資料庫讀值相減**,offset 抵消。
+            實測:舊式六機一律得 -32.08(假的一致),正確式得
+            -42.90/-48.62/-55.30/-52.12/-44.94/-38.72(散布 16.6 m,且與交接文件
+            §4 記載的數值完全吻合)。以 1.8 m 誤差/1 m 地表誤差放大 → 光這一項就
+            值 ~30 m 的水平誤差。
+
+        每機都要各問一次:各 SITL instance 有自己的地形快取。"""
+        for i, c in self.link.items():
+            try:
+                c.mav.terrain_check_send(int(self.T[0] * 1e7),
+                                         int(self.T[1] * 1e7))
+                if i in self.home_ll:
+                    hl = self.home_ll[i]
+                    c.mav.terrain_check_send(int(hl[0] * 1e7), int(hl[1] * 1e7))
+                else:   # MAV_CMD_REQUEST_MESSAGE(512) → HOME_POSITION(242)
+                    c.mav.command_long_send(c.target_system or i, 1, 512, 0,
+                                            242, 0, 0, 0, 0, 0, 0)
+            except Exception:
+                pass
+
+    @staticmethod
+    def _same_pt(a_lat, a_lon, b_lat, b_lon):
+        return abs(a_lat - b_lat) < 1e-5 and abs(a_lon - b_lon) < 1e-5
 
     def _pump_link(self):
         for i, c in self.link.items():
             while True:
                 m = c.recv_match(
-                    type=["GLOBAL_POSITION_INT", "ATTITUDE", "TERRAIN_REPORT"],
+                    type=["GLOBAL_POSITION_INT", "ATTITUDE", "TERRAIN_REPORT",
+                          "SIM_STATE", "HOME_POSITION"],
                     blocking=False)
                 if m is None:
                     break
@@ -313,17 +374,41 @@ class TotNode(Node):
                     self.home_amsl[i] = m.alt / 1000.0 - m.relative_alt / 1000.0
                 elif mt == "ATTITUDE":
                     self.att[i] = (m.roll, m.pitch, m.yaw)
+                elif mt == "SIM_STATE":
+                    # SITL 真值。**只做量測,絕不進導引** —— 驗收時要能同時報
+                    # 「遙測量到的 miss」與「真值 miss」:兩者差約 2 m,因為用遙測量
+                    # 會把 EKF 定位誤差抵消掉,用真值量則是疊加。先都記下來,
+                    # 讓使用者選驗收基準,而不是我們替他選一個好看的。
+                    tlat = m.lat_int / 1e7 if getattr(m, "lat_int", 0) else m.lat
+                    tlon = m.lon_int / 1e7 if getattr(m, "lon_int", 0) else m.lon
+                    self.truth[i] = (tlat, tlon, m.alt)
+                elif mt == "HOME_POSITION":
+                    self.home_ll[i] = (m.latitude / 1e7, m.longitude / 1e7)
                 else:
-                    # ⚠️ 要用 terrain_height(我們問的那一點的地表 AMSL),
-                    #    不是 current_height(飛機正下方的離地高)。用後者的話
-                    #    參考面會隨飛機飛過的地形一直變 —— 實測交接瞬間六機
-                    #    h 變成 128/107/125/46/395/0 m,但它們其實都在 400-470 m。
-                    #    我們只對紅心座標發 TERRAIN_CHECK,所以回報的就是紅心地表。
-                    if i in self.home_amsl and m.spacing != 0:
-                        zg = m.terrain_height - self.home_amsl[i]
+                    # ⚠️ 要用 terrain_height(我們問的那一點的地表 AMSL),不是
+                    #    current_height(飛機正下方的離地高)——後者的參考面會隨
+                    #    飛機飛過的地形一直變。
+                    # ⚠️ 必須比對回報座標:TERRAIN_REPORT 原樣帶回被查詢的 lat/lon,
+                    #    不比對就會混進 MAVProxy 替「飛機正下方」查的點。
+                    # ⚠️ 而且要拿**紅心地表減 HOME 地表**(兩次資料庫讀值相減),
+                    #    不能減 GPS 的 home_amsl —— 見 _terrain_probe 的說明。
+                    if m.spacing != 0:
+                        rlat, rlon = m.lat / 1e7, m.lon / 1e7
+                        if self._same_pt(rlat, rlon, self.T[0], self.T[1]):
+                            self.terr_bull[i] = m.terrain_height
+                        elif (i in self.home_ll
+                              and self._same_pt(rlat, rlon, *self.home_ll[i])):
+                            self.terr_home[i] = m.terrain_height
+                    if i in self.terr_bull and i in self.terr_home:
+                        zg = self.terr_bull[i] - self.terr_home[i]
+                        # 紅心地表的 AMSL(GPS 基準)= 換算 SIM_STATE 真值高度用
+                        if i in self.home_amsl:
+                            self.zg_amsl[i] = self.home_amsl[i] + zg
                         if i not in self.zg:
                             self.get_logger().info(
-                                f"UAV{i} 紅心地表 z_g = {zg:+.2f} m(相對 HOME)")
+                                f"UAV{i} 紅心地表 z_g = {zg:+.2f} m(相對 HOME;"
+                                f"紅心 {self.terr_bull[i]:.2f} − HOME 地表 "
+                                f"{self.terr_home[i]:.2f} AMSL)")
                         self.zg[i] = zg
 
     # ══════════════════════════════════════════════════════════════════
@@ -710,7 +795,11 @@ class TotNode(Node):
                         self._pn_step(i, now)
                 thru = self.thru[self.slot_id[i]]   # 穿越瞄準點(T 後方)
                 if d < self.dmin.get(i, 1e9):
-                    self.dmin[i] = d                # 追蹤真實最近水平距
+                    self.dmin[i] = d                # 追蹤最近水平距(遙測基準)
+                if i in self.truth:                 # 同一件事的 SITL 真值基準
+                    td = dist_m(self.T, self.truth[i][:2])
+                    if td < self.truth_dmin.get(i, 1e9):
+                        self.truth_dmin[i] = td
                 # 一旦進入 switch_r 就「鎖定穿越」(committed):此後永遠瞄穿越點,
                 # 不因穿過後 d 回升 > switch_r 又翻回瞄 T → 修掉繞圈 re-attack。
                 if not self.commit.get(i) and d < self.switch_r:
@@ -727,6 +816,8 @@ class TotNode(Node):
                     self.impact[i] = now
                     # 以「離紅心地表多高」回報:真正砸中 = 0
                     self.hit_alt[i] = self.pos[i][2] - self._zg(i)
+                    if i in self.truth and i in self.zg_amsl:
+                        self.truth_hit[i] = self.truth[i][2] - self.zg_amsl[i]
                     self.get_logger().info(
                         f"UAV{i} 命中紅心 @+{now-self.dive_go:.2f}s (最近 {self.dmin[i]:.0f}m "
                         f"命中高度 {self.hit_alt[i]:+.0f}m(離紅心地表) "
@@ -782,6 +873,17 @@ class TotNode(Node):
                     f"★★ 俯衝命中紅心:全員命中。命中時間散布 = {spread:.2f}s "
                     f"(≈{spread*self.dive_speed:.1f}m 縱向間隔);最近水平距 = {dmins} m;"
                     f"命中高度 = {halts} m(俯衝角 {self.dive_angle:.0f}°)")
+                # 真值基準另外報一行。⚠️ 兩個基準差約 2 m(EKF 定位誤差),
+                # 遙測基準會把它抵消、真值基準會疊加 —— 宣稱 ≤5 m 之前必須講清楚
+                # 用的是哪一個,不能挑好看的那個報。
+                if self.truth_dmin:
+                    tmins = {i: round(self.truth_dmin[i], 1)
+                             for i in sorted(self.truth_dmin)}
+                    thalts = {i: round(self.truth_hit.get(i, -999))
+                              for i in sorted(self.truth_dmin)}
+                    self.get_logger().warn(
+                        f"★★ 真值基準(SIM_STATE):最近水平距 = {tmins} m;"
+                        f"命中高度 = {thalts} m")
                 self.phase = "DONE"
 
         self.status_pub.publish(String(data=json.dumps(

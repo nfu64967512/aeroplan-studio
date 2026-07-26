@@ -12,14 +12,21 @@
 #
 # 結果逐趟寫入 /tmp/stot_kpi.csv,並印出累計成功率。
 # 用法: bash stot_kpi_loop.sh [趟數]
-set -uo pipefail
+# ⚠️ 不可加 -u:本腳本要 source ROS2 的 setup.bash,它會讀未設定的
+#    AMENT_TRACE_SETUP_FILES,-u 之下整個腳本會在第一趟就中止(實測踩到)。
+set -o pipefail
 SR="$HOME/fixwing_ws/sitl_run"
 TRIALS="${1:-50}"
-MISS_MAX="${MISS_MAX:-30}"
+MISS_MAX="${MISS_MAX:-5}"
 ALT_MAX="${ALT_MAX:-30}"
 SPREAD_MAX="${SPREAD_MAX:-3.0}"
 CSV="${CSV:-/tmp/stot_kpi.csv}"
-DIVE_PACE="${DIVE_PACE:-40}"
+DIVE_PACE="${DIVE_PACE:-40.0}"
+PN="${PN:-True}"
+GATE_R="${GATE_R:-1200.0}"
+N_LAT="${N_LAT:-4.0}"
+N_VERT="${N_VERT:-3.0}"
+PN_LEAD="${PN_LEAD:-1.0}"
 
 [ -f "$CSV" ] || echo "trial,spread_s,max_miss_m,max_abs_alt_m,n_hit,pass,note" > "$CSV"
 
@@ -53,6 +60,8 @@ for n in $(seq 1 "$TRIALS"); do
     -p dive_radius:=5.0 -p dive_pace:="$DIVE_PACE" -p dive_spdweight:=0.0 \
     -p overshoot:=300.0 -p switch_r:=300.0 -p dive_speed:=140.0 -p reach:=260.0 \
     -p layer_m:=25.0 -p perch_reach:=260.0 -p impact_reach:=25.0 \
+    -p pn_enable:="$PN" -p gate_r:="$GATE_R" -p pn_n_lat:="$N_LAT" \
+    -p pn_n_vert:="$N_VERT" -p pn_lead:="$PN_LEAD" \
     -p link_base:=6960 -p link_stride:=10 > /tmp/kpi_tot.log 2>&1 < /dev/null &
 
   ok=0

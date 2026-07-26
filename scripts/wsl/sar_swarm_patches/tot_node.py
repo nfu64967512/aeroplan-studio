@@ -111,7 +111,7 @@ class TotNode(Node):
         g("perch_reach", 70.0)    # 認定「已就位 pushover 環」的半徑
         g("impact_reach", 40.0)   # 認定「已穿越 T(衝擊)」的水平半徑(另有通過最近點判定)
         # ══ 終端比例導引(PN):最後一段改下姿態,繞開 L1/TECS ═══════════════
-        g("pn_enable", True)
+        g("pn_enable", False)   # 實測:PN 版本三軸全面變差(誤差 21-24m、高度 37-53m、散布 14-24s,且 9/12 逾時),暫時停用,改由航點導引基準線出發
         g("fc_base", 5762); g("fc_stride", 10)
                                   # ⚠️ 直連飛控 SERIAL1,不走 MAVProxy 分流:
                                   # 實測同一道 SET_MESSAGE_INTERVAL,分流上 uav3
@@ -225,7 +225,11 @@ class TotNode(Node):
             try:
                 c.mav.request_data_stream_send(c.target_system or i, 1,
                                                mavutil.mavlink.MAV_DATA_STREAM_ALL, 5, 1)
-                # 地表參考改用主動查詢(見 _ask_terrain),這裡不再設定串流
+                # 主線也要 ATTITUDE(直連還沒建立前的後備來源)
+                c.mav.command_long_send(
+                    c.target_system or i, 1,
+                    mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL, 0,
+                    30, 100000, 0, 0, 0, 0, 0)
             except Exception:
                 pass
             self.link[i] = c
@@ -267,6 +271,30 @@ class TotNode(Node):
                       for k, s in enumerate(self.slots)]})))
 
     def _pump(self):
+        # ⚠️ 直連飛控那條線也必須抽:50 Hz 的 GLOBAL_POSITION_INT/ATTITUDE 是下到
+        #    self.fc(5762+10i)的,只讀 self.link(6960 分流)的話 self.att 會是
+        #    舊值或空的,攻角估計 α = θ - γ 就整個錯,俯仰指令跟著錯 ——
+        #    這正是 PN 版命中高度掉到 37-53m、誤差 21-24m 的原因。
+        for i, c in self.fc.items():
+            k = 0
+            while k < 400:
+                m = c.recv_match(type=["GLOBAL_POSITION_INT", "ATTITUDE"],
+                                 blocking=False)
+                if m is None:
+                    break
+                k += 1
+                mt = m.get_type()
+                if mt == "GLOBAL_POSITION_INT":
+                    self.pos[i] = (m.lat / 1e7, m.lon / 1e7,
+                                   m.relative_alt / 1000.0)
+                    self.vel[i] = (m.vx / 100.0, m.vy / 100.0, m.vz / 100.0)
+                    self.gs[i] = math.hypot(m.vx, m.vy) / 100.0
+                    self.home_amsl[i] = m.alt / 1000.0 - m.relative_alt / 1000.0
+                else:
+                    self.att[i] = (m.roll, m.pitch, m.yaw)
+        self._pump_link()
+
+    def _pump_link(self):
         for i, c in self.link.items():
             while True:
                 m = c.recv_match(
@@ -384,7 +412,10 @@ class TotNode(Node):
         roll = max(-r_lim, min(r_lim, roll))
 
         # ── 油門:唯一的命中時刻通道,與兩個轉向通道解耦 ──
-        t_rem = max(0.4, self.dive_T - now)
+        # ⚠️ 時間窗過了就不要硬夾 0.4 s:那會讓 v_req = R/0.4 直接飽和成全速,
+        #    終端一路衝過頭。過期後改用「以現速估的 t_go」,退化成維持現速。
+        t_left = self.dive_T - now
+        t_rem = t_left if t_left > 1.0 else max(1.0, R / max(V, 1e-3))
         v_req = max(45.0, min(135.0, R / t_rem))
         thr = max(0.0, min(1.0, 0.36 + 0.030 * (v_req - V)))
         return roll, pitch, thr, R, V

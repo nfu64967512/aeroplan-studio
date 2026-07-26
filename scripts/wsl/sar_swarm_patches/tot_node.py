@@ -118,6 +118,7 @@ class TotNode(Node):
         g("line_tol", 80.0)       # 高於下滑線這麼多就重發一次航點(重新建立較陡的斜坡)
         g("resend_min_dt", 3.0)   # 重發最小間隔(秒)。無限制重發會一直重設高度斜坡。
         g("expend_on_impact", True)  # 命中即視為消耗(不再下令、不脫離)
+        g("impact_settle", 4.0)   # 全員命中後仍續錄這麼多秒才結算(見 DIVE 收尾)
         g("perch_reach", 70.0)    # 認定「已就位 pushover 環」的半徑
         g("impact_reach", 40.0)   # 認定「已穿越 T(衝擊)」的水平半徑(另有通過最近點判定)
         # ══ 終端比例導引(PN):最後一段改下姿態,繞開 L1/TECS ═══════════════
@@ -173,6 +174,8 @@ class TotNode(Node):
         self.line_tol = float(p("line_tol").value)
         self.resend_dt = float(p("resend_min_dt").value)
         self.expend = bool(p("expend_on_impact").value)
+        self.impact_settle = float(p("impact_settle").value)
+        self.done_t = None     # 全員命中的時刻(收尾要再多錄 impact_settle 秒)
         if bool(p("auto_ring").value):
             # 由「可達的下滑角」反推環半徑,而不是硬給半徑再期待飛機做得到。
             r_need = (self.perch_alt - self.dive_alt) / math.tan(
@@ -931,7 +934,12 @@ class TotNode(Node):
                     # 重發會以當下位置為新起點 → 建立更陡的斜坡把它拉回線上。
                     # (無限制重發 = 每 tick 重設斜坡 = 原本掉不下來的病根,故加最小間隔。)
                     key = "thru" if self.commit.get(i) else "T"
-                    z_line = self.dive_alt + self.dive_layer * (
+                    # ⚠️ 這條「我離下滑線多高」的判斷式必須用**本機自己量到的**紅心
+                    #    地表(_zg),不能用全隊共用的 ground_alt 常數 —— _line_alt
+                    #    算瞄準高度時用的是 _zg,兩邊不一致的話重發閘門就對不準:
+                    #    六機 z_g 散布 16.6 m(−38.72 ~ −55.31),ground_alt 卻是 −48,
+                    #    等於各機的門檻被平移了 −7 ~ +7 m。
+                    z_line = self._zg(i) + self.dive_alt_agl + self.dive_layer * (
                         self.slot_id[i] - (self.n - 1) / 2.0) + \
                         d * math.tan(math.radians(self.dive_angle))
                     if (self.pos[i][2] - z_line > self.line_tol and
@@ -943,7 +951,15 @@ class TotNode(Node):
                            "z": round(self.pos[i][2]), "gs": round(self.gs.get(i, 0))}
                 self._row(now, i, d, mode, self.T)
             self._csv.flush()
-            if done == self.n:
+            if done == self.n and self.done_t is None:
+                # ⚠️ 不能在最後一架「剛進 impact_reach」的瞬間就收工。那一架還沒飛到
+                #    真正的最近點,dmin 就凍在 19-23 m,看起來像導引誤差,其實是
+                #    取樣被截斷。實測 B4:最後三架(3/5/6)報 11.1-23.3 m,但它們
+                #    偏離自己徑向線只有 1.5 m —— 誤差全是「還沒走到」的縱向殘量;
+                #    早 8 秒命中、因此多取樣了 8 秒的 UAV4 報 0.05 m。
+                #    多跑 impact_settle 秒讓所有人走完最近點再結算。
+                self.done_t = now
+            if done == self.n and now - self.done_t >= self.impact_settle:
                 imp = [self.impact[i] - self.dive_go for i in self.impact]
                 spread = max(imp) - min(imp)
                 dmins = {i: round(self.dmin[i], 1) for i in sorted(self.impact)}

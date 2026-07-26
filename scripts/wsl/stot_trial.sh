@@ -27,6 +27,8 @@ TRACK_FRAC="${TRACK_FRAC:-1.0}"
 DIVE_SPDW="${DIVE_SPDW:-1.0}"
 ALIGN_TOL="${ALIGN_TOL:-40.0}"
 DIVE_ANGLE="${DIVE_ANGLE:-10.0}"
+LINE_TOL="${LINE_TOL:-25.0}"
+RESEND_DT="${RESEND_DT:-2.0}"
 LOG="${LOG:-/tmp/trial_${TRIAL}.log}"
 
 [ -f "$CSV" ] || echo "trial,spread_s,max_miss_m,max_abs_alt_m,n_hit,pass,note" > "$CSV"
@@ -63,7 +65,8 @@ setsid nohup ros2 run sar_swarm tot_node --ros-args \
   -p track_frac:="$TRACK_FRAC" -p dive_radius:=5.0 -p dive_pace:="$DIVE_PACE" \
   -p dive_spdweight:="$DIVE_SPDW" -p overshoot:=300.0 -p switch_r:=300.0 \
   -p dive_speed:=140.0 -p reach:=260.0 -p layer_m:=25.0 -p perch_reach:=260.0 \
-  -p impact_reach:=25.0 -p pn_enable:="$PN" -p gate_r:="$GATE_R" \
+  -p impact_reach:=25.0 -p line_tol:="$LINE_TOL" -p resend_min_dt:="$RESEND_DT" \
+  -p pn_enable:="$PN" -p gate_r:="$GATE_R" \
   -p pn_n_lat:="$N_LAT" -p pn_n_vert:="$N_VERT" -p pn_lead:="$PN_LEAD" \
   -p csv:="/tmp/tot_${TRIAL}" \
   -p link_base:=6960 -p link_stride:=10 > "$LOG" 2>&1 < /dev/null &

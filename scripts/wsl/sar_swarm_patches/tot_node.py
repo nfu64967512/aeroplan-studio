@@ -645,7 +645,11 @@ class TotNode(Node):
                     #    需要 54-71° 才打得到 → 物理上不可能 → 全部從紅心上空飛過。
                     #    (唯一在 2070m 進入俯衝的 UAV2 只需 22.3°,就真的砸到 93m。)
                     #    退到扇形 slot 可保證「爬完才開始內切」,進入距離 = 環半徑。
-                    mode = "climb"; self._goto(i, *self.slot_of[i], self.perch_alt, self.vmin)
+                    # ⚠️ 這裡不能用 vmin。實測死結:退回扇形 slot 等對正/爬升時
+                    #    用 vmin(45 m/s)飛,22 kg 噴射撐不住高度 —— 五機停在
+                    #    4052-4172m 外、高度一路掉到 216-306m,永遠達不到
+                    #    0.9*perch_alt=360m 的閘門,PERCH 卡死 20 分鐘不動。
+                    mode = "climb"; self._goto(i, *self.slot_of[i], self.perch_alt, max(self.vmin * 1.45, 65.0))
                 else:
                     t_rem = self.perch_T - now
                     v = max(self.vmin, min(self.vmax, (d - self.pushover_r) / max(t_rem, 0.1)))

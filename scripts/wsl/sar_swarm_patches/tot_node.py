@@ -110,6 +110,25 @@ class TotNode(Node):
         g("expend_on_impact", True)  # 命中即視為消耗(不再下令、不脫離)
         g("perch_reach", 70.0)    # 認定「已就位 pushover 環」的半徑
         g("impact_reach", 40.0)   # 認定「已穿越 T(衝擊)」的水平半徑(另有通過最近點判定)
+        # ══ 終端比例導引(PN):最後一段改下姿態,繞開 L1/TECS ═══════════════
+        g("pn_enable", True)
+        g("fc_base", 5762); g("fc_stride", 10)
+                                  # ⚠️ 直連飛控 SERIAL1,不走 MAVProxy 分流:
+                                  # 實測同一道 SET_MESSAGE_INTERVAL,分流上 uav3
+                                  # 只拿到 5 Hz 而 uav1 有 50 Hz(ACK 都是 0),
+                                  # MAVProxy 會把速率搶回去。直連三次都穩 50.2 Hz。
+        g("tel_us", 25000)        # 遙測間隔(µs)。⚠️ 不能填 20000:
+                                  # cap = loop_period_us/800 = 25 ms,要求更快會回
+                                  # MAV_RESULT_DENIED(實測 result=2),然後你就默默
+                                  # 拿 5 Hz 的狀態去跑 50 Hz 的導引律。
+        g("pn_hz", 50.0)          # 姿態指令率 = ArduPlane 主迴圈率
+        g("gate_r", 1200.0)       # 交接水平距(m)
+        g("gate_h", 600.0)        # 交接高度(離本機自己的地表 m)→ 視線俯角 26.6°
+        g("pn_n_lat", 4.0)        # 橫向導航常數(掃描 3~4 平坦,取 4 留延遲餘裕)
+        g("pn_n_vert", 3.0)       # 縱向導航常數
+        g("pn_lead", 1.0)         # 縱向 γ 指令前導(s)
+        g("pn_freeze_tgo", 1.5)   # t_go 小於此就凍結指令(但仍持續發送)
+        g("pn_freeze_r", 100.0)   # 或距離小於此
         g("csv", "/tmp/tot_node")
         p = self.get_parameter
         self.n = int(p("n").value)
@@ -165,6 +184,25 @@ class TotNode(Node):
             self.thru.append(dest(self.T[0], self.T[1],
                                   (brg + 180.0) % 360.0, self.overshoot))
         self.spacing = self.r_fan * math.radians(2 * self.half) / (self.n - 1)
+        self.pn_on = bool(p("pn_enable").value)
+        self.fc_base = int(p("fc_base").value)
+        self.fc_stride = int(p("fc_stride").value)
+        self.tel_us = float(p("tel_us").value)
+        self.pn_dt = 1.0 / max(5.0, float(p("pn_hz").value))
+        self.gate_r = float(p("gate_r").value)
+        self.gate_h = float(p("gate_h").value)
+        self.n_lat = float(p("pn_n_lat").value)
+        self.n_vert = float(p("pn_n_vert").value)
+        self.pn_lead = float(p("pn_lead").value)
+        self.fz_tgo = float(p("pn_freeze_tgo").value)
+        self.fz_r = float(p("pn_freeze_r").value)
+        self.vel = {}         # 每機 NED 速度 (vn, ve, vd)
+        self.att = {}         # 每機姿態 (roll, pitch, yaw) rad
+        self.alpha = {}       # 攻角估計(低通)
+        self.strike = {}      # 是否已進入終端 PN
+        self.frozen = {}      # 凍結後保持的指令
+        self.fc = {}          # 直連飛控的連線
+        self.home_amsl = {}   # 每機 home 海拔
         self.zg = {}    # 每機自量的地表高度(相對 HOME)
         self.dmin = {}   # 各機對 T 的最近水平距(記錄真實穿越)
         self.commit = {}  # 各機是否已鎖定穿越(進 switch_r 後不再翻回瞄 T)
@@ -187,11 +225,7 @@ class TotNode(Node):
             try:
                 c.mav.request_data_stream_send(c.target_system or i, 1,
                                                mavutil.mavlink.MAV_DATA_STREAM_ALL, 5, 1)
-                # 要求 TERRAIN_REPORT(136)以取得「本機自己的」地表高度
-                c.mav.command_long_send(
-                    c.target_system or i, 1,
-                    mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL, 0,
-                    136, 500000, 0, 0, 0, 0, 0)
+                # 地表參考改用主動查詢(見 _ask_terrain),這裡不再設定串流
             except Exception:
                 pass
             self.link[i] = c
@@ -217,7 +251,7 @@ class TotNode(Node):
             gw.writerow([f"pp{k}", s[0], s[1]])
         gf.close()
         self._publish_gate()
-        self.create_timer(0.33, self._tick)   # 3 Hz 協同迴圈
+        self.create_timer(0.05, self._tick)   # 20 Hz:終端 PN 需要高頻   # 3 Hz 協同迴圈
         self.create_timer(1.0, self._publish_gate)  # latched 定期補發
         self.get_logger().info(
             f"tot_node up：扇形 R={self.r_fan:.0f} ±{self.half:.0f}° {self.n} slot "
@@ -236,19 +270,139 @@ class TotNode(Node):
         for i, c in self.link.items():
             while True:
                 m = c.recv_match(
-                    type=["GLOBAL_POSITION_INT", "TERRAIN_REPORT"], blocking=False)
+                    type=["GLOBAL_POSITION_INT", "ATTITUDE", "TERRAIN_REPORT"],
+                    blocking=False)
                 if m is None:
                     break
-                if m.get_type() == "GLOBAL_POSITION_INT":
+                mt = m.get_type()
+                if mt == "GLOBAL_POSITION_INT":
                     self.pos[i] = (m.lat / 1e7, m.lon / 1e7,
                                    m.relative_alt / 1000.0)
+                    # vx/vy/vz = 北/東/下 (cm/s)
+                    self.vel[i] = (m.vx / 100.0, m.vy / 100.0, m.vz / 100.0)
                     self.gs[i] = math.hypot(m.vx, m.vy) / 100.0
+                    # home 的海拔 = 絕對高 - 相對高(用來把地形 AMSL 轉成相對高)
+                    self.home_amsl[i] = m.alt / 1000.0 - m.relative_alt / 1000.0
+                elif mt == "ATTITUDE":
+                    self.att[i] = (m.roll, m.pitch, m.yaw)
                 else:
-                    # 每機自己的地表高度 = 相對高 - 離地高。
-                    # 各機地形快取不同,對同一點的地表高度實測差到 12.4 m;
-                    # 用單一常數套全隊,誤差會以 ~1.8 m/m 放大進命中誤差。
-                    if i in self.pos:
-                        self.zg[i] = self.pos[i][2] - m.current_height
+                    # ⚠️ 要用 terrain_height(我們問的那一點的地表 AMSL),
+                    #    不是 current_height(飛機正下方的離地高)。用後者的話
+                    #    參考面會隨飛機飛過的地形一直變 —— 實測交接瞬間六機
+                    #    h 變成 128/107/125/46/395/0 m,但它們其實都在 400-470 m。
+                    #    我們只對紅心座標發 TERRAIN_CHECK,所以回報的就是紅心地表。
+                    if i in self.home_amsl and m.spacing != 0:
+                        zg = m.terrain_height - self.home_amsl[i]
+                        if i not in self.zg:
+                            self.get_logger().info(
+                                f"UAV{i} 紅心地表 z_g = {zg:+.2f} m(相對 HOME)")
+                        self.zg[i] = zg
+
+    # ══════════════════════════════════════════════════════════════════
+    #  終端比例導引(PN)—— 直接下姿態,繞開 L1 與 TECS
+    # ══════════════════════════════════════════════════════════════════
+    def _fc_connect(self):
+        """另開一組「直連飛控」的連線,並把狀態拉到 50 Hz。"""
+        for i in range(1, self.n + 1):
+            try:
+                port = self.fc_base + self.fc_stride * (i - 1)
+                c = mavutil.mavlink_connection(
+                    f"tcp:127.0.0.1:{port}", source_system=234,
+                    dialect="ardupilotmega")
+                c.wait_heartbeat(timeout=6)
+                for mid in (mavutil.mavlink.MAVLINK_MSG_ID_GLOBAL_POSITION_INT,
+                            mavutil.mavlink.MAVLINK_MSG_ID_ATTITUDE):
+                    c.mav.command_long_send(
+                        c.target_system or i, 1,
+                        mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL, 0,
+                        float(mid), self.tel_us, 0, 0, 0, 0, 0)
+                self.fc[i] = c
+                self.get_logger().info(f"UAV{i} 直連飛控 {port} 就緒(50 Hz)")
+            except Exception as e:
+                self.get_logger().warn(f"UAV{i} 直連飛控失敗:{e}")
+
+    def _att_target(self, i, roll, pitch, thr):
+        """SET_ATTITUDE_TARGET:roll/pitch 直接寫進 nav_roll/nav_pitch。
+
+        type_mask = 132 (0x84)。⚠️ 不是直覺的 7:韌體會先把 mask 反相(^0xFF)
+        再解讀。132 反相成 0x7B ⇒ roll ✓ pitch ✓ yaw ✗,且油門一併接管。
+        ⚠️ 必須持續發:GUIDED_TIMEOUT 3.0 s,斷流就默默掉回 L1。"""
+        c = self.fc.get(i) or self.link[i]
+        cr, sr = math.cos(roll / 2.0), math.sin(roll / 2.0)
+        cp, sp = math.cos(pitch / 2.0), math.sin(pitch / 2.0)
+        c.mav.set_attitude_target_send(
+            0, c.target_system or i, 1, 132,
+            [cr * cp, sr * cp, cr * sp, -sr * sp], 0.0, 0.0, 0.0, float(thr))
+
+    def _geom(self, i):
+        """相對紅心的 3D 狀態(當地切平面,1.5 km 內誤差 < 1 cm)。"""
+        lat, lon, z = self.pos[i]
+        dn = (self.T[0] - lat) * EARTH
+        de = (self.T[1] - lon) * mlon(lat)
+        d = max(1e-3, math.hypot(dn, de))
+        h = z - self._zg(i)
+        R = max(1e-3, math.hypot(d, h))
+        vn, ve, vd = self.vel.get(i, (0.0, 0.0, 0.0))
+        vh = math.hypot(vn, ve)
+        hdot = -vd
+        V = max(1e-3, math.hypot(vh, hdot))
+        return dn, de, d, h, R, vn, ve, vh, hdot, V
+
+    def _pn_cmd(self, i, now):
+        """終端律 → (roll rad, pitch rad, thrust)。三通道解耦。"""
+        GRAV = 9.80665
+        dn, de, d, h, R, vn, ve, vh, hdot, V = self._geom(i)
+        gam = math.atan2(hdot, max(vh, 1e-3))
+
+        # ── 橫向:真 PN。λ̇ 由速度向量解析求得(零微分雜訊)──
+        lam_dot = (de * vn - dn * ve) / (d * d)
+        a_h = self.n_lat * vh * lam_dot
+        # ⚠️ 分母是 g·cosγ 不是 g:維持俯角 γ 需要 n·cosφ = cosγ,
+        #    用 atan(a/g) 在 31° 俯衝會少要約 14% 的坡度。
+        roll = math.atan2(a_h, GRAV * max(math.cos(gam), 0.25))
+
+        # ── 縱向:同一條律在垂直面,用「角速率」形式(角度形式會要出 -90°)──
+        sig_dot = (hdot * d - h * (-(dn * vn + de * ve) / d)) / (R * R)
+        gdot = -self.n_vert * sig_dot
+        # 法向過載夾制 n_z = cosγ + V·γ̇/g ∈ [0.05, 3.0]
+        nz = math.cos(gam) + V * gdot / GRAV
+        nz = max(0.05, min(3.0, nz))
+        gdot = (nz - math.cos(gam)) * GRAV / V
+        gam_cmd = gam + gdot * self.pn_lead
+
+        # 攻角現場估計(低通),把 γ 指令換成姿態指令
+        th_meas = self.att.get(i, (0.0, 0.0, 0.0))[1]
+        a_raw = th_meas - gam
+        a_prev = self.alpha.get(i, a_raw)
+        k = min(1.0, self.pn_dt / 0.7)
+        self.alpha[i] = a_prev + k * (a_raw - a_prev)
+        pitch = gam_cmd + self.alpha[i] / max(math.cos(roll), 0.5)
+        pitch = max(math.radians(-80.0), min(math.radians(45.0), pitch))
+
+        # 韌體的耦合夾制(roll 上限隨 pitch 收斂),自己先夾好才能記錄飽和
+        r_lim = math.radians(80.0) * abs(math.cos(th_meas))
+        roll = max(-r_lim, min(r_lim, roll))
+
+        # ── 油門:唯一的命中時刻通道,與兩個轉向通道解耦 ──
+        t_rem = max(0.4, self.dive_T - now)
+        v_req = max(45.0, min(135.0, R / t_rem))
+        thr = max(0.0, min(1.0, 0.36 + 0.030 * (v_req - V)))
+        return roll, pitch, thr, R, V
+
+    def _pn_step(self, i, now):
+        """對單機跑一次終端律並發送。回傳 True 表示已在終端段。"""
+        if i not in self.pos or i not in self.vel:
+            return False
+        roll, pitch, thr, R, V = self._pn_cmd(i, now)
+        t_go = R / max(V, 1e-3)
+        # 終端凍結:t_go 或距離夠小就鎖住指令,但「仍要持續發送」——
+        # 停發 3 s 會觸發 GUIDED_TIMEOUT,控制權默默回到 L1。
+        if t_go <= self.fz_tgo or R <= self.fz_r:
+            if i not in self.frozen:
+                self.frozen[i] = (roll, pitch, thr)
+            roll, pitch, thr = self.frozen[i]
+        self._att_target(i, roll, pitch, thr)
+        return True
 
     def _zg(self, i):
         """本機自量的地表高度(相對 HOME);沒有地形回報就退回全域 ground_alt。"""
@@ -473,6 +627,8 @@ class TotNode(Node):
                 self.get_logger().warn(
                     f"★ 全員對準內切(alt {zs})→ DIVE 直線俯衝穿越!")
                 self.phase = "DIVE"; self.dive_go = now
+                if self.pn_on and not self.fc:
+                    self._fc_connect()
                 # TECS_SPDWEIGHT 是相位相依的:俯衝要 0(pitch 只追高度 → 肯壓機頭),
                 # 但巡航要 1(=0 時 pitch 不管空速,速度只剩油門在撐,編隊追不上長機,
                 # 實測 slot 誤差從 289m 一路惡化到 722m)。所以只在進俯衝的當下切 0。
@@ -505,6 +661,18 @@ class TotNode(Node):
             done = 0
             for i in sorted(self.pos):
                 d = dist_m(self.pos[i][:2], self.T)
+                # ── 終端交接:進了 gate_r 就改用 PN 直接下姿態 ──
+                # 航點導引本質到不了個位數公尺:GUIDED 高度需求被
+                # TECS_HDEM_TCONST 節流、L1 的時間常數 ζ·T/π ≈ 4 s 在終端
+                # 根本來不及修。PN 用 50 Hz 姿態指令繞開兩者。
+                if self.pn_on and self.fc and i not in self.impact:
+                    if not self.strike.get(i) and d <= self.gate_r:
+                        self.strike[i] = True
+                        self.get_logger().info(
+                            f"UAV{i} 交接終端 PN @ d={d:.0f}m "
+                            f"h={self.pos[i][2]-self._zg(i):.0f}m")
+                    if self.strike.get(i):
+                        self._pn_step(i, now)
                 thru = self.thru[self.slot_id[i]]   # 穿越瞄準點(T 後方)
                 if d < self.dmin.get(i, 1e9):
                     self.dmin[i] = d                # 追蹤真實最近水平距
@@ -564,7 +732,8 @@ class TotNode(Node):
                     if (self.pos[i][2] - z_line > self.line_tol and
                             now - self.wp_t.get(i, 0.0) > self.resend_dt):
                         key = f"{key}#{int(now)}"        # 換 key → 觸發一次重發
-                    self._goto_latched(i, *aimpt, alt, v, key=key)
+                    if not self.strike.get(i):
+                        self._goto_latched(i, *aimpt, alt, v, key=key)
                 stat[i] = {"mode": mode, "d": round(d), "alt": round(alt),
                            "z": round(self.pos[i][2]), "gs": round(self.gs.get(i, 0))}
                 self._row(now, i, d, mode, self.T)

@@ -139,6 +139,7 @@ class TotNode(Node):
         self.align_tol = float(p("align_tol").value)
         self.ground_alt = float(p("ground_alt").value)
         # 下滑線的終點高度 = 紅心地表(+dive_alt 微量餘裕),而不是相對 HOME 的 0
+        self.dive_alt_agl = self.dive_alt          # 離地餘裕(m)
         self.dive_alt = self.ground_alt + self.dive_alt
         self.line_tol = float(p("line_tol").value)
         self.resend_dt = float(p("resend_min_dt").value)
@@ -164,6 +165,7 @@ class TotNode(Node):
             self.thru.append(dest(self.T[0], self.T[1],
                                   (brg + 180.0) % 360.0, self.overshoot))
         self.spacing = self.r_fan * math.radians(2 * self.half) / (self.n - 1)
+        self.zg = {}    # 每機自量的地表高度(相對 HOME)
         self.dmin = {}   # 各機對 T 的最近水平距(記錄真實穿越)
         self.commit = {}  # 各機是否已鎖定穿越(進 switch_r 後不再翻回瞄 T)
         self.hit_alt = {}  # 各機命中當下的高度(驗證是俯衝命中而非高空掠過)
@@ -185,6 +187,11 @@ class TotNode(Node):
             try:
                 c.mav.request_data_stream_send(c.target_system or i, 1,
                                                mavutil.mavlink.MAV_DATA_STREAM_ALL, 5, 1)
+                # 要求 TERRAIN_REPORT(136)以取得「本機自己的」地表高度
+                c.mav.command_long_send(
+                    c.target_system or i, 1,
+                    mavutil.mavlink.MAV_CMD_SET_MESSAGE_INTERVAL, 0,
+                    136, 500000, 0, 0, 0, 0, 0)
             except Exception:
                 pass
             self.link[i] = c
@@ -228,11 +235,24 @@ class TotNode(Node):
     def _pump(self):
         for i, c in self.link.items():
             while True:
-                m = c.recv_match(type="GLOBAL_POSITION_INT", blocking=False)
+                m = c.recv_match(
+                    type=["GLOBAL_POSITION_INT", "TERRAIN_REPORT"], blocking=False)
                 if m is None:
                     break
-                self.pos[i] = (m.lat / 1e7, m.lon / 1e7, m.relative_alt / 1000.0)
-                self.gs[i] = math.hypot(m.vx, m.vy) / 100.0
+                if m.get_type() == "GLOBAL_POSITION_INT":
+                    self.pos[i] = (m.lat / 1e7, m.lon / 1e7,
+                                   m.relative_alt / 1000.0)
+                    self.gs[i] = math.hypot(m.vx, m.vy) / 100.0
+                else:
+                    # 每機自己的地表高度 = 相對高 - 離地高。
+                    # 各機地形快取不同,對同一點的地表高度實測差到 12.4 m;
+                    # 用單一常數套全隊,誤差會以 ~1.8 m/m 放大進命中誤差。
+                    if i in self.pos:
+                        self.zg[i] = self.pos[i][2] - m.current_height
+
+    def _zg(self, i):
+        """本機自量的地表高度(相對 HOME);沒有地形回報就退回全域 ground_alt。"""
+        return self.zg.get(i, self.ground_alt)
 
     def _goto(self, i, lat, lon, alt, v):
         c = self.link[i]; now = time.time()
@@ -304,7 +324,9 @@ class TotNode(Node):
         「高空掠過紅心」的真因。瞄準點在線上時,ArduPlane GUIDED 的高度斜坡
         (prev_WP=當前位置 → next_WP)本身就是那條 45° 直線,落後時斜率自動變陡。"""
         lay = self.dive_layer * (self.slot_id[i] - (self.n - 1) / 2.0)
-        z_wp = self.dive_alt + lay + d_aim * math.tan(
+        # 下滑線終點錨在「本機自己量到的地表」,不是全隊共用的常數
+        base = self._zg(i) + self.dive_alt_agl
+        z_wp = base + lay + d_aim * math.tan(
             math.radians(self.dive_angle))            # 幾何下滑線上的目標高度
         z_ac = self.pos[i][2] if i in self.pos else None
         if z_ac is not None and self.track_frac < 0.999:
@@ -501,7 +523,7 @@ class TotNode(Node):
                 if i not in self.impact and (d < self.impact_reach or passed):
                     self.impact[i] = now
                     # 以「離紅心地表多高」回報:真正砸中 = 0
-                    self.hit_alt[i] = self.pos[i][2] - self.ground_alt
+                    self.hit_alt[i] = self.pos[i][2] - self._zg(i)
                     self.get_logger().info(
                         f"UAV{i} 命中紅心 @+{now-self.dive_go:.2f}s (最近 {self.dmin[i]:.0f}m "
                         f"命中高度 {self.hit_alt[i]:+.0f}m(離紅心地表) "

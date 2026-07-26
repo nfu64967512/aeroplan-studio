@@ -111,12 +111,31 @@ def main():
         if best is None:
             continue
         g = zg.get(i, a.ground)
+        # ── 真正的命中點:軌跡與地面的交點 ────────────────────────────────
+        # ⚠️ 「最近通過距離」會美化結果:機體若在目標前 200 m 觸地再貼地滑進紅心,
+        #    最近距離看起來很小,但那不是命中紅心 —— 它是在 200 m 外墜地的。
+        #    物理上正確的命中點 = 軌跡穿過 AGL=0 的那一點。沒穿過就是從空中飛過。
+        touch = None
+        if g is not None:
+            for k in range(len(pts) - 1):
+                a0 = pts[k][3] - g
+                a1 = pts[k + 1][3] - g
+                if a0 > 0.0 >= a1:
+                    f = a0 / (a0 - a1) if (a0 - a1) != 0 else 0.0
+                    la = pts[k][1] + f * (pts[k + 1][1] - pts[k][1])
+                    lo = pts[k][2] + f * (pts[k + 1][2] - pts[k][2])
+                    tm = pts[k][0] + f * (pts[k + 1][0] - pts[k][0])
+                    touch = (math.hypot((la - T[0]) * EARTH,
+                                        (lo - T[1]) * ml), tm)
+                    break
         res[i] = {
             "miss_m": round(best[0], 2),
             "alt_agl_m": round(best[1] - g, 2) if g is not None else None,
             "alt_rel_m": round(best[1], 2),
             "t_s": round(best[2], 2),
             "gs_ms": round(best[3], 1),
+            "impact_miss_m": round(touch[0], 2) if touch else None,
+            "impact_t_s": round(touch[1], 2) if touch else None,
             "n_samples": len(pts),
             "z_g": g,
         }
@@ -141,15 +160,30 @@ def main():
         return 0
 
     print("目標 %.6f/%.6f    階段=%s" % (T[0], T[1], a.phase))
-    print("%-5s %10s %12s %10s %9s %8s %8s"
-          % ("UAV", "miss(m)", "alt_AGL(m)", "alt_rel", "t(s)", "gs", "n"))
+    print("%-5s %10s %12s %9s %8s | %13s %10s"
+          % ("UAV", "最近(m)", "最低AGL(m)", "最近t(s)", "gs",
+             "觸地誤差(m)", "觸地t(s)"))
     for i in sorted(res):
         v = res[i]
-        print("%-5d %10.2f %12s %10.2f %9.2f %8.1f %8d"
+        print("%-5d %10.2f %12s %9.2f %8.1f | %13s %10s"
               % (i, v["miss_m"],
                  "n/a" if v["alt_agl_m"] is None else "%.2f" % v["alt_agl_m"],
-                 v["alt_rel_m"], v["t_s"], v["gs_ms"], v["n_samples"]))
-    print("─" * 70)
+                 v["t_s"], v["gs_ms"],
+                 "未觸地" if v["impact_miss_m"] is None
+                 else "%.2f" % v["impact_miss_m"],
+                 "-" if v["impact_t_s"] is None else "%.2f" % v["impact_t_s"]))
+    print("─" * 78)
+    touched = {i: v for i, v in res.items() if v["impact_miss_m"] is not None}
+    if touched:
+        tm = [v["impact_miss_m"] for v in touched.values()]
+        tt = [v["impact_t_s"] for v in touched.values()]
+        print("★ 觸地基準(軌跡穿過 AGL=0 的那一點,%d/%d 架真的落地):"
+              % (len(touched), len(res)))
+        print("   命中誤差 max = %.2f m;觸地時間散布 = %.2f s"
+              % (max(tm), (max(tt) - min(tt)) if len(tt) > 1 else 0.0))
+    else:
+        print("★ 觸地基準:六機都沒有真的落地(全部從空中飛過)")
+    print("─" * 78)
     print("六機最大水平誤差 = %.2f m   (門檻 5)" % summary["max_miss_m"])
     if summary["max_abs_alt_m"] is not None:
         print("六機最大命中高度 = %.2f m   (門檻 %.0f)"

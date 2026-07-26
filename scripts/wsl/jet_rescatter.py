@@ -42,9 +42,17 @@ def main():
     time.sleep(1.0)
     tgt = {i: (T[0] - dn / EARTH, T[1] + de / mlon(T[0])) for i, (dn, de) in OFF.items()}
     t0 = time.time()
+    # ⚠️ 航點不能每秒重發。每一發 DO_REPOSITION 都會讓飛控做
+    # set_target_altitude_current(),把高度目標重錨在「當下高度」;重發比飛控
+    # 10 Hz 的 update_target_altitude() 還密,高度需求就累積不起來。
+    # 實測 1 Hz 重發 + 指令 130 m,300 秒後六機散在 48-235 m。目標固定不動,
+    # 送一次就夠;每 30 秒補一發防丟包。
+    last_send = 0.0
     while time.time() - t0 < hold:
-        for i, c in links.items():
-            goto(c, i, tgt[i][0], tgt[i][1], CRUISE_ALT, 70.0)
+        if time.time() - last_send > 30.0:
+            for i, c in links.items():
+                goto(c, i, tgt[i][0], tgt[i][1], CRUISE_ALT, 70.0)
+            last_send = time.time()
         time.sleep(1.0)
     print("--- rescatter 完成(讀最終) ---", flush=True)
     ok = 0

@@ -216,6 +216,7 @@ class TotNode(Node):
         self.hit_alt = {}  # 各機命中當下的高度(驗證是俯衝命中而非高空掠過)
         self.wp_key = {}   # 俯衝航點鎖存鍵(同 key 不重發 → 不重設高度斜坡)
         self.wp_t = {}     # 上次重發時刻(節制重發頻率)
+        self.wp_pt = {}    # 上次實際送出的航點 (lat, lon, alt),判斷「有沒有動」
         self.align_ok = {}  # 是否已在遠端對正過徑向線(鎖存,避免極限環)
 
         # ── ① MAVLink 分流連線(每機一條)──
@@ -524,14 +525,42 @@ class TotNode(Node):
         """本機自量的地表高度(相對 HOME);沒有地形回報就退回全域 ground_alt。"""
         return self.zg.get(i, self.ground_alt)
 
-    def _goto(self, i, lat, lon, alt, v):
+    def _goto(self, i, lat, lon, alt, v, move_tol=40.0, min_dt=2.0,
+              keepalive=30.0):
+        """去某點 + 速度。⚠️ **航點必須鎖存,不能每 tick 重發。**
+
+        這是 ALIGN/PERCH「爬不上去」的真因,和 _goto_latched 註解裡講的是同一個病,
+        只是先前只在 DIVE 修掉:每一次 DO_REPOSITION 都會走 `Plane::set_guided_WP()`,
+        裡面呼叫 `set_target_altitude_current()` —— 把高度目標**重新錨在飛機當下的
+        高度**。之後 `Mode::update_target_altitude()` 才會把目標推回航點高度,但那是
+        跟著 10 Hz 的導航迴圈跑的,而我們用 20 Hz 重發 ⇒ 重錨比修正還快,高度需求
+        永遠累積不起來,而且每次下沉都被當成新目標吃進去(單向棘輪)。
+
+        實測(2026-07-27):整場 ALIGN/PERCH 六機卡在 30-80 m(指令 400 m),
+        NAV_CONTROLLER_OUTPUT 的 alt_error 六機有五機 ≈ 0 —— 飛控認為「已經到高度了」。
+        `perch_alt_gate` 要求 0.9×400=360 m,永遠過不了 ⇒ 這才是 PERCH 死結的真因,
+        commit 9bcd985 把等待速度 45→65 只是治到症狀。
+        反證:把 tot_node 殺掉、不再重發之後,六機靠著「最後那一發」航點在 3 分鐘內
+        自己從 37 m 爬到 335-375 m。
+
+        所以只在「目標真的動了」時重發:位置移動 > move_tol 或高度差 > 5 m,
+        且距上次至少 min_dt 秒;另加 keepalive 秒的補發以防丟包。
+        DO_CHANGE_SPEED 不碰高度斜坡,可以照原本的節流繼續每 2 秒送。"""
         c = self.link[i]; now = time.time()
         if abs(v - self.last_v[i]) > 0.5 or (now - self.last_v_t[i]) > 2.0:
             c.mav.command_long_send(c.target_system or i, 1,
                                     mavutil.mavlink.MAV_CMD_DO_CHANGE_SPEED, 0,
                                     0, float(v), -1, 0, 0, 0, 0)
             self.last_v[i] = v; self.last_v_t[i] = now
-        self._reposition(i, lat, lon, alt)
+        prev = self.wp_pt.get(i)
+        moved = (prev is None or abs(prev[2] - alt) > 5.0
+                 or dist_m(prev[:2], (lat, lon)) > move_tol)
+        dt = now - self.wp_t.get(i, 0.0)
+        if (moved and dt >= min_dt) or dt > keepalive:
+            self._reposition(i, lat, lon, alt)
+            self.wp_pt[i] = (lat, lon, alt)
+            self.wp_t[i] = now
+            self.wp_key[i] = None      # 讓 DIVE 的鎖存鍵重新生效
 
     def _reposition(self, i, lat, lon, alt, radius=0.0):
         """param3 = 繞圈半徑。⚠️ 傳 0 時 ArduPlane 用 WP_LOITER_RAD(實測 180m),
@@ -785,7 +814,12 @@ class TotNode(Node):
                 # 航點導引本質到不了個位數公尺:GUIDED 高度需求被
                 # TECS_HDEM_TCONST 節流、L1 的時間常數 ζ·T/π ≈ 4 s 在終端
                 # 根本來不及修。PN 用 50 Hz 姿態指令繞開兩者。
-                if self.pn_on and self.fc and i not in self.impact:
+                # ⚠️ 還在環上等放行的機不可以進 PN:那會一邊用姿態律撲向目標、
+                #    一邊被 wait 分支用 DO_REPOSITION 拉回環點,兩套指令打架。
+                #    目前 pushover 環(2541 m)在 gate_r(1200 m)之外所以碰不到,
+                #    但 gate_r 一調大就會踩到 —— 先擋起來。
+                released = now >= getattr(self, "release_t", {}).get(i, 0.0)
+                if self.pn_on and self.fc and released and i not in self.impact:
                     if not self.strike.get(i) and d <= self.gate_r:
                         self.strike[i] = True
                         self.get_logger().info(

@@ -22,6 +22,7 @@ GATE_R="${GATE_R:-1200.0}"
 N_LAT="${N_LAT:-4.0}"
 N_VERT="${N_VERT:-3.0}"
 PN_LEAD="${PN_LEAD:-1.0}"
+PN_VMAX="${PN_VMAX:-80.0}"
 DIVE_LAYER="${DIVE_LAYER:-12.0}"
 TRACK_FRAC="${TRACK_FRAC:-1.0}"
 DIVE_SPDW="${DIVE_SPDW:-1.0}"
@@ -75,6 +76,7 @@ setsid nohup ros2 run sar_swarm tot_node --ros-args \
   -p dive_hdem_tconst:="$HDEM_TC" \
   -p pn_enable:="$PN" -p gate_r:="$GATE_R" \
   -p pn_n_lat:="$N_LAT" -p pn_n_vert:="$N_VERT" -p pn_lead:="$PN_LEAD" \
+  -p pn_vmax:="$PN_VMAX" \
   -p csv:="$CSV_BASE" \
   -p link_base:=6960 -p link_stride:=10 > "$LOG" 2>&1 < /dev/null &
 

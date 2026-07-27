@@ -147,6 +147,9 @@ class TotNode(Node):
         g("pn_lead", 1.0)         # 縱向 γ 指令前導(s)
         g("pn_freeze_tgo", 1.5)   # t_go 小於此就凍結指令(但仍持續發送)
         g("pn_freeze_r", 100.0)   # 或距離小於此
+        g("pn_vmax", 80.0)        # PN 油門律的速度上限(見 _pn_cmd 的說明)。
+                                  # 原本硬寫 135 —— 終端衝太快,殘餘高度會被
+                                  # 1/tan(俯角) 放大成縱向落點誤差。
         g("csv", "/tmp/tot_node")
         p = self.get_parameter
         self.n = int(p("n").value)
@@ -217,6 +220,7 @@ class TotNode(Node):
         self.pn_lead = float(p("pn_lead").value)
         self.fz_tgo = float(p("pn_freeze_tgo").value)
         self.fz_r = float(p("pn_freeze_r").value)
+        self.pn_vmax = float(p("pn_vmax").value)
         self.vel = {}         # 每機 NED 速度 (vn, ve, vd)
         self.att = {}         # 每機姿態 (roll, pitch, yaw) rad
         self.alpha = {}       # 攻角估計(低通)
@@ -527,7 +531,13 @@ class TotNode(Node):
         #    終端一路衝過頭。過期後改用「以現速估的 t_go」,退化成維持現速。
         t_left = self.dive_T - now
         t_rem = t_left if t_left > 1.0 else max(1.0, R / max(V, 1e-3))
-        v_req = max(45.0, min(135.0, R / t_rem))
+        # ⚠️ 上限不要放到 135:終端速度越快,觸地誤差越大。機制是「殘餘高度被
+        #    1/tan(俯角) 放大成縱向落點誤差」—— 實測 R2 的 UAV5 以 95.5 m/s 進場,
+        #    橫向最近通過距離只有 0.49 m(導引其實很準),卻在紅心正上方約 2 m
+        #    掠過、再往前 5.35 m 才觸地;同一趟其餘五機 51.8-77.3 m/s,觸地誤差
+        #    只有 1.41-2.12 m。散布現在有很大餘裕(0.33-0.80 s vs 門檻 3.0),
+        #    拿一點去換誤差是划算的。
+        v_req = max(45.0, min(self.pn_vmax, R / t_rem))
         thr = max(0.0, min(1.0, 0.36 + 0.030 * (v_req - V)))
         return roll, pitch, thr, R, V
 

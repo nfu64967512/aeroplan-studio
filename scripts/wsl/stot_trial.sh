@@ -5,7 +5,9 @@
 # 值守連跑;這支省掉重啟,適合「改一個參數 → 立刻看結果」的迭代。
 # ⚠️ 一趟打完機體就消耗在地上了(expend_on_impact),要再跑一趟必須重啟 SITL。
 #
-# 用法: TRIAL=b1 PN=False bash stot_trial.sh
+# 用法: TRIAL=q1 bash stot_trial.sh
+# ⚠️ 預設值 = 2026-07-27 驗證過的組態(U 批 5/5 三項全過),不帶任何環境變數
+#    直接跑就會重現它。要對照舊的航點導引基準才需要 PN=False。
 # 環境變數: PN / DIVE_PACE / GATE_R / N_LAT / N_VERT / PN_LEAD / DIVE_LAYER
 #           TRACK_FRAC / ALIGN_TOL / DIVE_ANGLE / TRIAL(標籤) / CSV
 # ⚠️ 不要 set -u:source ROS2 setup.bash 會踩到未設定的 AMENT_TRACE_SETUP_FILES。
@@ -16,13 +18,13 @@ CSV="${CSV:-/tmp/stot_kpi.csv}"
 MISS_MAX="${MISS_MAX:-5}"
 ALT_MAX="${ALT_MAX:-30}"
 SPREAD_MAX="${SPREAD_MAX:-3.0}"
-PN="${PN:-False}"
-DIVE_PACE="${DIVE_PACE:-40.0}"
+PN="${PN:-True}"
+DIVE_PACE="${DIVE_PACE:-50.0}"
 GATE_R="${GATE_R:-1200.0}"
 N_LAT="${N_LAT:-4.0}"
-N_VERT="${N_VERT:-3.0}"
+N_VERT="${N_VERT:-5.0}"
 PN_LEAD="${PN_LEAD:-1.0}"
-PN_VMAX="${PN_VMAX:-80.0}"
+PN_VMAX="${PN_VMAX:-135.0}"
 # ⚠️ 終端凍結:R 或 t_go 小於門檻就鎖住指令。**不要調小。**
 # 它擋的是 PN 的奇異點:視線角速率 λ̇ = (de·vn − dn·ve)/d²,分母是 d²,
 # R→0 時會爆掉、滾轉指令飽和、飛機亂飛。
@@ -31,13 +33,13 @@ PN_VMAX="${PN_VMAX:-80.0}"
 # (pn_n_vert),不能從拆掉這個保護下手。
 FREEZE_R="${FREEZE_R:-100.0}"
 FREEZE_TGO="${FREEZE_TGO:-1.5}"
-DIVE_LAYER="${DIVE_LAYER:-12.0}"
-TRACK_FRAC="${TRACK_FRAC:-1.0}"
-DIVE_SPDW="${DIVE_SPDW:-1.0}"
+DIVE_LAYER="${DIVE_LAYER:-4.0}"
+TRACK_FRAC="${TRACK_FRAC:-0.8}"
+DIVE_SPDW="${DIVE_SPDW:-0.0}"
 ALIGN_TOL="${ALIGN_TOL:-40.0}"
 DIVE_ANGLE="${DIVE_ANGLE:-10.0}"
 LINE_TOL="${LINE_TOL:-25.0}"
-HDEM_TC="${HDEM_TC:-1.0}"
+HDEM_TC="${HDEM_TC:-0.5}"
 RESEND_DT="${RESEND_DT:-2.0}"
 # ⚠️ 飛行記錄不要放 /tmp:WSL 一重啟就整個清空(2026-07-27 實測被清掉一整輪的
 #    tot_*.csv / trial_*.log,離線分析全部做不了)。預設改寫到 ~/fixwing_ws/runs/。

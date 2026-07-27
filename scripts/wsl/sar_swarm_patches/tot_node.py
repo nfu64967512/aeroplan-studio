@@ -118,6 +118,8 @@ class TotNode(Node):
         g("line_tol", 80.0)       # 高於下滑線這麼多就重發一次航點(重新建立較陡的斜坡)
         g("resend_min_dt", 3.0)   # 重發最小間隔(秒)。無限制重發會一直重設高度斜坡。
         g("expend_on_impact", True)  # 命中即視為消耗(不再下令、不脫離)
+        g("perch_band", 40.0)    # 抵環後要求的高度收斂帶(m,離 perch_alt)
+        g("perch_settle", 25.0)  # 收斂等待上限(s),超時就認賠放行避免卡死
         g("impact_settle", 4.0)   # 全員命中後仍續錄這麼多秒才結算(見 DIVE 收尾)
         g("dive_hdem_tconst", 0.0)  # 進俯衝時推給飛控的 TECS_HDEM_TCONST(0 = 不動)。
                                   # ⚠️ 高度需求的濾波時間常數,預設 3.0 s —— 這是
@@ -218,6 +220,9 @@ class TotNode(Node):
         self.line_tol = float(p("line_tol").value)
         self.resend_dt = float(p("resend_min_dt").value)
         self.expend = bool(p("expend_on_impact").value)
+        self.perch_band = float(p("perch_band").value)
+        self.perch_settle = float(p("perch_settle").value)
+        self.ring_t0 = None    # 全員抵環的時刻(高度收斂等待的起點)
         self.impact_settle = float(p("impact_settle").value)
         self.done_t = None     # 全員命中的時刻(收尾要再多錄 impact_settle 秒)
         if bool(p("auto_ring").value):
@@ -879,11 +884,26 @@ class TotNode(Node):
                 zs = {i: round(self.pos[i][2]) for i in sorted(self.pos)}
                 self.get_logger().warn(
                     f"★ 全員就緒(alt {zs})→ 同步內切到環,預計 {tmax+6.0:.0f}s")
-            if len(self.perch_arr) == self.n:
-                zs = {i: round(self.pos[i][2]) for i in self.pos}
-                self.get_logger().warn(
-                    f"★ 全員對準內切(alt {zs})→ DIVE 直線俯衝穿越!")
-                self.phase = "DIVE"; self.dive_go = now
+            if len(self.perch_arr) == self.n and self.ring_t0 is None:
+                self.ring_t0 = now      # 全員抵環,開始「高度收斂」等待
+            # ⚠️ 抵環後先讓高度收斂再俯衝。各機抵環時的高度散布實測 200+ m
+            #    (F3 496–720、F5 817–1039),而 gs = V·cos(航路角),進入高度不同
+            #    ⇒ 航路角不同 ⇒ 同樣的總速換算出的**地速差 25–30 m/s**
+            #    (連跑實測最慢 71–81 對最快 100–108,每一趟都這樣)。
+            #    這既讓「六機全部 ≥100」做不到,也是命中散布的來源。
+            #    全部進到 perch_band 內就放行;拖太久(perch_settle)就認賠放行,
+            #    免得像早期版本那樣卡死在閘門上。
+            if self.ring_t0 is not None and self.phase == "PERCH":
+                band = max(abs(self.pos[i][2] - self.perch_alt)
+                           for i in self.pos)
+                waited = now - self.ring_t0
+                if band <= self.perch_band or waited >= self.perch_settle:
+                    zs = {i: round(self.pos[i][2]) for i in self.pos}
+                    self.get_logger().warn(
+                        f"★ 全員對準內切(alt {zs};高度收斂 {band:.0f}m/"
+                        f"門檻 {self.perch_band:.0f}m,等了 {waited:.0f}s)"
+                        f"→ DIVE 直線俯衝穿越!")
+                    self.phase = "DIVE"; self.dive_go = now
                 if self.pn_on and not self.fc:
                     self._fc_connect()
                 # TECS_SPDWEIGHT 是相位相依的:俯衝要 0(pitch 只追高度 → 肯壓機頭),

@@ -117,6 +117,11 @@ def main():
         #    物理上正確的命中點 = 軌跡穿過 AGL=0 的那一點。沒穿過就是從空中飛過。
         touch = None
         if g is not None:
+            # ⚠️ 要取「離紅心最近的那個」穿越點,不是第一個。AGL 是相對**紅心地表**
+            #    算的,所以機體在遠處飛過較高地形時可能先出現一次 AGL<=0 的穿越,
+            #    那不是命中。實測 B21 的 UAV2:最近通過 0.72 m、最低 AGL 0.42 m
+            #    (其實很準),卻因為取到 2554 m 外那個早期穿越,被判成誤差 2554 m、
+            #    散布 37.9 s —— 一趟好的航次被誤判成失敗。
             for k in range(len(pts) - 1):
                 a0 = pts[k][3] - g
                 a1 = pts[k + 1][3] - g
@@ -125,9 +130,9 @@ def main():
                     la = pts[k][1] + f * (pts[k + 1][1] - pts[k][1])
                     lo = pts[k][2] + f * (pts[k + 1][2] - pts[k][2])
                     tm = pts[k][0] + f * (pts[k + 1][0] - pts[k][0])
-                    touch = (math.hypot((la - T[0]) * EARTH,
-                                        (lo - T[1]) * ml), tm)
-                    break
+                    dd = math.hypot((la - T[0]) * EARTH, (lo - T[1]) * ml)
+                    if touch is None or dd < touch[0]:
+                        touch = (dd, tm)
         res[i] = {
             "miss_m": round(best[0], 2),
             "alt_agl_m": round(best[1] - g, 2) if g is not None else None,

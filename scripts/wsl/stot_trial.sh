@@ -23,6 +23,14 @@ N_LAT="${N_LAT:-4.0}"
 N_VERT="${N_VERT:-3.0}"
 PN_LEAD="${PN_LEAD:-1.0}"
 PN_VMAX="${PN_VMAX:-80.0}"
+# ⚠️ 終端凍結:R 或 t_go 小於門檻就鎖住指令。**不要調小。**
+# 它擋的是 PN 的奇異點:視線角速率 λ̇ = (de·vn − dn·ve)/d²,分母是 d²,
+# R→0 時會爆掉、滾轉指令飽和、飛機亂飛。
+# 實測 T1(收成 30 m / 0.6 s):觸地誤差 2083 m、散布 32 s,整批崩掉。
+# 「最後 ~105 m 是開迴路」確實是殘餘 AGL 的來源,但要從**收斂速度**下手
+# (pn_n_vert),不能從拆掉這個保護下手。
+FREEZE_R="${FREEZE_R:-100.0}"
+FREEZE_TGO="${FREEZE_TGO:-1.5}"
 DIVE_LAYER="${DIVE_LAYER:-12.0}"
 TRACK_FRAC="${TRACK_FRAC:-1.0}"
 DIVE_SPDW="${DIVE_SPDW:-1.0}"
@@ -76,7 +84,8 @@ setsid nohup ros2 run sar_swarm tot_node --ros-args \
   -p dive_hdem_tconst:="$HDEM_TC" \
   -p pn_enable:="$PN" -p gate_r:="$GATE_R" \
   -p pn_n_lat:="$N_LAT" -p pn_n_vert:="$N_VERT" -p pn_lead:="$PN_LEAD" \
-  -p pn_vmax:="$PN_VMAX" \
+  -p pn_vmax:="$PN_VMAX" -p pn_freeze_r:="$FREEZE_R" \
+  -p pn_freeze_tgo:="$FREEZE_TGO" \
   -p csv:="$CSV_BASE" \
   -p link_base:=6960 -p link_stride:=10 > "$LOG" 2>&1 < /dev/null &
 

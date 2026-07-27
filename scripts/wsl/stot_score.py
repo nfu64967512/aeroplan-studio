@@ -133,7 +133,11 @@ def main():
                     dd = math.hypot((la - T[0]) * EARTH, (lo - T[1]) * ml)
                     if touch is None or dd < touch[0]:
                         touch = (dd, tm)
+        # 俯衝階段地速(驗收主項:要夠快)。峰值與觸地瞬間都報 ——
+        # 峰值通常出現在觸地前,兩者一起看才知道「衝下來的過程」有多快。
+        gs_all = [p[4] for p in pts if p[4] > 0]
         res[i] = {
+            "gs_peak_ms": round(max(gs_all), 1) if gs_all else None,
             "miss_m": round(best[0], 2),
             "alt_agl_m": round(best[1] - g, 2) if g is not None else None,
             "alt_rel_m": round(best[1], 2),
@@ -165,15 +169,16 @@ def main():
         return 0
 
     print("目標 %.6f/%.6f    階段=%s" % (T[0], T[1], a.phase))
-    print("%-5s %10s %12s %9s %8s | %13s %10s"
-          % ("UAV", "最近(m)", "最低AGL(m)", "最近t(s)", "gs",
+    print("%-5s %9s %9s %11s %9s | %12s %9s"
+          % ("UAV", "gs峰值", "gs觸地", "最低AGL(m)", "最近(m)",
              "觸地誤差(m)", "觸地t(s)"))
     for i in sorted(res):
         v = res[i]
-        print("%-5d %10.2f %12s %9.2f %8.1f | %13s %10s"
-              % (i, v["miss_m"],
+        print("%-5d %9s %9.1f %11s %9.2f | %12s %9s"
+              % (i, "n/a" if v["gs_peak_ms"] is None else "%.1f" % v["gs_peak_ms"],
+                 v["gs_ms"],
                  "n/a" if v["alt_agl_m"] is None else "%.2f" % v["alt_agl_m"],
-                 v["t_s"], v["gs_ms"],
+                 v["miss_m"],
                  "未觸地" if v["impact_miss_m"] is None
                  else "%.2f" % v["impact_miss_m"],
                  "-" if v["impact_t_s"] is None else "%.2f" % v["impact_t_s"]))
@@ -189,7 +194,13 @@ def main():
     else:
         print("★ 觸地基準:六機都沒有真的落地(全部從空中飛過)")
     print("─" * 78)
-    print("六機最大水平誤差 = %.2f m   (門檻 5)" % summary["max_miss_m"])
+    # ⭐ 使用者 2026-07-28 重排優先序:俯衝階段地速要夠快(100 m/s)最優先、
+    #    散布 ≤3 s 次之、精度再次之。所以速度放最前面報。
+    gsp = [v["gs_peak_ms"] for v in res.values() if v["gs_peak_ms"] is not None]
+    if gsp:
+        print("★ 俯衝階段地速:六機峰值 %.1f – %.1f m/s(最慢那架 %.1f)  目標 100"
+              % (min(gsp), max(gsp), min(gsp)))
+    print("六機最大水平誤差 = %.2f m   (門檻 5,優先序最低)" % summary["max_miss_m"])
     if summary["max_abs_alt_m"] is not None:
         print("六機最大命中高度 = %.2f m   (門檻 %.0f)"
               % (summary["max_abs_alt_m"], a.alt_max))

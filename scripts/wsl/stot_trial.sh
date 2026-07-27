@@ -41,6 +41,12 @@ TRACK_FRAC="${TRACK_FRAC:-0.8}"
 DIVE_SPDW="${DIVE_SPDW:-0.0}"
 ALIGN_TOL="${ALIGN_TOL:-40.0}"
 DIVE_ANGLE="${DIVE_ANGLE:-10.0}"
+# ⭐ 終端俯衝地速主要來自位能:在環上 h 公尺、初速 v0,理想終端 v=√(v0²+2gh)。
+#    perch 400 m(離紅心地表 443 m)理想值只有 ~106 m/s,扣掉阻力就到不了 100。
+#    要穩定拿到 100 m/s 得把 perch 拉高。auto_ring 會據此重算 pushover 環半徑:
+#    pushover_r = (perch_alt − dive_alt)/tan(dive_angle),要確認它仍落在 r_fan 內。
+PERCH_ALT="${PERCH_ALT:-400.0}"
+TALT="${TALT:-400.0}"
 LINE_TOL="${LINE_TOL:-25.0}"
 HDEM_TC="${HDEM_TC:-0.5}"
 RESEND_DT="${RESEND_DT:-2.0}"
@@ -77,9 +83,9 @@ echo "[3/3] STOT + 俯衝 → $LOG"
 source /opt/ros/humble/setup.bash
 source "$HOME/fixwing_ws/install/setup.bash" 2>/dev/null
 setsid nohup ros2 run sar_swarm tot_node --ros-args \
-  -p tlat:=25.1406 -p tlon:=121.2325 -p talt:=400.0 -p approach_from:=180.0 \
+  -p tlat:=25.1406 -p tlon:=121.2325 -p talt:="$TALT" -p approach_from:=180.0 \
   -p r_fan:=4000.0 -p half_angle:=25.0 -p vmin:=45.0 -p vmax:=100.0 \
-  -p plan_frac:=0.9 -p margin:=40.0 -p perch_alt:=400.0 -p ground_alt:=-48.0 \
+  -p plan_frac:=0.9 -p margin:=40.0 -p perch_alt:="$PERCH_ALT" -p ground_alt:=-48.0 \
   -p dive_alt:=0.0 -p dive_layer:="$DIVE_LAYER" -p dive_angle:="$DIVE_ANGLE" \
   -p auto_ring:=True -p perch_alt_gate:=0.9 -p align_tol:="$ALIGN_TOL" \
   -p track_frac:="$TRACK_FRAC" -p dive_radius:=5.0 -p dive_pace:="$DIVE_PACE" \

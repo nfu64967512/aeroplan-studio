@@ -141,7 +141,21 @@ class TotNode(Node):
                                   # 拿 5 Hz 的狀態去跑 50 Hz 的導引律。
         g("pn_hz", 50.0)          # 姿態指令率 = ArduPlane 主迴圈率
         g("gate_r", 1200.0)       # 交接水平距(m)
-        g("gate_h", 600.0)        # 交接高度(離本機自己的地表 m)→ 視線俯角 26.6°
+        g("gate_h", 600.0)        # 交接高度(離本機自己的地表 m)。只有 gate_profile
+                                  # 打開才會用到 —— 見下。
+        g("gate_profile", False)  # 「交接盒」剖面:航點段不再直接瞄紅心地表,改成
+                                  # 把飛機送到「距 T = gate_r、離紅心地表 gate_h」
+                                  # 那一點,讓 PN 從較大的視線俯角接手。
+                                  # ⚠️ 為什麼要這個:觸地誤差 ≈ 殘餘AGL / tan(終端俯角)。
+                                  # 目前終端俯角約 19°,放大 2.9 倍,誤差 p90 已經
+                                  # 4.14 m 貼著 5 m 門檻(實測成功率 93.9%,n=33)。
+                                  # 放大倍率 30° 時降到 1.7、40° 時 1.2。
+                                  # 壓殘餘 AGL 那條路已經到頂(pn_n_vert 5→7 反而更差:
+                                  # 誤差 p90 4.14→6.52),所以要改動放大倍率本身。
+                                  # ⚠️ 不能改用 dive_angle 讓整段變陡:auto_ring 會把
+                                  # pushover 環拉進噴射的迴轉半徑內,蜂群站不住
+                                  # (B9 實測 30° → 高度散 253-479 m、散布 18 s)。
+                                  # 這裡只改**交接之前**的高度剖面,環的幾何不動。
         g("pn_n_lat", 4.0)        # 橫向導航常數(掃描 3~4 平坦,取 4 留延遲餘裕)
         g("pn_n_vert", 5.0)       # 縱向導航常數。3→5 是 2026-07-27 實測改的:
                                   # 觸地誤差 ≈ 凍結時的殘餘 AGL / tan(終端俯角)
@@ -229,6 +243,7 @@ class TotNode(Node):
         self.fz_tgo = float(p("pn_freeze_tgo").value)
         self.fz_r = float(p("pn_freeze_r").value)
         self.pn_vmax = float(p("pn_vmax").value)
+        self.gate_profile = bool(p("gate_profile").value)
         self.vel = {}         # 每機 NED 速度 (vn, ve, vd)
         self.att = {}         # 每機姿態 (roll, pitch, yaw) rad
         self.alpha = {}       # 攻角估計(低通)
@@ -930,6 +945,15 @@ class TotNode(Node):
                 if self.commit.get(i):
                     aimpt = self.thru_dyn.get(i, thru)
                     alt = self._line_alt(i, -self.overshoot)
+                elif self.gate_profile and self.pn_on and d > self.gate_r:
+                    # 交接盒剖面:航點段只負責把飛機送到「距 T = gate_r、
+                    # 離紅心地表 gate_h」那一點,不要沿 10° 下滑線一路降到地面。
+                    # 這樣 PN 是從 atan(gate_h/gate_r) 的視線俯角接手,
+                    # 放大倍率 1/tan(俯角) 因此變小。瞄準點放在**本機自己的徑向上**
+                    # (由 T 沿「T→本機」方位射出 gate_r),航線不會被拉歪。
+                    b = bearing(self.T, self.pos[i][:2])
+                    aimpt = dest(self.T[0], self.T[1], b, self.gate_r)
+                    alt = self._zg(i) + self.gate_h
                 else:
                     aimpt = self.T; alt = self._line_alt(i, 0.0)
                 # 衝擊判定:進 impact_reach,或已 committed 且通過最近點(d 回升)→ 記為穿越
@@ -983,8 +1007,15 @@ class TotNode(Node):
                     z_line = self._zg(i) + self.dive_alt_agl + self.dive_layer * (
                         self.slot_id[i] - (self.n - 1) / 2.0) + \
                         d * math.tan(math.radians(self.dive_angle))
-                    if (self.pos[i][2] - z_line > self.line_tol and
-                            now - self.wp_t.get(i, 0.0) > self.resend_dt):
+                    # ⚠️ 交接盒剖面下不可以做這個重發:那條 z_line 是 10° 下滑線,
+                    #    而交接盒剖面**本來就是要飛在它上面**,判斷式會一路成立 →
+                    #    每 resend_dt 秒重發一次 → 高度斜坡不斷被重錨(就是
+                    #    d7a377a 修掉的那個病)。
+                    gate_leg = (self.gate_profile and self.pn_on
+                                and d > self.gate_r)
+                    if (not gate_leg
+                            and self.pos[i][2] - z_line > self.line_tol
+                            and now - self.wp_t.get(i, 0.0) > self.resend_dt):
                         key = f"{key}#{int(now)}"        # 換 key → 觸發一次重發
                     if not self.strike.get(i):
                         self._goto_latched(i, *aimpt, alt, v, key=key)

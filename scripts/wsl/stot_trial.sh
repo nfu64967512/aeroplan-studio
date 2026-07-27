@@ -25,6 +25,9 @@ N_LAT="${N_LAT:-4.0}"
 N_VERT="${N_VERT:-5.0}"
 PN_LEAD="${PN_LEAD:-1.0}"
 PN_VMAX="${PN_VMAX:-135.0}"
+# 交接盒剖面(預設關;見 tot_node 的 gate_profile 說明)
+GATE_PROFILE="${GATE_PROFILE:-False}"
+GATE_H="${GATE_H:-350.0}"
 # ⚠️ 終端凍結:R 或 t_go 小於門檻就鎖住指令。**不要調小。**
 # 它擋的是 PN 的奇異點:視線角速率 λ̇ = (de·vn − dn·ve)/d²,分母是 d²,
 # R→0 時會爆掉、滾轉指令飽和、飛機亂飛。
@@ -88,6 +91,7 @@ setsid nohup ros2 run sar_swarm tot_node --ros-args \
   -p pn_n_lat:="$N_LAT" -p pn_n_vert:="$N_VERT" -p pn_lead:="$PN_LEAD" \
   -p pn_vmax:="$PN_VMAX" -p pn_freeze_r:="$FREEZE_R" \
   -p pn_freeze_tgo:="$FREEZE_TGO" \
+  -p gate_profile:="$GATE_PROFILE" -p gate_h:="$GATE_H" \
   -p csv:="$CSV_BASE" \
   -p link_base:=6960 -p link_stride:=10 > "$LOG" 2>&1 < /dev/null &
 

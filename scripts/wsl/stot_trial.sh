@@ -30,7 +30,12 @@ DIVE_ANGLE="${DIVE_ANGLE:-10.0}"
 LINE_TOL="${LINE_TOL:-25.0}"
 HDEM_TC="${HDEM_TC:-1.0}"
 RESEND_DT="${RESEND_DT:-2.0}"
-LOG="${LOG:-/tmp/trial_${TRIAL}.log}"
+# ⚠️ 飛行記錄不要放 /tmp:WSL 一重啟就整個清空(2026-07-27 實測被清掉一整輪的
+#    tot_*.csv / trial_*.log,離線分析全部做不了)。預設改寫到 ~/fixwing_ws/runs/。
+OUT_DIR="${OUT_DIR:-$HOME/fixwing_ws/runs}"
+mkdir -p "$OUT_DIR"
+LOG="${LOG:-$OUT_DIR/trial_${TRIAL}.log}"
+CSV_BASE="$OUT_DIR/tot_${TRIAL}"
 
 [ -f "$CSV" ] || echo "trial,spread_s,max_miss_m,max_abs_alt_m,n_hit,pass,note" > "$CSV"
 
@@ -70,7 +75,7 @@ setsid nohup ros2 run sar_swarm tot_node --ros-args \
   -p dive_hdem_tconst:="$HDEM_TC" \
   -p pn_enable:="$PN" -p gate_r:="$GATE_R" \
   -p pn_n_lat:="$N_LAT" -p pn_n_vert:="$N_VERT" -p pn_lead:="$PN_LEAD" \
-  -p csv:="/tmp/tot_${TRIAL}" \
+  -p csv:="$CSV_BASE" \
   -p link_base:=6960 -p link_stride:=10 > "$LOG" 2>&1 < /dev/null &
 
 ok=0
@@ -90,3 +95,5 @@ MISS_MAX="$MISS_MAX" ALT_MAX="$ALT_MAX" SPREAD_MAX="$SPREAD_MAX" \
   TRIAL="$TRIAL" CSV="$CSV" TOT_LOG="$LOG" python3 "$SR/_kpi_parse.py"
 echo "── 遙測基準 ──"; tail -1 "$CSV"
 echo "── 真值基準 ──"; grep "真值基準" "$LOG" | tail -1
+echo "── 觸地基準(驗收用這個)──"
+python3 "$SR/stot_score.py" "${CSV_BASE}.csv" --log "$LOG" | tail -12

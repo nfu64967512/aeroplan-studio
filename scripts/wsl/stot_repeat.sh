@@ -15,7 +15,11 @@ set -o pipefail
 SR="$HOME/fixwing_ws/sitl_run"
 TRIALS="${TRIALS:-5}"
 PREFIX="${PREFIX:-R}"
-SUMMARY="${SUMMARY:-/tmp/stot_repeat.csv}"
+# ⚠️ 不要放 /tmp:WSL 重啟會清空(已經被清掉一整輪的飛行記錄)。
+OUT_DIR="${OUT_DIR:-$HOME/fixwing_ws/runs}"
+export OUT_DIR
+mkdir -p "$OUT_DIR"
+SUMMARY="${SUMMARY:-$OUT_DIR/stot_repeat.csv}"
 
 [ -f "$SUMMARY" ] || echo "trial,n_touch,max_impact_miss_m,max_abs_alt_m,touch_spread_s,pass" > "$SUMMARY"
 
@@ -37,10 +41,12 @@ for n in $(seq 1 "$TRIALS"); do
 import json, subprocess, sys, os
 T, SUMMARY = sys.argv[1], sys.argv[2]
 sr = os.path.expanduser("~/fixwing_ws/sitl_run")
+OUT = os.environ.get("OUT_DIR", os.path.expanduser("~/fixwing_ws/runs"))
 try:
     out = subprocess.run(
-        ["python3", os.path.join(sr, "stot_score.py"), f"/tmp/tot_{T}.csv",
-         "--log", f"/tmp/trial_{T}.log", "--json"],
+        ["python3", os.path.join(sr, "stot_score.py"),
+         os.path.join(OUT, f"tot_{T}.csv"),
+         "--log", os.path.join(OUT, f"trial_{T}.log"), "--json"],
         capture_output=True, text=True, timeout=120).stdout
     s = json.loads(out)
 except Exception as e:

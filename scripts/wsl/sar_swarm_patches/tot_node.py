@@ -590,6 +590,23 @@ class TotNode(Node):
         self._att_target(i, roll, pitch, thr)
         return True
 
+    def _pace_of(self, i, d):
+        """本機專屬的預估俯衝**地速**(放行判定用)。
+
+        ⚠️ 全隊不能共用一個 pace。地速 = 總速 · cos(航路角),而各機在環上的高度
+        本來就有差(實測 F5 進入高度 817–1039 m),角度不同 ⇒ 同樣的總速換算出
+        來的地速就不同:F5 進入 1039 m 的機地速峰值只有 78.6,進入 887 m 的有
+        93.8,但兩者總速都在 88–96 之間。用單一 pace 去反推放行時刻,這個差異
+        會原封不動變成命中散布 —— 高速組態散布卡在 5.6–6.4 s 就是這麼來的。
+
+        以設計俯角為基準做正規化:航路角剛好等於 dive_angle 時 pace 不變,
+        比設計角陡的機 pace 較低(需要更久)⇒ 晚一點放行。這樣既保留既有的
+        dive_pace 調校,又把各機的幾何差異補回去。"""
+        h = max(0.0, self.pos[i][2] - self._zg(i))
+        gam = math.atan2(h, max(d, 1.0))
+        ref = math.radians(max(1.0, self.dive_angle))
+        return max(10.0, self.dive_pace * math.cos(gam) / math.cos(ref))
+
     def _zg(self, i):
         """本機自量的地表高度(相對 HOME);沒有地形回報就退回全域 ground_alt。"""
         return self.zg.get(i, self.ground_alt)
@@ -888,7 +905,11 @@ class TotNode(Node):
                 dmax = max(dist_m(self.pos[i][:2], self.T) for i in self.pos)
                 self.dive_pace = self.pace_cfg if self.pace_cfg > 1.0 else min(
                     self.vmax, 0.8 * self.dive_speed)
-                self.dive_T = now + dmax / self.dive_pace + 2.0
+                # 共同命中時刻用「最慢的那架自己的預估航程時間」定,不是 dmax/單一 pace。
+                self.dive_T = now + max(
+                    dist_m(self.pos[j][:2], self.T)
+                    / self._pace_of(j, dist_m(self.pos[j][:2], self.T))
+                    for j in self.pos) + 2.0
                 # 錯開放行:近的先在環上多等一會兒,之後大家用同一個配速飛。
                 # ⚠️ 這是「不靠減速」達成同時命中的關鍵 —— 靠減速行不通,因為近機
                 #    需要的速度會低於噴射可持續下限 vmin(45),被夾住就一定早到
@@ -918,7 +939,7 @@ class TotNode(Node):
                 #    不是終端導引沒有權限。改成每 tick 用當下距離重判即可自我修正
                 #    (往內漂 → d 變小 → 更晚放;往外飄 → 更早放),放行後鎖存。
                 if not self.released.get(i) and \
-                        d / max(self.dive_pace, 1.0) >= self.dive_T - now:
+                        d / self._pace_of(i, d) >= self.dive_T - now:
                     self.released[i] = True
                 released = self.released.get(i, False)
                 # ⚠️ 還在環上等放行的機不可以進 PN:那會一邊用姿態律撲向目標、
@@ -985,7 +1006,7 @@ class TotNode(Node):
                     self._goto(i, *self.pp[self.slot_id[i]], self.perch_alt, self.vmin)
                     stat[i] = {"mode": mode, "d": round(d),
                                "slack": round((self.dive_T - now)
-                                              - d / max(self.dive_pace, 1.0), 1)}
+                                              - d / self._pace_of(i, d), 1)}
                     self._row(now, i, d, mode, self.T)
                     continue
                 if i in self.impact:

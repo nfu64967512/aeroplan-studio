@@ -241,6 +241,7 @@ class TotNode(Node):
         self.wp_pt = {}    # 上次實際送出的航點 (lat, lon, alt),判斷「有沒有動」
         self.align_ok = {}  # 是否已在遠端對正過徑向線(鎖存,避免極限環)
         self.ready = {}     # PERCH 就緒(高度+對正,鎖存;全員就緒才一起內切)
+        self.released = {}  # DIVE 已放行(閉迴路判定後鎖存,避免在門檻上抖動)
         self.runup_t0 = None  # 同步內切的起始時刻(None = 還在 slot 上爬升對正)
 
         # ── ① MAVLink 分流連線(每機一條)──
@@ -848,14 +849,12 @@ class TotNode(Node):
                 # ⚠️ 這是「不靠減速」達成同時命中的關鍵 —— 靠減速行不通,因為近機
                 #    需要的速度會低於噴射可持續下限 vmin(45),被夾住就一定早到
                 #    (實測早到 14.5s;把 vmin 壓到 38 又會失速亂飛)。
-                self.release_t = {}
-                for j in self.pos:
-                    dj = dist_m(self.pos[j][:2], self.T)
-                    self.release_t[j] = now + (dmax - dj) / self.dive_pace
-                lag = {j: round(self.release_t[j] - now, 1) for j in sorted(self.release_t)}
+                lag = {j: round((dmax - dist_m(self.pos[j][:2], self.T))
+                                / self.dive_pace, 1) for j in sorted(self.pos)}
                 self.get_logger().info(
                     f"DIVE 配速:最遠 {dmax:.0f}m / {self.dive_pace:.0f} m/s "
-                    f"→ 共同命中 T+{self.dive_T-now:.0f}s;錯開放行 {lag}")
+                    f"→ 共同命中 T+{self.dive_T-now:.0f}s;預估錯開 {lag}"
+                    f"(實際放行是閉迴路,每 tick 用當下距離重判)")
 
         elif self.phase == "DIVE":
             done = 0
@@ -865,11 +864,21 @@ class TotNode(Node):
                 # 航點導引本質到不了個位數公尺:GUIDED 高度需求被
                 # TECS_HDEM_TCONST 節流、L1 的時間常數 ζ·T/π ≈ 4 s 在終端
                 # 根本來不及修。PN 用 50 Hz 姿態指令繞開兩者。
+                # ── 閉迴路放行 ──────────────────────────────────────────
+                # 需要的時間 d/配速 >= 剩下的時間 ⇒ 該走了;還有餘裕就繼續等。
+                # ⚠️ 舊版是在進 DIVE 當下把 release_t 一次算死。但等待中的飛機
+                #    還在動(守環點、固定翼站不住只能繞),最久要等 ~12 s,
+                #    45 m/s 下就是 540 m 的位移 —— 錯開時間完全失真。
+                #    實測 Q1:進俯衝後半徑 2000 m 處散布已經 10.70 s,而俯衝段
+                #    本身一路在收斂(10.70 → 5.50)⇒ 散布是放行條件造成的,
+                #    不是終端導引沒有權限。改成每 tick 用當下距離重判即可自我修正
+                #    (往內漂 → d 變小 → 更晚放;往外飄 → 更早放),放行後鎖存。
+                if not self.released.get(i) and \
+                        d / max(self.dive_pace, 1.0) >= self.dive_T - now:
+                    self.released[i] = True
+                released = self.released.get(i, False)
                 # ⚠️ 還在環上等放行的機不可以進 PN:那會一邊用姿態律撲向目標、
                 #    一邊被 wait 分支用 DO_REPOSITION 拉回環點,兩套指令打架。
-                #    目前 pushover 環(2541 m)在 gate_r(1200 m)之外所以碰不到,
-                #    但 gate_r 一調大就會踩到 —— 先擋起來。
-                released = now >= getattr(self, "release_t", {}).get(i, 0.0)
                 if self.pn_on and self.fc and released and i not in self.impact:
                     if not self.strike.get(i) and d <= self.gate_r:
                         self.strike[i] = True
@@ -917,12 +926,13 @@ class TotNode(Node):
                         f"UAV{i} 命中紅心 @+{now-self.dive_go:.2f}s (最近 {self.dmin[i]:.0f}m "
                         f"命中高度 {self.hit_alt[i]:+.0f}m(離紅心地表) "
                         f"gs {self.gs.get(i,0):.0f}m/s)")
-                if now < getattr(self, "release_t", {}).get(i, 0.0):
+                if not released:
                     # 還沒輪到:在自己的環點上等,保持高度與對正
                     mode = "wait"
                     self._goto(i, *self.pp[self.slot_id[i]], self.perch_alt, self.vmin)
                     stat[i] = {"mode": mode, "d": round(d),
-                               "wait": round(self.release_t[i] - now, 1)}
+                               "slack": round((self.dive_T - now)
+                                              - d / max(self.dive_pace, 1.0), 1)}
                     self._row(now, i, d, mode, self.T)
                     continue
                 if i in self.impact:

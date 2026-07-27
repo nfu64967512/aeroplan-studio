@@ -88,7 +88,7 @@ def main():
             i = int(r["sysid"])
             tracks.setdefault(i, []).append(
                 (float(r["t"]), float(r["lat"]), float(r["lon"]),
-                 float(r["alt"]), float(r["gs"] or 0)))
+                 float(r["alt"]), float(r["gs"] or 0), r["mode"]))
 
     ml = mlon(T[0])
     res = {}
@@ -96,8 +96,8 @@ def main():
         pts = tracks[i]
         best = None
         for k in range(len(pts) - 1):
-            t0, la0, lo0, z0, g0 = pts[k]
-            t1, la1, lo1, z1, g1 = pts[k + 1]
+            t0, la0, lo0, z0, g0, _m0 = pts[k]
+            t1, la1, lo1, z1, g1, _m1 = pts[k + 1]
             ax, ay = (la0 - T[0]) * EARTH, (lo0 - T[1]) * ml
             bx, by = (la1 - T[0]) * EARTH, (lo1 - T[1]) * ml
             # 取樣間跳太遠(> 400 m)代表中間斷訊,直線假設不成立,跳過
@@ -133,9 +133,13 @@ def main():
                     dd = math.hypot((la - T[0]) * EARTH, (lo - T[1]) * ml)
                     if touch is None or dd < touch[0]:
                         touch = (dd, tm)
-        # 俯衝階段地速(驗收主項:要夠快)。峰值與觸地瞬間都報 ——
-        # 峰值通常出現在觸地前,兩者一起看才知道「衝下來的過程」有多快。
-        gs_all = [p[4] for p in pts if p[4] > 0]
+        # 俯衝階段地速(驗收主項:要夠快)。
+        # ⚠️ 一定要排除 mode == "wait" 的列。DIVE 階段裡「還在環上等錯開放行」的機
+        #    也記在同一個 phase 底下,而它們在環上繞圈時地速會衝到 100+ m/s
+        #    (實測 F3 的 UAV2 在 wait 狀態 105.8 m/s、UAV4 103.7 m/s)。
+        #    把那些算進峰值 → 會誤報「已經很接近 100 m/s」,而且會生出一個假的
+        #    「進入高度越低越快」的相關性。真正要量的是放行之後的俯衝。
+        gs_all = [p[4] for p in pts if p[4] > 0 and p[5] != "wait"]
         res[i] = {
             "gs_peak_ms": round(max(gs_all), 1) if gs_all else None,
             "miss_m": round(best[0], 2),

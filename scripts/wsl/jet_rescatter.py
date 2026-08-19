@@ -5,7 +5,9 @@ import sys, math, time
 from pymavlink import mavutil
 
 EARTH = 111320.0
-T = (25.1406, 121.2325)
+import os as _os
+T = (float(_os.environ.get("TGT_LAT", "25.1406")),
+     float(_os.environ.get("TGT_LON", "121.2325")))
 OFF = {1: (3600, -800), 2: (4400, -400), 3: (3800, 0),
        4: (4200, 500), 5: (3700, 1000), 6: (4300, -1300)}
 CRUISE_ALT = 130.0

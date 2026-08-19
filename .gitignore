@@ -99,3 +99,22 @@ assets/leaflet/
 
 # stray SITL artifact if arduplane ever run from repo root
 /eeprom.bin
+
+# ── 2026-08-19 首次把 8 月的工作納管時新增 ──────────────────────────
+# 航次產物:每趟數十 MB 的逐拍 CSV/log,可由 SITL 重生,不進版控
+runs/
+
+# 文獻 PDF(56 MB)。⚠️ docs/lit/*.md 與 docs/lit/ardupilot/ 的參考原始碼**要**進版控
+docs/lit/pdf/
+
+# 動畫產物(53 MB),可由 stot_make_anim.sh 重生
+docs/images/anim/
+
+# 研究用的二進位中間產物,可重生
+*.npz
+*.pkl
+
+# Windows/shell 意外產生的殘留檔(不是專案檔案)
+nul
+追蹤
+; else echo REAL

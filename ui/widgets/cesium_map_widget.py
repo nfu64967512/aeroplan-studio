@@ -229,9 +229,13 @@ class CesiumMapWidget(MapWidgetBase):
             logger.info('[Cesium] 使用 CDN 線上資源')
 
         # ── GLB 3D 模型路徑 ──
-        plane_glb = project_root / 'ui' / 'resources' / 'P25-ID.glb'
+        # 固定翼 = Barracuda 500，由 Fusion 直接匯出（Barracuda500/export_glb.py）。
+        # 刻意不自動退回 P25-ID.glb：兩者的單位與朝向慣例不同，main.html 裡的 scale 與
+        # _PLANE_*_OFFSET 是綁定 Barracuda 的，靜默換檔只會畫出一架姿態錯誤的飛機。
+        # 找不到檔案時 plane_model_uri 留空，Cesium 端自動退回 2D 圖示。
+        plane_glb = project_root / 'ui' / 'resources' / 'barracuda500.glb'
         plane_model_uri = plane_glb.as_uri() if plane_glb.exists() else ''
-        logger.info(f'[Cesium] 固定翼 GLB 模型: {plane_model_uri or "未找到，使用 fallback"}')
+        logger.info(f'[Cesium] 固定翼 GLB 模型: {plane_model_uri or "未找到，退回 2D 圖示"}')
 
         copter_glb = project_root / 'ui' / 'resources' / 'copter.glb'
         copter_model_uri = copter_glb.as_uri() if copter_glb.exists() else ''

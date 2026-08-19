@@ -88,6 +88,9 @@ class ParameterPanel(QWidget):
     strike_open_vtol_mission_planner_requested = pyqtSignal()  # 開啟 VTOL 全任務生命週期規劃器（戰術對話框）
     fence_export_requested = pyqtSignal()  # 匯出電子圍籬（每個 Tab 都有按鈕，共用一個 signal）
     strike_target_coord_changed = pyqtSignal(float, float)  # 目標 lat/lon 手動輸入 → 同步 3D marker
+    # ── WSL ROS2 STOT 全流程（run_west.sh）—— 與上面 AeroPlan 自有路徑平行的第二條 ──
+    stot_ros2_run_requested = pyqtSignal()                # ▶ 以此點執行 ROS2 STOT 打擊
+    stot_ros2_abort_requested = pyqtSignal()              # ABORT 整趟航次
     tab_changed = pyqtSignal(str)                           # 分頁切換（傳分頁標題）— 供 main_window 調整地圖點擊路由
 
     def __init__(self, parent=None):
@@ -3325,6 +3328,83 @@ class ParameterPanel(QWidget):
         sal.addLayout(action_row)
 
         layout.addWidget(sa)
+
+        # ════════════════════════════════════════════════════════════
+        # ⑦  WSL ROS2 STOT 全流程 —— 刻意獨立成一區，不併進上面的 Actions
+        #
+        # 上面那一區（EXECUTE / 匯出 / 上傳 SITL）是 AeroPlan 自有的 MAVLink
+        # 上傳路徑；這一區走的是 WSL 上的 ROS2 管線（run_west.sh → stot_repeat.sh
+        # → stot_trial.sh → tot_node）。兩條是**平行的實作**，同時跑會搶控制權。
+        # 放同一區又都叫「執行」，使用者遲早會按錯 —— 所以用 NEUTRAL 青色 +
+        # 標題掛 (WSL) 做視覺隔離。
+        # ════════════════════════════════════════════════════════════
+        s7 = _section("⑦  ROS2 STOT 全流程 (WSL)", TC.NEUTRAL)
+        s7l = QVBoxLayout(s7)
+        s7l.setSpacing(6); s7l.setContentsMargins(8, 14, 8, 8)
+
+        s7_hint = QLabel(
+            "用 ⓿ 區鎖定的紅心，在 WSL 上跑完整條 ROS2 管線：\n"
+            "彈射起飛 → 爬升 → 編隊巡航 → ALIGN 扇形 → PERCH 環 → DIVE 同步命中。\n"
+            "⚠️ 會先拆掉再重建 WSL 的 6 架 SITL（約 155 秒），期間 AeroPlan 連線會斷。\n"
+            "⚠️ 航次進行中請勿重新連線嵌入式蜂群 —— 會搶走階段 2 要用的 6760 分流。"
+        )
+        s7_hint.setWordWrap(True)
+        s7_hint.setStyleSheet(
+            f"QLabel{{color:{TC.FG_MUTED};font-size:11px;"
+            f"font-family:{TF.css_condensed()};}}"
+        )
+        s7l.addWidget(s7_hint)
+
+        # 目標高度基準。run_west.sh:185 為「台灣海峽海面」把 TARGET_AMSL 釘死成
+        # 0.0，註解明講陸地目標要改回 nan（=查地形資料庫）。點到陸地卻沿用海面
+        # 基準的話，誤差會直接等於當地地形高度，而且**不會有任何錯誤訊息**。
+        self._stot_sea_target_chk = QCheckBox("紅心在海面（TARGET_AMSL=0.0）")
+        self._stot_sea_target_chk.setChecked(True)
+        self._stot_sea_target_chk.setStyleSheet(
+            f"QCheckBox{{color:{TC.FG_PRIMARY};font-family:{TF.css_condensed()};}}"
+        )
+        self._stot_sea_target_chk.setToolTip(
+            "勾選 = 目標在海面，高度基準釘死 0 m AMSL（已驗證的基準組態）。\n"
+            "取消 = 陸地目標，改送 .nan 讓 tot_node 去查地形資料庫。\n"
+            "⚠️ 點到陸地卻用海面基準，末端誤差會等於當地地形高度，且完全靜默。"
+        )
+        s7l.addWidget(self._stot_sea_target_chk)
+
+        self._stot_run_btn = _btn(
+            "▶  以此點執行 ROS2 STOT 打擊", TC.BG_PRIMARY, TC.NEUTRAL, height=40
+        )
+        self._stot_run_btn.setToolTip(
+            "以 ⓿ 區的紅心座標啟動 WSL 上的 run_west.sh：\n"
+            "  TGT_LAT / TGT_LON / APPROACH_FROM / TARGET_AMSL / PREFIX / TRIALS=1\n"
+            "按下後會先做前置檢查（SITL、ROS2 層、上一趟殘留、幾何距離、航次代號），\n"
+            "任何一項不過都會擋下並說明原因與處置。\n"
+            "單趟典型 25–30 分鐘，最壞約 65 分鐘。"
+        )
+        self._stot_run_btn.clicked.connect(self.stot_ros2_run_requested.emit)
+        s7l.addWidget(self._stot_run_btn)
+
+        self._stot_abort_btn = _btn("ABORT 航次", TC.BG_PRIMARY, TC.HOSTILE, height=32)
+        self._stot_abort_btn.setEnabled(False)
+        self._stot_abort_btn.setToolTip(
+            "停掉整趟：先殺 tot_node 的行程群組（它是 setsid nohup，殺上游殺不到），\n"
+            "再收 ROS2 層，最後把殘留計數讀回來驗證。\n"
+            "不會動 arduplane / mavproxy —— 留著 SITL 讓你可以立刻重連。"
+        )
+        self._stot_abort_btn.clicked.connect(self.stot_ros2_abort_requested.emit)
+        s7l.addWidget(self._stot_abort_btn)
+
+        # 相位顯示的落點。內容由 StotRos2ControllerMixin._stot_set_status() 寫入，
+        # 同一段文字同時進 statusBar 與 logger —— 三處一致才好對帳。
+        self._stot_status_label = QLabel("待命 — 請先在 ⓿ 區鎖定紅心座標")
+        self._stot_status_label.setWordWrap(True)
+        self._stot_status_label.setStyleSheet(
+            f"QLabel{{color:{TC.NEUTRAL};background:{TC.BG_SUNKEN};"
+            f"border:1px solid {TC.BORDER_DEFAULT};padding:6px;"
+            f"font-family:{TF.css_mono()};font-size:11px;}}"
+        )
+        s7l.addWidget(self._stot_status_label)
+
+        layout.addWidget(s7)
 
         return group
 

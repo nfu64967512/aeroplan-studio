@@ -1090,9 +1090,25 @@ const _COPTER_MODEL_URI = '__COPTER_MODEL_URI__';
 // GLB 模型方向校正（單位：度）。MAVLink heading: 0=北, 90=東 (順時針)。
 // Cesium HPR heading 軸繞 -Z，若模型預設 forward 為 +X(東)，需 -90° 將其轉向北。
 // 若視覺仍偏離 HUD 儀表板，調整這兩個值即可。
-const _PLANE_HEADING_OFFSET  = -90;   // 固定翼 GLB forward = +X (Cesium 慣例)
-const _PLANE_PITCH_OFFSET    = 90;   // 固定翼 GLB pitch +90° 校正
-const _PLANE_ROLL_OFFSET     = 180;   // GLB 機身上下倒置校正 (roll 翻正)
+// 固定翼 = Barracuda 500，由 Fusion 直接匯出（見 Barracuda500/export_glb.py）。
+// 匯出時就已經對齊 Cesium 慣例：單位公尺、+Y = 上，因此 pitch / roll 不需要任何校正。
+// 舊的 P25-ID.glb 需要 pitch 90 / roll 180 是因為那個模型本身是躺著且上下顛倒的 ——
+// 換回舊模型的話這三個值要一起改回去。
+//
+// ⚠️⚠️ heading 偏移 2026-08-07 由 **-90 改成 0**（實測：機身垂直於航跡，
+//    使用者目視判定「模型需要順時針轉九十度」）。
+//    Cesium 的 HPR heading 與 MAVLink 同慣例（0=北，**順時針為正**），而這裡是
+//    `toRadians(headingDeg + headingOffset)` 直接相加 ⇒ 偏移值增加 = 模型順時針轉。
+//    所以 -90 + 90 = 0。
+//    ⇒ 也就是說 Barracuda 500 匯出後的機鼻**已經對齊 Cesium 的 0° 方位**，
+//      原本那句「+X = 機鼻，需要 -90 把 +X(東) 轉向北」與實際匯出結果不符。
+//    ⚠️ 這是**目視校正**，不是從匯出腳本推導出來的。要改回去之前請先看飛行中的
+//      模型是否與 2D 圖標／HUD 航向一致（2D 圖標走 billboard.rotation，一直是對的，
+//      可以拿來當基準）。
+//    ⚠️ 這個值只影響**顯示**，不影響任何飛行控制或評分。
+const _PLANE_HEADING_OFFSET  = 0;     // 目視校正：機鼻已對齊 Cesium 0° 方位
+const _PLANE_PITCH_OFFSET    = 0;     // Barracuda 500 匯出時已經是正的
+const _PLANE_ROLL_OFFSET     = 0;     // 同上，不需要翻正
 const _COPTER_HEADING_OFFSET = -90;   // 多旋翼 GLB yaw 逆時針 90°
 const _COPTER_PITCH_OFFSET   = 90;   // 多旋翼 GLB pitch +90° 校正
 const _COPTER_ROLL_OFFSET    = 180;   // GLB 機身上下倒置校正 (roll 翻正)
@@ -1561,7 +1577,9 @@ function updateUAVPosition(lat, lon, alt, headingDeg, speedMs, sysid, mode, arme
         uri: _PLANE_MODEL_URI,
         minimumPixelSize: 32,
         maximumScale: 50,
-        scale: 0.01,
+        // Barracuda 500 是以「公尺」匯出的實尺寸 (3.79 m)，所以 scale = 1。
+        // 舊的 P25-ID.glb 用 0.01 是因為那個檔的單位是公分。
+        scale: 1.0,
         // 全距離顯示立體模型，遠看靠 minimumPixelSize 保持 ≥32px，姿態
         // (pitch/roll/yaw) 在任何縮放下都看得到（取代原本 >2000m 退化為平面圖示）。
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 1.0e8),

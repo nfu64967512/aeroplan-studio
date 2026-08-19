@@ -28,7 +28,15 @@ from core.collision import CollisionChecker
 from mission.swarm_coordinator import SwarmCoordinator
 
 # 2026 重構：Swarm Strike 邏輯已抽出至 Controller Mixin (ui/controllers/)
-from ui.controllers import StrikeControllerMixin
+# StotRos2ControllerMixin 是**平行的第二條**打擊路徑（WSL ROS2 管線），
+# 與 StrikeControllerMixin 的 MAVLink 上傳路徑互不相干，兩者以 dashboard 互鎖。
+# RClickStrikeControllerMixin 是**第三條**：右鍵一點 → 送給已待命的 tot_node，
+# 不拆 SITL、不起 ROS2 層（那兩件事由兩個常駐 CMD 負責）。
+from ui.controllers import (
+    StrikeControllerMixin, StotRos2ControllerMixin, RClickStrikeControllerMixin,
+)
+# 右鍵語意（到達 / 攻擊）與高度 0 快捷的判定放在純邏輯層，UI 只負責跳窗。
+from integrations import rclick_strike
 
 # 戰術蜂群打擊面板（VTOL 全任務生命週期）— 彈出式對話框
 from ui.widgets.tactical_swarm_strike_panel import TacticalSwarmStrikeDialog
@@ -43,7 +51,8 @@ MAX_CORNERS = 100  # 最大邊界點數量
 _WP_LIMIT = 655   # Mission Planner 單次最大匯入航點數
 
 
-class MainWindow(QMainWindow, StrikeControllerMixin):
+class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
+                 RClickStrikeControllerMixin):
     """
     主視窗類
     
@@ -641,6 +650,13 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         )
         # 切換到蜂群打擊分頁 → 自動啟用目標標記模式（離開時關閉）
         self.parameter_panel.tab_changed.connect(self._on_param_tab_changed)
+
+        # ── WSL ROS2 STOT 全流程（第二條、平行的打擊路徑）────────────
+        # 目標座標一律取自 self._strike_targets[0]（地圖點擊 / ⓿ 區 spinbox
+        # 兩條輸入都收斂到那裡），這邊不另接 strike_target_added，
+        # 否則一次點擊會新增兩個目標。
+        self.parameter_panel.stot_ros2_run_requested.connect(self._on_stot_ros2_run)
+        self.parameter_panel.stot_ros2_abort_requested.connect(self._on_stot_ros2_abort)
 
         # 蜂群打擊內部狀態
         self._strike_marking_mode = False
@@ -5859,20 +5875,79 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         except Exception as e:
             logger.error(f'[GUIDED] guided_goto 失敗: {e}')
 
-    # ── 3D 右鍵 GUIDED（Mission Planner 風格：右鍵點圖 → 跳高度框 → 送長機）────
+    # ── 3D 右鍵：先選動作（到達 / 攻擊），再走各自的流程 ──────────────
     def on_rclick_guided_goto(self, lat: float, lon: float):
+        """3D 地圖右鍵 → 動作選單。
+
+        兩個動作的前置條件、確認方式、後續狀態顯示完全不同，所以是**選單**
+        而不是塞進高度框裡的一個選項：
+          * 「攻擊」根本不需要高度（幾何由 tot_node 決定）。跳一個高度框
+            再把它丟掉，正是這個專案最痛恨的靜默行為。
+          * 兩者的前置檢查不一樣（到達看 SITL 連線，攻擊看 ROS2 圖上有沒有
+            待命中的 tot_node），擋下來的訊息也必須不一樣。
+
+        「飛到此點」= 既有行為，一個位元都沒動（見 _rclick_guided_arrive）。
+        高度框輸入 0 仍然是「攻擊」的快捷 —— 但一定會跳確認框。
+        """
+        mode = self._rclick_pick_action(lat, lon)
+        if mode is None:                                  # 按 Esc / 點別處
+            return
+        if mode == rclick_strike.MODE_STRIKE:
+            self.rclick_strike_at(lat, lon)
+            return
+        self._rclick_guided_arrive(lat, lon)
+
+    def _rclick_pick_action(self, lat: float, lon: float):
+        """右鍵動作選單。回傳 MODE_ARRIVE / MODE_STRIKE / None（取消）。"""
+        from PyQt6.QtGui import QCursor
+        from PyQt6.QtWidgets import QMenu
+        menu = QMenu(self)
+        head = menu.addAction(f'📍 {lat:.7f}, {lon:.7f}')   # 攤開座標，方便對帳
+        head.setEnabled(False)
+        menu.addSeparator()
+        act_goto = menu.addAction('✈️  飛到此點（GUIDED）')
+        act_hit = menu.addAction('🎯  以此點執行 STOT 打擊')
+        picked = menu.exec(QCursor.pos())
+        if picked is act_goto:
+            return rclick_strike.MODE_ARRIVE
+        if picked is act_hit:
+            return rclick_strike.MODE_STRIKE
+        return None
+
+    def _rclick_guided_arrive(self, lat: float, lon: float):
         """3D 地圖右鍵 → 跳高度輸入框 → 送長機 GUIDED。
         長機在地面：長機帶頭起飛到該高度 → 僚機 3s 內接續 → 長機飛往該點（僚機 V 跟隨）。
-        長機已在空中：直接 GUIDED 飛往該點。"""
+        長機已在空中：直接 GUIDED 飛往該點。
+
+        ⚠️ 這一段是**原本 on_rclick_guided_goto 的內容原樣搬過來**，行為零改動。
+           唯一的差別是高度下限從 5.0 放寬到 0.0，因為 0 是「攻擊」的快捷、
+           必須進得來（進來之後就被 mode_for_altitude 接走，不會流到 guided_goto）。
+        """
         if not self._sitl_links:
             QMessageBox.information(self, 'GUIDED', '尚未連線任何 SITL / 蜂群')
             return
         from PyQt6.QtWidgets import QInputDialog
         alt, ok = QInputDialog.getDouble(
             self, 'GUIDED 目標高度',
-            f'目標點 ({lat:.5f}, {lon:.5f})\n指定高度 (m，相對起飛點):',
-            float(getattr(self, '_last_guided_alt', 80.0)), 5.0, 2000.0, 0)
+            f'目標點 ({lat:.5f}, {lon:.5f})\n指定高度 (m，相對起飛點):'
+            f'\n（輸入 0 = 改走 STOT 打擊，會再跳一次確認）',
+            float(getattr(self, '_last_guided_alt', 80.0)), 0.0, 2000.0, 0)
         if not ok:
+            return
+        # 高度 0 = 攻擊快捷。**不可以默默改語意** ⇒ rclick_strike_at 一定會跳確認框。
+        if rclick_strike.mode_for_altitude(alt) == rclick_strike.MODE_STRIKE:
+            self.rclick_strike_at(lat, lon, via_alt_zero=True)
+            return
+        if not rclick_strike.arrive_altitude_ok(alt):
+            # 0 < alt < 5 是舊 UI（下限 5.0）產生不出來的值。不要靜默夾到 5，
+            # 那會讓使用者以為自己指定的高度生效了。
+            QMessageBox.warning(
+                self, 'GUIDED',
+                f'高度 {alt:.0f} m 太低（合法範圍 '
+                f'{rclick_strike.ALT_ARRIVE_MIN:.0f}–'
+                f'{rclick_strike.ALT_ARRIVE_MAX:.0f} m）。\n'
+                f'0 是「STOT 打擊」的快捷，其餘小於 '
+                f'{rclick_strike.ALT_ARRIVE_MIN:.0f} m 的值一律不送。')
             return
         self._last_guided_alt = alt
         # 尊重 HUD 指令對象：以「選取機（或長機）」的遙測判斷是否已升空
@@ -6763,6 +6838,14 @@ class MainWindow(QMainWindow, StrikeControllerMixin):
         try:
             if getattr(self, '_strike_viz_state', None) is not None:
                 self._finalize_strike_visualization()
+        except Exception:
+            pass
+        # ROS2 STOT 航次還在跑時，要由使用者決定「中止 / 留著繼續跑 / 不關」。
+        # 靜默殺掉會製造不可歸因的失敗；靜默留著則會變成沒人監看的孤兒航次。
+        try:
+            if self._stot_close_decision() is False:
+                event.ignore()
+                return
         except Exception:
             pass
         # 確保 SITL 執行緒安全停止

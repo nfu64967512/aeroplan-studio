@@ -12,6 +12,7 @@ Params: uav_id, origin_lat, origin_lon, altitude, speed, heading_deg
 import json
 import math
 from sar_swarm.geodesy import dist_m
+from sar_swarm.strike_authority import StrikeAuthority
 
 import rclpy
 from rclpy.node import Node
@@ -53,13 +54,56 @@ class MasterNode(Node):
         # 到了轉角先別轉：等隊形重新成形（或逾時）再轉，免得長機急轉把僚機甩在外圈
         self.declare_parameter("patrol_hold_timeout", 60.0)
         # ── 編隊速度控制（長機端）──：僚機沒到位就放慢等，全部到位再回正常巡航
-        self.declare_parameter("nominal_speed", 14.0)     # 隊形成立後的巡航速度
-        self.declare_parameter("wait_speed", 10.0)        # 有人落後時長機放慢等
-        self.declare_parameter("formed_radius", 250.0)    # 僚機誤差 <= 此值算到位（導引航點實際精度）
+        # ⚠️⚠️ 預設值一律是 **jet plane**(B-500 機體),不是泡棉機。
+        #    泡棉機的 14/10/20 m/s 曾讓僚機被命令用 1/4 速度飛、物理上不可能跟上,
+        #    間距單調拉開到 13.7 km。任何沒經過 stot_trial.sh 的路徑都會吃到預設,
+        #    所以預設本身必須是可飛的。
+        #    機體:W=215.8 N、c=0.003168、T=4.142×THR_MAX(21)=87.0 N
+        #    巡航 135 EAS(地速 157)/ 追趕 157 EAS / 等待 90 EAS(用滿減速權限)
+        self.declare_parameter("nominal_speed", 135.0)     # 隊形成立後的巡航速度
+        self.declare_parameter("wait_speed", 90.0)        # 有人落後時長機放慢等
+        # 僚機誤差 <= 此值算到位。⚠️ 這個值是**相對於 v_spacing** 才有意義:
+        #   緊密編隊 v_spacing=120 之下 250 比間距還大 ⇒ 永遠算到位,隊形收不緊;
+        #   寬間距 v_spacing=4000 之下 200 是間距的 5%,是合理的到位判準。
+        #   200 m 也和 3 英里間距的動態雜訊量級相符(GPS + WP 滯後 + 陣風)。
+        #   ⚠️ 不要為了「看起來精準」而設小:設 20 m 會讓 formed 永遠不成立,
+        #   長機一路停在 wait_speed,整個編隊被自己的門檻拖住。
+        self.declare_parameter("formed_radius", 200.0)
         # 成形後的解除門檻 = formed_radius × 此倍數。巡航中 slot 追蹤誤差會比等待時
         # 膨脹（WP 滯後 + TECS 落後，實測 +~70m）；倍數太小（1.4）會一釋放就被打回
         # wait，長機在 wait/cruise 間震盪、群速卡在 wait_speed。放寬到 ~1.8 讓巡航撐得住。
         self.declare_parameter("formed_hysteresis", 1.4)
+        # ── Max-Consensus 速度對齊 ────────────────────────────────────────
+        # ⚠️⚠️ 舊行為是**二值**切換(formed ? nominal : wait),等於只用了「加速側」
+        #    的權限:落後機自己追,長機要嘛全速要嘛掉到 wait 一格。
+        #    但低推重比固定翼的速度權限是**不對稱**的 —— 減速靠阻力,加速靠剩餘推力:
+        #      巡航 135 EAS:加速側可用 +21(到 156);減速側可用 −45(到 90)
+        #      減速加速度 −cV²/m = −2.62 m/s² vs 加速 +1.33 m/s² ⇒ **快 2 倍**
+        #    換算成修正 167 s 抵達散布所需的航程:
+        #      只讓落後機加速      185.3 km
+        #      只讓領先機減速       53.2 km
+        #      兩邊同時用           41.3 km   ← 現有的 40 km 交棒段就夠
+        #    所以改成「全隊向**最慢者**對齊」(max-consensus):長機主動讓出速度,
+        #    讓出的量由最差僚機的落後量連續決定,而不是掉進一個固定的 wait 檔位。
+        #    參考:arXiv 2607.14781 的 max-consensus 同時到達(Tᵢᵈ = max_j Tⱼ)。
+        self.declare_parameter("catch_speed", 157.0)       # 僚機的追趕上限(算閉合率用)
+        self.declare_parameter("close_time", 60.0)        # 期望把最差落後量收掉的秒數
+        self.declare_parameter("max_consensus", True)
+        # ⭐⭐ 高度閘門:爬升段**強制關閉** max-consensus。
+        #    實測 AMB(3 s 彈射間隔):六機幾乎同時離地 ⇒ 長機立刻偵測到僚機落後
+        #    ⇒ 主動減速等待,而它是在**爬升途中**減速的 ⇒ 爬升率跟著掉。
+        #    UAV1 的爬升航程因此從 27.4 km 惡化到 **49.6 km**(+78%)。
+        #    協同讓速與爬升搶同一份剩餘推力(T/W 僅 0.403),必須時序上隔開:
+        #      alt < 門檻 → CLIMBING:全力爬,不下任何減速指令
+        #      alt ≥ 門檻 → CRUISE_FORMATION:解鎖速度對齊
+        # ⚠️⚠️ **master 端的高度閘門預設關閉(0.0)**,與 wingman 端分開。
+        #    實測 AMD1:master+wingman 一起開閘門,散布 62.7 → 188.2 s。
+        #    原因是 master 端閘門會在爬升段(28 km / 280 s)關掉手風琴,
+        #    而**缺口正是在那一段形成的** —— 長機全速跑掉、僚機拉開。
+        #    手風琴必須在缺口形成的當下就壓制它。
+        #    wingman 端閘門是另一回事(把追不到的 catch_speed 換成可達的
+        #    最佳爬升速度),那一項有效,見 wingman_node。
+        self.declare_parameter("master_alt_gate", 0.0)     # False = 回到舊的二值切換
         self.declare_parameter("status_stale", 5.0)       # 超過此秒數沒回報就忽略該僚機
         self.declare_parameter("expected_followers", 5)    # 收齊這麼多僚機回報才可能判定成形（含備長）
         self.declare_parameter("guided_min_alt", 15.0)
@@ -127,6 +171,11 @@ class MasterNode(Node):
             # 編隊速度控制狀態
             self._nominal_speed = float(g("nominal_speed").value)
             self._wait_speed = float(g("wait_speed").value)
+            self._catch_speed = float(g("catch_speed").value)
+            self._close_time = max(1.0, float(g("close_time").value))
+            self._max_consensus = bool(g("max_consensus").value)
+            self._cruise_alt_thr = float(g("master_alt_gate").value)
+            self._climb_gate_logged = False
             self._formed_radius = float(g("formed_radius").value)
             self._formed_hyst = float(g("formed_hysteresis").value)
             self._status_stale = float(g("status_stale").value)
@@ -139,6 +188,8 @@ class MasterNode(Node):
             self._last_guided_t = 0.0
             self.create_subscription(String, "/swarm/formation_status",
                                      self._on_status, HEARTBEAT_QOS)
+            # 打擊期間讓權給 tot_node(見 strike_authority 的事故說明)
+            self._strike_auth = StrikeAuthority(self)
             self.create_timer(0.5, self._tick)
             self.get_logger().info(f"UAV{vid} master: GUIDED takeoff, then patrol the box")
 
@@ -176,9 +227,44 @@ class MasterNode(Node):
         return worst <= self._formed_radius, worst
 
     def _leader_speed_control(self, now):
+        # ⭐ 高度閘門:還沒到巡航高度就不做協同讓速(見 cruise_alt_threshold)。
+        # ⚠️⚠️ 這道閘門**預設關閉(master_alt_gate=0.0)且應該維持關閉** ——
+        #    受控實測:爬升段關掉 max-consensus 讓散布從 62.7 s 惡化到 188.2 s。
+        #    因果是相反的:缺口正是在爬升段形成的,手風琴必須在那時就壓制。
+        # ⚠️ 若哪天要重新啟用,**不要用下面這個裸比較** —— 它沒有遲滯,
+        #    僚機端同樣的寫法在 P91 讓 UAV5 在 200 s 內翻了 10 次相位、
+        #    末端誤差發散到 33 km。改用 sar_swarm.phase_gate.LatchedAltGate。
+        p_now = self.mav.position() if hasattr(self, "mav") else None
+        if (self._cruise_alt_thr > 0.0 and p_now is not None
+                and p_now[2] < self._cruise_alt_thr):
+            if not self._climb_gate_logged:
+                self._climb_gate_logged = True
+                self.get_logger().info(
+                    f"CLIMBING(alt {p_now[2]:.0f} < 門檻 {self._cruise_alt_thr:.0f} m)"
+                    f" —— max-consensus 暫停,全力爬升")
+            self._formed_now = False
+            self._keep_guided_only(now)
+            return
+        if self._climb_gate_logged:
+            self._climb_gate_logged = False
+            self.get_logger().info(
+                f"CRUISE_FORMATION(alt {p_now[2]:.0f} m)—— 解鎖 max-consensus 速度對齊")
         formed, worst = self._formed(now)
         self._formed_now = formed            # 給轉彎閘門看
-        spd = self._nominal_speed if formed else self._wait_speed
+        if formed:
+            spd = self._nominal_speed
+        elif not self._max_consensus or worst is None:
+            spd = self._wait_speed           # 舊行為:二值切換 / 還沒收到任何回報
+        else:
+            # ⭐ Max-Consensus:全隊向最慢者對齊 —— 長機讓出速度,讓出量由最差
+            #    落後量連續決定。閉合率 = catch_speed − v_lead,要在 close_time
+            #    秒內收掉 worst 公尺 ⇒ v_lead = catch_speed − worst/close_time。
+            #    夾在 [wait_speed, nominal_speed]:落後小 → 幾乎不減速(不犧牲群速);
+            #    落後大 → 一路掉到 wait_speed(用滿減速權限)。
+            #    ⚠️ 這是連續的,不是檔位 —— 舊的二值切換會在 formed 邊界上抖動,
+            #      而抖動本身又會製造新的落後(長機忽快忽慢,僚機追不上相位)。
+            spd = self._catch_speed - worst / self._close_time
+            spd = max(self._wait_speed, min(self._nominal_speed, spd))
         self.master.cmd_speed = spd          # 廣播給僚機：到位的就跟著長機這個速度（不會超車）
         if formed and not self._was_formed:
             self.get_logger().info(
@@ -190,8 +276,13 @@ class MasterNode(Node):
             self._last_lead_speed, self._last_lead_speed_t = spd, now
             if not formed:
                 w = f"{worst:.0f} m" if worst is not None else "awaiting reports"
+                mode = "max-consensus" if (self._max_consensus and worst is not None) \
+                    else "binary wait"
+                rate = (self._catch_speed - spd) if worst is not None else 0.0
                 self.get_logger().info(
-                    f"leader slowing to {spd:.0f} m/s — waiting (worst follower err {w})")
+                    f"leader slowing to {spd:.0f} m/s [{mode}] — worst follower err {w}"
+                    f"(閉合率 {rate:.0f} m/s ⇒ 預估 "
+                    f"{(worst / rate) if (worst and rate > 0.5) else float('inf'):.0f} s)")
         # 起飛後若被切出 GUIDED（操作員手動 TAKEOFF/AUTO），重新宣告 GUIDED
         p = self.mav.position()
         if (p is not None and p[2] > self._guided_min_alt
@@ -200,6 +291,20 @@ class MasterNode(Node):
             self.mav.set_mode_async("GUIDED")
             self._last_guided_t = now
             self.get_logger().info("leader: re-asserting GUIDED for patrol")
+
+    def _keep_guided_only(self, now):
+        """爬升段:只維持 GUIDED,不下任何速度指令。
+
+        ⚠️ 不能整段 return —— 起飛後若被切出 GUIDED,導引航點會失效、飛機空盤旋。
+           保留這一段是為了「不干擾爬升」而不是「不控制」。
+        """
+        p = self.mav.position()
+        if (p is not None and p[2] > self._guided_min_alt
+                and self.mav.mode() not in ("GUIDED", "RTL")
+                and (now - self._last_guided_t) > 2.0):
+            self.mav.set_mode_async("GUIDED")
+            self._last_guided_t = now
+            self.get_logger().info("leader: re-asserting GUIDED (climb phase)")
 
     def _on_who(self, msg):
         """記錄「別機」whoLeader 的新鮮度(自己的忽略)。"""
@@ -212,7 +317,18 @@ class MasterNode(Node):
     def _tick(self):
         if not self.fsm.update():        # still climbing out into GUIDED
             return
-        # ── 讓權檢查(每 tick,最優先)──:有別機在當長機就退讓,不打架
+        # ── 讓權檢查 ①(最優先):tot_node 正在打擊 ⇒ 本節點停止下令 ──
+        # ⚠️⚠️ 沒有這一段的後果(AP2 實測):tot_node 在 ALIGN 指揮飛機
+        #    飛 48 km 向西、爬到 400 m,而本節點同時以 1 Hz 重發
+        #    `master -> leg 2 (…) @ 80 m` + `leader slowing to 10 m/s`
+        #    ⇒ 兩個控制器對同一架飛機下相反的令,編隊層靠重發頻率贏,
+        #    飛機被壓在 50–80 m 在起飛點繞圈,距目標幾乎不減少。
+        #    批次路徑是靠 swarm_ros2_down.sh 把本層整個收掉來交棒的
+        #    (stot_trial.sh:425),互動路徑沒有那一步 —— 這就是那一步。
+        # ⚠️ 只停下令,遙測 / 心跳 / whoLeader 照發(見 strike_authority)。
+        if self._strike_auth.yielded():
+            return
+        # ── 讓權檢查 ②(每 tick)──:有別機在當長機就退讓,不打架
         now = self.get_clock().now().nanoseconds * 1e-9
         if (now - self._foreign_leader_t) < 2.0:
             self.master.turn_rate = 0.0

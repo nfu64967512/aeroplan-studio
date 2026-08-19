@@ -54,3 +54,114 @@ def speed_for_error(err, formed_r, catch_r, nominal, catch_speed):
         return catch_speed
     f = err / max(catch_r, 1e-6)
     return nominal + f * (catch_speed - nominal)
+
+def speed_for_along_error(along, catch_r, nominal, catch_speed, min_speed):
+    """**有號**的縱向速度控制。along = slot 相對本機的沿航向分量(長機座標系)。
+
+        along > 0  ⇒ slot 在前方,本機落後 ⇒ 加速,上限 catch_speed
+        along < 0  ⇒ 本機超前 slot        ⇒ 減速,下限 min_speed
+        |along| ≥ catch_r ⇒ 飽和
+
+    ⚠️⚠️ 為什麼一定要有號(實測 S31):
+       舊的 `speed_for_error(err, ...)` 吃的是**無號距離**,只有
+       `err >= catch_r → catch_speed` 這一支。僚機超前 slot 10–28 km 時
+       err 一樣是 10–28 km ⇒ 仍然命令 catch_speed 157 ⇒ **加速、超前更多**。
+       S31 實測:四架僚機 along **全部為正** +10383 ~ +28014 m,
+       佔總誤差 98%,而且單調發散。
+    ⚠️ 這個 bug 先前**不會發作**:機體推力不足時僚機一律落後,踩不到超前那一側;
+       而且實驗 A 之前速度指令零權限(TECS 走 no-airspeed 路徑),
+       連加速那一側也沒有執行器。**修好速度通道等於同時解鎖了這個 bug。**
+
+    ⚠️⚠️ `min_speed` 必須**低於長機當下速度**,否則誤差會凍結而不是收斂:
+       長機被 max-consensus 壓在 wait_speed 等人,若僚機超前時也降到同一個
+       wait_speed,兩者同速 ⇒ 閉合率 0 ⇒ 誤差卡在 10 km 不動。
+       呼叫端應傳 nominal×0.67(本專案已確立的 wait 比例)並夾住 AIRSPEED_MIN。
+    ⚠️ 減速權限(−45 EAS)是加速權限(+21)的 2 倍 —— 超前這一側本來就是
+       比較強的通道,先前完全沒有用到。
+    """
+    if along is None:
+        return nominal
+    f = max(-1.0, min(1.0, float(along) / max(catch_r, 1e-6)))
+    if f >= 0.0:
+        return nominal + f * (catch_speed - nominal)
+    return nominal + (-f) * (min_speed - nominal)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  空速 / 地速轉換(EAS → TAS → GS)
+#
+#  ⚠️⚠️ 本專案反覆踩過的錯:**速度指令是空速,幾何是地速**,兩者不可混用。
+#     DO_CHANGE_SPEED / nominal_speed / catch_speed 吃的都是 EAS(等效空速),
+#     而編隊間距、追趕距離、驗收的「觸地地速」全是地面量。
+#     3100 m 差 1.167 倍、5000 m 差 1.30 倍 —— 混用會系統性低估閉合率。
+#     實例:長機 90 EAS vs 僚機 157 EAS,空速差 67 但**地速差 78.2** m/s。
+# ══════════════════════════════════════════════════════════════════════════
+
+ISA_LAPSE_K = 2.25577e-5      # 1/m;ISA 對流層溫度遞減率的無因次化係數
+ISA_RHO_EXP = 4.25588         # ρ/ρ0 = (1 − k·h)^此指數
+ISA_H_MAX = 11000.0           # 對流層頂;超過此高度本模型不成立
+
+
+def density_ratio(altitude_amsl):
+    """ISA 標準大氣的空氣密度比 σ = ρ/ρ0。
+
+    σ = (1 − 2.25577e-5·h)^4.25588,h 為**絕對海拔**(m AMSL)。
+    ⚠️ 用 AMSL 不是 AGL —— 密度只看絕對高度,和地表無關。本專案的
+       HOME 在山區(1839–2673 m AMSL),用相對高度算會差一大截。
+    ⚠️ 夾在對流層內並保證 σ > 0:負高度(死海、氣壓異常)回 σ ≥ 1 的合理值,
+       超過 11 km 回對流層頂的值,不外插。
+    """
+    h = min(max(float(altitude_amsl), -500.0), ISA_H_MAX)
+    return max(1e-3, (1.0 - ISA_LAPSE_K * h) ** ISA_RHO_EXP)
+
+
+def eas_to_tas(eas, altitude_amsl):
+    """等效空速 → 真實空速:TAS = EAS / √σ。"""
+    return float(eas) / math.sqrt(density_ratio(altitude_amsl))
+
+
+def tas_to_eas(tas, altitude_amsl):
+    """真實空速 → 等效空速(反向,設定指令時用)。"""
+    return float(tas) * math.sqrt(density_ratio(altitude_amsl))
+
+
+def flight_path_angle_deg(pitch_deg, alpha_deg):
+    """航跡角 γ = θ − α(度)。爬升為正、俯衝為負。"""
+    return float(pitch_deg) - float(alpha_deg)
+
+
+def calculate_projected_ground_speed(eas, altitude_amsl, pitch_deg=0.0,
+                                     alpha_deg=0.0):
+    """指令 EAS 在當前高度與姿態下的**水平地速投影** V_G。
+
+        σ  = (1 − 2.25577e-5·h)^4.25588
+        TAS = EAS / √σ
+        γ  = θ − α
+        V_G = TAS · cos γ
+
+    ⚠️ 這就是「爬升時前進地速急劇下降」的量化式子:γ 越大,cos γ 把 TAS
+       投影掉越多。長機爬升 / 僚機平飛的非對稱幾何,閉合率就是由這裡來的。
+    ⚠️ 無除以零風險:density_ratio 有下限 1e-3,cos γ 在 ±90° 內恆 ≥ 0;
+       γ 超過 ±90°(倒飛/垂直)時回 0 而不是負值 —— 水平投影的量值不應為負。
+    回傳 (V_G, TAS, γ_deg)。
+    """
+    tas = eas_to_tas(eas, altitude_amsl)
+    gam = flight_path_angle_deg(pitch_deg, alpha_deg)
+    if abs(gam) >= 90.0:
+        return 0.0, tas, gam
+    return tas * math.cos(math.radians(gam)), tas, gam
+
+
+def climb_rate_from_eas(eas, altitude_amsl, pitch_deg=0.0, alpha_deg=0.0):
+    """同一組狀態下的垂直分量(爬升率,m/s;上為正)= TAS · sin γ。"""
+    tas = eas_to_tas(eas, altitude_amsl)
+    return tas * math.sin(math.radians(flight_path_angle_deg(pitch_deg, alpha_deg)))
+
+
+def gamma_for_climb_rate(roc, eas, altitude_amsl):
+    """要達到指定爬升率所需的航跡角(度)。用來把 TECS 的爬升率上限
+    換算成可以直接夾的 γ 上限(見 wingman_node._climb_authority)。"""
+    tas = eas_to_tas(eas, altitude_amsl)
+    if tas <= 1e-6:
+        return 0.0
+    return math.degrees(math.asin(max(-1.0, min(1.0, float(roc) / tas))))

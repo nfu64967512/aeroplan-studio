@@ -67,7 +67,10 @@ for n in $(seq 1 "$TRIALS"); do
   ok=0
   for w in $(seq 1 55); do
     sleep 12
-    if grep -q "俯衝命中紅心:全員命中" /tmp/kpi_tot.log; then ok=1; break; fi
+    # 固定哨兵「★★ 俯衝結案:」= 「跑完了」(成功與否交給 _kpi_parse.py)。
+    # 四種結案形狀都有它;第二段只為了讀舊 log。見 stot_trial.sh 與
+    # sar_swarm_patches/tot_node.py 的 CLOSEOUT_SENTINEL。
+    if grep -qE "★★ 俯衝結案:|俯衝命中紅心:全員命中" /tmp/kpi_tot.log; then ok=1; break; fi
   done
   pkill -x tot_node 2>/dev/null
   if [ "$ok" -ne 1 ]; then

@@ -529,6 +529,103 @@ function addDiveLine(lat0, lon0, alt0, lat_t, lon_t, alt_t) {
   _tacticalEntities.push(e);
 }
 
+// ── 飛控任務航線疊加（從飛控讀回的那一份，不是規劃器算出來的那份）────────
+// ⚠️ 自己一組 entity 陣列，**刻意不共用** _tacticalEntities：那一組歸
+//    clearTacticalOverlay() 管，而右鍵打擊每次重畫都會先呼叫它一次
+//    （ui/controllers/strike_controller.py:326）⇒ 共用的話，做一次打擊規劃
+//    就會把讀回來的航線靜靜洗掉，而使用者只會覺得「剛剛明明有」。
+let _missionEntities = [];
+function clearMissionOverlay() {
+  _missionEntities.forEach(e => { try { viewer.entities.remove(e); } catch(_){} });
+  _missionEntities = [];
+}
+// ptsJson: [[lat, lon, alt], ...] — 注意是 lat 先，和 Cesium 的順序相反
+function addMissionRoute(ptsJson, colorHex, label) {
+  const c = colorHex || '#00E5FF';
+  if (!ptsJson || ptsJson.length < 1) return;
+  const flat = [];
+  ptsJson.forEach(p => { flat.push(p[1], p[0], p[2] || 0); });
+  if (ptsJson.length >= 2) {
+    _missionEntities.push(viewer.entities.add({
+      name: label || 'FC Mission',
+      polyline: {
+        positions: Cesium.Cartesian3.fromDegreesArrayHeights(flat),
+        width: 4,
+        material: new Cesium.PolylineOutlineMaterialProperty({
+          color: Cesium.Color.fromCssColorString(c),
+          outlineWidth: 1,
+          outlineColor: Cesium.Color.BLACK.withAlpha(0.6),
+        }),
+        arcType: Cesium.ArcType.GEODESIC,
+      },
+    }));
+  }
+  // 逐點編號標記 —— 沒有編號就看不出航線的**方向**，而方向正是
+  // 「這份任務對不對」最先要確認的事。
+  ptsJson.forEach((p, i) => {
+    _missionEntities.push(viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(p[1], p[0], p[2] || 0),
+      point: {
+        pixelSize: 9,
+        color: Cesium.Color.fromCssColorString(c),
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 1,
+      },
+      label: {
+        text: String(i + 1),
+        font: '12px monospace',
+        fillColor: Cesium.Color.WHITE,
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 2,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        pixelOffset: new Cesium.Cartesian2(10, -10),
+      },
+    }));
+  });
+}
+// 飛控的 home（mission seq 0）—— 獨立的 H 標記,**不接進航線折線**。
+// MP / QGC 都是這樣畫的:seq 0 是飛控自己的 home,任務本體從 seq 1 開始。
+function addMissionHome(lat, lon, alt_m) {
+  _missionEntities.push(viewer.entities.add({
+    name: 'FC Home',
+    position: Cesium.Cartesian3.fromDegrees(lon, lat, alt_m || 0),
+    point: {
+      pixelSize: 12,
+      color: Cesium.Color.fromCssColorString('#7CFC00'),
+      outlineColor: Cesium.Color.BLACK,
+      outlineWidth: 2,
+      heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+    },
+    label: {
+      text: 'H',
+      font: 'bold 14px monospace',
+      fillColor: Cesium.Color.fromCssColorString('#7CFC00'),
+      outlineColor: Cesium.Color.BLACK,
+      outlineWidth: 3,
+      style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+      pixelOffset: new Cesium.Cartesian2(12, -12),
+      heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+    },
+  }));
+}
+// 任務裡的盤旋圈（NAV_LOITER_* 的 param3 = 半徑）→ AUTO 架構的決斷圈
+function addMissionLoiter(lat, lon, radius_m, alt_m, colorHex) {
+  const c = colorHex || '#00E5FF';
+  if (!(radius_m > 0)) return;   // 半徑 0/負 → Cesium 靜靜不畫，不如早退
+  _missionEntities.push(viewer.entities.add({
+    position: Cesium.Cartesian3.fromDegrees(lon, lat, alt_m || 0),
+    ellipse: {
+      semiMajorAxis: radius_m,
+      semiMinorAxis: radius_m,
+      material: Cesium.Color.fromCssColorString(c).withAlpha(0.08),
+      outline: true,
+      outlineColor: Cesium.Color.fromCssColorString(c).withAlpha(0.9),
+      outlineWidth: 2,
+      height: alt_m || 0,
+    },
+  }));
+}
+
 // ── 電子圍籬 (Geofence) — 黃色邊界 = §5.17.25 TABLE XL「caution boundary」─────
 // 4 頂點矩形 + altitude band 視覺化（地面外框 + 高度上限頂蓋）
 let geofenceEntities = [];
@@ -710,6 +807,203 @@ function explodeAt(lat, lon, alt, label) {
       if (k >= 0) explosionEntities.splice(k, 1);
     });
   }, DUR * 1000 + 200);
+}
+
+// ── 投放彈體：即時下落動畫 + 落地特效 ──────────────────────────────────
+// 彈道由 Python 端 mission/ballistics.py 先算好整條軌跡再送過來（不是在這裡
+// 積分）。這樣做的理由：落點與飛行時間可以在 Python 端離線單元測試，
+// 而這裡只負責「照著時間把它畫出來」—— 畫錯和算錯不會混在一起。
+//
+// ⚠️ 這是視覺化，不是投放精度模型：無風、無升力、單一阻力係數。
+// 把目前的 3D 畫面抓成 PNG dataURL。
+// 為什麼不用螢幕擷取：QWebEngine 在視窗沒有真正前景時會把算圖節流，
+// 螢幕擷取會拿到一模一樣的舊畫面（實測連拍四張 md5 完全相同）。
+// 直接向 Cesium 要，不管視窗可不可見都拿得到真的內容。
+// 注意：preserveDrawingBuffer 預設是 false，所以必須在**同一次 JS 執行裡**
+//      先 render() 再 toDataURL()，中間不能讓瀏覽器換幀。
+function grabCanvas() {
+  try {
+    // 視窗被遮蔽時 Chromium 會把 requestAnimationFrame 節流，Cesium 的整個
+    // 算圖迴圈因此停住：clock.tick() 不跑 -> dataSourceDisplay 不更新 ->
+    // entity 的 CallbackProperty 位置不重算 -> 相機 flyTo 的補間也不前進。
+    // 實測：連拍三張 md5 完全相同，但實體其實正在下落。
+    // 所以這裡自己推一次時鐘再算圖，不依賴瀏覽器的 rAF。
+    viewer.clock.currentTime = Cesium.JulianDate.now();
+    viewer.clock.tick();
+    viewer.render();
+    return viewer.canvas.toDataURL('image/png');
+  } catch (e) {
+    return 'ERR:' + e;
+  }
+}
+
+let _storeEntities = [];
+function clearStores() {
+  _storeEntities.forEach(e => { try { viewer.entities.remove(e); } catch(_){} });
+  _storeEntities = [];
+  if (typeof clearImpacts === 'function') clearImpacts();
+}
+
+function dropStore(trajJson, label) {
+  let tr;
+  try { tr = JSON.parse(trajJson); } catch(_) { return; }
+  const smp = tr.samples || [];
+  if (smp.length < 2) return;
+
+  const kind = tr.kind || 'dumb';
+  const isSmoke = (kind === 'smoke');
+  const bodyColor = isSmoke ? Cesium.Color.fromCssColorString('#d0d0d0')
+                            : Cesium.Color.fromCssColorString('#2a2a2a');
+
+  // ⚠️ 不要用 availability / SampledPositionProperty：兩者都吃
+  //    viewer.clock.currentTime，而這個 app 的 Cesium 時鐘 shouldAnimate=false、
+  //    currentTime 停在過去不前進（實測落後 10.5 s）⇒ 實體 isAvailable() 恆為
+  //    false，整個動畫從頭到尾不會被畫出來，而畫面上看起來就只是「沒有動畫」。
+  //    改成和既有的 explodeAt() 一樣：CallbackProperty 在回呼裡自己取
+  //    JulianDate.now()，完全不碰 viewer 的時鐘。
+  const t0 = Cesium.JulianDate.now();
+  const tof = tr.tof || smp[smp.length - 1][0];
+  const pts = smp.map(s => Cesium.Cartesian3.fromDegrees(s[2], s[1], s[3]));
+  const times = smp.map(s => s[0]);
+
+  function age() {
+    return Cesium.JulianDate.secondsDifference(Cesium.JulianDate.now(), t0);
+  }
+  // 依經過秒數在取樣點之間線性內插（取樣間隔 0.08 s，線性已足夠平滑）
+  function posAt(a) {
+    if (a <= times[0]) return pts[0];
+    if (a >= times[times.length - 1]) return pts[pts.length - 1];
+    let i = 1;
+    while (i < times.length && times[i] < a) i++;
+    const f = (a - times[i - 1]) / (times[i] - times[i - 1]);
+    return Cesium.Cartesian3.lerp(pts[i - 1], pts[i], f, new Cesium.Cartesian3());
+  }
+
+  const born = [];
+
+  // 1) 彈體本身
+  born.push(viewer.entities.add({
+    name: (label || '投放彈體'),
+    position: new Cesium.CallbackProperty(() => posAt(age()), false),
+    point: {
+      pixelSize: isSmoke ? 13 : 11,
+      color: bodyColor,
+      outlineColor: Cesium.Color.WHITE,
+      outlineWidth: 2,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    },
+    label: {
+      text: label || '',
+      font: 'bold 13px sans-serif',
+      fillColor: Cesium.Color.WHITE,
+      showBackground: true,
+      backgroundColor: hexColor('#000000', 0.6),
+      pixelOffset: new Cesium.Cartesian2(0, -20),
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      scaleByDistance: new Cesium.NearFarScalar(3e2, 1.1, 4e4, 0.45),
+    },
+  }));
+
+  // 2) 落下軌跡（隨時間逐段長出來）
+  born.push(viewer.entities.add({
+    polyline: {
+      positions: new Cesium.CallbackProperty(() => {
+        const a = age();
+        const out = [];
+        for (let i = 0; i < times.length && times[i] <= a; i++) out.push(pts[i]);
+        out.push(posAt(a));
+        return out.length >= 2 ? out : [pts[0], pts[0]];
+      }, false),
+      width: isSmoke ? 5 : 3,
+      material: new Cesium.PolylineDashMaterialProperty({
+        color: isSmoke ? hexColor('#d0d0d0', 0.85) : hexColor('#ff8c42', 0.95),
+        dashLength: 12,
+      }),
+    },
+  }));
+
+  // 3) 落點預示（彈體還在空中就看得到會打到哪）
+  // heightReference 要搭配 height，且貼地時不能畫外框，否則 Cesium 會警告並忽略。
+  const imp = tr.impact || [0, 0, 0];
+  born.push(viewer.entities.add({
+    position: Cesium.Cartesian3.fromDegrees(imp[1], imp[0], imp[2]),
+    ellipse: {
+      semiMinorAxis: 15.0, semiMajorAxis: 15.0, height: imp[2],
+      material: hexColor('#ff2020', 0.25),
+      outline: false,
+    },
+  }));
+
+  _storeEntities.push(...born);
+
+  // 4) 到時間 -> 落地特效
+  setTimeout(() => {
+    born.forEach(e => {
+      try { viewer.entities.remove(e); } catch(_) {}
+      const k = _storeEntities.indexOf(e);
+      if (k >= 0) _storeEntities.splice(k, 1);
+    });
+    _impactMark(imp[0], imp[1], imp[2], tr.blast_radius_m || 8.0, label);
+  }, tof * 1000);
+}
+
+// 落點標記：一個紅色圓形，簡單標示影響範圍。
+//
+// 為什麼不用既有的 explodeAt()：那是為「蜂群同時命中紅心」設計的，火球半徑
+// 140 m、震波環 420 m，套在投放彈上會蓋掉半個校區（實測）。explodeAt 本身
+// 不動 —— 它還被蜂群打擊視覺化與 check_bullseye_hit 使用。
+//
+// 半徑由 Python 端的 ballistics.STORE_KINDS[kind].blast_radius_m 決定
+// （傻瓜彈 8 m、煙霧彈 10 m）。⚠️ 那是**示意值不是毀傷半徑**，本系統沒有
+// 毀傷模型。
+let _impactEntities = [];
+function clearImpacts() {
+  _impactEntities.forEach(e => { try { viewer.entities.remove(e); } catch(_){} });
+  _impactEntities = [];
+}
+
+function _impactMark(lat, lon, alt, radius, label) {
+  const t0 = Cesium.JulianDate.now();
+  const HOLD = 10.0;          // 完全不透明地停留幾秒
+  const FADE = 5.0;           // 之後淡出幾秒
+  const r = Math.max(1.0, radius || 8.0);
+  // 用 CallbackProperty 自己取 JulianDate.now()，不碰 viewer.clock ——
+  // 這個 app 的 Cesium 時鐘 shouldAnimate=false 且停在過去（見 dropStore 的說明）。
+  function fade(base) {
+    const a = Cesium.JulianDate.secondsDifference(Cesium.JulianDate.now(), t0);
+    if (a <= HOLD) return base;
+    return base * Math.max(0.0, 1.0 - (a - HOLD) / FADE);
+  }
+  const e = viewer.entities.add({
+    name: (label || '落點'),
+    position: Cesium.Cartesian3.fromDegrees(lon, lat, alt + 0.5),
+    ellipse: {
+      semiMinorAxis: r, semiMajorAxis: r, height: alt + 0.5,
+      material: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(
+        () => hexColor('#ff2020', fade(0.40)), false)),
+      outline: true,
+      outlineWidth: 2,
+      outlineColor: new Cesium.CallbackProperty(
+        () => hexColor('#ff2020', fade(0.95)), false),
+    },
+    label: {
+      text: (label ? label + '  ' : '') + '影響範圍 R=' + r.toFixed(0) + ' m',
+      font: 'bold 12px sans-serif',
+      fillColor: Cesium.Color.WHITE,
+      showBackground: true,
+      backgroundColor: hexColor('#c02000', 0.85),
+      // 往上挪開，不要壓在圓圈上（-14 時標籤會蓋掉半個圓）
+      pixelOffset: new Cesium.Cartesian2(0, -30),
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      scaleByDistance: new Cesium.NearFarScalar(2e2, 1.1, 3e4, 0.45),
+    },
+  });
+  _impactEntities.push(e);
+  setTimeout(() => {
+    try { viewer.entities.remove(e); } catch(_) {}
+    const k = _impactEntities.indexOf(e);
+    if (k >= 0) _impactEntities.splice(k, 1);
+  }, (HOLD + FADE) * 1000 + 200);
 }
 
 function setGeofence(jsonStr) {
@@ -1060,6 +1354,21 @@ function flyToScene() {
   }
 }
 
+// 立即把相機擺到指定位置（不做補間）。
+// flyTo 的補間由 scene.tweens 在算圖迴圈裡推進，視窗被遮蔽時 rAF 被節流，
+// 補間永遠不會完成 —— 程式化截圖時一定要用這一支。
+function setViewPos(lat, lon, alt, range) {
+  // lookAt 會把目標點擺在畫面正中；setView 只是把相機放到座標上，
+  // 目標會落在畫面邊緣（實測彈體被切在下緣）。
+  var tgt = Cesium.Cartesian3.fromDegrees(lon, lat, alt || 0);
+  viewer.camera.lookAt(
+    tgt, new Cesium.HeadingPitchRange(0.0, Cesium.Math.toRadians(-40.0),
+                                      range || 800));
+  // 一定要解除鎖定，否則相機會一直綁在那個參考框裡，之後怎麼動都回到這裡
+  viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+  return true;
+}
+
 function flyToPos(lat, lon, alt, range) {
   viewer.camera.flyTo({
     destination: Cesium.Cartesian3.fromDegrees(lon, lat, (alt || 0) + (range || 600)),
@@ -1086,6 +1395,13 @@ function toggleClamp() {
 const _UAV_COLORS = ['#FFD700','#E53935','#43A047','#1E88E5','#8E24AA','#00ACC1','#FB8C00','#3949AB'];
 const _PLANE_MODEL_URI = '__PLANE_MODEL_URI__';
 const _COPTER_MODEL_URI = '__COPTER_MODEL_URI__';
+// VTOL (4+1 QuadPlane) 專用模型：ui/resources/vtol.glb。
+// 沒有這個檔時 VTOL 沿用固定翼模型（舊行為）。
+const _VTOL_MODEL_URI = '__VTOL_MODEL_URI__';
+const _VTOL_MODEL_SCALE = __VTOL_MODEL_SCALE__;
+const _VTOL_HEADING_OFFSET = __VTOL_HEADING_OFFSET__;
+const _VTOL_PITCH_OFFSET = __VTOL_PITCH_OFFSET__;
+const _VTOL_ROLL_OFFSET = __VTOL_ROLL_OFFSET__;
 
 // GLB 模型方向校正（單位：度）。MAVLink heading: 0=北, 90=東 (順時針)。
 // Cesium HPR heading 軸繞 -Z，若模型預設 forward 為 +X(東)，需 -90° 將其轉向北。
@@ -1520,15 +1836,18 @@ function updateUAVPosition(lat, lon, alt, headingDeg, speedMs, sysid, mode, arme
   const color = _UAV_COLORS[(sysid - 1) % _UAV_COLORS.length];
   _appendTrail(sysid, lat, lon, alt, color);
   const _vt = (vehicleType || '').toUpperCase();
+  const isVtol = _vt.indexOf('VTOL') >= 0;
   const isPlane = _vt.indexOf('PLANE') >= 0 || _vt.indexOf('FIXED') >= 0
-                  || _vt.indexOf('VTOL') >= 0;   // VTOL (QuadPlane) 使用固定翼模型
+                  || isVtol;   // VTOL 沒有專屬 GLB 時沿用固定翼模型
   const icon = isPlane ? '✈' : '🚁';
   const labelTxt = icon + ' UAV' + sysid + (mode ? ' [' + mode + ']' : '') + (armed ? ' ●ARM' : '');
 
   // 計算 orientation（含姿態：heading + pitch + roll）
-  const isPlaneGlb = isPlane && _PLANE_MODEL_URI && _PLANE_MODEL_URI.length > 0;
+  const isVtolGlb = isVtol && _VTOL_MODEL_URI && _VTOL_MODEL_URI.length > 0;
+  const isPlaneGlb = !isVtolGlb && isPlane && _PLANE_MODEL_URI && _PLANE_MODEL_URI.length > 0;
   const isCopterGlb = !isPlane && _COPTER_MODEL_URI && _COPTER_MODEL_URI.length > 0;
   let headingOffset = 0, pitchOffset = 0, rollOffset = 0;
+  if (isVtolGlb)   { headingOffset = _VTOL_HEADING_OFFSET;   pitchOffset = _VTOL_PITCH_OFFSET;   rollOffset = _VTOL_ROLL_OFFSET; }
   if (isPlaneGlb)  { headingOffset = _PLANE_HEADING_OFFSET;  pitchOffset = _PLANE_PITCH_OFFSET;  rollOffset = _PLANE_ROLL_OFFSET; }
   if (isCopterGlb) { headingOffset = _COPTER_HEADING_OFFSET; pitchOffset = _COPTER_PITCH_OFFSET; rollOffset = _COPTER_ROLL_OFFSET; }
   const hpr = new Cesium.HeadingPitchRoll(
@@ -1540,7 +1859,8 @@ function updateUAVPosition(lat, lon, alt, headingDeg, speedMs, sysid, mode, arme
 
   let entity = uavEntities[sysid];
   if (!entity) {
-    const useGlbModel = (isPlane && _PLANE_MODEL_URI && _PLANE_MODEL_URI.length > 0)
+    const useGlbModel = isVtolGlb
+                     || (isPlane && _PLANE_MODEL_URI && _PLANE_MODEL_URI.length > 0)
                      || (!isPlane && _COPTER_MODEL_URI && _COPTER_MODEL_URI.length > 0);
     const entityOpts = {
       name: 'UAV-' + sysid,
@@ -1571,7 +1891,16 @@ function updateUAVPosition(lat, lon, alt, headingDeg, speedMs, sysid, mode, arme
       },
     };
 
-    if (isPlaneGlb) {
+    if (isVtolGlb) {
+      console.log('[3D] 載入 VTOL GLB 模型:', _VTOL_MODEL_URI);
+      entityOpts.model = {
+        uri: _VTOL_MODEL_URI,
+        minimumPixelSize: 32,
+        maximumScale: 50,
+        scale: _VTOL_MODEL_SCALE,
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 1.0e8),
+      };
+    } else if (isPlaneGlb) {
       console.log('[3D] 載入固定翼 GLB 模型:', _PLANE_MODEL_URI);
       entityOpts.model = {
         uri: _PLANE_MODEL_URI,
@@ -2644,13 +2973,27 @@ function _computeFrustumGroundCorners(s) {
 
     var offE = dE * t;
     var offN = dN * t;
-    var dLat = offN / 111320.0;
-    var dLon = offE / (111320.0 * cosLat);
 
-    corners.push(Cesium.Cartesian3.fromDegrees(
-      s.lon + dLon, s.lat + dLat, 1.0
-    ));
-    cornersLL.push({ lat: s.lat + dLat, lon: s.lon + dLon });
+    // ⚠⚠ 這裡以前是等距長方投影近似:
+    //       dLat = offN / 111320.0 ; dLon = offE / (111320 * cosLat)
+    //   111320 是赤道附近的值。在本專案的作業緯度(~25N)實測
+    //   1/111320 度 = **0.9951 m**(應為 1.0000)⇒ 南北方向短 0.49%。
+    //   而畫面上的半透明光錐是用 Cesium 的**真實 ENU 公制框架**擺放的
+    //   (_computeFrustumModelMatrix → eastNorthUpToFixedFrame),
+    //   兩者因此系統性錯開:300 m 高、60/45 FOV 時實測每個角差 **1.17 m**,
+    //   而且隨高度線性放大。
+    //   規格是「真的被光錐掃過的地方才消除」,消除用的四邊形就必須和**畫出來
+    //   的那個**是同一個 —— 所以改用同一套 ENU 變換,而不是自己近似一次。
+    var _enu = Cesium.Transforms.eastNorthUpToFixedFrame(
+      Cesium.Cartesian3.fromDegrees(s.lon, s.lat, 0.0));
+    var _world = Cesium.Matrix4.multiplyByPoint(
+      _enu, new Cesium.Cartesian3(offE, offN, 0.0), new Cesium.Cartesian3());
+    var _carto = Cesium.Cartographic.fromCartesian(_world);
+    var _lat = Cesium.Math.toDegrees(_carto.latitude);
+    var _lon = Cesium.Math.toDegrees(_carto.longitude);
+
+    corners.push(Cesium.Cartesian3.fromDegrees(_lon, _lat, 1.0));
+    cornersLL.push({ lat: _lat, lon: _lon });
   }
   // 寫入快取（同時暴露 lat/lon 版本給熱力圖點面內判定用）
   s._cornersKey = key;
@@ -3056,6 +3399,25 @@ function updateHeatmap(uavLat, uavLon, fovRadius, sysid) {
     if (llCorners && llCorners.length === 4) useFrustum = true;
   }
 
+  // ⚠⚠ 沒有光錐 ⇒ **什麼都不消除**。
+  //   舊行為是退回「以 UAV 為圓心、半徑 fovRadius 的圓」,那個圓
+  //   **畫面上根本不存在** —— 使用者看到熱力圖被清掉,卻找不到是誰清的。
+  //   而且它正好在 _fovStates 被刪掉時觸發,也就是 alt<=0(飛機還在地面)那段,
+  //   等於一起飛前就先把起降場周圍清乾淨了。
+  //   規格是「真的被光錐掃過才消除」,所以這裡直接 return。
+  if (!useFrustum) return;
+
+  // ⚠ 足跡沒有移動就不累積。
+  //   updateHeatmap 是被**每一種**遙測訊息觸發的(HEARTBEAT / GLOBAL_POSITION_INT
+  //   / ATTITUDE / VFR_HUD / SERVO_OUTPUT_RAW 各自 emit),而其中只有位置類的
+  //   會改變足跡。舊行為讓 COS 的成長速度取決於**飛控送了幾種訊息**,
+  //   而不是飛過多少地面 —— 同一格會被同一個位置重複「掃到」約 5 次。
+  //   _cornersKey 就是足跡的完整識別(lat|lon|alt|heading|mount|hfov|vfov),
+  //   一樣就代表這一拍沒有掃到任何新地面。
+  var _fs = _fovStates[sysid];
+  if (_fs._lastSweptKey === _fs._cornersKey) return;
+  _fs._lastSweptKey = _fs._cornersKey;
+
   // 單次探測機率：P_single = 1 - exp(-W * q)
   // 這裡 W 正規化為 (掃描寬度/格子寬度)，q 為探測品質
   const cellWidthM = heatmapGrid.dLon * mPerDegLon;
@@ -3090,11 +3452,9 @@ function updateHeatmap(uavLat, uavLon, fovRadius, sysid) {
         covered = _pointInConvexQuad(cell.latCenter, cell.lonCenter, llCorners);
       }
     } else {
-      // Legacy 圓形覆蓋（sysid 未給 / 未啟用 frustum 時 fallback）
-      const dLatM = (cell.latCenter - uavLat) * mPerDegLat;
-      const dLonM = (cell.lonCenter - uavLon) * mPerDegLon;
-      const dist = Math.sqrt(dLatM * dLatM + dLonM * dLonM);
-      covered = (dist <= R);
+      // 到不了：上面 `if (!useFrustum) return;` 已經擋掉。
+      // 保留分支只是為了萬一有人改壞上面的守衛時不會靜靜當成「全部覆蓋」。
+      covered = false;
     }
 
     if (covered) {
@@ -3105,28 +3465,92 @@ function updateHeatmap(uavLat, uavLon, fovRadius, sysid) {
       // 等價遞推：COS_new = 1 - (1 - COS_old) * (1 - P_single)
       cell.cos = 1.0 - (1.0 - cell.cos) * (1.0 - pSingle);
 
-      // 顏色映射：紅(0) → 黃(0.5) → 青(0.8) → 藍(1.0)
-      const t = Math.min(cell.cos, 1.0);
-      let r, g, b, a;
-      if (t < 0.5) {
-        // 紅 → 黃
-        const k = t / 0.5;
-        r = 1.0; g = k; b = 0.0;
-      } else if (t < 0.8) {
-        // 黃 → 青
-        const k = (t - 0.5) / 0.3;
-        r = 1.0 - k; g = 1.0; b = k;
-      } else {
-        // 青 → 藍
-        const k = (t - 0.8) / 0.2;
-        r = 0.0; g = 1.0 - k * 0.7; b = 1.0;
-      }
-      // 已搜索越多 → 越透明
-      a = Math.max(0.08, 0.55 - t * 0.45);
-
-      cell.entity.rectangle.material = new Cesium.Color(r, g, b, a);
+      cell.entity.rectangle.material = _sarRampColor(cell.cos);
     }
   }
+}
+
+/**
+ * 熱力圖共用色階：紅(0) → 黃(0.5) → 青(0.8) → 藍(1.0)，值越高越透明。
+ * SAR 搜救的累積發現機率 COS 與偵察覆蓋率共用同一組視覺語言：
+ *   紅 = 沒掃到 / 殘餘機率高，藍 = 已充分掃過。
+ * @param {number} t 0–1
+ */
+function _sarRampColor(t) {
+  t = Math.max(0.0, Math.min(t, 1.0));
+  let r, g, b;
+  if (t < 0.5) {                    // 紅 → 黃
+    const k = t / 0.5;
+    r = 1.0; g = k; b = 0.0;
+  } else if (t < 0.8) {             // 黃 → 青
+    const k = (t - 0.5) / 0.3;
+    r = 1.0 - k; g = 1.0; b = k;
+  } else {                          // 青 → 藍
+    const k = (t - 0.8) / 0.2;
+    r = 0.0; g = 1.0 - k * 0.7; b = 1.0;
+  }
+  const a = Math.max(0.08, 0.55 - t * 0.45);
+  return new Cesium.Color(r, g, b, a);
+}
+
+/**
+ * renderCoverageHeatmap — 用 SAR 熱力圖呈現偵察覆蓋率驗算結果
+ *
+ * 與 initSARHeatmap 的差別：那個是「邊飛邊累積 COS」，這個是把
+ * core.recon.verify_coverage 已經算好的每格覆蓋率**一次畫上去**，
+ * 讓漏掃分布直接看得到（紅塊 = 沒掃到，通常出現在迴轉端點與凹角）。
+ *
+ * 兩者共用 heatmapEntities / heatmapGrid，所以 clearSARHeatmap() 一樣清得掉。
+ *
+ * @param {object} g - { lat_min, lat_max, lon_min, lon_max, rows, cols, values }
+ *   values 長度 rows*cols，row-major；null = 該格完全在偵察區外（不畫）
+ */
+function renderCoverageHeatmap(g) {
+  clearSARHeatmap();
+  if (!g || !g.rows || !g.cols || !g.values) {
+    console.log('[Recon] renderCoverageHeatmap: 無資料');
+    return;
+  }
+  const dLat = (g.lat_max - g.lat_min) / g.rows;
+  const dLon = (g.lon_max - g.lon_min) / g.cols;
+  heatmapGrid = {
+    rows: g.rows, cols: g.cols,
+    latMin: g.lat_min, latMax: g.lat_max,
+    lonMin: g.lon_min, lonMax: g.lon_max,
+    dLat: dLat, dLon: dLon,
+    cells: [],
+  };
+  let drawn = 0, gaps = 0;
+  for (let r = 0; r < g.rows; r++) {
+    for (let c = 0; c < g.cols; c++) {
+      const v = g.values[r * g.cols + c];
+      if (v === null || v === undefined) continue;   // 偵察區外，不畫
+      const cellLatMin = g.lat_min + r * dLat;
+      const cellLonMin = g.lon_min + c * dLon;
+      const entity = viewer.entities.add({
+        name: 'Recon-Coverage-' + r + '-' + c,
+        rectangle: {
+          coordinates: Cesium.Rectangle.fromDegrees(
+            cellLonMin, cellLatMin, cellLonMin + dLon, cellLatMin + dLat),
+          material: _sarRampColor(v),
+          height: 0.5,
+          classificationType: Cesium.ClassificationType.TERRAIN,
+        },
+      });
+      heatmapEntities.push(entity);
+      heatmapGrid.cells.push({
+        r: r, c: c,
+        latCenter: cellLatMin + dLat / 2.0,
+        lonCenter: cellLonMin + dLon / 2.0,
+        cos: v, sweepCount: v > 0 ? 1 : 0,
+        entity: entity,
+      });
+      drawn++;
+      if (v <= 0.0) gaps++;
+    }
+  }
+  console.log('[Recon] renderCoverageHeatmap: ' + drawn + ' 格（其中 ' +
+              gaps + ' 格全漏掃），網格 ' + g.rows + 'x' + g.cols);
 }
 
 /**
@@ -4807,15 +5231,10 @@ function drawVTOLSwarmPaths(uavDataJson) {
       _vtolEntities.push(arrowDn);
     }
 
-    // ── 4. 轉場點標記：閃爍菱形 — FW 轉換點（藍）與 MC 轉換點（橘）──
-    if (uav.fw_transition_pt) {
-      _addVTOLTransitionMarker(uav.fw_transition_pt, 'FW',
-        Cesium.Color.DODGERBLUE, uavLabel + ' →FW');
-    }
-    if (uav.mc_transition_pt) {
-      _addVTOLTransitionMarker(uav.mc_transition_pt, 'MC',
-        Cesium.Color.ORANGERED, uavLabel + ' →MC');
-    }
+    // （2026-08-25 使用者要求移除：FW/MC 轉換點的閃爍繭型橢球太吵，
+    //   轉換位置從航跡顏色分段已可判讀。fw_transition_pt / mc_transition_pt
+    //   資料仍在 payload 裡，要恢復顯示時參考 git 歷史裡被刪掉的
+    //   轉場點標記函式。）
   }); // forEach uav
 
   // 鏡頭飛往第一架 UAV 的 Home
@@ -4828,54 +5247,6 @@ function drawVTOLSwarmPaths(uavDataJson) {
     });
   }
   console.log('[VTOL] drawVTOLSwarmPaths: 已繪製', uavList.length, '架 VTOL 軌跡');
-}
-
-/**
- * _addVTOLTransitionMarker — 在轉換點放置閃爍菱形標記
- */
-function _addVTOLTransitionMarker(pt, modeName, markerColor, entityName) {
-  var pos = Cesium.Cartesian3.fromDegrees(pt.lon, pt.lat, pt.alt || 0);
-
-  // 閃爍橢球（菱形外觀）
-  var blinkEntity = viewer.entities.add({
-    name: entityName,
-    position: pos,
-    // 3D 菱形：壓扁的橢球
-    ellipsoid: {
-      radii: new Cesium.Cartesian3(15, 15, 30),
-      material: markerColor.withAlpha(0.6),
-      outline: true,
-      outlineColor: markerColor,
-      outlineWidth: 2,
-    },
-    label: {
-      text: '⚡ ' + modeName + ' 轉換',
-      font: 'bold 12px "Segoe UI",sans-serif',
-      fillColor: markerColor,
-      outlineColor: Cesium.Color.BLACK,
-      outlineWidth: 2.5,
-      style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-      pixelOffset: new Cesium.Cartesian2(0, -50),
-      disableDepthTestDistance: Number.POSITIVE_INFINITY,
-    },
-  });
-  _vtolEntities.push(blinkEntity);
-
-  // 閃爍動畫：週期性切換 alpha
-  var _blinkOn = true;
-  var blinkTimer = setInterval(function() {
-    if (!blinkEntity || !blinkEntity.ellipsoid) {
-      clearInterval(blinkTimer);
-      return;
-    }
-    _blinkOn = !_blinkOn;
-    try {
-      blinkEntity.ellipsoid.material = _blinkOn
-        ? markerColor.withAlpha(0.6)
-        : markerColor.withAlpha(0.15);
-    } catch(_e) { clearInterval(blinkTimer); }
-  }, 500);
-  _vtolTransitionAnims.push(blinkTimer);
 }
 
 /**
@@ -4904,6 +5275,48 @@ function vtolClearAll() {
   });
   _vtolEntities = [];
   console.log('[VTOL] vtolClearAll: 已清除所有 VTOL 軌跡');
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  偵察覆蓋率：漏掃格標示
+//  由 core.recon.verify_coverage 算出「規劃後仍未被掃到」的格心，
+//  在地面用紅點標出來，讓使用者直接看到缺口落在哪一段（通常是迴轉端點）。
+// ══════════════════════════════════════════════════════════════════
+var _coverageGapEntities = [];
+
+/**
+ * drawCoverageGaps — 標出漏掃格心
+ * @param {Array} points - [{lat, lon}, ...]
+ */
+function drawCoverageGaps(points) {
+  clearCoverageGaps();
+  if (!points || !points.length) {
+    console.log('[Recon] drawCoverageGaps: 沒有漏掃格');
+    return;
+  }
+  points.forEach(function(p) {
+    try {
+      _coverageGapEntities.push(viewer.entities.add({
+        position: Cesium.Cartesian3.fromDegrees(p.lon, p.lat, 0),
+        point: {
+          pixelSize: 6,
+          color: Cesium.Color.RED.withAlpha(0.85),
+          outlineColor: Cesium.Color.WHITE.withAlpha(0.6),
+          outlineWidth: 1,
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY
+        }
+      }));
+    } catch (e) { /* 單點失敗不應中斷整批 */ }
+  });
+  console.log('[Recon] drawCoverageGaps: 已標出 ' + _coverageGapEntities.length + ' 個漏掃格');
+}
+
+function clearCoverageGaps() {
+  _coverageGapEntities.forEach(function(e) {
+    try { viewer.entities.remove(e); } catch(_){}
+  });
+  _coverageGapEntities = [];
 }
 
 // ══════════════════════════════════════════════════════════════════

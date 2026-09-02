@@ -16,7 +16,248 @@ from PyQt6.QtGui import QAction, QKeySequence, QShortcut
 from config import get_settings
 from utils.logger import get_logger
 from utils.file_io import write_waypoints, create_waypoint_line
-from utils.math_utils import EARTH_RADIUS_M  # 0-2 標準化：WGS84 單一來源
+from utils.math_utils import (  # 0-2 標準化：WGS84 單一來源
+    EARTH_RADIUS_M, point_at_distance_bearing,
+)
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  可測接縫：生成點幾何 / 上傳參數來源
+#  （抽成模組層級函式，才能用值層級測試鎖住，不必去戳 MainWindow 的巨大方法）
+# ═════════════════════════════════════════════════════════════════════
+
+#: 生成點間距至少要比避撞門檻高這個倍率，避免「剛好等於門檻」的刀鋒情況。
+SPAWN_SPACING_MARGIN = 1.2
+
+
+#: FOV 光錐的參數來源標記。兩個分頁共用同一個 3D 光錐實體,
+#: 所以「現在吃誰的參數」必須是一個**明確的值**,不能靠哪個 checkbox 剛好被勾。
+FOV_SOURCE_TACTICAL = 'tactical'
+FOV_SOURCE_VTOL = 'vtol'
+
+#: 兩個面板的光錐勾選框屬性名(**故意不同**,歷史因素)。集中在這裡,
+#: 由 test_both_panels_expose_a_fov_checkbox 保證兩邊都找得到。
+FOV_CHECKBOX_ATTRS = ('fov_cone_check', '_fov_cone_check')
+
+#: 相對高度低於這個值就當作「還在地面」。Cesium 端對 `!(alt > 0)` 會直接
+#: 刪掉該機光錐(main.html:2715),所以貼地時本來就畫不出來。
+FOV_AIRBORNE_MIN_ALT_M = 0.5
+
+
+def fov_pose_summary(poses: dict) -> tuple:
+    """(收到姿態的機數, 其中真正離地的機數)。
+
+    ⚠⚠ 為什麼要分開數:VTOL 停在起降場時 `alt_rel ≈ 0`,Cesium 端會**每一拍
+    刪掉**那架的光錐(連 per-sysid 狀態一起 delete)。那正好是使用者第一次
+    勾選這個框的時刻 ⇒ 什麼都不會出現,看起來就是功能沒做完。
+    不是壞掉,但必須講出來 —— 沉默地畫不出東西是這個專案最貴的失效模式。
+    """
+    n = len(poses)
+    airborne = sum(1 for p in poses.values()
+                   if len(p) > 2 and p[2] > FOV_AIRBORNE_MIN_ALT_M)
+    return n, airborne
+
+
+#: Cesium 端 frustum 的**硬夾制**(ui/widgets/cesium_templates/main.html:2455/2625)
+#: 掛載角 Math.max(0, Math.min(89.5, am));半角 clamp 到 [1, 85]。
+FOV_CONE_MOUNT_RANGE = (0.0, 89.5)
+FOV_CONE_HALF_ANGLE_RANGE = (1.0, 85.0)
+
+
+def fov_cone_clamp_warning(mount_deg: float, hfov_deg: float,
+                           vfov_deg: float) -> str:
+    """3D 光錐會**默默夾掉**哪些值?沒有就回空字串。
+
+    ⚠⚠ 為什麼需要這個:戰術頁的掛載角範圍是 0~85,永遠碰不到 JS 的夾制;
+    但 VTOL 頁是 **-84~+84** —— 把 VTOL 頁接上光錐,等於第一次讓使用者
+    碰得到「設 -30 度、畫出來卻是 0 度(nadir)」而**完全沒有提示**。
+    面板的足跡數字仍用 -30 算 ⇒ 面板與 3D 畫面對不上,而兩邊都不會報錯。
+
+    ⇒ 夾制本身是 Cesium 那側的既有限制,這裡不改它;但**不可以靜靜地**
+      讓顯示值與實際渲染值分家。
+    """
+    lo_m, hi_m = FOV_CONE_MOUNT_RANGE
+    lo_a, hi_a = FOV_CONE_HALF_ANGLE_RANGE
+    msgs = []
+    if mount_deg < lo_m:
+        msgs.append(f"掛載角 {mount_deg:.1f}° 會被 3D 光錐夾成 {lo_m:.0f}°"
+                    f"(向後傾的角錐畫不出來)")
+    elif mount_deg > hi_m:
+        msgs.append(f"掛載角 {mount_deg:.1f}° 會被夾成 {hi_m:.1f}°")
+    for name, full in (("HFOV", hfov_deg), ("VFOV", vfov_deg)):
+        half = full / 2.0
+        if half > hi_a:
+            msgs.append(f"{name} {full:.1f}° 的半角會被夾成 {hi_a:.0f}°")
+        elif 0 < half < lo_a:
+            msgs.append(f"{name} {full:.1f}° 的半角會被撐成 {lo_a:.0f}°")
+    return "；".join(msgs)
+
+
+#: SAR 熱力圖的公尺/度換算。
+#: ⚠⚠ **必須**和 ui/widgets/cesium_templates/main.html 的 `mPerDegLat = 111320.0`
+#: 一致。JS 端用它算 `cellWidthM` 再推 `normalizedW = 掃描寬度 / 格子寬`,
+#: 面板若用別的常數,顯示出來的「格子邊長」就不是 JS 實際採用的那個
+#: —— 兩個數字都對得起自己,合起來卻是錯的(本專案已有前例:兩套
+#: 每度公尺常數讓生成點間距差 0.000229 m 而卡在避撞門檻上)。
+HEATMAP_M_PER_DEG = 111320.0
+
+#: 超過這個格數就提醒重繪成本。每格一個 Cesium Entity,且改色會讓整批
+#: primitive 重建(非 per-instance 屬性路徑),所以成本隨格數**超線性**成長。
+HEATMAP_HEAVY_CELLS = 4000
+
+
+def heatmap_cell_size_m(lat_min, lat_max, lon_min, lon_max, grid):
+    """網格解析度換算成格子邊長(南北 m, 東西 m)。
+
+    JS 端 `initSARHeatmap` 把區域切成 grid x grid,所以格子邊長完全由
+    **區域跨距 / 行列數** 決定 —— 而區域是使用者在地圖上畫的,
+    面板自己看不到。「解析度 20」對使用者是個沒有單位的數字。
+    """
+    g = max(1, int(grid))
+    import math as _m
+    lat_mid = (float(lat_min) + float(lat_max)) / 2.0
+    ns = abs(float(lat_max) - float(lat_min)) * HEATMAP_M_PER_DEG / g
+    ew = (abs(float(lon_max) - float(lon_min)) * HEATMAP_M_PER_DEG
+          * _m.cos(_m.radians(lat_mid)) / g)
+    return ns, ew
+
+
+def heatmap_resolution_note(cell_ns_m, cell_ew_m, sweep_width_m, grid):
+    """給使用者看的格子大小說明 + 取樣不足警告。
+
+    ⚠⚠ 判準是**格子邊長 vs 掃描寬度**,不是「格子看起來大不大」。
+    JS 的覆蓋判定是「格子**中心點**落不落在足跡內」(_pointInConvexQuad),
+    所以格子比足跡大時,一格會整格翻或整格不翻 —— 畫面上就是一大塊一大塊,
+    而且覆蓋率會同時**高估**(掃到一角就整格算掃過)與**低估**(擦過中心以外)。
+    那不是渲染不夠細,是**取樣不足**,調再多顏色也修不好。
+    """
+    worst = max(cell_ns_m, cell_ew_m)
+    cells = grid * grid
+    txt = (f"{cell_ns_m:.0f} × {cell_ew_m:.0f} m／格"
+           f"（{grid}×{grid} = {cells:,} 格）")
+    # ⚠⚠ 成本不是線性的。每格是一個獨立 Cesium Entity,而更新時是
+    #   `entity.rectangle.material = 新 Color` —— 這條路徑**不走** Cesium 的
+    #   per-instance 顏色屬性快取(那只給 updatersWithAttributes 的 updater),
+    #   所以每次改色都會讓整批 primitive 重建。格數一多,飛行中每一拍都在重建。
+    #   ⇒ 使用者有權在按下去之前就知道,而不是飛到一半發現卡頓。
+    if cells > HEATMAP_HEAVY_CELLS:
+        txt += "　⚠ 格數偏多，飛行中重繪可能變慢"
+    if sweep_width_m > 0 and worst > sweep_width_m:
+        # ⚠ 必須**無條件進位**。四捨五入會給出一個「照做了還是會被警告」的
+        #   建議值(實測 141/50*20 = 56.4 → 56 ⇒ 格子 50.3 m 仍 > 50)。
+        #   給一個不管用的數字比不給更糟 —— 使用者會照做,然後發現沒解決。
+        import math as _mm
+        need = int(_mm.ceil(worst / sweep_width_m * grid))
+        return (txt + f"　⚠ 格子比掃描寬度 {sweep_width_m:.0f} m 還大"
+                      f"（覆蓋判定只看格子中心）；要對得上感測器footprint，"
+                      f"解析度需 ≈ {need}"), False
+    return txt, True
+
+
+def resolve_fov_param_source(source, tactical_panel, vtol_panel):
+    """決定由哪個面板提供 FOV 光錐參數。
+
+    ⚠⚠ 這個接縫存在的理由跟 `build_avoidance_kwargs` 一樣:
+    「光錐畫出來了」和「光錐吃的是**這一頁**的參數」在畫面上長得一模一樣。
+    兩頁的 HFOV 預設都是 60、VFOV 都是 45 ⇒ 接錯來源時**完全看不出來**,
+    只有當使用者去改其中一頁的值才會發現改了沒用 ——
+    正是 [[two-pipelines-one-is-dead]] 的形狀。
+
+    ⚠ 回傳的是**面板物件**,呼叫端一律用 `get_fov_radius()` /
+    `get_fov_visual_params()` 取值 —— 兩個面板刻意提供同名方法。
+
+    Args:
+        source: FOV_SOURCE_VTOL / FOV_SOURCE_TACTICAL / None
+        tactical_panel: 戰術分析頁(parameter_panel),永遠存在
+        vtol_panel: VTOL 偵察頁,可能還沒建立 ⇒ None 時退回戰術頁
+    """
+    if source == FOV_SOURCE_VTOL and vtol_panel is not None:
+        return vtol_panel
+    return tactical_panel
+
+
+def build_avoidance_kwargs(params: dict, cruise_speed_mps: float) -> dict:
+    """把面板參數翻成 CollisionAvoidance 的建構引數。
+
+    ⚠⚠ 拉出來當**接縫**的理由:這一層以前是寫在呼叫點的一長串 kwargs,
+    漏掉一個參數不會有任何症狀 —— 規劃器吃自己的預設,而預設常常剛好等於
+    面板預設 ⇒ 只有使用者**改動**那一格時才會發現「改了沒用」。
+    掃描角就是這樣壞掉的(面板送了、消費端沒收),避撞上限差一點重演。
+
+    ⚠ 這裡**不做任何夾制或修正**:面板顯示什麼就送什麼,不合理的組合由
+    CollisionAvoidance 自己大聲警告。偷偷改值會製造「顯示的值 ≠ 用的值」。
+    """
+    return dict(
+        min_separation_m=float(params.get('min_separation_m', 100.0)),
+        alt_offset_m=float(params.get('alt_offset_m', 30.0)),
+        time_step_s=1.0,
+        cruise_speed_mps=float(cruise_speed_mps),
+        strategy=params.get('avoid_strategy', 'altitude'),
+        # ⚠ None 是合法值(= 自動),不可以 float(None)
+        max_alt_offset_m=(None if params.get('max_alt_offset_m') is None
+                          else float(params['max_alt_offset_m'])),
+    )
+
+
+def resolve_spawn_spacing_m(params: dict, logger_=None) -> float:
+    """決定多機生成點的間距（公尺）。
+
+    ⚠ 間距**不可等於**避撞門檻。舊行為：VTOL 偵察頁的 get_params() 不送
+    ``takeoff_spacing`` ⇒ 退回 50.0，而同一頁送出的 ``min_separation_m`` 也是
+    50.0 ⇒ 間距恰好壓在門檻上，浮點誤差往哪邊倒都可能被判成衝突。
+    """
+    min_sep = float(params.get('min_separation_m', 0.0) or 0.0)
+    spacing = float(params.get('takeoff_spacing', 0.0) or 0.0)
+    if spacing <= 0.0:
+        return max(50.0, min_sep * SPAWN_SPACING_MARGIN)
+    if min_sep > 0.0 and spacing < min_sep * SPAWN_SPACING_MARGIN:
+        if logger_ is not None:
+            logger_.warning(
+                f'[生成點] 起飛間距 {spacing:.1f} m 未高過避撞門檻 '
+                f'{min_sep:.1f} m 的 {SPAWN_SPACING_MARGIN} 倍 ⇒ 相鄰機在 t=0 '
+                f'就可能被判成衝突。自動放大到 {min_sep * SPAWN_SPACING_MARGIN:.1f} m。'
+            )
+        return min_sep * SPAWN_SPACING_MARGIN
+    return spacing
+
+
+def spawn_positions(base_lat: float, base_lon: float, num_drones: int,
+                    takeoff_bearing_deg: float, spacing_m: float) -> list:
+    """沿起飛方向的垂直方向、以起飛點為中心對稱排開 N 個生成點。
+
+    ⚠ 一定要用 ``point_at_distance_bearing``（它用 ``EARTH_RADIUS_M``），
+    不可再用手刻的 111320.0 m/deg：避撞偵測的 ``_haversine`` 用的是
+    ``EARTH_RADIUS_M``（2πR/360 = 111319.4908 m/deg），兩個常數差 0.51 m/deg，
+    會讓「排好 50 m」量起來只有 49.999771 m，剛好掉到 50 m 門檻底下，
+    於是 t=0 每一組相鄰機都被誤判成衝突（cos φ 會約掉 ⇒ 與緯度無關）。
+    """
+    if num_drones <= 1:
+        return [(base_lat, base_lon)]
+    out = []
+    for i in range(num_drones):
+        offset_m = (i - (num_drones - 1) / 2.0) * spacing_m
+        brg = (takeoff_bearing_deg + 90.0) % 360.0
+        if offset_m < 0.0:
+            brg = (brg + 180.0) % 360.0
+        out.append(point_at_distance_bearing(base_lat, base_lon, abs(offset_m), brg))
+    return out
+
+
+def resolve_upload_speed_radius(planned: dict, panel_params: dict) -> tuple:
+    """上傳飛控要用的 (巡航速度, 迴轉半徑)。
+
+    ⚠ 優先用「這份規劃當時實際使用的」值。``panel_params`` 來自**基本演算法**
+    分頁；用 VTOL 偵察頁規劃時那個 panel 可能從沒被碰過，``speed`` 還停在初始
+    預設 3.0 m/s ⇒ 匯出的檔寫 18 m/s、上傳的任務卻是 3 m/s。
+    """
+    planned = planned or {}
+    speed = float(panel_params.get('speed', 15.0))
+    radius = float(panel_params.get('turn_radius', 50.0))
+    if planned.get('cruise_speed_mps'):
+        speed = float(planned['cruise_speed_mps'])
+    if planned.get('turn_radius_m'):
+        radius = float(planned['turn_radius_m'])
+    return speed, radius
 from mission import MissionManager
 from core.global_planner.coverage_planner import CoveragePlanner, CoverageParameters, ScanPattern
 from core.global_planner.astar import AStarPlanner
@@ -490,6 +731,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             n_avoid = len(_fz_reg.by_category(ZoneCategory.NFZ)) \
                     + len(_fz_reg.by_category(ZoneCategory.THREAT))
             self.parameter_panel.update_fence_zone_count(n_all, n_avoid)
+            if hasattr(self, 'vtol_recon_panel'):
+                self.vtol_recon_panel.update_fence_zone_count(n_all, n_avoid)
 
         _fz_reg.zones_changed.connect(_on_fz_changed)
         self.parameter_panel.dccpp_coverage_requested.connect(self._on_dccpp_coverage_requested)
@@ -548,6 +791,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         self.sitl_hud.cmd_set_mode.connect(lambda m: self._sitl_broadcast('set_mode', m))
         self.sitl_hud.cmd_takeoff.connect(lambda a: self._sitl_broadcast('takeoff', a))
         self.sitl_hud.cmd_upload.connect(self.on_sitl_upload_mission)
+        self.sitl_hud.cmd_download.connect(self.on_sitl_download_mission)
         self.sitl_hud.cmd_upload_fence.connect(self.on_sitl_upload_fence)
         self.sitl_hud.cmd_auto_start.connect(lambda: self._sitl_broadcast('auto_start'))
         self.sitl_hud.cmd_guided_takeoff.connect(
@@ -563,6 +807,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         self.sitl_hud.cmd_params_batch.connect(
             lambda items: self._sitl_broadcast('set_params', items)
         )
+        self.sitl_hud.cmd_release_store.connect(self.on_release_store)
         self.sitl_hud.cmd_vtol_transition.connect(
             lambda state: self._sitl_broadcast('vtol_transition', state)
         )
@@ -593,6 +838,60 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         self.hil_panel.disconnect_requested.connect(self._on_hil_disconnect_all)
         sitl_inner_tabs.addTab(self.hil_panel, "HIL")
 
+        # ── 「VTOL 偵察」：VTOL 群飛偵察一頁式工作流 ────────────────
+        # 底層規劃仍走既有 DCCPP（本面板只是把 vehicle_type 釘成 vtol），
+        # 額外負責 DCCPP 沒做的兩件事：感測器足跡建模、規劃後覆蓋率驗算。
+        from ui.widgets.vtol_recon_panel import VTOLReconPanel
+        self.vtol_recon_panel = VTOLReconPanel()
+        self.vtol_recon_panel.pick_area_requested.connect(
+            self.parameter_panel.open_click_map_requested.emit)
+        self.vtol_recon_panel.clear_area_requested.connect(self.on_clear_corners)
+        self.vtol_recon_panel.delete_last_corner_requested.connect(
+            self.on_delete_last_corner)
+        # 自動建構的電子圍籬狀態也餵給 VTOL 面板 —— 否則地圖上明明畫著圍籬，
+        # ⑥ Fence 管理卻只顯示 registry 的 0 個，看起來像 bug（實際是兩套系統）。
+        if hasattr(self.map_widget, 'fence_built'):
+            self.map_widget.fence_built.connect(
+                self.vtol_recon_panel.update_fence_status)
+        # 面板建立時補一次現況（可能已經規劃過）
+        self.vtol_recon_panel.update_fence_status(
+            getattr(self.map_widget, 'last_fence_bundle', None))
+        self.vtol_recon_panel.plan_requested.connect(self._on_vtol_recon_plan)
+        self.vtol_recon_panel.verify_coverage_requested.connect(
+            self._on_vtol_recon_verify)
+        self.vtol_recon_panel.show_missed_requested.connect(
+            self._on_vtol_recon_show_missed)
+        self.vtol_recon_panel.show_heatmap_requested.connect(
+            self._on_vtol_recon_heatmap)
+        self.vtol_recon_panel.export_requested.connect(self._on_vtol_export_requested)
+        self.vtol_recon_panel.fov_cone_toggle_requested.connect(
+            self._on_vtol_fov_cone_toggle)
+        self.vtol_recon_panel.fov_visual_changed.connect(
+            self._on_vtol_fov_visual_changed)
+        self.vtol_recon_panel.upload_requested.connect(self.on_sitl_upload_mission)
+        self.vtol_recon_panel.launch_sitl_requested.connect(
+            lambda n: self.on_sitl_launch('VTOL', n))
+        # VTOL 分頁的 Fence 管理 —— 接同一組 handler、共用同一個 registry
+        self.vtol_recon_panel.fence_zone_create_requested.connect(
+            self.open_fence_zone_dialog)
+        self.vtol_recon_panel.fence_zone_draw_polygon_requested.connect(
+            self.on_fence_zone_draw_polygon)
+        self.vtol_recon_panel.fence_zone_draw_circle_requested.connect(
+            self.on_fence_zone_draw_circle)
+        self.vtol_recon_panel.fence_zone_upload_requested.connect(
+            self.upload_fence_zones_to_fc)
+        self.vtol_recon_panel.fence_zone_clear_all_requested.connect(
+            self.clear_all_fence_zones)
+        # 邊界點在別的分頁 / 地圖上改動時即時同步，不必等到切分頁
+        self.parameter_panel.corner_count_changed.connect(
+            self.vtol_recon_panel.set_corner_count)
+        vtol_recon_scroll = self.parameter_panel._make_resizable_tab(
+            [self.vtol_recon_panel]
+        )
+        self._vtol_recon_tab_index = self.parameter_panel._tabs.addTab(
+            vtol_recon_scroll, "VTOL 偵察"
+        )
+
         self.parameter_panel._tabs.addTab(sitl_inner_tabs, "🛰 SITL")
 
         # 任務操作面板隨分頁切換可見元件：只有「基本演算法」分頁才顯示完整預覽/匯出
@@ -601,6 +900,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
 
         self._sitl_link = None        # 主鏈路（向後相容）
         self._sitl_links: list = []   # 多機鏈路列表
+        # 最近一次從飛控讀回的任務 {'sysid': int, 'items': [dict, ...]}
+        self._fc_mission: dict | None = None
         self._hil_links: list = []    # HIL 實體飛控鏈路（_sitl_links 的子集）
         self._sitl_launcher = None
         
@@ -617,13 +918,16 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         self.parameter_panel.sar_heatmap_reset_requested.connect(self._on_sar_heatmap_reset)
         self.parameter_panel.sar_heatmap_clear_requested.connect(self._on_sar_heatmap_clear)
         self.parameter_panel.fov_cone_toggle_requested.connect(self._on_fov_cone_toggle)
-        self.parameter_panel.fov_visual_changed.connect(self._on_fov_visual_changed)
+        self.parameter_panel.fov_visual_changed.connect(
+            self._on_tactical_fov_visual_changed)
         self.parameter_panel.radar_sim_requested.connect(self._on_radar_sim)
         self.parameter_panel.radar_clear_requested.connect(self._on_radar_clear)
         self.parameter_panel.rcs_toggle_requested.connect(self._on_rcs_toggle)
 
         # 戰術模組內部狀態
         self._fov_cone_enabled = False   # FOV 光錐是否啟用
+        # 目前由哪一頁提供光錐參數(None = 沒開)。見 resolve_fov_param_source()
+        self._fov_cone_source = None
         self._rcs_enabled = False        # RCS 渲染是否啟用
         # 各 sysid 最近一筆 UAV 姿態快取（給 FOV 視覺參數變更時即時重投影用）
         #   {sysid: (lat, lon, alt, heading_deg, pitch_deg, roll_deg)}
@@ -1086,20 +1390,32 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         return R * 2 * math.asin(math.sqrt(a))
 
     def on_delete_last_corner(self):
-        """刪除最後一個角點"""
-        if self.corners:
-            removed = self.corners.pop()
-            # 同步地圖 widget 的 corners 與 markers 列表
+        """刪除最後一個角點（誤點救援）—— 2D 與 3D 同時生效。
+
+        ⚠ 舊版只 pop 了 ``self.corners`` 與 2D 的 corners/markers，再呼叫
+        ``map_widget._render_map()``：
+          * 3D（Cesium）的 ``corners`` 與標記**完全沒被動到** ⇒ 切到 3D 那顆
+            被刪的點還在，而且兩邊索引從此漂移，再刪一次就刪錯點；
+          * ``DualMapWidget`` 當時**沒有 markers 代理**，`self.map_widget.markers`
+            會 AttributeError，整個刪除流程在那一行就中斷。
+        改成呼叫 `DualMapWidget.remove_last_corner()`，2D+3D 一起刪。
+        """
+        if not self.corners:
+            return
+        removed = self.corners.pop()
+        # 地圖端（2D + 3D）對稱刪除
+        remover = getattr(self.map_widget, 'remove_last_corner', None)
+        if callable(remover):
+            remover()
+        else:                                   # 極舊版 widget 的保底
             if self.map_widget.corners:
                 self.map_widget.corners.pop()
-            if self.map_widget.markers:
-                self.map_widget.markers.pop()
-            # 重新渲染地圖
             self.map_widget._render_map()
-            # 更新 UI
-            self.parameter_panel.update_corner_count(len(self.corners))
-            self.update_statusbar()
-            logger.info(f"刪除角點: ({removed[0]:.6f}, {removed[1]:.6f}), 剩餘 {len(self.corners)} 個")
+        # 更新 UI（各分頁的角點計數：基本演算法 + VTOL 偵察都靠這個）
+        self.parameter_panel.update_corner_count(len(self.corners))
+        self.update_statusbar()
+        logger.info(f"刪除角點: ({removed[0]:.6f}, {removed[1]:.6f}), "
+                    f"剩餘 {len(self.corners)} 個（2D+3D 同步）")
 
     def _schedule_path_generation(self):
         """排程延遲路徑生成（防止頻繁更新）"""
@@ -1376,6 +1692,16 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
 
         # 處理載具變更
         if 'vehicle_type' in params:
+            if params['vehicle_type'] != self.current_vehicle_type:
+                # 換了載具，之前算的 DCCPP 結果（含每架起飛點、載具類型）就不再適用。
+                # 不清掉的話它會一路活到 process 結束，繼續影響 SITL 啟動的
+                # 載具比對、生成座標與台數。
+                if getattr(self, '_dccpp_result', None) is not None:
+                    logger.info(
+                        f"[DCCPP] 載具由 {self.current_vehicle_type} 改為 "
+                        f"{params['vehicle_type']}，清除既有 DCCPP 結果快取"
+                    )
+                    self._dccpp_result = None
             self.current_vehicle_type = params['vehicle_type']
         if 'vehicle_model' in params:
             self.current_vehicle_model = params['vehicle_model']
@@ -3486,6 +3812,9 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         self.spiral_waypoint_altitudes.clear()
         self.waypoint_label.setText("航點: 0")
         self.distance_label.setText("距離: 0.0m")
+        # 路徑清掉了，DCCPP 結果也不再有效 —— 否則它仍會決定 SITL 的
+        # 生成座標 / 台數 / 載具比對。
+        self._dccpp_result = None
         logger.info("已清除路徑")
     
     def on_clear_corners(self):
@@ -3526,10 +3855,28 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             self.on_clear_all_silent()
     
     def on_clear_all_silent(self):
-        """清除全部（不帶確認）"""
+        """清除全部（不帶確認）
+
+        ⚠️ 舊版就只有「清除邊界 + 清除路徑 + 清 obstacles」三行 —— 從來沒有
+        呼叫過 `map_widget.clear_all()`。也就是說「清除全部」實際上等於
+        「清除邊界」加「清除路徑」，凡是不屬於這兩類的疊圖（電子圍籬、
+        VTOL 三段軌跡、飛控讀回的 AUTO 航線、TOT 閘門、爆炸特效……）
+        一個都沒被清掉，而 log 照樣印「已清除全部」。
+        使用者看到的就是：按了清除全部，2D 還有琥珀虛線矩形、3D 還有
+        黃色圍籬與黃/藍軌跡。
+        """
         self.on_clear_corners()
         self.on_clear_paths()
         self.obstacles.clear()
+        # 真正把兩張圖都清乾淨（含圍籬、VTOL 軌跡、飛控航線等非路徑疊圖）
+        if hasattr(self.map_widget, 'clear_all'):
+            self.map_widget.clear_all()
+        # `clear_all` 會把地圖上的 NFZ 一起抹掉。這裡不同步清掉**模型**的話，
+        # `self.nfz_zones` 會留著一份畫面上看不見、但仍會參與繞行修正、
+        # 也仍會被下一次 display_nfz_zones() 原地畫回來的禁航區 —— 典型的
+        # 「畫面清了、來源沒清」靜默分歧。
+        if self.nfz_zones:
+            self.on_nfz_changed([])
         logger.info("已清除全部")
     
     def on_reset_view(self):
@@ -4032,6 +4379,42 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         return out_xy, out_refs
 
     @staticmethod
+    def _split_takeoff_head(
+        waypoints: list,
+    ) -> tuple:
+        """剝離開頭「起飛爬升型態」供 NFZ 避障豁免（_split_landing_tail 的鏡像）。
+
+        為什麼需要
+        ----------
+        VTOL 的起飛前兩點是**同一個經緯度**（純垂直爬升）。NFZ 避障後會用
+        ``_resample_alts_by_arclength`` 依**水平**弧長比例重採樣高度剖面，
+        而垂直段的水平弧長是 0 ⇒ 它在比例上佔 0，整段 0 m→轉換高度 的爬升
+        會被擠掉，變成從地面直接以巡航高度出發。
+
+        作法與尾端對稱：
+          1. 找出開頭連續的 TAKEOFF 區段。
+          2. 把「最後一個 TAKEOFF 航點（爬升完成點）」留在避障段 ``rest``，
+             讓「爬升完成點 → 第一個作業點」這條長離場巡航段仍會繞 NFZ。
+          3. 其餘（地面點 + 垂直段 + 過渡段）放進 ``exempt_head`` 原樣豁免，
+             保住垂直起飛幾何與匯出時的 NAV_VTOL_TAKEOFF。
+
+        Returns:
+            (exempt_head, rest)
+        """
+        n = len(waypoints)
+        i = 0
+        while i < n and getattr(
+            getattr(waypoints[i], 'segment_type', None), 'name', ''
+        ) == 'TAKEOFF':
+            i += 1
+        if i == 0:
+            return [], list(waypoints)
+        # 爬升完成點留給避障段，讓離場巡航仍被涵蓋
+        exempt_head = list(waypoints[:max(0, i - 1)])
+        rest = list(waypoints[max(0, i - 1):])
+        return exempt_head, rest
+
+    @staticmethod
     def _split_landing_tail(
         waypoints: list,
     ) -> tuple:
@@ -4287,7 +4670,10 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             #   場周入口併入避障前段，使回程巡航走 VG 繞行 + Dubins fillet，
             #   其餘下降進場型態 (landing_tail) 仍原樣豁免接回。
             _full_wps = apath.waypoints
-            wps, landing_tail = self._split_landing_tail(_full_wps)
+            # 起飛段也要豁免：VTOL 的垂直爬升水平弧長為 0，
+            # 被 _resample_alts_by_arclength 重採樣時會整段被擠掉。
+            takeoff_head, _rest_wps = self._split_takeoff_head(_full_wps)
+            wps, landing_tail = self._split_landing_tail(_rest_wps)
             if not wps or len(wps) < 2:
                 continue
 
@@ -4665,7 +5051,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 new_wps.append(new_wp)
             # ★ 下降進場型態原樣接回（避障豁免）— 確保匯出時仍有 LANDING → NAV_LAND；
             #   回程巡航段（到場周入口）已在上方 new_wps 中完成 NFZ 繞行。
-            apath.waypoints = new_wps + landing_tail
+            apath.waypoints = takeoff_head + new_wps + landing_tail
             n_rerouted += 1
 
         # ── 統一摘要 ──
@@ -4730,7 +5116,15 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             dem_path      = params.get('dem_path', '')
 
             # ── 組裝區域 ──
-            areas = [{'area_id': 1, 'polygon': list(self.corners), 'priority': 1.0}]
+            # ⚠ `scan_angle_deg` 一定要放進來：規劃器在 auto_scan_angle=False 時
+            #   走 `area_dict.get('scan_angle_deg', 0.0)`。舊版沒帶這個鍵 ⇒ 就算
+            #   關掉自動選角，掃描方向也永遠是 0°，使用者改角度完全沒反應。
+            scan_angle_deg = float(params.get('scan_angle_deg', 0.0))
+            areas = [{'area_id': 1, 'polygon': list(self.corners), 'priority': 1.0,
+                      'scan_angle_deg': scan_angle_deg}]
+            if not auto_scan:
+                logger.info(
+                    f'[DCCPP] 手動掃描角度 {scan_angle_deg:.1f}°（0°=北，順時針）')
 
             # ── 組裝無人機 ──
             centroid_lat = sum(c[0] for c in self.corners) / len(self.corners)
@@ -4741,21 +5135,14 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             else:
                 base_lat, base_lon = centroid_lat, centroid_lon
             user_takeoff_hdg = float(params.get('takeoff_bearing', 0.0))
-            takeoff_spacing_m = float(params.get('takeoff_spacing', 50.0))
+            takeoff_spacing_m = resolve_spawn_spacing_m(params, logger)
+            _spawn_pts = spawn_positions(
+                base_lat, base_lon, num_drones, user_takeoff_hdg, takeoff_spacing_m,
+            )
             drones = []
             for i in range(num_drones):
-                # 多機時沿跑道方向（垂直方向）排列，間距由使用者設定
-                if num_drones > 1:
-                    # 沿跑道的垂直方向（左右排列），以起飛點為中心對稱展開
-                    perp_bearing_rad = math.radians((user_takeoff_hdg + 90.0) % 360.0)
-                    offset_m = (i - (num_drones - 1) / 2.0) * takeoff_spacing_m
-                    dN = offset_m * math.cos(perp_bearing_rad)
-                    dE = offset_m * math.sin(perp_bearing_rad)
-                    cos_lat = max(math.cos(math.radians(base_lat)), 1e-6)
-                    pos = (base_lat + dN / 111320.0,
-                           base_lon + dE / (111320.0 * cos_lat))
-                else:
-                    pos = (base_lat, base_lon)
+                # 生成點幾何見模組層級的 spawn_positions()（有值層級守衛）
+                pos = _spawn_pts[i]
                 drones.append({
                     'drone_id': i + 1,
                     'name': f'UAV-{i + 1}',
@@ -4797,6 +5184,13 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 runway_length_m=user_runway_length,
                 landing_bearing_deg=user_landing_hdg,
                 landing_rollout_m=user_landing_rollout,
+                # VTOL：把「轉換高度」往下傳，起降才會是垂直剖面而不是跑道滑行。
+                # 非 VTOL 時為 None，走原本的固定翼跑道起降。
+                vtol_transition_alt_m=(
+                    float(params.get('transition_alt', 0.0) or 0.0)
+                    if str(params.get('vehicle_type', '')).lower() == 'vtol'
+                    else None
+                ),
             )
 
             # 註：fence-zone 避讓延後到「起降航段組裝完成後」才執行，
@@ -4812,6 +5206,17 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             })
 
             # ── 將 DCCPP 結果轉為 display_swarm_raw 格式 ──
+            # 把規劃器**實際**用的掃描角回報給面板。自動模式下使用者才看得到
+            # 幾何選了幾度，取消自動時也才有一個合理的起跳值。
+            # ⚠ 只有 DCCPP v2 管線會給這個 key；回退到舊 solver 時拿不到，
+            #   那就維持面板原顯示，不要自己重算一個數字充當（會變兩套值）。
+            _eff = (dccpp_result.get('effective_scan_angles') or {}).get(1)
+            if _eff is not None and hasattr(self, 'vtol_recon_panel'):
+                self.vtol_recon_panel.set_effective_scan_angle(_eff, auto=auto_scan)
+                logger.info(
+                    f'[DCCPP] 實際生效掃描角 {_eff:.1f}°'
+                    f'（{"自動" if auto_scan else "手動"}）')
+
             results = dccpp_result.get('results', {})
             total_makespan = dccpp_result.get('total_makespan', 0.0)
             allocation = dccpp_result.get('allocation', {})
@@ -4877,12 +5282,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 try:
                     from core.dccpp.collision_avoidance import CollisionAvoidance
                     _ca = CollisionAvoidance(
-                        min_separation_m=float(params.get('min_separation_m', 100.0)),
-                        alt_offset_m=float(params.get('alt_offset_m', 30.0)),
-                        time_step_s=1.0,
-                        cruise_speed_mps=speed,
-                        strategy=params.get('avoid_strategy', 'altitude'),
-                    )
+                        **build_avoidance_kwargs(params, speed))
                     _collision_conflicts, _collision_actions = _ca.run(assembled_paths)
                     if _collision_conflicts:
                         self.statusBar().showMessage(
@@ -5002,14 +5402,25 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
 
             # 計算總距離
             def _haversine(a, b):
+                """兩點 3D 距離（含高度差）。
+
+                點的格式是 (lat, lon, alt)；只算水平的話，VTOL 的垂直起降段
+                會被當成 0 公尺。
+                """
                 dlat = (b[0] - a[0]) * 111320
                 dlon = (b[1] - a[1]) * 111320 * math.cos(math.radians(a[0]))
-                return math.hypot(dlat, dlon)
+                dz = (b[2] - a[2]) if (len(a) > 2 and len(b) > 2) else 0.0
+                return math.hypot(math.hypot(dlat, dlon), dz)
 
+            # ⚠ 五個航段都要算。原本只加 operation_paths ⇒「飛行距離」只是掃描
+            #   條帶的長度，與表格的總航程對不起來（實測 45.6 km vs 66.0 km），
+            #   而且起降、進場、轉場全部被當成沒飛。
             for dd in drones_data:
-                for path in dd.get('operation_paths', []):
-                    for j in range(len(path) - 1):
-                        total_dist += _haversine(path[j], path[j + 1])
+                for _key in ('takeoff_paths', 'entry_paths', 'operation_paths',
+                             'transfer_paths', 'landing_paths'):
+                    for path in dd.get(_key, []):
+                        for j in range(len(path) - 1):
+                            total_dist += _haversine(path[j], path[j + 1])
 
             # 衝突標記
             conflict_markers = []
@@ -5035,6 +5446,24 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 },
                 'conflicts': conflict_markers,
             }
+            # 把**權威**載具類型記進結果裡。SITL 啟動時要用這個值，不要再從
+            # 「航點裡有沒有 TAKEOFF 段」反推 —— 那個啟發式沒有 TAKEOFF 就一律
+            # 判成 COPTER，會把使用者選的 PLANE 悄悄改掉。
+            dccpp_result['vehicle_type'] = vehicle_type
+            # 把這次規劃**實際使用**的 VTOL 轉換高度一起記下來。
+            # 上傳飛控時必須用同一個值，否則上傳的任務與畫面上的軌跡不一致
+            # （舊行為是去讀 DCCPP 分頁的 spin box，VTOL 偵察頁設的值被忽略）。
+            if vehicle_type == 'vtol':
+                dccpp_result['vtol_transition_alt_m'] = float(
+                    params.get('transition_alt', 0.0) or 0.0
+                )
+            # 同理，速度與迴轉半徑也要記「這次規劃實際用的值」。
+            # 舊行為：上傳飛控去讀 parameter_panel（**基本演算法**分頁）。用
+            # VTOL 偵察頁規劃時那個 panel 可能從沒被碰過，speed 還停在初始預設
+            # 3.0 m/s ⇒ 匯出的檔寫 18 m/s、上傳的任務卻是 3 m/s，同一架飛機
+            # 兩份互相矛盾的任務。
+            dccpp_result['cruise_speed_mps'] = float(speed)
+            dccpp_result['turn_radius_m'] = float(turn_radius)
             self._dccpp_result = dccpp_result
             self.map_widget.display_swarm_raw(swarm_data)
 
@@ -5429,6 +5858,13 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         link.error.connect(self.sitl_hud.on_error)
         # SERVO 參數（FUNCTION/MIN/TRIM/MAX/REVERSED）→ ServoOutputPanel
         link.servo_param.connect(self.sitl_hud.on_servo_param)
+        # 任務下載結果 → 畫到地圖。
+        # ⚠️ 接在**建立 link 時**，不是接在按鈕的處理函式裡：這樣不論觸發來源
+        #    是 HUD 的按鈕、DroneDetailPanel 的 ↧、還是程式自己呼叫
+        #    link.download_mission()，結果都會畫出來，而且每條 link 只接一次。
+        #    接在處理函式裡會每按一次多接一條 ⇒ 第 N 次點擊畫 N 遍。
+        link.mission_downloaded.connect(self._on_mission_downloaded)
+        link.mission_download_failed.connect(self._on_mission_download_failed)
         link.start()
         self._sitl_links.append(link)
         if self._sitl_link is None:
@@ -5648,6 +6084,9 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         # 主機 (sysid_label==1) 才更新 HUD，避免多機資訊互相覆蓋
         # 所有 sysid 都送進 HUD（多機卡片）
         self.sitl_hud.on_telemetry(frame)
+        # 投放讀回確認：PWM 真的動了才播落點模擬（見 on_release_store）
+        if getattr(self, '_pending_releases', None):
+            self._confirm_pending_release(frame)
         if frame.is_valid_gps() and hasattr(self.map_widget, 'update_uav_position'):
             _pitch = getattr(frame, 'pitch', 0.0)
             _roll = getattr(frame, 'roll', 0.0)
@@ -5713,6 +6152,180 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             except Exception as e:
                 logger.error(f'[SITL] {cmd} 失敗: {e}')
 
+    # ── 投放：送指令 → **等 PWM 讀回真的變了** → 才播落點模擬 ──────────
+    # 設計要點：動畫不是按鈕觸發的，是**飛控回報的 SERVO_OUTPUT_RAW 觸發的**。
+    # 按鈕只負責送指令；只有在該通道的 PWM 真的跳到目標值之後才會有動畫。
+    # 這樣「畫面上有東西掉下去」就等於「伺服真的動了」，而不是兩件不相干的事
+    # 剛好同時發生 —— 否則指令被飛控吃掉（例如 SERVOn_FUNCTION 不是 Disabled）
+    # 時畫面照樣播，那是最糟的一種假綠燈。
+    _RELEASE_CONFIRM_TIMEOUT_S = 4.0     # 超過這麼久沒看到 PWM 變化 = 判定沒動
+    _RELEASE_PWM_TOL = 25                # μs：讀回值與目標值的容差
+
+    def on_release_store(self, index: int, kind: str = 'dumb'):
+        """SITL 面板的「一號彈 / 二號彈」。
+
+        只做一件事：把該掛架的伺服通道打到 HI（MAV_CMD_DO_SET_SERVO）。
+        落點模擬由 `_confirm_pending_release()` 在**讀回確認**之後才啟動。
+        """
+        import time as _time
+        if not self._sitl_links:
+            QMessageBox.information(self, '投放', '尚未連線任何 SITL')
+            return
+        links = self._target_links()
+        if not links:
+            QMessageBox.information(
+                self, '投放', '所選的指令對象 UAV 已離線，請改選其他機或「全部」')
+            return
+
+        ch = self.sitl_hud.release_channel(index)
+        pwm = self.sitl_hud.release_pwm()
+        label = f'{index} 號彈'
+        tol = self._RELEASE_PWM_TOL
+
+        if not hasattr(self, '_pending_releases'):
+            self._pending_releases = []
+
+        sent, already = 0, []
+        for link in links:
+            sysid = int(getattr(link, 'sysid_label', 1))
+            f = link.get_latest_telemetry()
+            before = int(f.servo_pwm[ch - 1]) if f else 0
+            # 整條 servo_pwm 都是 0 = 還沒收到 SERVO_OUTPUT_RAW，不是「PWM 是 0」
+            has_stream = bool(f and any(f.servo_pwm))
+            if has_stream and abs(before - pwm) <= tol:
+                # 已經停在放的位置：再送一次不會有任何變化，也就無從確認。
+                # 這不是投放成功，是「上一發投完沒歸位」。
+                already.append(sysid)
+                continue
+            try:
+                link.set_servo(ch, pwm)
+                sent += 1
+                self._pending_releases.append(dict(
+                    sysid=sysid, ch=ch, target=pwm, before=before,
+                    kind=kind, label=label, t0=_time.monotonic(),
+                    has_stream=has_stream))
+            except Exception as e:
+                logger.error(f'[投放] UAV-{sysid} set_servo ch{ch}={pwm} 失敗: {e}')
+
+        if already:
+            QMessageBox.information(
+                self, '投放',
+                f'UAV-{"/".join(str(x) for x in already)} 的 ch{ch} 已經停在 '
+                f'{pwm} μs（上一發投完沒有歸位）。\n'
+                f'再送一次不會有任何 PWM 變化，因此無法確認投放，已略過。\n\n'
+                f'請先把該通道送回鎖住位置再投。')
+        if sent == 0:
+            return
+
+        logger.warning(f'[投放] {label}: SERVO ch{ch} → {pwm} μs，送出 {sent} 台，'
+                       f'等待 PWM 讀回確認')
+        self.statusBar().showMessage(
+            f'💣 {label} 指令已送出（ch{ch} → {pwm} μs，{sent} 台）'
+            f'　等待 SERVO_OUTPUT_RAW 讀回確認…', 6000)
+        self._ensure_release_sweeper()
+
+    def _ensure_release_sweeper(self):
+        """逾時掃描器：沒等到 PWM 變化就大聲說「沒動」，不要靜靜地什麼都沒發生。"""
+        if getattr(self, '_release_timer', None) is None:
+            self._release_timer = QTimer(self)
+            self._release_timer.setInterval(500)
+            self._release_timer.timeout.connect(self._sweep_pending_releases)
+        if not self._release_timer.isActive():
+            self._release_timer.start()
+
+    def _sweep_pending_releases(self):
+        import time as _time
+        pend = getattr(self, '_pending_releases', None)
+        if not pend:
+            if getattr(self, '_release_timer', None) is not None:
+                self._release_timer.stop()
+            return
+        now = _time.monotonic()
+        for pr in list(pend):
+            if now - pr['t0'] < self._RELEASE_CONFIRM_TIMEOUT_S:
+                continue
+            pend.remove(pr)
+            if not pr['has_stream']:
+                why = (f'收不到 ch{pr["ch"]} 的 SERVO_OUTPUT_RAW —— 無法確認。'
+                       f'請確認 SERVO OUTPUT 面板有在跳動。')
+            else:
+                # 實測（2026-09-01, ArduCopter SITL）：0/1/51 打得上去，
+                # 33 Motor1 與 24 Flap 完全擋掉 —— 是「被主動驅動的功能」擋的，
+                # 不是「只要不是 0 就會被擋」。訊息照實寫，不要給錯的線索。
+                why = (f'ch{pr["ch"]} 的 PWM 仍停在 {pr["before"]} μs，沒有變化。'
+                       f'先查 SERVO{pr["ch"]}_FUNCTION：若被指派給飛控會主動'
+                       f'驅動的功能（例如 Motor / Flap），DO_SET_SERVO 會被擋掉；'
+                       f'投放通道請設為 0 (Disabled)。')
+            logger.error(f'[投放] UAV-{pr["sysid"]} {pr["label"]} 未確認：{why}')
+            self.statusBar().showMessage(
+                f'⚠️ UAV-{pr["sysid"]} {pr["label"]} **未確認投放**：{why}', 15000)
+
+    def _confirm_pending_release(self, frame):
+        """每幀遙測都檢查：等到的那一刻就用**這一幀**當投放點去播動畫。
+
+        用當下這一幀而不是按鈕按下那一刻的位置：兩者相差數百毫秒，
+        高速飛行下就是幾十公尺，落點會差一截。
+        """
+        pend = getattr(self, '_pending_releases', None)
+        if not pend:
+            return
+        tol = self._RELEASE_PWM_TOL
+        for pr in list(pend):
+            if pr['sysid'] != int(getattr(frame, 'sysid', 1)):
+                continue
+            try:
+                now_pwm = int(frame.servo_pwm[pr['ch'] - 1])
+            except Exception:
+                continue
+            if abs(now_pwm - pr['target']) > tol:
+                continue
+            if now_pwm == pr['before']:
+                continue          # 本來就在那個值，不算「動了」
+            pend.remove(pr)
+            logger.warning(
+                f'[投放] UAV-{pr["sysid"]} {pr["label"]} 已確認：'
+                f'ch{pr["ch"]} {pr["before"]} → {now_pwm} μs')
+            self.statusBar().showMessage(
+                f'💥 UAV-{pr["sysid"]} {pr["label"]} 已確認投放'
+                f'（ch{pr["ch"]} {pr["before"]} → {now_pwm} μs）', 8000)
+            self._play_store_drop(frame, pr)
+
+    def _play_store_drop(self, frame, pr):
+        """在 3D 地圖上播一發落點模擬。⚠️ 純視覺化：無風、無升力、單一阻力係數。"""
+        cesium = self._get_cesium_widget()
+        if cesium is None or not hasattr(cesium, 'drop_store'):
+            return
+        # ⚠️ _get_cesium_widget() **不管現在顯示 2D 還是 3D 都會回傳物件**。
+        # App 預設開在 2D，直接畫下去就是畫進看不見的圖台，狀態列還照樣報成功
+        # —— 這個坑在 _get_visible_cesium_widget() 的註解裡已經記過一次。
+        # 這裡不用 _get_visible_cesium_widget()：它會跳 modal 對話框，
+        # 而投放已經發生了，不該被擋住。改成「照播、但明講看不到」。
+        try:
+            from ui.widgets.dual_map_widget import _MODE_3D
+            in_3d = getattr(self.map_widget, '_mode', None) == _MODE_3D
+        except Exception:
+            in_3d = True
+        if not in_3d:
+            self.statusBar().showMessage(
+                f'💥 UAV-{pr["sysid"]} {pr["label"]} 已確認投放。'
+                f'落點模擬需要切到 3D 圖台才看得到。', 8000)
+            return
+        if not frame.is_valid_gps():
+            logger.info('[投放] 無有效 GPS，略過落點模擬')
+            return
+        try:
+            from mission import ballistics
+            traj = ballistics.simulate_from_frame(frame, kind=pr['kind'])
+            if traj.tof <= 0.0:
+                logger.info('[投放] 機體已在地面高度，不播落點模擬')
+                return
+            cesium.drop_store(traj, f'UAV-{pr["sysid"]} {pr["label"]}')
+            logger.info(
+                f'[投放] UAV-{pr["sysid"]} 彈道：飛行 {traj.tof:.1f}s、'
+                f'前拋 {traj.range_m:.0f}m、落地 {traj.impact_speed:.0f}m/s')
+        except Exception as e:
+            logger.error(f'[投放] 落點模擬失敗: {e}', exc_info=True)
+
     # ── GUIDED 點圖起飛（點地圖 → 整群一次 GUIDED 起飛）────────────────
     def on_guided_takeoff_mode(self, enabled: bool):
         """切換『點圖起飛』模式（2D/3D 地圖點一下 → 整群 GUIDED 起飛）。與點圖飛到互斥。"""
@@ -5766,6 +6379,44 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                        if int(getattr(l, 'sysid_label', 1)) == int(sid)), None)
         return target, []                          # 單機 → 無僚機
 
+    def _confirm_single_target(self, action: str) -> bool:
+        """指令對象被點成單機、但現場不只一台時，問清楚再送。
+
+        ⚠️ 這是實測踩到的（2026-09-02）：點一下 UAV 卡片只是想看它，副作用
+           卻是把「指令對象」換成那一台。之後右鍵起飛只有那一台會動，**而且
+           完全沒有提示** —— 畫面上只有右上角一行小字。使用者看到的現象是
+           「僚機不跟隨」，會往編隊那邊找原因，但那裡根本沒有問題。
+
+        回傳 True = 繼續送。
+        """
+        try:
+            sid = self.sitl_hud.get_target_sysid()
+        except Exception:
+            return True
+        if sid is None:                       # 已經是「全部」
+            return True
+        if len(self._sitl_links) <= 1:        # 本來就只有一台，沒有歧義
+            return True
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle('指令對象是單機')
+        box.setText(
+            f'目前指令對象是 <b>UAV{sid}（單獨）</b>，'
+            f'{action}只會送給這一台。<br><br>'
+            f'現場共有 {len(self._sitl_links)} 台。要改成「全部 UAV」嗎？')
+        b_all = box.addButton('改成全部 UAV',
+                              QMessageBox.ButtonRole.AcceptRole)
+        b_one = box.addButton(f'只操作 UAV{sid}',
+                              QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton('取消', QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(b_all)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is b_all:
+            self.sitl_hud._set_target(None)
+            return True
+        return clicked is b_one
+
     def _send_guided_takeoff_swarm(self, lat: float, lon: float, alt: float = 60.0):
         """點地圖 → 長機帶領的「分階段」GUIDED 起飛（非整群同時）：
 
@@ -5774,6 +6425,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         階段3：長機 GUIDED 確認後，才讓僚機跟著起飛；之後由蜂群節點維持 V 編隊跟隨。
         """
         if not self._sitl_links:
+            return
+        if not self._confirm_single_target('起飛'):
             return
         # 尊重 HUD 指令對象：選單機 → 只起飛該機（wingmen=[]）；全部 → 長機帶隊
         leader, wingmen = self._resolve_flight_target()
@@ -5897,6 +6550,14 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             return
         self._rclick_guided_arrive(lat, lon)
 
+    # ── 地圖右鍵的 STOT 打擊入口（2026-09-02 暫時關閉）────────────────
+    # 現在專心做投彈機群，右鍵不要再跳出紅心/STOT 那條路。
+    # 要開回來把這個改成 True 就好 —— 底層的 rclick_strike_at /
+    # stot_ros2_controller 都沒有動，只是拿掉入口。
+    # ⚠️ 兩個入口要一起關：選單項，以及高度輸入框「輸入 0 = STOT 打擊」
+    #    的快捷。只關選單的話，打 0 還是會進 STOT。
+    ENABLE_STOT_RCLICK_STRIKE = False
+
     def _rclick_pick_action(self, lat: float, lon: float):
         """右鍵動作選單。回傳 MODE_ARRIVE / MODE_STRIKE / None（取消）。"""
         from PyQt6.QtGui import QCursor
@@ -5906,11 +6567,13 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         head.setEnabled(False)
         menu.addSeparator()
         act_goto = menu.addAction('✈️  飛到此點（GUIDED）')
-        act_hit = menu.addAction('🎯  以此點執行 STOT 打擊')
+        act_hit = None
+        if self.ENABLE_STOT_RCLICK_STRIKE:
+            act_hit = menu.addAction('🎯  以此點執行 STOT 打擊')
         picked = menu.exec(QCursor.pos())
         if picked is act_goto:
             return rclick_strike.MODE_ARRIVE
-        if picked is act_hit:
+        if act_hit is not None and picked is act_hit:
             return rclick_strike.MODE_STRIKE
         return None
 
@@ -5927,15 +6590,22 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             QMessageBox.information(self, 'GUIDED', '尚未連線任何 SITL / 蜂群')
             return
         from PyQt6.QtWidgets import QInputDialog
+        _hint = ('\n（輸入 0 = 改走 STOT 打擊，會再跳一次確認）'
+                 if self.ENABLE_STOT_RCLICK_STRIKE else '')
+        # STOT 入口關閉時高度下限提到 ALT_ARRIVE_MIN：0 不再有特殊語意，
+        # 讓它可輸入卻沒有作用只會讓人困惑。
+        _lo = 0.0 if self.ENABLE_STOT_RCLICK_STRIKE \
+            else float(rclick_strike.ALT_ARRIVE_MIN)
         alt, ok = QInputDialog.getDouble(
             self, 'GUIDED 目標高度',
-            f'目標點 ({lat:.5f}, {lon:.5f})\n指定高度 (m，相對起飛點):'
-            f'\n（輸入 0 = 改走 STOT 打擊，會再跳一次確認）',
-            float(getattr(self, '_last_guided_alt', 80.0)), 0.0, 2000.0, 0)
+            f'目標點 ({lat:.5f}, {lon:.5f})\n指定高度 (m，相對起飛點):' + _hint,
+            float(getattr(self, '_last_guided_alt', 80.0)), _lo, 2000.0, 0)
         if not ok:
             return
         # 高度 0 = 攻擊快捷。**不可以默默改語意** ⇒ rclick_strike_at 一定會跳確認框。
-        if rclick_strike.mode_for_altitude(alt) == rclick_strike.MODE_STRIKE:
+        if (self.ENABLE_STOT_RCLICK_STRIKE
+                and rclick_strike.mode_for_altitude(alt)
+                == rclick_strike.MODE_STRIKE):
             self.rclick_strike_at(lat, lon, via_alt_zero=True)
             return
         if not rclick_strike.arrive_altitude_ok(alt):
@@ -5946,8 +6616,11 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 f'高度 {alt:.0f} m 太低（合法範圍 '
                 f'{rclick_strike.ALT_ARRIVE_MIN:.0f}–'
                 f'{rclick_strike.ALT_ARRIVE_MAX:.0f} m）。\n'
-                f'0 是「STOT 打擊」的快捷，其餘小於 '
-                f'{rclick_strike.ALT_ARRIVE_MIN:.0f} m 的值一律不送。')
+                + (f'0 是「STOT 打擊」的快捷，其餘小於 '
+                   f'{rclick_strike.ALT_ARRIVE_MIN:.0f} m 的值一律不送。'
+                   if self.ENABLE_STOT_RCLICK_STRIKE
+                   else f'小於 {rclick_strike.ALT_ARRIVE_MIN:.0f} m '
+                        f'的值一律不送。'))
             return
         self._last_guided_alt = alt
         # 尊重 HUD 指令對象：以「選取機（或長機）」的遙測判斷是否已升空
@@ -6081,6 +6754,72 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             logger.error(f'[Fence] 匯出失敗: {e}', exc_info=True)
             QMessageBox.warning(self, '匯出失敗', f'寫入檔案失敗：\n{e}')
 
+    # ── 飛控任務讀回（= Mission Planner 的 Ctrl+F → Read WPs）─────────
+    def on_sitl_download_mission(self):
+        """向飛控索取目前存著的任務航線，畫到地圖上。
+
+        結果是非同步的：`SITLLink.mission_downloaded` 在建立 link 時就接到
+        `_on_mission_downloaded`（見 on_sitl_connect），所以這裡只負責發起。
+        """
+        if not self._sitl_links:
+            QMessageBox.information(self, 'SITL', '尚未連線任何 SITL')
+            return
+        links = self._target_links()
+        # ⚠️ 多機同時下載會讓後畫的蓋掉先畫的（疊加層只有一份），而且
+        #    看起來像「只讀到一架」。指定指令對象才是這個功能的正常用法。
+        if len(links) > 1:
+            QMessageBox.information(
+                self, 'SITL',
+                f'目前指令對象是「全部」（{len(links)} 架）。\n'
+                '任務航線疊加層只有一份，多架同時讀回會互相覆蓋。\n\n'
+                '請先在 HUD 上點選單一 UAV 卡片，再讀回任務。')
+            return
+        for link in links:
+            try:
+                link.download_mission()
+            except Exception as e:
+                logger.error(f'[SITL] 讀回任務失敗: {e}', exc_info=True)
+        self.statusBar().showMessage('正在向飛控讀回任務航線…', 3000)
+
+    def _on_mission_downloaded(self, sysid: int, items: list):
+        """飛控任務讀回成功 → 疊到地圖上。"""
+        from mission import mission_view as _mv
+        try:
+            path2d = _mv.mission_to_path_2d(items)
+            path3d = _mv.mission_to_path_3d(items)
+            loiters = _mv.mission_loiters(items)
+            home = _mv.mission_home(items)
+            summary = _mv.mission_summary(items)
+
+            if hasattr(self.map_widget, 'display_fc_mission'):
+                self.map_widget.display_fc_mission(path2d, path3d, loiters,
+                                                   home=home)
+            self._fc_mission = {'sysid': int(sysid), 'items': list(items)}
+
+            # ⚠️ 「n 項但 0 點可繪製」是一個真實且會發生的狀態（整份都是 DO_*，
+            #    或全部是 lat=lon=0 的純指令項）。這時地圖上什麼都不會出現，
+            #    如果狀態列只說「下載完成」，使用者會去查地圖 —— 查錯地方。
+            if items and not path2d:
+                QMessageBox.information(
+                    self, '任務讀回',
+                    f'UAV-{sysid} 的任務有 {len(items)} 項，但**沒有一項帶座標**\n'
+                    '（全是 DO_*/CONDITION_* 之類的純指令項）。\n'
+                    '地圖上不會有航線 —— 這不是地圖壞掉。')
+            self.statusBar().showMessage(f'UAV-{sysid} {summary}', 8000)
+            logger.info(f'[SITL] UAV-{sysid} {summary}')
+        except Exception as e:
+            logger.error(f'[SITL] 繪製讀回任務失敗: {e}', exc_info=True)
+            self.statusBar().showMessage(f'讀回任務但繪製失敗：{e}', 8000)
+
+    def _on_mission_download_failed(self, sysid: int, reason: str):
+        """讀回失敗 —— **不可以**靜默，也不可以畫成空航線。
+
+        空航線是一個合法答案（飛控裡真的沒有任務），把失敗畫成空的，
+        使用者就會以為「AUTO 沒有上傳成功」而去查上傳側 —— 查錯地方。
+        """
+        logger.warning(f'[SITL] UAV-{sysid} 任務讀回失敗: {reason}')
+        self.statusBar().showMessage(f'UAV-{sysid} 任務讀回失敗：{reason}', 10000)
+
     def on_sitl_upload_fence(self):
         """把目前自動建構的電子圍籬上傳到所有連線的 SITL。"""
         if not self._sitl_links:
@@ -6158,13 +6897,18 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 # ── VTOL QuadPlane 專用 ──
                 # CMD_VTOL_TO   = 84   (MAV_CMD_NAV_VTOL_TAKEOFF)    → 垂直起飛
                 # CMD_VTOL_LAND = 85   (MAV_CMD_NAV_VTOL_LAND)       → 垂直降落
-                # CMD_VTOL_TRANS= 3000 (MAV_CMD_DO_VTOL_TRANSITION)  → 飛行模式轉換
+                # (3000 MAV_CMD_DO_VTOL_TRANSITION 不使用)  → 飛行模式轉換
                 #   param1=3 → MC（多旋翼）  param1=4 → FW（固定翼）
                 CMD_WP, CMD_TO, CMD_LAND, CMD_SPD = 16, 22, 21, 178
-                CMD_VTOL_TO, CMD_VTOL_LAND, CMD_VTOL_TRANS = 84, 85, 3000
+                CMD_VTOL_TO, CMD_VTOL_LAND = 84, 85
                 params = self.parameter_panel.get_parameters()
                 turn_radius = float(params.get('turn_radius', 50.0))
                 cruise_speed = float(params.get('speed', 15.0))
+                # ⚠ 優先用「這份規劃當時實際使用的」值，別讀別的分頁。
+                #   見規劃端寫入 cruise_speed_mps / turn_radius_m 的註解。
+                cruise_speed, turn_radius = resolve_upload_speed_radius(
+                    self._dccpp_result, params,
+                )
 
                 # 判斷是否為 VTOL 載具 → 使用垂直起降指令
                 is_vtol = self.flight_params.get('vehicle_type', '') == 'vtol'
@@ -6173,12 +6917,18 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 # 預設 100m；優先讀取 UI 參數面板的設定值
                 vtol_transition_alt = 100.0
                 if is_vtol:
-                    try:
-                        vtol_transition_alt = float(
-                            self.parameter_panel.vtol_transition_alt_spin.value()
-                        )
-                    except Exception:
-                        pass
+                    # 優先用「這份規劃當時實際使用的」轉換高度，
+                    # 才不會上傳一份與畫面軌跡不同剖面的任務。
+                    planned = (self._dccpp_result or {}).get('vtol_transition_alt_m')
+                    if planned:
+                        vtol_transition_alt = float(planned)
+                    else:
+                        try:
+                            vtol_transition_alt = float(
+                                self.parameter_panel.vtol_transition_alt_spin.value()
+                            )
+                        except Exception:
+                            pass
                     logger.info(
                         f'[SITL] VTOL 轉換高度: {vtol_transition_alt}m '
                         f'(多旋翼垂直爬升 → 轉換 FW → 巡航)'
@@ -6192,8 +6942,10 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                     """把一個 BuiltPath 轉成 (lat,lon,alt,cmd,p1,p2,p3,p4) 列表。
 
                     VTOL 模式任務序列（ArduPilot QuadPlane）：
-                      DO_CHANGE_SPEED → NAV_VTOL_TAKEOFF → DO_VTOL_TRANSITION(FW)
-                      → NAV_WAYPOINT × N → DO_VTOL_TRANSITION(MC) → NAV_VTOL_LAND
+                      DO_CHANGE_SPEED → NAV_VTOL_TAKEOFF → NAV_WAYPOINT × N
+                      → NAV_VTOL_LAND
+                    （不插 DO_VTOL_TRANSITION：飛控自己會在飛往下一航點時前向
+                      過渡、在 NAV_VTOL_LAND 進場時轉回 VTOL。）
 
                     固定翼模式任務序列：
                       DO_CHANGE_SPEED → NAV_TAKEOFF → NAV_WAYPOINT × N → NAV_LAND
@@ -6231,12 +6983,10 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                             wps_local.append((float(_w0.lat), float(_w0.lon),
                                               vtol_transition_alt,
                                               CMD_VTOL_TO, 0.0, 0.0, 0.0, 0.0))
-                            # 階段 2: DO_VTOL_TRANSITION → 固定翼 (FW)
-                            #   param1=4 → MAV_VTOL_STATE_FW
-                            #   在轉換高度懸停狀態下啟動後推馬達，
-                            #   前進加速到失速速度以上後，四軸馬達關閉
-                            wps_local.append((0.0, 0.0, 0.0, CMD_VTOL_TRANS,
-                                              4.0, 0.0, 0.0, 0.0))
+                            # 階段 2: 不插 DO_VTOL_TRANSITION(FW)。
+                            #   官方 QuadPlane AUTO Missions：NAV_VTOL_TAKEOFF
+                            #   到達高度後飛向下一航點時會「as needed」自動前向
+                            #   過渡，明確指令是多餘的（與匯出器同一決定）。
                             # 階段 3: 第一個 NAV_WAYPOINT 會帶飛機爬升到任務高度
                             #   例如任務高度 200m → 固定翼以爬升姿態飛向第一航點
                             #   （這一步由後面的 for 迴圈自動產生）
@@ -6265,10 +7015,9 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                             if not takeoff_emitted:
                                 if is_vtol:
                                     # VTOL: 垂直起飛到轉換高度 → 轉 FW
+                                    # 同上：不插 DO_VTOL_TRANSITION(FW)，飛控自動過渡
                                     wps_local.append((lat, lon, vtol_transition_alt,
                                                       CMD_VTOL_TO, 0.0, 0.0, 0.0, 0.0))
-                                    wps_local.append((0.0, 0.0, 0.0, CMD_VTOL_TRANS,
-                                                      4.0, 0.0, 0.0, 0.0))
                                 else:
                                     wps_local.append((lat, lon, alt, CMD_TO,
                                                       10.0, 0.0, 0.0, 0.0))
@@ -6279,23 +7028,29 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                         elif seg_name == 'LANDING':
                             if idx == last_landing_idx:
                                 if is_vtol:
-                                    # ── VTOL QuadPlane 降落序列 ──────────────
-                                    # 階段 1: 先飛到降落點上空，高度=轉換高度
-                                    #   確保在安全高度進行 FW→MC 轉換
-                                    wps_local.append((lat, lon, vtol_transition_alt,
-                                                      CMD_WP, 0.0, 0.0, 0.0, 0.0))
-                                    # 階段 2: DO_VTOL_TRANSITION → 多旋翼 (MC)
-                                    #   param1=3 → MAV_VTOL_STATE_MC
-                                    #   後推馬達關閉，四軸馬達啟動接管
-                                    wps_local.append((0.0, 0.0, 0.0, CMD_VTOL_TRANS,
-                                                      3.0, 0.0, 0.0, 0.0))
-                                    # 階段 3: NAV_VTOL_LAND (cmd=85)
-                                    #   四軸馬達垂直降落到地面
+                                    # ── VTOL QuadPlane 降落 ──────────────────
+                                    # 只發 NAV_VTOL_LAND (cmd=85)。
+                                    # ⚠ 舊版在它前面多塞一個「降落點上空 @ 轉換
+                                    #   高度」的 NAV_WAYPOINT ⇒ 進場段變 0 m ⇒
+                                    #   PreArm「VTOL land too short, min 108m」
+                                    #   拒絕解鎖（也是上傳版比匯出版多一項重複
+                                    #   航點的來源）。固定翼進場 + airbrake +
+                                    #   垂直下降都由 NAV_VTOL_LAND 自己處理，
+                                    #   規劃器已把進場定位點放在 land_approach_m
+                                    #   外，這裡不需要再補。
                                     wps_local.append((lat, lon, 0.0, CMD_VTOL_LAND,
                                                       0.0, 0.0, 0.0, hdg))
                                 else:
                                     wps_local.append((lat, lon, 0.0, CMD_LAND,
                                                       0.0, 0.0, 0.0, hdg))
+                            elif (is_vtol
+                                  and abs(alt - vtol_transition_alt) < 1e-6
+                                  and last_landing_idx >= 0
+                                  and abs(lat - float(wp_list[last_landing_idx].lat)) < 1e-9
+                                  and abs(lon - float(wp_list[last_landing_idx].lon)) < 1e-9):
+                                # 「降落點正上方 @ 轉換高度」懸停點：跳過，
+                                # 理由同上（與匯出器的鏡像跳過一致）。
+                                continue
                             else:
                                 wps_local.append((lat, lon, alt, CMD_WP,
                                                   0.0, turn_radius, 0.0, 0.0))
@@ -6379,46 +7134,265 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 mp._stats_card.setVisible(is_basic)
         except Exception as e:
             logger.warning(f'切換分頁時調整 mission_panel 失敗: {e}')
+        # VTOL 偵察分頁的「偵察區」狀態要跟主視窗的 corners 同步。
+        # 邊界點是在別的分頁 / 地圖上畫的，切過來時補一次即可。
+        try:
+            if hasattr(self, 'vtol_recon_panel'):
+                self.vtol_recon_panel.set_corner_count(len(self.corners))
+        except Exception as e:
+            logger.warning(f'同步 VTOL 偵察分頁邊界點失敗: {e}')
+
+    # ══════════════════════════════════════════════════════════════════
+    #  VTOL 群飛偵察分頁
+    # ══════════════════════════════════════════════════════════════════
+
+    def _on_vtol_recon_plan(self, params: dict):
+        """VTOL 偵察分頁按下「執行 DCCPP 偵察規劃」。
+
+        直接複用既有的 DCCPP 流程（params 裡 vehicle_type 已釘成 'vtol'），
+        跑完再把每架的航程 / 時間整理成摘要表回填面板。
+        """
+        panel = self.vtol_recon_panel
+        if len(self.corners) < 3:
+            QMessageBox.warning(self, "尚未劃定偵察區",
+                                "請先在地圖上標出至少 3 個邊界點。")
+            panel.set_plan_status("尚未規劃")
+            return
+        if params.get('fov_width_m', 0.0) <= 0.0:
+            QMessageBox.warning(self, "感測器參數無效",
+                                "有效條帶間距為 0，請檢查相機 FOV / 重疊率設定。")
+            panel.set_plan_status("感測器參數無效")
+            return
+
+        self._on_dccpp_coverage_requested(params)
+
+        result = getattr(self, '_dccpp_result', None)
+        if not result:
+            panel.set_plan_status("規劃未產生結果（詳見日誌）")
+            panel.set_plan_result([], "規劃未產生結果（詳見日誌）")
+            return
+
+        # ── VTOL 專屬 3D 視覺化 ──────────────────────────────
+        # 先前 drawVTOLSwarmPaths（垂直段 + MC/FW 轉換點標記）只掛在**匯出**
+        # 流程上，所以規劃完看到的是一般折線，非得按「匯出航點」才會出現轉換
+        # 標記。規劃當下就畫，畫面才會跟實際規劃的剖面一致。
+        try:
+            cesium = self._get_cesium_widget()
+            if cesium is not None:
+                from mission.vtol_mission_exporter import VTOLMissionExporter
+                _viz = VTOLMissionExporter(
+                    transition_alt_m=float(params.get('transition_alt', 40.0)),
+                    cruise_speed_ms=float(params.get('speed', 18.0)),
+                    turn_radius_m=float(params.get('turn_radius', 60.0)),
+                )
+                cesium.draw_vtol_swarm_paths(
+                    _viz.to_cesium_data(result.get('assembled_paths') or {},
+                                        float(params.get('altitude', 100.0)))
+                )
+        except Exception as _ve:
+            logger.warning(f'[VTOL 偵察] 3D 視覺化失敗: {_ve}', exc_info=True)
+
+        speed = max(0.1, float(params.get('speed', 18.0)))
+        # 表格與 makespan 必須用**同一支**時間估算，否則畫面上兩個數字又對不起來。
+        # estimate_flight_time_s 每段取 max(水平/巡航, 垂直/爬升率)，
+        # 所以 VTOL 的純垂直起降段不會被算成 0 秒。
+        import math as _m
+        from core.dccpp.dccpp_path_builder import estimate_flight_time_s
+        from core.dccpp.vtol_profile import Q_PILOT_SPD_UP
+        rows = []
+        for uav_id, apath in sorted((result.get('assembled_paths') or {}).items(),
+                                    key=lambda kv: kv[0]):
+            wps = getattr(apath, 'waypoints', None) or []
+            # 航程用 3D 長度：VTOL 的垂直爬升也是真的飛了那段距離
+            dist_m = 0.0
+            for a, b in zip(wps, wps[1:]):
+                h = self._polyline_length_m(
+                    [(float(a.lat), float(a.lon)), (float(b.lat), float(b.lon))]
+                )
+                dist_m += _m.hypot(h, float(b.alt) - float(a.alt))
+            t_min = estimate_flight_time_s(apath, speed, Q_PILOT_SPD_UP) / 60.0
+            rows.append((uav_id, len(wps), dist_m / 1000.0, t_min))
+
+        makespan = float(result.get('total_makespan', 0.0) or 0.0)
+        summary = (
+            f"規劃完成：{len(rows)} 架 ｜ 總航程 "
+            f"{sum(r[2] for r in rows):.2f} km ｜ makespan {makespan / 60.0:.1f} min"
+        )
+        panel.set_plan_result(rows, summary)
+        logger.info(f'[VTOL 偵察] {summary}')
+
+    @staticmethod
+    def _polyline_length_m(pts: list) -> float:
+        """折線長度（公尺），用等距圓柱近似。"""
+        import math as _m
+        total = 0.0
+        for (la1, lo1), (la2, lo2) in zip(pts, pts[1:]):
+            dN = (la2 - la1) * 111320.0
+            dE = (lo2 - lo1) * 111320.0 * _m.cos(_m.radians((la1 + la2) / 2.0))
+            total += _m.hypot(dN, dE)
+        return total
+
+    def _on_vtol_recon_verify(self, cfg: dict):
+        """覆蓋率驗算：拿規劃出來的航跡對偵察區做幾何覆蓋檢查。"""
+        from core.recon import verify_coverage
+        panel = self.vtol_recon_panel
+        result = getattr(self, '_dccpp_result', None)
+        if not result:
+            QMessageBox.warning(self, "尚無規劃結果", "請先執行 DCCPP 偵察規劃。")
+            return
+        # ⚠ 只取**作業段（OPERATION）**的航點。
+        #   論文 §2.3 明確定義：coverage 只在 Operation Path 上有效，
+        #   Entry / Transfer / 起降段感測器不計覆蓋。把全部航點都拿去驗算
+        #   等於把轉場與爬升也算成掃過，覆蓋率會虛高。
+        from core.trajectory.dccpp_path_assembler import SegmentLabel
+        paths = {}
+        for uid, ap in (result.get('assembled_paths') or {}).items():
+            wps = getattr(ap, 'waypoints', None) or []
+            op = [w for w in wps
+                  if getattr(getattr(w, 'segment_type', None), 'name', '') ==
+                  SegmentLabel.OPERATION.name]
+            paths[int(uid)] = [(float(w.lat), float(w.lon)) for w in op]
+        if not any(paths.values()):
+            QMessageBox.warning(
+                self, "無作業段航跡",
+                "規劃結果中沒有 OPERATION 段航點，無法驗算覆蓋率。"
+            )
+            return
+        # ⚠ 驗算用的是**感測器實際掃描寬度**，不是條帶間距。
+        #   條帶間距（已扣重疊）是規劃器排條帶用的；感測器每一趟真正看到的
+        #   是完整的 swath。拿間距去驗算會低估覆蓋率。
+        swath = float(cfg.get('swath_width_m', 0.0)) or float(cfg.get('sweep_width_m', 0.0))
+        try:
+            report = verify_coverage(
+                uav_paths=paths,
+                polygon=list(self.corners),
+                sweep_width_m=swath,
+                cell_size_m=float(cfg.get('cell_size_m', 20.0)),
+            )
+        except ValueError as e:
+            QMessageBox.warning(self, "驗算參數有誤", str(e))
+            return
+        self._vtol_coverage_report = report
+        panel.set_coverage_result(report)
+        logger.info(f'[VTOL 偵察] 覆蓋率驗算 — {report.summary()}')
+        self.statusBar().showMessage(f'[VTOL 偵察] {report.summary()}', 8000)
+
+    def _on_vtol_recon_heatmap(self):
+        """把覆蓋率驗算結果畫成 SAR 熱力圖（紅=漏掃、藍=已充分掃過）。
+
+        重用戰術模組既有的 SAR 熱力圖網格與色階，所以「清除熱力圖」按鈕
+        一樣清得掉，視覺語言也與搜救模式一致。
+        """
+        report = getattr(self, '_vtol_coverage_report', None)
+        if report is None:
+            QMessageBox.information(self, "尚未驗算",
+                                    "請先按「驗算覆蓋率」，再用熱力圖呈現。")
+            return
+        grid = report.to_display_grid()
+        if not grid:
+            self.statusBar().showMessage('[VTOL 偵察] 驗算格網為空，無法呈現', 4000)
+            return
+        try:
+            cesium = self._get_visible_cesium_widget("呈現熱力圖")
+            if cesium is None:
+                return
+            cesium.render_coverage_heatmap(grid)
+            gaps = sum(1 for v in grid['values'] if v is not None and v <= 0.0)
+            self.statusBar().showMessage(
+                f"[VTOL 偵察] 覆蓋熱力圖 {grid['rows']}×{grid['cols']}，"
+                f"其中 {gaps} 格全漏掃（覆蓋率 {report.coverage_pct:.2f}%）", 8000
+            )
+            logger.info(
+                f'[VTOL 偵察] 熱力圖呈現 {grid["rows"]}x{grid["cols"]}，'
+                f'全漏掃 {gaps} 格'
+            )
+        except Exception as e:
+            logger.error(f'[VTOL 偵察] 熱力圖呈現失敗: {e}', exc_info=True)
+            QMessageBox.warning(self, "呈現失敗", f"無法呈現覆蓋熱力圖：\n{e}")
+
+    def _on_vtol_recon_show_missed(self):
+        """把漏掃格心標到 3D 圖台上。"""
+        report = getattr(self, '_vtol_coverage_report', None)
+        if report is None or not report.missed_points:
+            self.statusBar().showMessage('[VTOL 偵察] 沒有漏掃格可顯示', 4000)
+            return
+        try:
+            cesium = self._get_visible_cesium_widget("標示漏掃格")
+            if cesium is None:
+                return
+            cesium.draw_coverage_gaps(report.missed_points)
+            note = '（已抽樣）' if report.missed_truncated else ''
+            self.statusBar().showMessage(
+                f'[VTOL 偵察] 已標出 {len(report.missed_points)} 個漏掃格{note}', 6000
+            )
+        except Exception as e:
+            logger.error(f'[VTOL 偵察] 標示漏掃格失敗: {e}', exc_info=True)
+            QMessageBox.warning(self, "標示失敗", f"無法標示漏掃格：\n{e}")
 
     def on_sitl_launch(self, vehicle: str, count: int = 1):
         """啟動 N 台專案內 SITL binary
 
-        若已執行過 DCCPP，則自動依任務的載具類型覆寫 vehicle，
-        避免使用者選錯 binary 導致 ArduPlane 跑 Copter 任務或反之。
+        載具以**使用者在 SITL 分頁選的為準**。若任務（DCCPP / 蜂群打擊）規劃的
+        載具與之不符，跳確認框讓使用者決定，不自動覆寫 —— 舊版會靜靜換掉，
+        造成「畫面顯示 PLANE、實際跑 ArduCopter」。
         """
         from mission.sitl_launcher import SITLLauncher
         if self._sitl_launcher is None:
             self._sitl_launcher = SITLLauncher()
 
         try:
-            # ── 載具自動推斷（蜂群打擊優先 — 一定是固定翼）──
+            # ── 載具比對 ────────────────────────────────────────────────
+            # 原則：使用者在 SITL 分頁選的就是準的。任務結果只能「提醒」，
+            # 不能自己把 vehicle 換掉 —— 舊版會靜靜換掉，而下拉還停在原選項，
+            # 於是畫面說 PLANE、實際跑 ArduCopter.exe --model quad。
+            user_choice = vehicle.upper()
+            expected = None      # 任務認為應該用的載具
+            source = ''
             diamond_plans = getattr(self, '_diamond_plans', None)
             if diamond_plans:
-                if vehicle.upper() != 'VTOL' and vehicle.upper() != 'PLANE':
-                    logger.warning(
-                        f'[SITL] 依蜂群打擊結果自動切換載具：{vehicle} → PLANE'
-                    )
-                    vehicle = 'PLANE'
+                expected, source = 'PLANE', '蜂群打擊'
             else:
                 dccpp = getattr(self, '_dccpp_result', None)
                 if dccpp:
-                    ap = dccpp.get('assembled_paths') or {}
-                    first_path = next(iter(ap.values()), None)
-                    if first_path is not None:
-                        wp_list = getattr(first_path, 'waypoints', None) or []
-                        has_takeoff = any(
-                            getattr(getattr(w, 'segment_type', None), 'name', '') == 'TAKEOFF'
-                            for w in wp_list
-                        )
-                        inferred = 'PLANE' if has_takeoff else 'COPTER'
-                        # VTOL 由使用者明確選擇，不被 DCCPP 推斷覆寫
-                        if vehicle.upper() != 'VTOL' and inferred != vehicle.upper():
-                            logger.warning(
-                                f'[SITL] 依 DCCPP 結果自動切換載具：{vehicle} → {inferred}'
-                            )
-                            vehicle = inferred
+                    # 讀權威欄位，而不是從航點反推。
+                    # 舊版用「有沒有 TAKEOFF 段」猜，空路徑 / 無起飛段一律判 COPTER。
+                    vt = dccpp.get('vehicle_type')
+                    if not vt:
+                        # 舊的快取結果沒有這個欄位 → 退回目前面板設定
+                        vt = (getattr(self, 'flight_params', None) or {}).get('vehicle_type')
+                    expected = {
+                        'fixed_wing': 'PLANE',
+                        'vtol':       'VTOL',
+                        'multirotor': 'COPTER',
+                    }.get(vt)
+                    source = 'DCCPP'
+
+            if expected and expected != user_choice:
+                logger.warning(
+                    f'[SITL] 載具不一致：SITL 分頁選 {user_choice}，'
+                    f'但{source}任務是 {expected}'
+                )
+                reply = QMessageBox.question(
+                    self, '載具與任務不符',
+                    f'SITL 分頁選的是「{user_choice}」，'
+                    f'但目前的{source}任務規劃是「{expected}」。\n\n'
+                    f'要改用 {expected} 啟動嗎？\n'
+                    f'（選「否」則照你選的 {user_choice} 啟動）',
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes,
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    vehicle = expected
+                    logger.info(f'[SITL] 使用者同意改用 {expected}')
+                    # 把下拉同步過去，別讓畫面繼續顯示沒有生效的選項
+                    try:
+                        self.sitl_hud.set_vehicle(expected)
+                    except Exception:
+                        pass
+                else:
+                    logger.info(f'[SITL] 使用者維持 {user_choice}')
         except Exception as _e:
-            logger.warning(f'[SITL] 推斷載具類型失敗: {_e}')
+            logger.warning(f'[SITL] 載具比對失敗，沿用使用者選擇: {_e}')
 
         if not SITLLauncher.is_available():
             QMessageBox.warning(
@@ -6485,12 +7459,17 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                             u_lat = float(u_wp0.lat)
                             u_lon = float(u_wp0.lon)
                             u_hdg = 0.0
-                            if len(wps_u) >= 2:
-                                u_wp1 = wps_u[1]
-                                dN = (float(u_wp1.lat) - u_lat) * 111320.0
-                                dE = (float(u_wp1.lon) - u_lon) * 111320.0 * _m.cos(_m.radians(u_lat))
+                            # ⚠ 不能只看 wps_u[1]：VTOL 起飛第一段是**純垂直**
+                            #   （wps_u[0] 與 wps_u[1] 同經緯度），只比第二點會
+                            #   算不出方位而靜靜退回 0°，SITL 就會生在錯的朝向。
+                            #   往後掃到第一個真的有水平位移的點（與上面
+                            #   Diamond 分支同一套作法）。
+                            for nxt in wps_u[1:]:
+                                dN = (float(nxt.lat) - u_lat) * 111320.0
+                                dE = (float(nxt.lon) - u_lon) * 111320.0 * _m.cos(_m.radians(u_lat))
                                 if abs(dN) + abs(dE) > 1e-6:
                                     u_hdg = (_m.degrees(_m.atan2(dE, dN))) % 360.0
+                                    break
                             per_uav_homes.append((u_lat, u_lon, u_hdg))
                             logger.info(
                                 f'[SITL] UAV-{uav_id} 起飛點: '
@@ -6576,19 +7555,34 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             self.sitl_hud.on_sitl_launched(f'{vehicle} x{count}', first_conn)
             logger.info(f'[SITL] 內建 {vehicle} x{count} 已啟動')
 
-            # 對每台啟動 MAVLink 連線（sysid_label 優先用 dialog 指定的 sysid，否則 instance+1）
+            # 對每台啟動 MAVLink 連線。
+            # sysid_label 用**邏輯序號** logical+1（與 start_multi 實際寫進
+            # MAV_SYSID 的值同源），不用 actual_instance —— port 位移時兩者會差
+            # 一個位移量，舊寫法就是這樣標成 1/2/3 卻連到 sysid 7/8/9 的機體。
             QApplication.processEvents()
             import time as _t; _t.sleep(0.5)
-            for instance, conn in results:
-                sysid_label = instance + 1
-                if instance_configs and instance < len(instance_configs):
-                    cfg = instance_configs[instance] or {}
+            for logical, conn, actual in results:
+                sysid_label = logical + 1
+                if instance_configs and logical < len(instance_configs):
+                    cfg = instance_configs[logical] or {}
                     if cfg.get('sysid') is not None:
                         sysid_label = int(cfg['sysid'])
+                if actual != logical:
+                    logger.info(
+                        f'[SITL] i{logical} 因 port 佔用位移至 i{actual}；'
+                        f'sysid 仍釘在 {sysid_label}（與飛控 MAV_SYSID 一致）'
+                    )
                 self.on_sitl_connect(conn, sysid_label=sysid_label,
                                      vehicle_hint=vehicle)
         except Exception as e:
             logger.error(f'[SITL] 啟動失敗: {e}', exc_info=True)
+            # 半途失敗會留下已經起來的 SITL 行程占著 port，且 _allocated_instances
+            # 不會被清 ⇒ 下一次重試 instance 只會越飄越高。先把這批收乾淨。
+            try:
+                if self._sitl_launcher is not None:
+                    self._sitl_launcher.stop()
+            except Exception:
+                logger.exception('[SITL] 清理部分啟動的實例失敗')
             QMessageBox.critical(self, 'SITL 啟動失敗', str(e))
             self.sitl_hud.on_sitl_stopped()
 
@@ -6641,8 +7635,12 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             rows=grid_size, cols=grid_size,
             sweep_width=sweep_w, quality=quality,
         )
+        ns, ew = heatmap_cell_size_m(lat_min, lat_max, lon_min, lon_max,
+                                     grid_size)
+        note, ok = heatmap_resolution_note(ns, ew, sweep_w, grid_size)
+        self.parameter_panel.set_heatmap_cell_info(note, ok=ok)
         self.statusBar().showMessage(
-            f'[SAR] 熱力圖初始化: {grid_size}×{grid_size} 網格', 5000
+            f'[SAR] 熱力圖初始化: {grid_size}×{grid_size} 網格 — {note}', 8000
         )
 
     def _on_sar_heatmap_reset(self):
@@ -6657,14 +7655,156 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         self.statusBar().showMessage('[SAR] 熱力圖已清除', 3000)
 
     def _on_fov_cone_toggle(self, enabled: bool):
-        """FOV 光錐開關"""
-        self._fov_cone_enabled = enabled
+        """FOV 光錐開關（戰術分析頁）"""
+        self._set_fov_cone(enabled, FOV_SOURCE_TACTICAL)
+
+    def _on_vtol_fov_cone_toggle(self, enabled: bool):
+        """FOV 光錐開關（VTOL 偵察頁）—— 參數改吃本頁的。"""
+        self._set_fov_cone(enabled, FOV_SOURCE_VTOL)
+
+    def _set_fov_cone(self, enabled: bool, source: str):
+        """兩頁共用的光錐開關。
+
+        擁有權規則(刻意寫成**單一**進入點,不讓兩邊各自維護狀態):
+          * 開啟 ⇒ 這一頁取得擁有權,另一頁的勾選框**跟著取消**
+            (取消勾選是唯一能讓使用者看出擁有權易主的方式)。
+          * 關閉 ⇒ 只有擁有者才關得掉;非擁有者按了不動光錐,但會說明原因。
+
+        ⚠ 為什麼不允許「兩頁都開、各畫各的」:3D 場景裡是**同一批**
+          per-sysid 光錐實體,兩個來源會互相覆寫成最後一筆遙測的參數,
+          畫面上只會看到閃爍,看不出是兩個來源在搶。
+        """
+        other = (FOV_SOURCE_TACTICAL if source == FOV_SOURCE_VTOL
+                 else FOV_SOURCE_VTOL)
+        src_name = {FOV_SOURCE_TACTICAL: '戰術分析頁',
+                    FOV_SOURCE_VTOL: 'VTOL 偵察頁'}
+
         if not enabled:
+            if self._fov_cone_source not in (None, source):
+                # 非擁有者關不掉別人的光錐 —— 但要講清楚,不能靜靜沒反應
+                self.statusBar().showMessage(
+                    f'[FOV] 光錐目前由{src_name[self._fov_cone_source]}控制，'
+                    f'這裡的取消不影響它', 4000)
+                self._refresh_fov_cone_status()
+                return
+            self._fov_cone_enabled = False
+            self._fov_cone_source = None
             self.map_widget.clear_fov_cone()
             self._last_uav_pose_for_fov.clear()
+            self.statusBar().showMessage('[FOV] 光錐關閉', 3000)
+            self._refresh_fov_cone_status()
+            return
+
+        # ── 開啟 ──
+        # ⚠ 2D 視圖時 dual_map_widget.update_fov_cone 仍會把光錐畫進**隱藏的**
+        #   3D 場景 ⇒ 看起來像功能壞掉。這裡直接把圖台切過去。
+        if self._get_visible_cesium_widget('顯示 FOV 光錐') is None:
+            self._uncheck_fov_source(source)
+            self._refresh_fov_cone_status()
+            return
+
+        self._fov_cone_enabled = True
+        self._fov_cone_source = source
+        self._uncheck_fov_source(other)          # 擁有權易主要看得見
         self.statusBar().showMessage(
-            f'[SAR] FOV 光錐 {"啟用" if enabled else "關閉"}', 3000
-        )
+            f'[FOV] 光錐啟用 — 參數來源：{src_name[source]}', 4000)
+        self._on_fov_visual_source_changed()     # 立即用新來源重投影
+        self._refresh_fov_cone_status()
+
+    def _heatmap_radius_m(self) -> float:
+        """SAR 熱力圖的掃描半徑 —— **永遠**吃戰術分析頁。
+
+        ⚠ 這是唯一允許直接讀 `self.parameter_panel.get_fov_radius()` 的地方,
+        AST 守衛 test_no_consumer_hardcodes_the_tactical_panel 對本函式開白名單。
+        """
+        return self.parameter_panel.get_fov_radius()
+
+    def _fov_checkbox(self, source: str):
+        """取得某一頁的光錐勾選框。
+
+        ⚠⚠ 兩個面板的屬性名**不一樣**(VTOL `fov_cone_check`、戰術
+        `_fov_cone_check`)。找不到時若只是 `return`,結果是兩個勾選框都留在
+        「已勾選」而 `_fov_cone_source` 只認得其中一個 ⇒ 使用者看到兩個開關
+        都亮著,光錐卻吃另一頁的數字,而且沒有任何錯誤。
+        ⇒ 名稱寫在這裡集中管理,並由 test_both_panels_expose_a_fov_checkbox 鎖住。
+        """
+        panel = (getattr(self, 'vtol_recon_panel', None)
+                 if source == FOV_SOURCE_VTOL else self.parameter_panel)
+        if panel is None:
+            return None
+        for name in FOV_CHECKBOX_ATTRS:
+            box = getattr(panel, name, None)
+            if box is not None:
+                return box
+        return None
+
+    def _uncheck_fov_source(self, source: str) -> None:
+        """取消某一頁的光錐勾選框，且**不**再觸發 toggled 訊號。"""
+        box = self._fov_checkbox(source)
+        if box is None or not box.isChecked():
+            return
+        box.blockSignals(True)
+        box.setChecked(False)
+        box.blockSignals(False)
+
+    def _refresh_fov_cone_status(self) -> None:
+        """把「誰在控制光錐 / 為什麼沒畫」寫回 VTOL 面板的狀態標籤。"""
+        panel = getattr(self, 'vtol_recon_panel', None)
+        if panel is None or not hasattr(panel, 'set_fov_cone_status'):
+            return
+        if not self._fov_cone_enabled:
+            panel.set_fov_cone_status('光錐未啟用', ok=True)
+        elif self._fov_cone_source == FOV_SOURCE_VTOL:
+            mount, hfov, vfov = panel.get_fov_visual_params()
+            poses = self._last_uav_pose_for_fov
+            n, airborne = fov_pose_summary(poses)
+            # ⚠⚠ Cesium 端 main.html:2715 對 `!(alt > 0)` 直接刪掉該機的光錐
+            #   （連 per-sysid 狀態一起 delete）。VTOL 停在起降場時 alt_rel≈0,
+            #   正好是使用者第一次勾這個框的時刻 ⇒ 什麼都不會出現。
+            #   這不是壞掉,但**必須講出來**,否則看起來就是功能沒做。
+            if not n:
+                tail = '，尚未收到 UAV 姿態（需連線中的 UAV）'
+            elif not airborne:
+                tail = (f'，{n} 架都在地面（相對高度 ≈ 0）'
+                        f'—— 光錐要離地後才畫得出來')
+            else:
+                tail = f'，{airborne}/{n} 架已投影'
+            clamp = fov_cone_clamp_warning(mount, hfov, vfov)
+            panel.set_fov_cone_status(
+                f'使用本頁參數：掛載 {mount:.1f}° / HFOV {hfov:.1f}°'
+                f' / VFOV {vfov:.1f}°{tail}'
+                + (f'　⚠ {clamp}' if clamp else ''),
+                ok=bool(airborne) and not clamp)
+        else:
+            panel.set_fov_cone_status(
+                '光錐由戰術分析頁控制，吃的是那一頁的參數', ok=False)
+
+    def _on_fov_visual_source_changed(self) -> None:
+        """來源或參數變更 → 用快取姿態立即重投影。"""
+        src = resolve_fov_param_source(
+            self._fov_cone_source, self.parameter_panel,
+            getattr(self, 'vtol_recon_panel', None))
+        mount, hfov, vfov = src.get_fov_visual_params()
+        self._on_fov_visual_changed(mount, hfov, vfov)
+
+    def _on_tactical_fov_visual_changed(self, mount_deg: float,
+                                        hfov_deg: float, vfov_deg: float):
+        """戰術頁的三個角度變更 —— 只有戰術頁擁有光錐時才重投影。
+
+        ⚠ 少了這道守衛,VTOL 頁擁有光錐時去動戰術頁的滑桿會把光錐**改成
+          戰術頁的角度**,而 VTOL 面板上顯示的仍是自己的值 ⇒ 顯示與實際分家。
+        """
+        if self._fov_cone_source != FOV_SOURCE_TACTICAL:
+            return
+        self._on_fov_visual_changed(mount_deg, hfov_deg, vfov_deg)
+
+    def _on_vtol_fov_visual_changed(self, mount_deg: float,
+                                     hfov_deg: float, vfov_deg: float):
+        """VTOL 頁的三個角度變更 —— 只有本頁擁有光錐時才重投影。"""
+        if self._fov_cone_source != FOV_SOURCE_VTOL:
+            return
+        self._on_fov_visual_changed(mount_deg, hfov_deg, vfov_deg)
+        self._refresh_fov_cone_status()
 
     def _on_fov_visual_changed(self, mount_deg: float,
                                 hfov_deg: float, vfov_deg: float):
@@ -6676,7 +7816,9 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         if not self._last_uav_pose_for_fov:
             # 尚未收到任何 UAV 姿態 → 留待下一筆遙測時自動帶入新參數
             return
-        fov_r = self.parameter_panel.get_fov_radius()
+        fov_r = resolve_fov_param_source(
+            self._fov_cone_source, self.parameter_panel,
+            getattr(self, 'vtol_recon_panel', None)).get_fov_radius()
         for sysid, pose in self._last_uav_pose_for_fov.items():
             lat, lon, alt, heading, pitch, roll = pose
             self.map_widget.update_fov_cone(
@@ -6734,10 +7876,13 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         3. RCS 敏感度動態計算
         """
         if self._fov_cone_enabled:
-            fov_r = self.parameter_panel.get_fov_radius()
-            mount_deg, hfov_deg, vfov_deg = (
-                self.parameter_panel.get_fov_visual_params()
-            )
+            # ⚠ 參數一律走接縫取得 —— 寫死 self.parameter_panel 的話,
+            #   VTOL 頁改參數會**完全沒有反應**而且沒有任何錯誤。
+            _src = resolve_fov_param_source(
+                self._fov_cone_source, self.parameter_panel,
+                getattr(self, 'vtol_recon_panel', None))
+            fov_r = _src.get_fov_radius()
+            mount_deg, hfov_deg, vfov_deg = _src.get_fov_visual_params()
             # 快取最新姿態 → 拖動掛載角 / HFOV / VFOV 時可即時重投影
             self._last_uav_pose_for_fov[int(sysid)] = (
                 lat, lon, alt, heading_deg, pitch_deg, roll_deg
@@ -6756,7 +7901,12 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             # 同時更新熱力圖（光錐掃過的區域）
             # 傳 sysid → 熱力圖採用該機 frustum 真實梯形覆蓋判定
             # （HFOV/VFOV/掛載角拖滑桿改變時，掃描範圍即時跟著變）
-            self.map_widget.update_heatmap(lat, lon, fov_r, sysid=int(sysid))
+            # ⚠⚠ 熱力圖半徑**不可以**跟著光錐來源跑。
+            #   熱力圖是戰術頁的功能;光錐改成可切換來源之後,VTOL 頁一開光錐
+            #   就會順手把熱力圖掃描半徑從 50 改成掃描寬度的一半(69.3),
+            #   而使用者完全不知道自己動到了另一頁的東西。
+            self.map_widget.update_heatmap(
+                lat, lon, self._heatmap_radius_m(), sysid=int(sysid))
 
         if self._rcs_enabled:
             self.map_widget.update_rcs_sensitivity(
@@ -6769,10 +7919,37 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
     # ═════════════════════════════════════════════════════════════════
 
     def _get_cesium_widget(self):
-        """取得 CesiumMapWidget 實例（通過 DualMapWidget）"""
+        """取得 CesiumMapWidget 實例（通過 DualMapWidget）
+
+        ⚠ 這個函式**不保證 3D 圖台正在顯示** —— 它只回傳物件，2D 模式下也照樣
+        回傳。要畫給使用者看的東西請改用 `_get_visible_cesium_widget()`。
+        """
         if hasattr(self.map_widget, 'map_3d'):
             return self.map_widget.map_3d
         return None
+
+    def _get_visible_cesium_widget(self, what: str):
+        """取得 Cesium widget，並確保 3D 圖台真的切到前面來。
+
+        ⚠ 為什麼需要這個：`_get_cesium_widget()` 回傳的是 `map_widget.map_3d`，
+        **不管現在顯示的是 2D 還是 3D**。App 開機預設是 2D
+        （dual_map_widget.py `self._mode = _MODE_2D`），所以覆蓋熱力圖／漏掃標示
+        會畫進看不見的圖台，狀態列還照樣回報成功；而原本寫的
+        `if cesium is None: 請切換到 3D 圖台` 永遠不會被執行到 —— 那是死碼。
+
+        回傳 None 表示無法呈現（已經提示過使用者）。
+        """
+        cesium = self._get_cesium_widget()
+        if cesium is None:
+            QMessageBox.information(
+                self, "需要 3D 圖台", f"目前沒有 3D Cesium 圖台，無法{what}。")
+            return None
+        ensure = getattr(self.map_widget, 'ensure_3d', None)
+        if callable(ensure) and not ensure():
+            QMessageBox.information(
+                self, "需要 3D 圖台", f"請切換到 3D Cesium 圖台再{what}。")
+            return None
+        return cesium
 
     def on_reset_layout(self):
         """重置所有 Splitter 為預設比例 (Ctrl+Shift+R)

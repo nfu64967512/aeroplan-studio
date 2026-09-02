@@ -18,7 +18,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QRectF, QPointF, QSize
 from PyQt6.QtGui import QPainter, QColor, QPen, QPolygonF, QFontMetrics
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton,
-    QLineEdit, QFrame, QComboBox, QScrollArea, QSizePolicy,
+    QLineEdit, QFrame, QComboBox, QScrollArea, QSizePolicy, QSpinBox,
 )
 
 # MIL-STD-1472H 戰術色彩 / 字型常數（單一事實來源 — QPainter / 動態樣式仍需）
@@ -788,12 +788,14 @@ class SITLHud(QWidget):
     cmd_set_mode   = pyqtSignal(str)         # 模式名稱
     cmd_takeoff    = pyqtSignal(float)       # 高度
     cmd_upload     = pyqtSignal()            # 上傳當前任務
+    cmd_download   = pyqtSignal()            # 從飛控讀回任務航線（Read WPs）
     cmd_upload_fence = pyqtSignal()          # 上傳電子圍籬
     cmd_auto_start = pyqtSignal()            # 一鍵 AUTO+ARM+MISSION_START
     cmd_param_set  = pyqtSignal(str, float, str)   # name, value, ptype
     cmd_param_get  = pyqtSignal(str)
     cmd_params_batch = pyqtSignal(list)            # [(name,value,ptype), ...]
     cmd_vtol_transition = pyqtSignal(int)          # VTOL 轉換: 3=MC, 4=FW
+    cmd_release_store  = pyqtSignal(int, str)      # 投彈：掛架編號(1/2), 彈種
     cmd_guided_takeoff = pyqtSignal(float)         # 固定翼相容 GUIDED 起飛（TAKEOFF 模式）
     cmd_guided_goto_mode = pyqtSignal(bool)        # 點圖飛到模式開關（長機 GUIDED 飛到，僚機跟）
     cmd_guided_takeoff_mode = pyqtSignal(bool)     # 點圖起飛模式開關（點地圖 → 整群 GUIDED 起飛）
@@ -1056,6 +1058,78 @@ class SITLHud(QWidget):
         arm_row.addWidget(self.btn_takeoff)
         cmd_outer.addLayout(arm_row)
 
+        # ── 投放列：保險 + 一號彈 / 二號彈 ────────────────────────────
+        # 兩顆投彈鈕預設 disabled，必須先扳開「投放保險」才會亮。
+        # 這不是多餘的手續：這兩顆鈕會直接把伺服打到 HI 位置放掉掛載，
+        # 誤點沒有 undo。實機上的機械保險銷是同一個道理，這裡做成軟體版。
+        rel_row = QHBoxLayout()
+        rel_row.setSpacing(4)
+        self.btn_release_safety = self._cmd_btn('🔐 投放保險', TC.BG_SECONDARY)
+        self.btn_release_safety.setCheckable(True)
+        self.btn_release_safety.setToolTip(
+            '投放保險。扳開後「一號彈 / 二號彈」才可按。\n'
+            '投放後會自動復位，避免連續誤觸。')
+        self.btn_release_safety.toggled.connect(self._on_release_safety)
+        rel_row.addWidget(self.btn_release_safety)
+
+        self.btn_release_1 = self._cmd_btn('💣 一號彈', TC.HOSTILE)
+        self.btn_release_2 = self._cmd_btn('💣 二號彈', TC.HOSTILE)
+        for b, idx in ((self.btn_release_1, 1), (self.btn_release_2, 2)):
+            b.setEnabled(False)
+            b.setToolTip(
+                f'投放 {idx} 號掛架：MAV_CMD_DO_SET_SERVO 把該通道打到 HI (2000 μs)。\n'
+                '通道與 PWM 見下方「投放設定」；\n'
+                '注意：該通道若被指派給飛控會主動驅動的功能，'
+                '指令會被擋掉、PWM 完全不動。\n'
+                '2026-09-01 對 ArduCopter SITL 實測：\n'
+                '  0 Disabled / 1 RCPassThru / 51 RCIN1 -> 打得上去且停住\n'
+                '  33 Motor1 / 24 Flap -> 完全沒上去\n'
+                '投放通道請設為 0 (Disabled)，其餘不要依賴。\n'
+                '按下後看 SERVO OUTPUT 面板該通道的 PWM 是否真的跳上去；'
+                '那是飛控回報的值，不是我們送出去的值。\n'
+                '沒有跳上去就不會有落點動畫（動畫由讀回觸發，不是按鈕觸發）。')
+            b.clicked.connect(
+                lambda _, i=idx: self._on_release_clicked(i))
+        rel_row.addWidget(self.btn_release_1)
+        rel_row.addWidget(self.btn_release_2)
+        cmd_outer.addLayout(rel_row)
+
+        # 投放設定：通道與彈種（彈種只影響 3D 地圖的落點模擬，不影響送出的指令）
+        rel_cfg = QHBoxLayout()
+        rel_cfg.setSpacing(4)
+        rel_cfg.addWidget(self._tiny_label('通道'))
+        self.spin_release_ch1 = QSpinBox()
+        self.spin_release_ch1.setRange(1, 16)
+        self.spin_release_ch1.setValue(9)
+        self.spin_release_ch1.setToolTip('一號彈的伺服通道（預設 9，與蜂群節點的左掛架一致）')
+        self.spin_release_ch2 = QSpinBox()
+        self.spin_release_ch2.setRange(1, 16)
+        self.spin_release_ch2.setValue(10)
+        self.spin_release_ch2.setToolTip('二號彈的伺服通道（預設 10，右掛架）')
+        for sp in (self.spin_release_ch1, self.spin_release_ch2):
+            sp.setFixedHeight(24)
+            sp.setFixedWidth(74)      # 52/62 都會把兩位數的通道號(10)截成 1
+            rel_cfg.addWidget(sp)
+        rel_cfg.addWidget(self._tiny_label('HI'))
+        self.spin_release_pwm = QSpinBox()
+        self.spin_release_pwm.setRange(800, 2200)
+        self.spin_release_pwm.setSingleStep(50)
+        self.spin_release_pwm.setValue(2000)
+        self.spin_release_pwm.setFixedHeight(24)
+        self.spin_release_pwm.setFixedWidth(84)   # 64 會把 2000 截成 2
+        self.spin_release_pwm.setToolTip('投放位置的 PWM（μs）。預設 2000 = HI。')
+        rel_cfg.addWidget(self.spin_release_pwm)
+        rel_cfg.addWidget(self._tiny_label('彈種'))
+        self.combo_store_kind = QComboBox()
+        self.combo_store_kind.addItem('傻瓜彈', 'dumb')
+        self.combo_store_kind.addItem('煙霧彈', 'smoke')
+        self.combo_store_kind.setFixedHeight(24)
+        self.combo_store_kind.setToolTip(
+            '只影響 3D 地圖上的落點模擬（阻力係數），不影響送給飛控的指令。\n'
+            '傻瓜彈：低阻力，前拋距離明顯；煙霧彈：高阻力，幾乎垂直落下 + 煙柱。')
+        rel_cfg.addWidget(self.combo_store_kind, 1)
+        cmd_outer.addLayout(rel_cfg)
+
         # ── GUIDED 群飛指令列（固定翼相容）──────────────────────────
         # ArduPlane 純固定翼 GUIDED 不吃 NAV_TAKEOFF/SET_POSITION_TARGET，
         # 故起飛走 TAKEOFF 模式、飛到走 guided 航點（MISSION_ITEM current=2）。
@@ -1135,6 +1209,17 @@ class SITLHud(QWidget):
         self.btn_upload = self._cmd_btn('📤 上傳當前任務到 SITL', TC.FG_EMPHASIS)
         self.btn_upload.clicked.connect(self.cmd_upload.emit)
         cmd_outer.addWidget(self.btn_upload)
+
+        # 從飛控讀回任務（= Mission Planner 的 Ctrl+F → Read WPs）
+        self.btn_download = self._cmd_btn('📥 從飛控讀回任務航線', TC.FG_EMPHASIS)
+        self.btn_download.setToolTip(
+            '向飛控索取目前存著的任務並畫到地圖上。\n'
+            '看 AUTO 架構的預劃航線用（起飛 → 巡航 → 攻擊發起點決斷圈）。\n'
+            '⚠️ 讀回來的是**飛控裡實際存著的那一份**，不是規劃器算出來的那份 —— '
+            '兩者不同就是上傳沒生效。'
+        )
+        self.btn_download.clicked.connect(self.cmd_download.emit)
+        cmd_outer.addWidget(self.btn_download)
 
         self.btn_upload_fence = self._cmd_btn('🛡️ 上傳電子圍籬', TC.WARNING)
         self.btn_upload_fence.setToolTip(
@@ -1312,6 +1397,31 @@ class SITLHud(QWidget):
         return l
 
     @staticmethod
+    def _tiny_label(text):
+        lb = QLabel(text)
+        lb.setStyleSheet(f'color:{TC.FG_MUTED};font-size:10px;')
+        return lb
+
+    def _on_release_safety(self, on: bool):
+        """投放保險開關：只有扳開時兩顆投彈鈕才可按。"""
+        self.btn_release_1.setEnabled(bool(on))
+        self.btn_release_2.setEnabled(bool(on))
+        self.btn_release_safety.setText('🔓 保險已開' if on else '🔐 投放保險')
+
+    def _on_release_clicked(self, index: int):
+        """送出投放請求，然後**立刻把保險復位** —— 一次開保險只放一發。"""
+        kind = self.combo_store_kind.currentData() or 'dumb'
+        self.cmd_release_store.emit(int(index), str(kind))
+        self.btn_release_safety.setChecked(False)
+
+    def release_channel(self, index: int) -> int:
+        return int((self.spin_release_ch1 if index == 1
+                    else self.spin_release_ch2).value())
+
+    def release_pwm(self) -> int:
+        return int(self.spin_release_pwm.value())
+
+    @staticmethod
     def _cmd_btn(text, bg):
         """
         命令按鈕。bg 參數為「語意色」hint：
@@ -1358,6 +1468,18 @@ class SITLHud(QWidget):
                 self.btn_connect.setEnabled(False)
         else:
             self.disconnect_requested.emit()
+
+    def set_vehicle(self, vehicle: str):
+        """把載具下拉同步到 vehicle（'PLANE'/'COPTER'/'VTOL'）。
+
+        啟動流程若因任務不符而改了載具，必須把下拉一起改過來，
+        否則畫面會顯示一個沒有生效的選項。
+        """
+        target = (vehicle or '').upper()
+        for i in range(self.vehicle_combo.count()):
+            if self.vehicle_combo.itemText(i).upper().startswith(target):
+                self.vehicle_combo.setCurrentIndex(i)
+                return
 
     def _on_launch_clicked(self):
         if not self._sitl_running:

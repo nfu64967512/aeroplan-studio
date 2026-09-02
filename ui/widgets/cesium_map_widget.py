@@ -122,6 +122,20 @@ class CesiumPage(QWebEnginePage):
 #  CesiumMapWidget
 # ══════════════════════════════════════════════════════════════════════
 class CesiumMapWidget(MapWidgetBase):
+    # ── VTOL GLB 模型校正常數 ────────────────────────────────────
+    # 綁定 ui/resources/vtol.glb 這一個檔的匯出慣例（單位/朝向），
+    # 換模型檔必須一起重校 —— 同 Barracuda 的教訓：靜默換檔只會畫出
+    # 一架姿態錯誤的飛機。scale 依該檔單位設定（公尺=1.0、公分=0.01）。
+    # vtol.glb = P25-ID.glb（2026-08-25 使用者確認：900 STEP 那顆渲染出來
+    # 是六軸旋翼機，不是 VTOL；全機唯一有翼的候選是 P25-ID）。
+    # 校正沿用 P25-ID 當年在固定翼通道的慣例（main.html 註解）：
+    # 單位公分 ⇒ scale 0.01；模型躺著且上下顛倒 ⇒ pitch +90 / roll 180；
+    # 機鼻朝 +X(東) ⇒ heading -90。歪了就目視調這四個值。
+    VTOL_MODEL_SCALE = 0.01
+    VTOL_HEADING_OFFSET = -90
+    VTOL_PITCH_OFFSET = 90
+    VTOL_ROLL_OFFSET = 180
+
     """3D 地圖組件，介面與 MapWidget 相容"""
 
     # (1-1) 5 個交集 signal（corner_added/corner_moved/circle_defined/
@@ -157,6 +171,16 @@ class CesiumMapWidget(MapWidgetBase):
         # Geofence — 強制飛安：每次顯示路徑時自動建立並渲染
         self._geofence = None
         self._strike_marking: bool = False       # 打擊目標標記模式
+        # ── TOT 扇形閘門（紅心）疊圖開關 ──────────────────────────────
+        # ⚠️ 這兩個原本寫成 getattr(self, '_tot_gate_auto', True) 而該屬性
+        #    **從未被指派**，等於一個關不掉的開關。改成真的欄位。
+        #   * 右鍵「飛到此點」不該畫紅心 —— 那是 STOT 的東西，而 STOT 入口
+        #     已於 2026-09-02 關閉（main_window.ENABLE_STOT_RCLICK_STRIKE）。
+        #     兩個要一起關，否則選單沒了、疊圖還在。
+        #   * 蜂群打擊分頁的「標記目標」模式是使用者明確進入的流程，維持原樣。
+        self._tot_gate_on_rclick: bool = False   # 右鍵 → 不畫
+        self._tot_gate_auto: bool = True         # 標記目標模式 → 照畫
+        self._tot_approach: float = 180.0
 
         self._cesium_html_file = None
 
@@ -241,6 +265,12 @@ class CesiumMapWidget(MapWidgetBase):
         copter_model_uri = copter_glb.as_uri() if copter_glb.exists() else ''
         logger.info(f'[Cesium] 多旋翼 GLB 模型: {copter_model_uri or "未找到，使用 fallback"}')
 
+        # VTOL (4+1 QuadPlane) 專屬模型。沒有這個檔時 VTOL 沿用固定翼模型
+        # （舊行為），所以缺檔不是錯誤，只記 log。
+        vtol_glb = project_root / 'ui' / 'resources' / 'vtol.glb'
+        vtol_model_uri = vtol_glb.as_uri() if vtol_glb.exists() else ''
+        logger.info(f'[Cesium] VTOL GLB 模型: {vtol_model_uri or "未找到，VTOL 沿用固定翼模型"}')
+
         html = (_CESIUM_HTML
                 .replace('__CESIUM_JS__',   cesium_js)
                 .replace('__CESIUM_CSS__',  cesium_css)
@@ -249,7 +279,12 @@ class CesiumMapWidget(MapWidgetBase):
                 .replace('__INIT_LON__',    str(init_lon))
                 .replace('__INIT_HEIGHT__', str(init_height))
                 .replace('__PLANE_MODEL_URI__', plane_model_uri)
-                .replace('__COPTER_MODEL_URI__', copter_model_uri))
+                .replace('__COPTER_MODEL_URI__', copter_model_uri)
+                .replace('__VTOL_MODEL_URI__', vtol_model_uri)
+                .replace('__VTOL_MODEL_SCALE__', str(self.VTOL_MODEL_SCALE))
+                .replace('__VTOL_HEADING_OFFSET__', str(self.VTOL_HEADING_OFFSET))
+                .replace('__VTOL_PITCH_OFFSET__', str(self.VTOL_PITCH_OFFSET))
+                .replace('__VTOL_ROLL_OFFSET__', str(self.VTOL_ROLL_OFFSET)))
 
         # 將 HTML 寫入 data/tmp_maps/cesium_NNNN.html (每次覆蓋舊檔)
         # 所有 Cesium 資源 (JS/CSS/GLB) 皆為絕對 file:// URI，因此 HTML
@@ -368,6 +403,62 @@ class CesiumMapWidget(MapWidgetBase):
     def clear_explosions(self) -> None:
         self._js('clearExplosions()')
 
+    # ── 投放彈體：即時下落 + 落地特效 ──────────────────────────────────
+    def drop_store(self, traj, label: str = '') -> None:
+        """在 3D 地圖上即時播放一發投放彈體的下落與落地。
+
+        traj 可以是 mission.ballistics.Trajectory，或它的 as_dict() 結果。
+        軌跡是 Python 端算好的（mission/ballistics.py），這裡只負責播放 ——
+        算錯和畫錯因此不會混在一起，落點與飛行時間可以離線單元測試。
+        """
+        d = traj.as_dict() if hasattr(traj, 'as_dict') else traj
+        self._js(f'dropStore({json.dumps(json.dumps(d))}, '
+                 f'{json.dumps(str(label))})')
+
+    def set_view_position(self, lat: float, lon: float,
+                          alt: float = 0.0, range_m: float = 800.0) -> None:
+        """立即把相機擺到指定位置（不做補間）。
+
+        程式化截圖時要用這一支而不是 fly_to_position：flyTo 的補間由
+        scene.tweens 在算圖迴圈裡推進，視窗被遮蔽時 rAF 被節流，補間永遠飛不到。
+        """
+        self._js(f'setViewPos({float(lat)},{float(lon)},'
+                 f'{float(alt)},{float(range_m)})')
+
+    def capture_png(self, path, callback=None) -> None:
+        """把目前的 3D 畫面存成 PNG（非同步）。
+
+        直接向 Cesium 的 canvas 要圖，不是螢幕擷取 —— QWebEngine 在視窗沒有
+        真正前景時會把算圖節流，螢幕擷取會拿到一模一樣的舊畫面
+        （實測連拍四張 md5 完全相同）。這條路不受視窗可見性影響。
+
+        callback(ok: bool, detail: str) 在寫檔完成後被呼叫。
+        """
+        import base64
+
+        def _done(data_url):
+            ok, detail = False, ''
+            try:
+                if not data_url:
+                    detail = 'JS 沒有回傳（頁面還沒載入完？）'
+                elif str(data_url).startswith('ERR:'):
+                    detail = str(data_url)
+                else:
+                    _head, b64 = str(data_url).split(',', 1)
+                    with open(path, 'wb') as f:
+                        f.write(base64.b64decode(b64))
+                    ok, detail = True, str(path)
+            except Exception as e:
+                detail = str(e)
+            if callback:
+                callback(ok, detail)
+
+        self._page.runJavaScript('grabCanvas()', _done)
+
+    def clear_stores(self) -> None:
+        """清掉還在空中的彈體與煙柱（換場景/重置時用）。"""
+        self._js('if (typeof clearStores === "function") clearStores();')
+
     def check_bullseye_hit(self, sysid: int, lat: float, lon: float,
                            alt: float = 0.0, radius: float = 60.0) -> bool:
         """UAV 位置更新時呼叫:靠近已標記的紅心就自動放爆炸(每機只放一次)。
@@ -427,10 +518,9 @@ class CesiumMapWidget(MapWidgetBase):
             self.strike_target_added.emit(lat, lon)
             # 標記蜂群打擊/TOT 目標時,順手畫出目標前的扇形閘門 + 6 slot + 切線
             # (與 sar_swarm/tot_node 同幾何;純疊圖,不影響既有打擊規劃)。
-            if getattr(self, '_tot_gate_auto', True):
+            if self._tot_gate_auto:
                 try:
-                    self.set_tot_gate(lat, lon,
-                                      approach_from=getattr(self, '_tot_approach', 180.0))
+                    self.set_tot_gate(lat, lon, approach_from=self._tot_approach)
                 except Exception:
                     pass
             return
@@ -440,11 +530,21 @@ class CesiumMapWidget(MapWidgetBase):
 
     def on_map_rclick(self, lat: float, lon: float):
         """3D 地圖右鍵 → GUIDED 飛到此點（Mission Planner 風格，由上層跳高度框）。
-        並在此點預覽蜂群 TOT 扇形閘門(與 sar_swarm/tot_node 同幾何);純疊圖。"""
-        if getattr(self, '_tot_gate_auto', True):
+
+        ⚠️ 2026-09-02：右鍵**不再**畫 TOT 扇形閘門（紅心）。那是 STOT 的疊圖，
+           而 STOT 右鍵入口已關閉；只關選單、疊圖照畫，看起來就像沒關。
+           要開回來把 _tot_gate_on_rclick 設 True 即可（幾何程式碼零改動）。
+        """
+        if self._tot_gate_on_rclick:
             try:
-                self.set_tot_gate(lat, lon,
-                                  approach_from=getattr(self, '_tot_approach', 180.0))
+                self.set_tot_gate(lat, lon, approach_from=self._tot_approach)
+            except Exception:
+                pass
+        else:
+            # 關閉時順手清掉上一次留下的疊圖，否則畫面上還有紅心，
+            # 看起來像沒關掉。
+            try:
+                self._js('clearTotGate();')
             except Exception:
                 pass
         self.guided_goto_requested.emit(lat, lon)
@@ -813,6 +913,19 @@ class CesiumMapWidget(MapWidgetBase):
             self.corners.append((lat, lon))
             self._refresh_corners()
 
+    def remove_last_corner(self):
+        """刪除最後一個邊界點並重繪 3D 標記。回傳被刪的 (lat, lon) 或 None。
+
+        ⚠ 舊版沒有這個方法：main_window 的刪除流程只 pop 了 2D 的 corners、
+        只重繪 2D，3D 這邊的 ``corners`` 與 Cesium 標記完全沒動 ⇒ 切到 3D
+        還看得到那顆被刪掉的點，而且兩邊索引從此對不上（再刪一次就刪錯點）。
+        """
+        if not self.corners:
+            return None
+        removed = self.corners.pop()
+        self._refresh_corners()
+        return removed
+
     def move_corner(self, index: int, lat: float, lon: float):
         if 0 <= index < len(self.corners):
             self.corners[index] = (lat, lon)
@@ -842,6 +955,19 @@ class CesiumMapWidget(MapWidgetBase):
         self._js('if (typeof clearAllTerminalDives === "function") clearAllTerminalDives();')
 
     def clear_all(self):
+        """清掉 3D 圖上所有**規劃疊圖**。
+
+        ⚠️ 舊版只清 corners / paths / NFZ / circle / home / DEM / 打擊，
+        而 Cesium 這邊實際上有十幾組互相獨立的 entity 陣列。沒被列進來的
+        那幾組（`geofenceEntities` 黃色電子圍籬、`_vtolEntities` VTOL 起降
+        黃線 + 巡航虛線、`_missionEntities` 飛控讀回的航線、TOT 扇形閘門、
+        爆炸特效、漏掃格心）**沒有任何 Python 端會去清**，只能等下一次
+        重畫自己蓋掉自己 ⇒ 使用者按「清除全部」，圖上還是一片東西。
+
+        不動的東西：即時 UAV 與它衍生的碰撞預警連線（另有「清除 UAV」）、
+        使用者在「管理 Fence」建立的圍籬區（那是飛安設定，有自己的管理介面，
+        不該被一顆泛用清除鈕靜靜刪掉）。
+        """
         self.corners.clear()
         self.paths.clear()
         self.path_colors.clear()
@@ -853,10 +979,22 @@ class CesiumMapWidget(MapWidgetBase):
         self._nfz_zones.clear()
         self._swarm_data      = None
         self._fw_result       = None
+        self._geofence        = None
         self._js('clearCorners(); clearPaths(); clearNFZ();')
         self._js('if(circleEntity){viewer.entities.remove(circleEntity);circleEntity=null;}')
         self._js('if(homeEntity){viewer.entities.remove(homeEntity);homeEntity=null;}')
         self._js('clearDemOverlay()')
+        # 電子圍籬（黃色矩形 + 高度帶）
+        self._js('if (typeof clearGeofence === "function") clearGeofence();')
+        # VTOL 三段軌跡（垂直黃線 / 巡航虛線 / 轉場箭頭）
+        self._js('if (typeof vtolClearAll === "function") vtolClearAll();')
+        # 從飛控讀回來的 AUTO 航線疊圖
+        self._js('if (typeof clearMissionOverlay === "function") clearMissionOverlay();')
+        # 戰術疊圖 / TOT 扇形閘門 / 爆炸特效 / 漏掃格心
+        self._js('if (typeof clearTacticalOverlay === "function") clearTacticalOverlay();')
+        self._js('if (typeof clearTotGate === "function") clearTotGate();')
+        self._js('if (typeof clearExplosions === "function") clearExplosions();')
+        self._js('if (typeof clearCoverageGaps === "function") clearCoverageGaps();')
         # 末端打擊 / 俯衝視覺化
         self._js('if (typeof strikeClearAll === "function") strikeClearAll();')
         self._js('if (typeof clearAllTerminalDives === "function") clearAllTerminalDives();')
@@ -1342,6 +1480,74 @@ class CesiumMapWidget(MapWidgetBase):
     def vtol_clear_all(self):
         """清除所有 VTOL 軌跡視覺化"""
         self._js('vtolClearAll()')
+
+    # ── 飛控任務航線（讀回的那一份）────────────────────────────────
+    def display_fc_mission(self, path3d, loiters=None,
+                           color: str = '#00E5FF', label: str = 'FC Mission',
+                           home=None):
+        """畫從飛控讀回來的任務航線 + 盤旋圈。
+
+        Parameters
+        ----------
+        path3d : list[tuple[float, float, float]]
+            [(lat, lon, alt), ...]，由 `mission.mission_view.mission_to_path_3d`
+            產生。
+        loiters : list[dict] | None
+            `mission.mission_view.mission_loiters` 的輸出。
+
+        ⚠️ 這條路徑**不碰** `_tacticalEntities`，也不觸發任何圍籬重建。
+           對應的清除是 `clear_fc_mission()`，不是 `clearTacticalOverlay()`。
+        """
+        import json as _json
+        self._js('clearMissionOverlay()')
+        pts = [[float(p[0]), float(p[1]), float(p[2] if len(p) > 2 else 0.0)]
+               for p in (path3d or [])]
+        if pts:
+            self._js(f'addMissionRoute({_json.dumps(pts)},'
+                     f'{_json.dumps(color)},{_json.dumps(label)})')
+        if home:
+            self._js('addMissionHome(%r,%r,%r)' % (
+                float(home['lat']), float(home['lon']),
+                float(home.get('alt', 0.0))))
+        for lo in (loiters or []):
+            self._js(
+                'addMissionLoiter(%r,%r,%r,%r,%s)' % (
+                    float(lo['lat']), float(lo['lon']),
+                    float(lo['radius_m']), float(lo.get('alt', 0.0)),
+                    _json.dumps(color))
+            )
+
+    def clear_fc_mission(self):
+        """清除飛控任務航線疊加。"""
+        self._js('clearMissionOverlay()')
+
+    def draw_coverage_gaps(self, missed_points: list):
+        """標出偵察覆蓋率驗算找出的漏掃格心。
+
+        Parameters
+        ----------
+        missed_points : list[tuple[float, float]]
+            [(lat, lon), ...]，來自 core.recon.CoverageReport.missed_points。
+        """
+        import json as _json
+        pts = [{'lat': float(la), 'lon': float(lo)} for la, lo in missed_points]
+        self._js(f'drawCoverageGaps({_json.dumps(pts)})')
+
+    def clear_coverage_gaps(self):
+        """清除漏掃格標示"""
+        self._js('clearCoverageGaps()')
+
+    def render_coverage_heatmap(self, display_grid: dict):
+        """用 SAR 熱力圖呈現偵察覆蓋率分布（紅=漏掃，藍=已充分掃過）。
+
+        Parameters
+        ----------
+        display_grid : dict
+            core.recon.CoverageReport.to_display_grid() 的回傳值。
+            與 initSARHeatmap 共用同一組 entity，故 clear_sar_heatmap() 可清除。
+        """
+        import json as _json
+        self._js(f'renderCoverageHeatmap({_json.dumps(display_grid)})')
 
     def animate_radar_scan(self, radar_idx: int = 0, duration_ms: int = 2000):
         """播放雷達掃描動畫"""

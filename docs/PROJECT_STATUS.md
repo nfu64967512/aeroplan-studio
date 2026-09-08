@@ -221,4 +221,24 @@ NVIDIA Jetson @ `192.168.2.249`（user `nvidia`）｜JetPack 6.2 / L4T R36.4.7�
 - **閉環 STOT 極端落差**：等距環緊（~2s），極端不等距（700 vs 2600m）受 GUIDED carrot 跟隨保真度限制偏鬆（~10–48s）；實際包圍環場景不受影響。
 - **仿生編隊 UI**：GCS 執行器已可對 SITL 實跑，但尚未做成 AeroPlan UI 按鈕（可比照打擊執行器接 `SITLLink`+`FleetRegistry`+地圖視覺化）。
 - **refactor 分支 WIP**：本分支尚有 ~100 個檔案處於重構中（whole-project DRY/KISS/SOLID，見 `docs/refactor_audit_2026.md`）。
+- **HV-DCCPP（異構雙構型 VTOL）**：已接上，且函式庫本身已 **vendor 進本專案**（`hv_dccpp/`，與 core/ mission/ ui/ 同層；來源與同步方式見 `docs/hv_dccpp/VENDOR.md`）—— 不再需要 pip 安裝或依賴外部資料夾。它自己的 809 項測試在 `tests/hv_dccpp/`（約 72 s）。旗標 `SwarmCoordinator.use_hv_dccpp`（預設關閉）。
+  **入口在「VTOL 偵察」分頁「5. 規劃」的規劃演算法下拉**（DCCPP 既有實作 / HV-DCCPP 本專案），
+  選 HV 才展開它專屬的參數群組；一般 DCCPP 分頁不放這個開關。
+  HV 走 `ui/workers/planning_worker.py` 的背景執行緒，結果由
+  `_on_dccpp_coverage_requested(..., on_done=)` 回呼帶回偵察頁的摘要表。
+  決策見 `docs/adr/0007`、`0008`，參數與錯誤對照見 `vtol演篹法/docs/AEROPLAN_接入手冊.md`。
+  ✅ **真 SITL 已跑過**：`runs/artifacts/HV4SITL2/`（1 Pioneer + 3 HERO，ArduPlane 4.8
+  QuadPlane ×4，speedup 5）——4/4 起降完成、航程與規劃差 +2.0%、兩構型各飛自己的作業高度、
+  參數讀回 68/68 相符。重現：`python scripts/hv_sitl_fly.py`。
+  ⚠⚠ 該趟證實 **ArduPlane 不執行任務裡的 `NAV_DELAY`**，所以錯開起飛必須由地面站
+  逐機延後切 AUTO；用 `export_all(takeoff_delay='nav_delay')` 的話四架會同時起飛而且不報錯。
+  **尚未做**：備降點還沒有地圖點選介面（未給時系統自動放一點，那個點不見得能降落）；
+  逐機能量餘裕尚未顯示在結果面板；飛行中最小間距與實飛覆蓋率尚未量測。
+- ✅ **圍籬對齊掃描角已還原**（2026-09-06）：`mission/geofence_manager.py` 補回
+  `build(scan_angle_deg=)`、第三種 method `'scan'`，以及
+  `scan_angle_to_math_deg` / `_resolve_mode` / `_scan_aligned_rect`。
+  在此之前 `ui/widgets/dual_map_widget.py:602` 每次都丟 TypeError 被 except 吞掉，
+  **地圖從來沒有畫出圍籬**。`tests/test_fence_scan_angle.py` 69/69 綠；
+  突變驗證 12/13 咬合（第 13 條「換旋轉原點」經量測為等價突變：build 一律以點集形心
+  為 AEQD 切點，兩種寫法差 0.000000 m）。
 - **SSH 免密碼**：屬存取控制變更，由使用者自行設定（`ssh-copy-id`），AeroPlan 端續用密碼 askpass 連 Jetson。

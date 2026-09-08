@@ -1,0 +1,919 @@
+J Intell Robot Syst
+DOI 10.1007/s10846-016-0461-x
+
+DARP: Divide Areas Algorithm for Optimal Multi-Robot
+Coverage Path Planning
+
+Athanasios Ch. Kapoutsis ·
+Savvas A. Chatzichristofis ·
+Elias B. Kosmatopoulos
+
+Received: 6 December 2016 / Accepted: 15 December 2016
+© Springer Science+Business Media Dordrecht 2017
+
+Abstract This paper deals with the path planning          solution, alleviating the original mCPP explosive com-
+problem of a team of mobile robots, in order to           binatorial complexity. Although it is not possible to
+cover an area of interest, with prior-defined obsta-      analytically derive bounds regarding the complexity of
+cles. For the single robot case, also known as single     the proposed algorithm, extensive numerical analysis
+robot coverage path planning (CPP), an O(n) optimal       indicates that the complexity is bounded by polyno-
+methodology has already been proposed and evalu-          mial curves for practical sized inputs. In the heart
+ated in the literature, where n is the grid size. The     of the proposed approach lies the DARP algorithm,
+majority of existing algorithms for the multi robot case  which divides the terrain into a number of equal areas
+(mCPP), utilize the aforementioned algorithm. Due to      each corresponding to a specific robot, so as to guar-
+the complexity, however, of the mCPP, the best the        antee complete coverage, non-backtracking solution,
+existing mCPP algorithms can perform is at most 16        minimum coverage path, while at the same time does
+times the optimal solution, in terms of time needed for   not need any preparatory stage (video demonstration
+the robot team to accomplish the coverage task, while     and standalone application are available on-line http://
+the time required for calculating the solution is poly-   tinyurl.com/DARP-app).
+nomial. In the present paper, we propose a new algo-
+rithm which converges to the optimal solution, at least   Keywords mCPP · Multi-robots · Complete
+in cases where one exists. The proposed technique         coverage · Minimum coverage paths · Terrain
+transforms the original integer programming prob-         sub-division
+lem (mCPP) into several single-robot problems (CPP),
+the solutions of which constitute the optimal mCPP        1 Introduction
+
+A. Ch. Kapoutsis ( ) · S. A. Chatzichristofis ·           Since the 1970s, autonomous robots have been in
+E. B. Kosmatopoulos                                       daily use at very low and very high altitudes, for
+Department of Electrical and Computer Engineering,        deep-sea and space exploration and in almost all air-
+Democritus University of Thrace, Xanthi, Greece           crafts [20]. Today, in the era of multi robots, many
+e-mail: athakapo@iti.gr                                   of the robotic challenges, with a definite solution for
+                                                          the case of single robot, have to be revised so as
+A. Ch. Kapoutsis · S. A. Chatzichristofis ·               to optimally incorporate the multi-robot dynamics.
+E. B. Kosmatopoulos                                       One of the fundamental problems in robotics is to
+Information Technologies Institute, CERTH,                determine an optimal path involving all points of a
+Thessaloniki, Greece
+given area of interest, while avoiding sub-areas with                                                             J Intell Robot Syst
+specific characteristics (e.g., obstacles, no-fly zones,
+etc.). In the literature, this problem is often refer-      teams in the coverage path planning problem (form-
+eed to as coverage path planning problem (CPP),             ing the multi-CPP or mCPP problem), has recently
+but can also be found as sweeping, exhaustive geo-          received a lot of attention. Unfortunately, the mCPP
+graphical search, area patrolling etc. This task is         problem was proven to be extremely more difficult
+directly related with a plethora of robotic applications,   to be adequately addressed. As a matter of a fact,
+such as vacuum cleaning robots [1, 26], autonomous          solving mCPP with the minimal covering time has
+underwater vehicles [22, 23], unmanned aerial vehi-         been proven to be NP-hard [39]. Previous investi-
+cles [31], demining robots [4], automated harvesters        gations attempt to overcome the NP nature of the
+[28], planetary exploration [6], search and rescue          problem by proposing algorithms that solve a relaxed
+operations [34].                                            version of the original mCPP problem, mostly focus-
+                                                            ing only on one of the main coverage objectives
+   The usual abstraction of the problem, consists of a      (see Section 2 for more details). Moreover, in the
+robot with an associated tool (e.g. sensor, actuator),      mCPP problem, besides the optimality features that
+which is able to spatially cover at least the size of the   characterize a solution and derived directly from the
+robot itself. Therefore, one of the most common area        single-CPP, the challenge to design the paths in a
+representation techniques is to separate the field into     way to fully exploit the available multi-robot dynam-
+identical cells (e.g. in the size of robot), such that the  ics arises. In essence, this condition is one of the holy
+coverage of each cell can be easily achieved. Appar-        grails in any multi-robot system, since the unlock of
+ently, for any arbitrary shaped area, the union of the      such a feature would allow the fully cooperation of
+cells only approximates the target region, thus this        the robots with the ultimate utilization of their capa-
+technique, which is also adopted in our approach (see       bilities. In many of the proposed approaches, the fully
+Section 3), is termed as approximate cellular decom-        exploitation of multi-robots dynamics is sacrificed for
+position. A comprehensive analysis of the different         the sake of the main coverage objective (complete-
+area decomposition techniques along with the major          ness, non-backtracking). Additionally, in multi-robot
+representatives from each class can be found in [11].       approaches, an often omitting issue is the needed
+                                                            cost/time in order to "transfer" the robots in their start-
+   During the previous decade, researchers focus their      ing cells, excluding the initial robots location from the
+effort to the aforementioned single robot coverage          problem. Overall, the best of the proposed approaches
+planning problem (inside an already known terrain),         can achieve coverage time which can be 16 times
+producing a lot of different approaches (e.g. [10, 36,      greater than the optimal one, in strictly polynomial
+38]). One of the dominant approaches is the span-           time.
+ning tree coverage (STC) algorithm [18], which is
+able to guarantee an optimal covering path in lin-             In the present paper we propose a methodology that
+ear time, constructing a minimum spanning tree for          is able to deliver the optimal solution for the mCPP
+all the free cells. The term optimal encapsulates that,     problem - at least where one exists- in terms of cov-
+the generated path does not revisit the same cell           erage time, without overlooking any of the aforemen-
+(non-backtracking property), completely covers the          tioned aspects. In contrary to the traditional addressing
+area of interest and it achieves all the above with-        of this problem [14] (usually referred as allocate-
+out any preparatory effort (the robot can be initiated      then-decompose or decompose-then-allocate), where
+at any non-occupied cell). This major accomplish-           the building and allocation of the tasks are tack-
+ment comes with the assumption that the operation           led in a separated fashion [29], a new method in
+area does not get "more narrow" than the double of          which the building task is robot-oriented is presented.
+the robot's size. Our approach utilizes the STC algo-       Simultaneously, extended numerical analysis in realis-
+rithm, thus it inherits this requirement, which is more     tic environments indicates that the computational time
+formally described in the Section 4 of the paper.           is polynomial in the size of grid times the #robots.
+                                                            In essence, the original mCPP is transformed into an
+   The recent advances in robotics technology, both in      optimization problem, where the satisfaction of a well-
+the hardware and in the associated software, expand         defined set of constraints will eventually give rise to
+the variety of robots that can be deployed for a cover-     the optimal solution. More precisely, the proposed
+age task. As a consequence, the usage of multi-robots       scheme is separated into two phases.
+J Intell Robot Syst                                         problem. An in-depth discussion of this field is beyond
+                                                            the scope of this paper, thus, in oder to construct a
+­ First, the available cells are divided into distinct      more appropriate and homogeneous pool of alternative
+     classes, as many as the #robots, by utilizing a        works, only publications that are in line with our prob-
+     constraint satisfaction scheme. The aim of this        lem formulation (Section 3) are included. For a more
+     clustering is to preserve the following attributes     detailed and complete survey with regards to the latest
+     a) the complete coverage, b) the operation with-       achievements on the CPP/mCPP problem the reader
+     out any preparatory effort and - most importantly      should refer to [19].
+     - c) the fully exploitation of multi-robots dynam-
+     ics. In the heart of the proposed algorithm, lies the     The authors in [21] transformed, for the first time,
+     Divide Areas based on Robot's initial Positions        the single robot Spanning Tree Coverage (STC) Algo-
+     (DARP) algorithm which is able to produce the          rithm [18] into a method that is able to incorporate
+     optimal cells assignment with respect to the initial   team of robots. Their centralized algorithm (referred
+     positions of the robots. The later can be achieved     as MSTC) guarantees the complete coverage of the
+     by employing a - specifically tailored to the prob-    operational area while avoids a-priori known obsta-
+     lem at hand - cyclic coordinate descent approach       cles. Moreover, the non-backtracking version pro-
+     [35] with the known convergence properties.            duces a solution that visits every cell only once, while
+                                                            it is robust to robot's failures. Unfortunately, the path
+­ During the second phase, the STC algorithm                length for each robot is critically depended on the ini-
+     designs the optimal path for every robot's cluster,    tial position of the robots and indeed in the worst case
+     in a distributed manner.                               scenario, the maximum path length for the one robot
+                                                            is almost equivalent to that of a single robot case,
+   The outline of the paper is as follows. The related      even though there may exist alternative optimal paths
+work is described in Section 2, presenting alternative      configurations.
+works on the mCPP. The mCPP problem is trans-
+formed into an optimization problem in Section 3,              The same authors, in an attempt to alleviate the
+introducing all the essential notation. In Section 4 are    aforementioned shortcoming, proposed an enhanced
+briefly summarized the main steps of the STC algo-          version (referred as OPT-MSTC) [5], in which the
+rithm, regarding the optimal solution of CPP problem.       form of the spanning tree is modified so as to mini-
+The findings of that section are going to be utilized in    mize the maximum distance between every two con-
+order to relax the original mCPP problem in Section 5.      secutive robots along the spanning tree path. This
+On the same section, are formally described the essen-      technique performs statistically better than the random
+tial conditions of the optimal solution. In Section 6       generated tree, but again without any guarantee with
+is proposed the DARP algorithm, with a comprehen-           respect to the initial robots' positions.
+sive discussion about its performance. The complete
+scheme for the mCPP problem is outlined in Section 7.          An alternative technique that also utilizes span-
+As proof of concept, in Section 8 is presented the per-     ning trees, was presented in [39]. In this work, the
+formance of the proposed scheme in comparison with          authors provide an upper bound on the performance
+two of the state-of-the-art algorithms, regarding the       of a multi-robot coverage algorithm on known ter-
+mCPP problem. Finally, the concluding remarks are           rain, guaranteeing a performance at most sixteen times
+drawn in Section 9 together with an outlook to the          the optimal cost, preserving at the same time the
+future work.                                                key feature of complete coverage. Although the non-
+                                                            backtracking guarantee has been now removed, the
+2 Related Work                                              MFC algorithm performs significantly better from
+                                                            both MSTC and OPT-MSTC in terms of minimizing
+2.1 Multi-Robot Coverage Path Planning Problem              the maximum robot's path length, revealing that solu-
+    Inside Known Terrain                                    tions without the equality constraint in the robot's path
+                                                            length are far away from the optimal team utilization.
+Despite the fact that mCPP is a relative young field
+of research, there is a plethora of works that attempt         The authors in [17], developed a methodology that
+to address the limitations and the restrictions of this     attempts to solve the problem of patrolling a known
+                                                            environment by a team of mobile robots, which can
+                                                            be translated to visiting all the points of the terrain
+with a certain frequency. Indeed, the patrol problem is                                                         J Intell Robot Syst
+closely related to the mCPP problem, therefore solu-
+tions that are used for patrolling might be used for         The authors in [3], presented an alternative method
+mCPP as well. In this work, the authors first produce     using a heuristic algorithm to tackle the problem of
+a minimal cyclic path, similar to [18], that traverse     arbitrary polygon division. Despite the fact that the
+every single cell of the operation area and afterwards    results are rather promising and their algorithm runs in
+they search for the best "new" robots initial positions.  polynomial time, the produced solution has two main
+These new locations are calculated so as to minimize      disadvantages. On the one hand, there is no specific
+the maximum distance from their initial positions and     guarantee about the optimality of the area division,
+these to-be-traveled distances to be more or less the     while at the other hand the initial robots' positions are
+same. Unfortunately, this separation into two indepen-    not taking into account.
+dent tasks, restricts the performance of the proposed
+algorithm. As a matter of fact, there is no upper bound      The algorithm described in [29], aims to achieve
+regarding of number of the cells that are going to be     an enhanced multi-robot exploration by dividing
+visited in the worst case scenario, in order to fulfill   workplace into separated regions for each avail-
+the condition about the equality in robots' paths, even   able robot. The authors, by employing the K-means
+in cases where an alternative optimal solution actually   algorithm, divide the available terrain into distance-
+exists.                                                   related, convex subregions and afterwards apply a
+                                                          robot-subregion assignment mechanism to the trans-
+2.2 Area Division, for Multi-Robot Tasks                  formed linear programming problem, utilizing LP-
+                                                          solve software [2]. Unfortunately, this two stage pro-
+This subsection presents the dominant area division       cedure may end up with highly sub-optimal solu-
+techniques, in order to assist multi-robot tasks - not    tions, where it might be required for the robots to
+limited to coverage.                                      travel long distances (in comparison to the whole
+                                                          operation area) in order to reach their assigned
+   An interesting method that falls in this class, has    subareas.
+been presented in [25]. The operation area is divided
+using sweep-line approach and in the sequel, each sub-       Many of the state-of-the-art approaches regarding
+area is assigned to the most appropriate robot, based     the area division problem in multi robot context (e.g.
+on their relative capabilities. However, the approach     [9, 13, 16]), have been relied on the Lloyd's [24] algo-
+assumes as essential the unrealistic condition that       rithm, with the known convergence properties [15],
+the robots are initially located on the boundaries of     and/or the Voronoi partitioning [7]. Although, these
+the operation area. Moreover, the presented algorithm     approaches seem suitable for the mCPP problem, and
+considers only convex areas without obstacles.            especially for the area division problem, they differ
+                                                          at a quite important aspect. These approaches seek to
+   In [8], the authors proposed a complete approach       answer the following question: "Which are the most
+for multi-UAV area coverage problem with a direct         preferable positions to place the robots, so as to cover
+application to the task of remote sensing in agri-        the non-occupied space with their on-board sensors?"
+culture. As first step, the authors proposed an area      On the contrary, in the present paper the term "cover"
+subdivision method, which expands the well-known          implies that the respective robot has to physically visit
+alternate-offer protocol [30]. This technique, aims       the corresponding assigned area. The aforementioned
+to perform the tasks of area division and assign-         approaches are better suited for problems, such as to
+ment simultaneously, but in a distributed effective       position a team of robots in a terrain so that any loca-
+way. Despite the well establishment of the method         tion is as close as possible to at least one robot [12]
+in terms of implementation details, there is no per-      or to optimally monitoring a dynamic event with het-
+formance guarantee. The authors state that the final      erogeneous sensory interest (e.g. oil spill) [32]. Thus,
+subareas assignment is a perfect equilibrium, but there   the majority of these approaches solves the area divi-
+is no reference on how the approach overcomes sub-        sion problem independently of the robots/agents initial
+optimal cases, which will be inevitably appeared in       positions. Therefore, the direct appliance of these
+cases of non-convex areas or "difficult" initial robots'  algorithms to the mCPP problem may lead to quite
+placement.                                                sub-optimal results as the robots' areas may be equally
+                                                          divided, but the time/cost to reach these sub-areas has
+                                                          been left out of the equation.
+J Intell Robot Syst                                             and the number of cells to be covered is reduced to
+                                                                l = n - no
+   The fine-grained analysis of the related literature
+clearly indicates that there is room for contributions,         Definition 1 Two cells (xi, yi) and xj , yj are con-
+so as to enhance the fully exploitation of the robots           sidered adjacent if:
+capabilities without jeopardizing important features
+of the already produced solutions. According to this            xi - xj + yi - yj  1                           (4)
+necessity, this work proposes a grid-based multi-robot
+path planning algorithm inside known terrains, per-                As typical in many multi-robot coverage
+forming an area subdivision, according to both the              approaches, it is assumed that the robot can
+number of robots and to their initial locations. In a           perfectly localize itself inside U and at each time-
+subsequent stage, the exact paths inside each robot-            stamp, it can travel from its current cell to any
+exclusive area are defined in a completely distributed          unblocked ( L) adjacent cell, without any motion
+manner. The proposed algorithm is an approximate                uncertainty.
+polynomial-time algorithm (for practical sized inputs)
+for the mCPP problem, which is able to guarantee that           Definition 2 As valid robot path of length m is con-
+the solution i) complete covers all the area ii) without        sidered every sequence of cells
+backtracking in already visited sub-areas iii) guar-
+antees the minimum coverage time exploiting all the             X = ((x1, y1) , . . . , (xm, ym))
+available robots iv) and does not need any preparatory
+stage (the robots can start their journeys from their           where the following constraints are hold
+initial positions).
+
+                                                                ­ (xi, yi)  L,  i  {1, . . . , m}
+
+                                                                ­ every two sequential cells, i.e.
+
+3 Multi-Robot Coverage Path Planning                            (xi , yi ) and (xi+1, yi+1),       are         adjacent
+  Formulation
+                                                                (Definition 1), i  {1, . . . , m - 1}.
+
+For ease of understanding, it is assumed that the                  Moreover, a closed path of length m is a path, as
+terrain to be covered is constrained within a rect-             defined in Definition 2, where the additional condition
+angle1 in the (x, y)-coordinates and it is dis-                 is hold
+cretized into finite set of equal cells, the number
+of which represent both the level of required spa-              ­ (x1, y1) and (xm, ym) are adjacent
+tial resolution and the sensing capabilities of the
+robots.                                                         The robot positions are defined as:
+
+U = {x, y : x  [1, rows], y  [1, cols]}                         i(t) = (xi, yi)  L, i  {1, . . . , nr }        (5)
+
+                                         (1)
+
+where rows, cols are the number of rows and columns             where t denotes the specific time-stamp of the cov-
+after the discretization of the terrain to be covered.
+Apparently, the number of all the terrain's cells is            erage path and nr denotes the number of operational
+given by n = rows × cols.                                       robots. The (given) initial position of the ith robot
+                                                                inside L is represented as i(t0).
+   It is also assumed that there are no obstacles placed
+in a-priori known positions of U . The set of unknown              Having the above formulation in mind, the mCPP
+obstacles is represented as:                                    problem2 can be transformed to calculate the robots'
+                                                                paths Xi i  {1, . . . , nr } so as,
+
+B = {(x, y)  U : (x, y) is occupied}     (2)                    minimize  maxi{1,...,nr } |Xi |                (6)
+
+                                                                      X
+
+Robots cannot traverse obstacles, thus the overall set          subject to X1  X2  · · ·  Xnr  L
+of cells that need to be covered is reduced to:
+                                                                where |Xi| denotes the length of the path Xi.
+
+L = U \B                                 (3)                    2The aforementioned formulation may include cases, where
+                                                                the optimal solution does not exist and therefore are neglected
+1However, the problem formulation along with the proposed       for the analysis. The interest reader is kindly referred to the
+algorithm could be straightforwardly applied to different area  Appendix A.
+shapes, not necessarily convex
+4 Single Robot Coverage Inside Unstructured                                                                     J Intell Robot Syst
+  Environment
+                                                          discretized cells (Fig. 1b). More precisely, the
+Disregarding for the moment the problem of optimal        obstructed areas cannot be smaller than 4 times
+                                                          the size of grid's cell and this condition consists of the
+movement for a team of robots, let us consider the        only algorithm's requirement. As next step, every
+                                                          unobstructed large cell is translated into a node (Fig. 1b)
+problem of covering a continuous unstructured area,       and for every adjacent cell, an edge is introduced. For
+                                                          the resulting graph, a minimal spanning tree is con-
+utilizing only a single robot. Following the notation     structed, using any minimum-spanning-tree algorithm,
+                                                          such as Kruskal's or Prim's algorithms [33], as it is
+of optimization problem in Eq. 6, the aforementioned      illustrated in Fig. 1c. The robot then circumnavigates
+                                                          the spanning-tree along a (counter) clockwise direc-
+single robot CPP can be defined as:                       tion (Fig. 1d). The circumnavigation of the spanning
+                                                          tree generates a simple closed path X1, producing an
+minimize |X1|                                             optimal -in terms of coverage time- solution.
+X1                                           (7)
+
+subject to X1  L
+
+It has been proved in the literature that the CPP
+
+problem has an O(n) algorithm [18], where n is the
+
+size of grid, that is able to produce always the optimal
+
+solution. In other words, the Spanning Tree Coverage
+
+(STC) algorithm is able to construct the minimum path     5 Reduce the Original mCPP Problem
+
+that coverages all the operation area L, starting from
+
+any arbitrary unoccupied cell.                            Utilizing the findings of STC algorithm for the case of
+                                                          one robot, the original mCPP problem, as defined in
+Figure 1 illustrates the basic steps of an example        Eq. 6, can be reduced to
+
+designing trajectory. In this approach, the ter-
+
+rain's cells are grouped into large square-shaped         minimize  maxi{1,...,nr } |Li |
+
+cells, each of which is either entirely blocked or              L                                  (8)
+
+entirely unblocked, and contains four of the initially    subject to L1  L2  · · ·  Lnr  L
+
+Fig. 1 Spanning tree
+coverage algorithm, sample
+execution
+
+                                     (a) Initial cells' discretiza-  (b) Subdivide the terrain
+                                     tion, robot's cell and obsta-   into large square cells of 4
+                                     cles                            cells and represent them as
+                                                                     nodes
+
+                                     (c) Construct a Minimum         (d) Apply the ST to the orig-
+                                     Spanning Tree for all the       inal terrain and circumnavi-
+                                     unblocked nodes                 gate the robot around it
+J Intell Robot Syst                                             initial position of each robot i(t0) must be contained
+                                                                on its own set Li, providing the ultimate layer of effec-
+where L1, L2, . . . , Lnr denote the robot sets (and not        tiveness, ensuring zero preparation time and energy.
+strict paths). As next step, nr instances of the STC            Any algorithm that is able to construct the Li sets,
+algorithm could be employed -in a completely dis-               ensuring the Definition's 3 conditions, can be utilized
+tributed manner- in order to calculate the robots' exact        (in combination with the STC) to construct optimal
+paths inside these sets (problem (7)). Therefore, the           solutions to the original mCPP problm (6).
+exploitation of STC algorithm allows the removal of
+the severe adjacency constraint (Definition 2) regard-             Regarding to the existence of these solutions, it
+ing the produced robot sets. In other words, only the           has been proved [27] that, a fair partition, which does
+problem of building the Li sets, without any concern            not require convex pieces, always exists for any poly-
+about the actual robot's movement, inside the L world           gon and any number of partitions. The problem which
+has to be addressed.                                            is formulated here is a variation of the aforemen-
+                                                                tioned one, with an extra condition, that indicates the
+   In the rest of this section we investigate the funda-        inclusion of any arbitrary point of the polygon inside
+mental conditions, that have to be hold regrading the           each partition. Apparently, the above problem cannot
+Li sets, so as the optimal solution to the overall mCPP         always have a solution and strongly depends on the
+(6) problem to be guaranteed.                                   arrangement of the arbitrary points, that need to be
+                                                                included in the produced fair partitions. The overall
+Definition 3 A selection L1, L2, . . . , Lnr com-               formulation of the problem along with proposed algo-
+poses an optimal solution for the mCPP, iff                     rithm are referred to cases where at least, one optimal
+                                                                solution exists.
+1. Li  Lj = , i, j  1, . . . , nr , i = j
+2. L1  L2  · · ·  Lnr = L                                       6 Divide Areas Based on Robots Initial Positions
+3. |L1|  |L2| · · ·  Lnr                                          (DARP)
+4. Li is connected i  1, . . . , nr
+5. i (t0)  Li                                                   In this section is described the DARP (Divide Areas
+                                                                based on Robots Initial Positions) algorithm, a specif-
+   The first condition secures that every cell must be          ically tailored, optimality preserving technique that
+contained strictly in one robot's set, constituting the         divides the terrain into nr robot-exclusive regions. To
+non-backtracking guarantee for the produced solution.           start with, DARP algorithm adopts the following cell-
+The second condition states that the union of all Li            to-robot assignment scheme. For every ith operational
+sets must contain every unblocked cell of the area              robot an evaluation matrix Ei is maintained. This eval-
+to be covered (3) and depicts the fundamental cov-              uation matrix Ei expresses the level of reachability
+erage objective of completeness. The third condition            (e.g. distance) between the cells of L and the ith
+establishes the fully exploitation of the multi-robot           robot's initial position i(t0). During each iteration the
+dynamics, by making certain that the number of cells            assignment matrix A is constructed as follows:
+|Li| in each robot's set are more or less the same.3
+The forth condition declares that the cells inside each         Ax,y = argmin Ei|x,y , (x, y)  L  (9)
+robot's set Li should be compact, forming a solid
+sub-region. In other words, this condition ensures                     i{1,...,nr }
+that the division is absolutely fair and guarantees
+a seamlessness navigation scheme, inside spatially              Afterwards, each robot's region Li can be computed
+cohesive areas. According to that statement, no robot           straightforwardly by the assignment matrix A as fol-
+may spend extra/non-inclusive time to travel between
+unconnected areas. The final condition refines that the         lows:
+
+3This ambiguity is introduced mainly for two reasons. On one    Li = {(x, y)  L : A(x, y) = i} , i  {1, . . . , nr }
+hand, it might be impossible to perfect divide the number of                                                                (10)
+cells to be covered |L| with the number of robots nr . On the
+other hand, even in cases where the perfect division is pos-       Additionally, the number of assigned cells per robot
+sible the initial configuration - placement of both the robots  can be defined as the cardinality of the Li set
+and obstacles - may raise limitations according to the optimal
+solution.                                                       ki = |Li| , i  {1, . . . , nr }   (11)
+                                                                                      J Intell Robot Syst
+
+By adopting the aforementioned cells assignments               (15), two shortcomings arise. At first, J /mi can-
+policy, regardless of the robots' evaluation matrices E,       not be computed algebraically, as the analytical form
+the first, second and fifth conditions of Definition 3         that relates J with mi is not available. On the other
+are always satisfied. Concretely, one cell can only be         hand, there is no guarantee that J has only one (global)
+assigned to one robot (first condition), every cell has        minimum.
+been assigned to some robot's operation plan (second
+condition) and it is assumed that the initial robot posi-         To overcome the above problems, a cyclic
+tions are always assigned to the corresponding robot           Coordinate Descent (CD) methodology is adopted
+area (fifth condition). In a nutshell, DARP algorithm          [35, Algorithm 1]. Coordinate descent algorithms
+is an iterative process, which appropriately modifies          solve optimization problems by successively perform-
+the robots' evaluations Ei in a coordinated fashion, in        ing approximate minimization along coordinate direc-
+order to meet the two remaining -and in many cases             tions or coordinate hyperplanes. The global cost func-
+conflicting- requirements.                                     tion is minimized cyclically over each of one of the
+                                                               coordinates while fixing the remaining ones at their
+   Furthermore, the aforementioned cells' assignment           last updated values. Each such subproblem is a scalar
+policy automatically undertakes an additional task             minimization problem, and thus can typically solved
+related to the robots' trajectories time-scheduling. If        more easily than the full problem.
+it is allowed for robots to occupy the same cells, then
+a fine-grained analysis should take place to prevent              To start with, the global minimum of this function
+robot-to-robot collisions. This fact could result in a         will always be in case where k1 = k2 = · · · = knr =
+serious downgrade regarding the quality of the overall         f . Therefore, the global minimum of Eq. 14 can be
+solution, even in case where the sets Li are equal.            obtained if we solve nr single dimension optimization
+                                                               problems with the following objective function:
+
+6.1 Equally Divide the Space                                   Ji  =  1  (ki  - f )2  (16)
+                                                                      2
+
+Initially, the robots evaluation matrices Ei contain              By applying the above transformation, we can
+distance only information:                                     achieve the following:
+
+Ei|x,y = d i (t0), [x, y] , i  {1, . . . , nr } (12)              First and foremost, the above search is performed
+                                                               in local-minima free space.
+
+where d(·) denotes the chosen distance function (e.g.          Lemma 1 All sub-problems of Eq. 16 are convex to
+Euclidean). Thus, the initial assignment matrix A (9)          the corresponding controllable parameter mi.
+should be a classical Voronoi diagram.
+                                                               Proof Let's assume that the ith robot during the pre-
+   The DARP algorithm's core idea is that each evalu-          vious iteration, based on its evaluation matrix Ei,
+ation matrix Ei can be appropriately "corrected" by a          occupied less cells than the desirable threshold (<
+term mi as follows:                                            f ). It is obvious from Eqs. 13 and 9 that a "small"
+                                                               decrease in the corresponding correction factor, mi
+Ei = mi Ei                                               (13)  (< 1), will lead to an increase in the number of
+                                                               assigned cells ki, assuming that the other robots'
+where mi is a scalar correction factor for the ith robot.      evaluation matrices E remain the same. Therefore,
+   The third condition of Definition 3 is equivalent           the corresponding objective function Ji (16) will be
+                                                               decreased. Although, if we "over-decrease" the mi
+with the minimization of the:                                  factor "many" cells will be assigned to the ith robot.
+                                                               Now, the Ji will start to rise again, as the ki will be
+   =1    nr                                                    greater that the f . From this point and after, if we con-
+      2                                                        tinue to decrease mi, the ith robot will be assigned to
+J              (ki - f )2                                (14)  more and more cells, as ki can only be increased in
+                                                               response to mi decrease. The value of Ji is saturated
+         r =1
+
+where f denotes the global "fair share": f = l/nr
+(#Unoccupied cells divided by the #robots).
+
+    A standard gradient descent method for updating m
+
+mi  =  mi  -     J   ,     >  0,  i    {1, . . . , nr }  (15)
+               
+
+                 mi
+
+can be employed, in an attempt to minimize the value
+
+of the cost function (14). When attempting to apply
+J Intell Robot Syst
+
+when all the available cells4 (l - nr + 1) have been                6.2 Build Spatial Connected Areas
+
+assigned to the ith cell, and further decreases of mi               Although, the aforementioned procedure can be eas-
+                                                                    ily converge to share the available cells L among the
+cannot affect neither ki nor Ji. Hence, Ji will mono-               different robots, it cannot guarantee the continuity of
+                                                                    each robot's sub-region (condition 4, Definition 3).
+tonically be increased, as mi is decreased until the                In oder to deal with such situations, for every ith
+                                                                    robot that occupies more than one distinct regions the
+maximum possible Ji  |ki =l-nr +1  =  1  (l-nr )(nr -1)  2          following matrix is introduced
+                                      2         nr
+                                                          .
+
+Therefore, the previously encountered minimum is the
+
+global one. The proof continues to hold if, instead, we
+
+had assumed that the ith robot had been assigned to
+
+more cells than f .
+
+   Additionally, the update rule of mi can be straight-             Ci|x,y = min (||[x, y] - r||) - min (||[x, y] - q||) ,
+forwardly calculated for each objective function (16)                                   r  Ri , q  Qi
+separately as:
+                                                                                                                               (20)
+
+mi  =  mi  -  Ji                                                    where Ri denotes the connected set of cells where
+                 mi                                                 the ith robot actual lies in (i(t0)) and Qi denotes the
+                                                                    union of all other connected sets, which have been
+    =  mi  -  (ki    -f)   ki            (17)                       assigned to the ith robot but they do not have spatial
+                           mi                                       connectivity with Ri set. In a more abstract concep-
+                                                                    tualization, the Ci is constructed in a way, to reward
+   Due to the nature of the problem, the changes in                 the regions around the ith robot location's subset,
+ki with respect to mi will always be negative (see                  and to penalize the regions around other unconnected
+proof in Lemma 1) and they are almost identical for                 subsets, constructing gradually a closed-shape region.
+each robot (for a given sub-problem (16)). Addition-                If all the assigned cells to ith robot belong to the
+ally, two sets of evaluation matrices E1, . . . , Enr               same closed-shape region, the Ci is set to be the
+and E1, . . . , Enr , where  denotes any posi-                      all-one-matrix.
+tive constant, correspond to the identical assignment
+matrices (9). Therefore, the influence of |ki/mi| can                  The final update in the ith evaluation matrices is
+be securely omitted and the final update policy can be              calculated as
+approximated as follows:
+
+mi = mi + c (ki - f )                    (18)                       Ei = Ci (mi Ei )  (21)
+
+where c denotes a positive tunable parameter.                          where denotes the element-wise multiplication.
+   Summarizing, using Lemma 1 we can establish                      The findings of the previous subsections are illustrated
+                                                                    in Fig. 2, where a flowchart of the proposed algorithm
+that even thought the global cost function f can                    is presented.
+be generally non-convex - depending of the robots
+and obstacles formation - with many local minima,                   6.3 Performance Discussion
+each robot's contribution Ji is a convex function with
+respect to the controllable parameter mi. As shown in               Although simple in concept, the DARP algorithm aims
+[37], cyclic Coordinate Descent methodologies, where                to provide the optimal cells' assignment, in cases
+the above property holds, are able to converge to a                 where at least one exists. A sample execution is illus-
+global optimal solution set m, i.e.                                 trated in Fig. 3, where the terrain is constituted of 42×
+                                                                    42 cells and the number of robots is nr = 5. The initial
+J (m)  J (m), m  dom(J )                 (19)                       robots' positions were squeezed inside a sub-region of
+                                                                    the whole operation area, at the left bottom space of
+with respect to the initial evaluation matrices Ei (12).            the grid, with dimension 10×10 cells. Each sub-figure
+                                                                    illustrates the condition of the assignment matrix A (9)
+4The available cells are l - nr + 1 as the initial robot cells are
+a-priori allocated to the corresponding robot.
+                                                                                  J Intell Robot Syst
+
+Fig. 2 DARP algorithm flowchart - divide areas based on robots initial positions
+
+at the corresponding iteration. Apparently, the algo-               duced sub-areas that are finally assigned to each robot,
+rithm was terminated after 260 iterations, fulfilling all           may be arbitrary unconnected (at least temporary, e.g.
+the conditions of Definition 3.5                                    Fig. 3b) non-convex areas. In fact, this DARP algo-
+                                                                    rithm's key feature, allows the gradually inclusion to
+   It is worth highlighting, that contrary to robot's               each robot's sub-region, of any arbitrary located cell.
+evaluation matrix Ei which is continuous, the pro-                  More precisely, DARP algorithm is capable of escap-
+                                                                    ing the local minima by temporarily violating the
+5The interested readers are kindly referred to http://tinyurl.com/  condition about the connectivity of the each ith robot
+DARP-live to watch an additional recorded execution of the          assignment matrix. Afterwards, the algorithm grad-
+DARP algorithm.                                                     ually eliminates the presence of unconnected areas,
+J Intell Robot Syst
+
+(a) T = 0                                                     (b) T = 40   (c) T = 80
+
+(d) T = 120                                                   (e) T = 200  (f) T = 260
+
+Fig. 3 Progression of the robots sub-regions over iterations
+
+by reinforcing the robot's evaluation Ei around the           O ( × nr × n)6 computational complexity. However,
+original (the one that the robot actually lies in) sub-       the number of times which the main optimization loop
+area. By the time, the connectivity inside the exclusive      is executed (MaxIter) is not constant or linear, but it
+robot sets Li is restored, the evaluation matrices Ei         depends on the specific characteristics of the current
+will have completely changed their forms, and ideally         problem in a non-linear fashion. As it is not possible to
+towards to the optimal cells assignment.                      find the closed form that relates the maximum needed
+                                                              (main optimization loop) iterations with the number
+   The proposed algorithm diverges from the general           of robots nr , initial deployments i(t0) and the grid
+class of local search algorithms in the sense that, it        size n, the following approximation scheme for the
+changes its current state, mainly based on the global         algorithm's computational needs is adopted.
+optimal one and not only by evaluating information
+from the current and the candidate states. Over and              A series of simulations were conducted in order
+above, DARP algorithm approximates the behavior of            to measure the MaxIter (main optimization loop) iter-
+a gradient decent algorithm, with an extra capability to      ations that were needed for the construction of the
+search effectively and reach the global optimal, even         optimal solution (Definition 3). For each configura-
+in case with multiple local minima.                           tion (nr and n) the results were validated by repeating
+                                                              the experiment with different, randomly chosen, initial
+6.4 Computational & Memory Complexity Analysis                i(t0), in order to be able to approximate the MaxIter
+    from an Approximation Point of View                       for the worst case scenario.
+
+The memory needs of the algorithm can be calcu-                  Please note that, it is practically infeasible to com-
+lated straightforwardly, as it utilizes a constant number     pute exhaustively, the actual worst case for each con-
+ of matrices with dimensions (nr × n). In other               figuration, due to the vast number of possible combi-
+words, the algorithm's memory complexity is linear            nations of the initial robots positions. Nonetheless, in
+to the size of input (nr × n), i.e. O ( × nr × n). The
+main optimization loop performs  × nr × n oper-               6Please note that, in both complexity calculations, there is
+ations, where  is a constant number, resulting in             an additive constant which is omitted, due to its negligible
+                                                              influence
+every different set-up the number of randomly created                                                            J Intell Robot Syst
+instances was proportional to the input parameters (nr
+and n). By doing so, it is ensured that the computed       on the complexity curve is strictly bounded under the
+worst case complexity is representative of the number      n3r × n2 curve, at least until the maximum simulated
+of possible occurring configurations.                      parameters nr = 20 and n = 5000.
+
+   The number of the experiments for each configura-          Concluding this section, it is worth mentioned that
+tion starts form 50 for {nr = 3, n = 500} and reaches      the proposed algorithm cannot bypass the NP-nature
+up to 5000 for {nr = 20, n = 5000}, constructing a         of the mCPP problem, but it provides an approxi-
+pool of more than 120000 different experiments.            mately polynomial algorithm until a specific (practical
+                                                           interesting) input. If both the size of the robots and
+   In order to present the overall approximation on        number of the cells grow beyond the aforementioned
+the DARP's complexity (MaxIter × nr × n), for each         order of magnitude of the input, the algorithm may
+{nr , n} scenario was extracted the worse-case (maxi-      lose its polynomial behavior.
+mum) of the needed iterations (MaxIter). These worse
+cases for each scenario are translated into a surface by   6.5 Beyond the Classical mCPP
+applying a polynomial least squares curve fitting tech-
+nique. The produced surface is illustrated with blue       It is worth to point out that, the DARP algorithm is
+color in Fig. 4, where the operations' needs growth,       an optimization based one, which allows the inclu-
+with respect to the input, is representing both in lin-    sion of other secondary objectives, depending on the
+ear and logarithmic scale. Moreover, and in order to       final multi-robot application, such as robot's subareas
+evaluate the produced complexity results a number          smoothing etc., by just revising the appropriate per-
+of polynomial surfaces is utilized. More specifically,     formances' criteria. In the literature, the problem of
+with yellow, magenta and green color is illustrated the    mCPP is usually defined as in Section 3, where it is
+complexity curves in cases of f1(nr , n) = nr2 × n2 ,      desirable to produce balanced paths, in order to exploit
+f2(nr , n) = nr3 × n2, and f3(nr , n) = n2r × n3, respec-  all the available robots' capabilities. However, there
+tively. The evidences of this representation indicate      might be cases where specific robots' characteristics
+that DARP's complexity is cubic with respect to the        (e.g. sensing module, battery life, etc.) impose dif-
+input of the problem (nr × n), as the approximation        ferent utilization portions among the different robots.
+                                                           The proposed approach is able to straightforwardly
+
+Fig. 4 Approximation on DARP's complexity, a comparison with known polynomial surfaces
+J Intell Robot Syst
+
+encompass this additional information, by appropri-        In essence, this can be attained by the original con-
+ately modifying the calculation of Ji (16). More pre-      struction, during the first phase (Section 6), of the Li
+cisely, the objective function for the ith robot is going  sets, ensuring that the conditions of the Definition 3
+to alternate as                                            are satisfied. The aforementioned feature of the algo-
+                                                           rithm not only allows the fully parallelization of the
+Ji  =  1   (ki  -  pi )2                (22)               algorithm, but dramatically reduces the complexity of
+       2                                                   the initial mCPP problem to the order of magnitude of
+                                                           the STC algorithm.
+where pi is the corresponding portion of the map that
+                                                              Figure 5 depicts an example execution of the pro-
+the ith robot has to covered based on its capabilities or  posed algorithm. Figure 5a illustrates the initial robots
+                                                           positions along with the placements of the fixed
+limitations        nr     pi  =  1  .                      obstacles. The Fig. 5b represents the result from the
+                   i=1                                     area division approach, as described in Fig. 2. Each
+                                                           sub-area's Minimum Spanning Tree is represented
+    However in order to be in-line with the ordinary       in Fig. 5c with spatial information about the nodes
+                                                           inside the L world. Finally, the proposed algorithm
+mCPP formulation we limit our simulation evaluation        let the robots move along the path that circumnav-
+                                                           igates the corresponding spanning tree, as is shown
+(Section 8) only to scenarios where an equal cells'        in Fig. 5d. It is worth noticing that, the produced
+                                                           paths constitute an optimal solution, as the number
+division between the robots is considered desirable.       of cells that have been assigned to each robots are
+                                                           [12 13 12 12 12 13 12 12 12 ] (Definition 3, condi-
+7 Overview of the Proposed Multi-Robot                     tion 3)). The corresponding summation, translated to
+  Coverage Path Planning Algorithm                         the operational world, is 4 (12  7 + 13  2) = 440,
+                                                           which is exactly the number of cells to be covered
+This section summarizes the complete algorithm for         (Definition 3, condition 2)).
+mCPP problem (6), by fusing the findings of the
+DARP and STC algorithms. The proposed algorithm            8 Simulation Results
+is separated into two phases: During the first phase,
+the DARP algorithm divides the cells of L set into         This section presents a comparison study between the
+nr exclusive areas Li, for each available robot, as        proposed DARP+STC algorithm and two of the state-
+explained in Section 6. The outcome Li of that process     of-the-art methods ("MFS" and "Optimized MSTC"
+serves as the operational area for each robot separately   see related work). In order to produce comparable
+(Section 4).                                               results, we adopt the same simulation set-up as in [39].
+                                                           More precisely:
+   After the applying of DARP algorithm and the cor-
+responding production of Li sets, the original multi       ­ The size of the terrain is always [rows, cols] =
+robot optimization problem (6) is downgraded to nr              98×98.
+single robots CPP problems, alleviating its explosive
+combinatorial complexity. Each one of these problems       ­ We considered two kind of terrains: 1) The empty
+can be expressed as:                                            terrain [empty] and 2) the one, which has the 10 %
+                                                                of its cells occupied by obstacles [outdoor]. The
+minimize |Xi|                                                   obstacles' arrangement follows a random uniform
+       Xi                               (23)                    distribution.
+
+subject to Xi  Li                                          ­ The number of robots varies from 2, 8, 14 to 20
+                                                                robots.
+where Xi denotes a robot path as defined in Defini-
+tion 2. As shown in Section 4 this class of optimization   ­ The robots initial placement can take three
+problems (single robot inside grid connected environ-           different types, according to their in-between
+                                                                maximum distance (clustering). More precisely,
+ments) can be solved in an optimum manner (optimal
+solution - polynomial time), utilizing the STC Algo-
+rithm.
+
+   Even though the final path X1, X2, . . . , Xnr con-
+struction takes place in a fully distributed manner, the
+union of the produced solutions is actually an optimal
+solution for the Eq. 6 problem, without any compro-
+mise in the quality or the generality of the solution.
+                                                                                                      J Intell Robot Syst
+
+(a) Initial cells discretization, robots cell and obstacles  (b) DARP outcome - robots' exclusive areas
+
+(c) Constructing Minimum Spanning Trees for each one of      (d) Final Paths, designed to circumnavigate the MSTs
+
+the robots sets
+
+Fig. 5 DARP+STC Proposed Approach, sample execution with 24x24 grid size, 9 robots and 100 obstacles
+
+     the maximum distance between two robots can be          the problem. In other words, this value is simply cal-
+     at most 1) 30 % [30] or, 2) 60 % [60] of the maxi-
+     mum terrain's dimension correspondingly, and 3)         culated by dividing the number of unoccupied cells
+     without any distance constraint (free selection)        with the number of robots (f ). Apparently, the larger
+     [none].                                                 deviations from the ideal coverage time, the bigger
+                                                             the difference between the robots paths, resulting in
+   In order to obtain a fair comparison with MFC             unbalanced, sub-optimal routes. The overall scoring
+and Optimized MSTC algorithm, we repeated each
+scenario 100 times. The results for each combina-            for each scenario per algorithm, against the ideal cov-
+tion of different evaluation scenario and algorithm, are     erage time, is depicted in [Ratio] column and reports
+illustrated in Table 1, where it is reported the maxi-       the ratio of actual (maximum) traveled path and the
+mum [Max] and minimum [Min] coverage time for all            ideal coverage time.
+robots, in terms of paths lengths. Simultaneously, for
+each scenario we provide the idealized coverage time            The direct observation is that the performance
+[Ideal Max], which represents the optimal solution to        of the proposed algorithm DARP+STC seems to be
+                                                             immune to the number of robots and/or the obsta-
+                                                             cles and/or the initial clustering of the robots, as it
+J Intell Robot Syst
+
+Table 1 Cover time (in terms of path length) for DARP+STC, compared with MFC and optimized MSTC
+
+Terrain Robots Clustering Ideal Max DARP+STC            MFC                                      Optimized MSTC
+
+                                  Max (Min) Ratio Max (Min) Ratio Max (Min) Ratio
+
+Empty 2              30     4801  4803 (4799) 1.001 4878 (4731) 1.02                             5337 (4410) 1.11
+                            4801
+2                    60     4801  4803 (4799) 1.001 4886 (4720) 1.02                             5513 (4241) 1.15
+                            1200
+2                    none   1200  4803 (4799) 1.001 4888 (4725) 1.02                             5602 (4168) 1.17
+                            1200
+8                    30     685   1203 (1199) 1.003 1399 (838) 1.17                              3817 (45) 3.18
+                            685
+8                    60     685   1203 (1199) 1.003 1415 (904) 1.18                              3539 (93) 2.95
+                            479
+8                    none   479   1203 (1199) 1.003 1394 (956) 1.16                              3281 (146) 2.73
+                            479
+14                   30     4321  687 (683) 1.006 841 (431) 1.23                                 3756 (5)        5.48
+                            4321
+14                   60     4321  687 (683) 1.006 819 (522) 1.20                                 3461 (16) 5.05
+                            1079
+14                   none   1079  687 (683) 1.006 830 (513) 1.21                                 3072 (40) 4.48
+                            1079
+20                   30     616   483 (479) 1.008 615 (307) 1.28                                 3685 (3)        7.69
+                            616
+20                   60     616   483 (479) 1.008 604 (332) 1.26                                 3439 (9)        7.18
+                            431
+20                   none   431   483 (479) 1.008 604 (321) 1.26                                 2867 (18) 5.99
+                            431
+Outdoor 2            30           4321 (4321) 1         4380 (4269) 1.01                         4772 (4031) 1.10
+
+2                    60           4321 (4321) 1         4382 (4266) 1.01                         4854 (3954) 1.12
+
+2                    none         4321 (4321) 1         4377 (4269) 1.01                         4923 (3903) 1.14
+
+8                    30           1082 (1078) 1.003 1263 (789) 1.17                              3561 (26) 3.30
+
+8                    60           1082 (1078) 1.003 1278 (790) 1.18                              3229 (70) 2.99
+
+8                    none         1082 (1078) 1.003 1247 (873) 1.16                              3099 (94) 2.87
+
+14                   30           620 (616) 1.006 746 (450) 1.24                                 3452 (6)        5.60
+
+14                   60           620 (616) 1.006 750 (482) 1.22                                 3228 (20) 5.24
+
+14                   none         620 (616) 1.006 746 (464) 1.21                                 2819 (37) 4.58
+
+20                   30           434 (430) 1.007 572 (280) 1.33                                 3437 (3)        7.97
+
+20                   60           434 (430) 1.007 557 (285) 1.29                                 3140 (9)        7.29
+
+20                   none         434 (430) 1.007 551 (296) 1.28                                 2740 (18) 6.36
+
+performs with almost the same ratio over the differ-    above effectiveness bound is straightforwardly incom-
+ent scenarios. Additionally, all the results are close  ing from the DARP algorithm optimality guarantee.
+to the [Ideal Max], and the maximum difference          The DARP algorithm calculates the Li areas, having
+between two robots path is at most 4 cells, indepen-    at most 1 cell difference among the different ith robots
+dent of the number of robots or/and the grid size,      (see Fig. 2). This maximum discrepancy is translated
+i.e. |Xi| - Xj  4, i, j  1, . . . , nr . The            into 4 cells after the appliance of STC algorithm
+
+Fig. 6 Cases where the
+robots and/or obstacles
+arrangement, do not allow
+the acquisition of optimal
+solution
+
+                                  (a) The robots ini-   (b) The obstacles                        (c) The obstacles
+                                  tial placement lim-   and robots place-                        do not allow the
+                                  its some robots op-   ment forms two ex-                       fully coverage of
+                                  eration plans         clusive sub-areas                        the area of interest
+(Section 4). Overall, these findings seal experimen-                                                            J Intell Robot Syst
+tally, the performance of the proposed algorithm.
+                                                          cases, in order to directly apply the appropriate, pre-
+   The afore-mentioned optimal performance does not       defined solution scheme. Finally, in our future plans is
+come without shortcomings. In all cases, initial con-     the development of an online version of DARP algo-
+figurations that lead to sub-optimal results are dis-     rithm, so as to be able to operate inside completely
+carded from the pool of test cases, while both the        unknown terrains.
+other two algorithms are able to straightforwardly
+produce some sub-optimal operation plans. A proper        Acknowledgments This project is funded by the European
+categorization of the cases where optimal solutions       Commission (FIRE+ challenge, Horizon 2020) that aims to pro-
+cannot be obtained, is provided in Appendix A, where      vide for research, technological development and demonstration
+also preliminary solutions, in-line with the proposed     under grant agreement no 645220 (RAWFIE).
+approach, are also presented.
+                                                          Appendix A: Cases Where the Optimal Solution
+9 Conclusions and Future Work                                         does not Exist
+
+The proposed approach orchestrates the optimal coor-      The problem formulation, as it is defined in Section 3,
+dination of a multi-robot team, so as to completely       it may contain cases where the given placement of
+cover an area of interest. During the preliminary         the obstacles or the robots blocks the access to one or
+analysis, the underlying mCPP problem is translated       more cells. Although these cases are considered out
+into a constraint satisfaction problem, by formally       of the scope of the paper, and excluded from the con-
+define the exact attributes that have to be hold in       sidered scenarios, here in the appendix we categorize
+order to achieve the optimal performance. In heart        them and propose some preliminary solutions in-line
+of the proposed approach lies the DARP methodol-          with the proposed approach.
+ogy, a search algorithm, which finds the optimal cells
+assignment for each robot utilizing a cyclic coordi-         The first class consists of cases where an optimal
+nate descent approach, which takes into account both      solution to the mCPP problem can not be attained,
+the robots initial positions and the obstacles forma-     due to the initial placements of the robots (Fig. 6a). In
+tion. The outcome of the DARP algorithm constitutes       these cases, one could spend some preparatory steps
+a set of exclusive operation areas for each mobile        in order to rearrange the robots, so as to transform
+robot. These well-defined regions, are forwarded to       the problem into a solvable scenario (by the pro-
+each robot's planner, where by employing STC algo-        posed approach DARP+STC). This rearrangement is
+rithm, the exact route that covers the assigned area      not trivial and is forming another optimization prob-
+is calculated. The overall navigation scheme achieves     lem, where now the objective is to find the minimum
+to traverse the complete operation area, without back-    path to travel in order to render the problem tractable.
+tracking in already visited areas, starting from the      Alternatively, one could apply a relaxed version of
+exact initial robot positions. To the best of our knowl-  DARP algorithm by removing its non-backtracking
+edge, no other method from the literature exhibits all    property (Definition 3, condition 1).
+the aforementioned features at the same time.
+                                                             Another case, where the coverage task cannot be
+   Several avenues of exploration are left open for       equally separated among the available robots, might
+future work. One direction could be the relaxing of       be occurred, where one or more robots are trapped
+one or more constraints of Definition 3. For instance,    inside non-avoided, bounded sub-areas (Fig. 6b). In
+in expense of the non-backtracking attribute, the pro-    these cases one could straightforwardly apply the pro-
+duced paths can be constructed to be convex only (less    posed approach, as many times as the number of
+messy) or/and the shape of the STC can be appropri-       bounded zones, and the optimal attainable solutions is
+ately modified in order of the turns in robots' paths to  again guaranteed. Apparently, in this case it is highly
+be minimized. In addition, we intend to include in our    unlikely to end up having a balanced path length
+methodology another stage, which will be in charge        across all the robots' planners. In fact, now the pro-
+for the automatic recognition/detection of non-optimal    duced path lengths are highly dependent on the size
+                                                          of the corresponding bounded area. However, differ-
+                                                          ent robots that lie in same sub-area should have almost
+                                                          the same workload (Definition 3, condition 3).
+J Intell Robot Syst                                                        1999 IEEE International Symposium on Intelligent Con-
+                                                                           trol/Intelligent Systems and Semiotics, 1999, pp. 266­271.
+   Moreover, there are non-recoverable cases, where                        IEEE (1999)
+one or more sub-areas cannot be reached (Fig. 6c).                    11. Choset, H.: Coverage for robotics­a survey of recent
+In such situations the proposed algorithm can be                           results. Ann. Math. Artif. Intell. 31(1­4), 113­126 (2001)
+applied on the remaining terrain, ensuring the optimal                12. Corte´s, J.: Coverage optimization and spatial load bal-
+robots' path construction. Finally, it might be occurred                   ancing by robotic sensor networks. IEEE Trans. Autom.
+a combination of the above scenarios and then one                          Control 55(3), 749­754 (2010)
+could apply a hybrid version of the aforementioned                    13. Cortes, J., Martinez, S., Karatas, T., Bullo, F.: Coverage
+solutions.                                                                 control for mobile sensing networks. In: IEEE International
+                                                                           Conference on Robotics and Automation, 2002. Proceed-
+   Over and above, it should be highlighted that, in                       ings. ICRA'02, vol. 2, pp. 1327­1332. IEEE (2002)
+all these cases the fact that the proposed approach is                14. Bernardine Dias, M., Zlot, R., Kalra, N., Stentz, A.: Market-
+not able to deliver an optimal set of paths, is not some                   based multirobot coordination: a survey and analysis. Proc.
+kind of weakness, but it is due to the fact that the opti-                 IEEE 94(7), 1257­1270 (2006)
+mal solution, at least with the properties as defined in              15. Du, Q., Emelianenko, M., Ju, L.: Convergence of the lloyd
+Definition 3, does not exist.                                              algorithm for computing centroidal voronoi tessellations.
+                                                                           SIAM J. Numer. Anal. 44(1), 102­119 (2006)
+References                                                            16. Durham, J.W., Carli, R., Frasca, P., Bullo, F.: Discrete par-
+                                                                           titioning and coverage control for gossiping robots. IEEE
+ 1. irobot web site. http://www.irobot.com. Accessed: 2016-4-              Trans. Robot. 28(2), 364­378 (2012)
+     1                                                                17. Elmaliach, Y., Agmon, N., Kaminka, G.A.: Multi-robot
+                                                                           area patrol under frequency constraints. Ann. Math. Artif.
+ 2. Mixed integer linear programming (milp) solver, software.              Intell. 57(3-4), 293­320 (2009)
+     http://lpsolve.sourceforge.net/. Accessed: 2016-4-1              18. Gabriely, Y., Rimon, E.: Spanning-tree based coverage of
+                                                                           continuous areas by a mobile robot. Ann. Math. Artif. Intell.
+ 3. The area partitioning problem. In: Proceedings of the 12th             31(1-4), 77­98 (2001)
+     Canadian Conference on Computational Geometry, Freder-           19. Galceran, E., Carreras, M.: A survey on coverage path plan-
+     icton, New Brunswick, Canada (2000)                                   ning for robotics. Robot. Auton. Syst. 61(12), 1258­1276
+                                                                           (2013)
+ 4. Acar, E., Zhang, Y., Choset, H., Schervish, M., Costa, A.G.,      20. Goldberg, K.: Robotics: countering singularity sensational-
+     Melamud, R., Lean, D.C., Graveline, A.: Path planning for             ism. Nature 526(7573), 320­321 (2015)
+     robotic demining and development of a test platform. In:         21. Hazon, N., Kaminka, G., et al.: Redundancy, efficiency
+     International Conference on Field and Service Robotics,               and robustness in multi-robot coverage. In: Proceedings of
+     vol. 1, pp. 161­168 (2001)                                            the 2005 IEEE International Conference on Robotics and
+                                                                           Automation, 2005. ICRA 2005, pp. 735­741. IEEE (2005)
+ 5. Agmon, N., Hazon, N., Kaminka, G., et al.: Constructing           22. Kapoutsis, A., Chatzichristofis, S.A., Doitsidis, L., de
+     spanning trees for efficient multi-robot coverage. In: Pro-           Sousa, J.B., Kosmatopoulos, E.B., et al.: Autonomous nav-
+     ceedings 2006 IEEE International Conference on Robotics               igation of teams of unmanned aerial or underwater vehicles
+     and Automation, 2006. ICRA 2006, pp. 1698­1703. IEEE                  for exploration of unknown static & dynamic environ-
+     (2006)                                                                ments. In: 21st Mediterranean Conference on Control &
+                                                                           Automation (MED), 2013, pp. 1181­1188. IEEE (2013)
+ 6. Apostolopoulos, D.S., Pedersen, L., Shamah, B.N.,                 23. Kapoutsis, A.Ch., Chatzichristofis, S.A., Doitsidis, L., de
+     Shillcutt, K., Wagner, M.D., Whittaker, W.L.: Robotic                 Sousa, J.B., Pinto, J., Braga, J., Kosmatopoulos, E.B.:
+     antarctic meteorite search: outcomes. In: IEEE Interna-               Real-time adaptive multi-robot exploration with applica-
+     tional Conference on Robotics and Automation, 2001.                   tion to underwater map construction. Auton. Robot. 40(6),
+     Proceedings 2001 ICRA, vol. 4, pp. 4174­4179. IEEE                    987­1015 (2016)
+     (2001)                                                           24. Lloyd, S.P.: Least squares quantization in pcm. IEEE Trans.
+                                                                           Inf. Theory 28(2), 129­137 (1982)
+ 7. Aurenhammer, F.: Voronoi diagrams--a survey of a fun-             25. Maza, I., Ollero, A.: Multiple uav cooperative searching
+     damental geometric data structure. ACM Comput. Surv.                  operation using polygon area decomposition and efficient
+     (CSUR) 23(3), 345­405 (1991)                                          coverage algorithms. In: Distributed Autonomous Robotic
+                                                                           Systems 6, pp. 221­230. Springer (2007)
+ 8. Barrientos, A., Colorado, J., del Cerro, J., Martinez, A.,        26. Moloney, D., Suarez, O.D.: A vision for the future [soap-
+     Rossi, C., Sanz, D., Valente, J.: Aerial remote sensing in            box]. IEEE Consumer Electronics Magazine 4(2), 40­45
+     agriculture: a practical approach to area coverage and path           (2015)
+     planning for fleets of mini aerial robots. J. Field Rob. 28(5),  27. Nandakumar, R., Ramana Rao, N.: Fair partitions of poly-
+     667­689 (2011)                                                        gons: an elementary introduction. Proc. Math. Sci. 122(3),
+                                                                           459­467 (2012)
+ 9. Breitenmoser, A., Schwager, M., Metzger, J.-C., Siegwart,         28. Ollis, M., Stentz, A.: Vision-based perception for an auto-
+     R., Rus, D.: Voronoi coverage of non-convex environments              mated harvester. In: Proceedings of the 1997 IEEE/RSJ
+     with a group of networked robots. In: IEEE International
+     Conference on Robotics and Automation (ICRA), 2010,
+     pp. 4982­4989. IEEE (2010)
+
+10. Butler, Z.J., Rizzi, A.A., Hollis, R.L.: Contact sensor-based
+     coverage of rectilinear environments. In: Proceedings of the
+     International Conference on Intelligent Robots and Sys-                                                             J Intell Robot Syst
+     tems, 1997. IROS'97, vol. 3, pp. 1838­1844. IEEE (1997)
+29. Puig, D., Garc´ia, M.A., Wu, L.: A new global optimization     Athanasios Ch. Kapoutsis graduated from the Department of
+     strategy for coordinated multi-robot exploration: devel-      Electrical and Computer Engineering of the Democritus Uni-
+     opment and comparative evaluation. Robot. Auton. Syst.        versity of Thrace (D.U.Th.) (2007-2012). He is currently a PhD
+     59(9), 635­653 (2011)                                         candidate at the Automatic Control Systems and Robotics Lab
+30. Rubinstein, A.: Perfect equilibrium in a bargaining model.     at the same department, as well as research assistant with the
+     Econometrica: Journal of the Econometric Society, 97­109      Centre for Research and Technology Hellas, Information Tech-
+     (1982)                                                        nologies Institute, Thessaloniki, Greece. During the past years,
+31. Scaramuzza, D., Achtelik, M.C., Doitsidis, L., Fraundorfer,    he has been involved in several EU FP7 and H2020 funded
+     F., Kosmatopoulos, E.B., Martinelli, A., Achtelik, M.W.,      IP Research and Development projects. His research is mainly
+     Chli, M., Chatzichristofis, S.A., Kneip, L., et al.: Vision-  focused on robotics, machine intelligent, nonlinear and adaptive
+     controlled micro flying robots: from system design to         control, pattern recognition and image processing.
+     autonomous navigation and mapping in gps-denied envi-
+     ronments. IEEE Robot. Autom. Mag., 1­10 (2014)                Savvas A. Chatzichristofis received the Diploma and Ph.D.
+32. Schwager, M., Rus, D., Slotine, J.-J.: Decentralized, adap-    degrees from the Department of Electrical and Computer Engi-
+     tive coverage control for networked robots. Int. J. Robot.    neering, Democritus University of Thrace, Xanthi, Greece, in
+     Res. 28(3), 357­375 (2009)                                    2005 and 2010, respectively. He is currently a postdoctoral
+33. Tarjan, R.E.: Data Structures and Network Algorithms,          researcher with the Democritus University of Thrace, as well
+     vol. 14. SIAM (1983)                                          as a post-doctoral researcher with the Centre for Research and
+34. Waharte, S., Trigoni, N.: Supporting search and rescue         Technology Hellas, Information Technologies Institute, Thessa-
+     operations with uavs. In: International Conference on         loniki, Greece. During the past years, he has been involved in
+     Emerging Security Technologies (EST), 2010, pp. 142­          several EU FP6, FP7 and H2020 funded IP and STReP Research
+     147. IEEE (2010)                                              and Development projects.
+35. Wright, S.J.: Coordinate descent algorithms. Math. Pro-
+     gram. 151(1), 3­34 (2015)                                     Elias B. Kosmatopoulos received the Diploma, M.Sc. and
+36. Xu, A., Viriyasuthee, C., Rekleitis, I.: Efficient complete    Ph.D. degrees from the Technical University of Crete, Greece,
+     coverage of a known arbitrary environment with applications   in 1990, 1992, and 1995, respectively. He is currently a Pro-
+     to aerial operations. Auton. Robot. 36(4), 365­381 (2014)     fessor with the Department of Electrical and Computer Engi-
+37. Xu, Y., Yin, W.: A block coordinate descent method for         neering, Democritus University of Thrace, Xanthi, Greece.
+     regularized multiconvex optimization with applications to     Previously, he was a faculty member of the Department of
+     nonnegative tensor factorization and completion. SIAM J.      Production Engineering and Management, Technical Univer-
+     Imag. Sci. 6(3), 1758­1789 (2013)                             sity of Crete (TUC), Greece, a Research Assistant Professor
+38. Yao, Z.: Finding efficient robot path for the complete cov-    with the Department of Electrical Engineering- Systems, Uni-
+     erage of a known space. In: 2006 IEEE/RSJ International       versity of Southern California (USC) and a Postdoctoral Fellow
+     Conference on Intelligent Robots and Systems, pp. 3369­       with the Department of Electrical & Computer Engineering,
+     3374. IEEE (2006)                                             University of Victoria, B.C., and Canada. Dr. Kosmatopoulos
+39. Zheng, X., Jain, S., Koenig, S., Kempe, D.: Multi-robot        research interests in the areas of nonlinear and adaptive control,
+     forest coverage. In: IEEE/RSJ International Conference on     robotics, energy-efficient buildings and intelligent transporta-
+     Intelligent Robots and Systems, 2005. (IROS 2005). 2005,      tion systems. He is the author of over 40 journal papers. He has
+     pp. 3852­3857. IEEE (2005)                                    been currently leading many research projects funded by the
+                                                                   European Union with a total budget of about 10 Million Euros.
+

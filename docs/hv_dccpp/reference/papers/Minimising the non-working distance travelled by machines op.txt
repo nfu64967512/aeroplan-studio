@@ -1,0 +1,803 @@
+                                      biosystems engineering 101 (2008) 1­12
+                                        Available at www.sciencedirect.com
+
+journal homepage: www.elsevier.com/locate/issn/15375110
+
+Research Paper: AEdAutomation and Emerging Technologies
+
+Minimising the non-working distance travelled
+by machines operating in a headland field pattern
+
+D.D. Bochtis*, S.G. Vougioukas
+
+Aristotle University of Thessaloniki, Faculty of Agriculture, Department of Agricultural Engineering,
+Box 275, 54124 Thessaloniki, Greece
+
+article info                          When treating an area of field using agricultural equipment, the field is usually traversed
+                                      by a series of parallel tracks using a pattern established by the experience of the operator.
+Article history:                      At the end of each track the process is constrained by the ability of the operator to distin-
+Received 29 November 2007             guish the next track to be followed. The introduction of commercially available auto-
+Received in revised form 6 June 2008  steering or navigation-aid systems for agricultural machines has made it possible to upload
+Accepted 18 June 2008                 arbitrary field pattern sequences into programmable navigational computers and for the
+Published online 6 August 2008        machines to follow them with precision. This new technology also offers a new perspective
+                                      for improving machine field efficiency, since not all field traversal sequences are similar in
+                                      terms of total non-working distance travelled.
+                                      This paper presents an algorithmic approach towards computing traversal sequences for
+                                      parallel field tracks, which improve the field efficiency of machines by minimising the total
+                                      non-working distance travelled. Field coverage is expressed as the traversal of a weighted
+                                      graph and the problem of finding an optimum traversing sequence is shown to be equiva-
+                                      lent to finding the shortest route in the graph. The optimisation is formulated and solved as
+                                      a binary integer programming problem. Experimental results show that by using optimum
+                                      sequences, the total non-working distance can, depending on operation, be reduced by up
+                                      to 50%.
+
+                                                                                   ª 2008 IAgrE. Published by Elsevier Ltd. All rights reserved.
+
+1. Introduction                                                       in the field due to non-working travel (Hunt, 2001). A large por-
+                                                                      tion of the non-working time occurs during turning and the
+Modern agricultural machines are, in theory, capable of               strong negative influence of turning time on field efficiency
+achieving very high performance in terms of work rate and             has been verified experimentally in grain harvesting opera-
+quality. A measure of machine performance during field oper-          tions (Taylor et al., 2002; Hansen et al., 2003), as well as by using
+ations is its field efficiency, Ef, which is defined (ASAE, 2005) as  simulation tools (Benson et al., 2002).
+the ratio between the productivity of the machine under field
+conditions and the theoretical maximum productivity. Field                When turning on the headland non-working time depends
+efficiency is not a constant for a particular machine, but varies     on the distance travelled during turning (i.e., the length of the
+with the size and shape of the field, pattern of field operation,     manoeuvre), and the mean turning speed. Some types of ma-
+crop yield, crop moisture, and other conditions. In particular,       noeuvre are easily executed and consequently can be executed
+the pattern of field operation affects very much the time lost        at high speed, while other types demand skilful driving, or
+                                                                      even reversing, resulting in lower mean speeds and requiring
+
+  * Corresponding author.
+    E-mail address: dionmpo@agro.auth.gr (D.D. Bochtis).
+
+1537-5110/$ ­ see front matter ª 2008 IAgrE. Published by Elsevier Ltd. All rights reserved.
+doi:10.1016/j.biosystemseng.2008.06.008
+2                                          biosystems engineering 101 (2008) 1­12
+
+   Nomenclature                                                   pð$Þ : T/T bijective function which for every field track,
+
+   A      set of arcs of the headland traversal graph G:                iT, returns the order in which the machine covers
+
+          A¼TÂT                                                         the ith field track
+
+   bl(i)  symbolises the type of the traditional where i is the   rmin  minimum turning radius of the machine
+
+          number of tracks which constitute one block (see        T     set of the field track indices. The cardinality kTk of
+
+          Fig. 6)                                                       the set T which is equal to the total number of
+
+   cij    cost that is associated to each arc Aij of the graph          tracks that cover the entire field area
+
+          G. This cost corresponds to the distance that           w     machine effective operating width
+
+          a machine has to travel in order to go from the end     xij   decision variable of the optimisation problem
+
+          of track i to the beginning of track j, i.e.,                 which is xij ¼ 1 if and only if immediately after
+
+          cij ¼ Lminðji À jjÞ ¼ LminðdijÞ                               visiting node i the machine travels to node j;
+
+   Dab    Euclidean distance between the beginning of the                      otherwise xij ¼ 0
+                                                                  D set Di represents the same tracks as Ti with an offset in
+          first track of field a, and the beginning of the first
+                                                                               their indexing
+          track of field b
+                                                                  3ij   stochastic variable that gives the deviation of the
+   d      degree of a manoeuvre which is given by
+                                                                        measured manoeuvre distance from the
+          dij ¼ ji À jj, where i is the track through which the
+          machine exits at the beginning of the manoeuvre               theoretical minimum manoeuvre distance
+
+          and j is the track the machine enters at the end of     P-turn manoeuvre type executed by an agricultural
+
+          the manoeuvre                                                 machine operating in a headland pattern (see
+
+   Ef     field efficiency                                              Fig. 2b). The function P(d ) gives the minimum
+
+   G      field headland traversal graph: G ¼ fT; Ag, where T           lengths for a P-turn manoeuvre of degree d (see
+
+          is the set of graph nodes (which is also the set of           Eq. (1))
+
+          tracks) and A ¼ T Â T is the set of arcs                T-turn manoeuvre type executed by an agricultural
+
+   G0     the extended graph G0 which contains the field                machine operating in a headland pattern (see
+
+          coverage graph G, plus the node 0 which represent             Fig. 2c)
+
+          the machine's initial position and the node kTk þ 1     s     permutation that gives the traversal sequence of
+
+          which represents the final position of the machine            the tracks for the entire field covering. The
+                                                                        notation s* represents the optimal sequence of the
+   Jturn(s) the total travelled distance during the turnings at         tracks (see Eq. (5)), while the symbol stype the
+                the headlands for the field track coverage
+                                                                        sequence of the tracks according to the traditional
+          sequence s (see Eq. (3))
+                                                                        pattern: type
+   Lmin(d ) the function that gives minimum length of
+                a manoeuvre of degree d (see Eq. (2))             U-turn manoeuvre type executed by an agricultural machine
+
+   l      the headland length                                           operating in a headland pattern (see Fig. 2a). The
+
+   N      set of the nodes of the graph G0: N ¼ TWf0; kTk þ 1g          function U(d ) gives the minimum lengths for a U-
+
+                                                                        turn manoeuvre of degree d (see Eq. (1))
+
+larger headland areas. Furthermore, some manoeuvres unfav-        optimisation method in order to optimise the driving pattern
+ourably influence soil condition (Keller, 2005; Ansorge & God-    based on a priori characteristics of the field, the vehicle, and
+win, 2007). Vertical disturbance of the soil is caused by the     the corresponding implement. Another research direction is
+weight of the machine, and horizontal disturbances are caused     concerned with computing optimal tractor manoeuvres at
+by changes in the direction of travel. As a consequence the       the headlands (Vougioukas et al., 2006; Oksanen, 2007). All
+headland areas constitute ``low productivity'' field areas (Wit-  the previous research in this area has been directed towards
+ney, 1996). The controlled traffic systems can reduce the im-     the use of autonomous agricultural vehicles. A survey on the
+pact of the machine but only in the body of the field and not     topic of autonomous agricultural vehicles and related issues
+at the headlands (Bailey, 1997). Finally, the headland manoeu-    was given by Blackmore & Griepentrog (2006).
+vres affect the fuel consumption, with longer and more com-
+plex manoeuvres requiring more fuel.                                  The goal of this work is to analyse one of the most common
+                                                                  field patterns, the headland pattern, in order to develop an al-
+    Recently, research on route planning for agricultural         gorithmic method which minimises the non-working distance
+machines has been carried out in order to increase their field    travelled by the machine. In this paper the term ``headland
+efficiency. Research has been directed towards computing the      pattern'' refers to the complete covering, in a geometrical
+optimum decomposition of a complex-geometry field into            sense, of a field by a set of parallel tracks, or trips, which starts
+sub-fields and the optimum driving direction in each field.       at one boundary of the field and terminates at the opposite
+Two algorithms for coverage path planning for agricultural        boundary. Given such a headland pattern, the sequence in
+fields were presented by Oksanen (2007); one (off-line), which    which a machine can traverse all the tracks during its
+uses a top­down approach to split complex-shaped fields into      operation is not unique. For example, the consecutive tracks
+simple ones, and another (on-line), which uses a bottom­up        covered by the machine may be adjacent (Fig. 1a) (continuous
+approach to cover the field using prediction and exhaustive       headland pattern), or non-adjacent (Fig. 1b) (alternating
+search methods. Sørensen et al. (2004) used a combinatorial       headland pattern).
+biosystems engineering 101 (2008) 1­12                                                                             3
+
+                                                                       2. Modelling of headland pattern traversal
+
+Fig. 1 ­ Headland pattern: (a) adjacent and (b) non-adjacent           The headland pattern is one of the most common field cover-
+traversal; tracks are arbitrarily ordered from left to right.          age patterns for agricultural machines. A given field is covered
+                                                                       by a set of parallel tracks, or trips, which start at one boundary
+    In terms of total non-working distance travelled, some             of the field and terminate at the opposite. It is assumed that
+headland sequences are better than others. The main reason             the direction of the tracks on the field has already been deter-
+for this is that the turning distance between any two tracks           mined (e.g., along its longest side) and that the field will be
+depends on the turning radius of the vehicle as well as on the         covered by a single machine with effective operating width
+distance between these tracks. Additionally, the non-working           w, using the headland pattern. Let T ¼ f1; 2; 3; .g be the arbi-
+distance from the initial position of the vehicle to the first track,  trarily ordered set of the field track indices (e.g., from left to
+and from the last track to its desired final position, depends on      right). The complete covering of the field by the tracks is
+the coverage sequence.                                                 defined uniquely by the dimension of the field across the
+                                                                       tracks and by the working width of the machine. The total
+    Typically, the choice of headland traversal sequence is            number of tracks that cover the entire field area is given by
+based on the experience of the machine operator and is                 the cardinality of the set T:
+strongly constrained by the presence of a human operator. A
+major constraint stems from the ability of the operator to             l  kTk   l   þ  1
+distinguish the next track to be followed at the end of the track      w       PwR
+currently being taken. In some cases, this is a relatively simple
+task, due to the nature of the operation (e.g., harvesting or not      where l is the headland length, w is the operating width of the
+harvesting), or due to various methods that provide traces on          machine and the symbol PR denotes the floor function.
+the field surface (soil-engaging discs, foam markers etc.). As
+a result, the routes followed by agricultural machines tend                For any possible coverage sequence of the field, it is
+to form repetitions of standard patterns. This may be conve-           assumed that the entry-point of the next track and the exit-
+nient for the operators, but it may lead to patterns which are         point of the current track belong to the same field headland.
+far from optimal in terms of field efficiency, compaction, etc.        Then, a bijective function (one to one and onto) pð$Þ : T/T
+                                                                       can be defined, such that for every field track, iT, the function
+    The introduction of commercially available auto-steering           value p(i) returns the order in which the machine covers the ith
+or navigation-aid systems for agricultural machines (Zhang             field track. For example, in the pattern that is illustrated in
+et al., 1999; Keicher & Seufert, 2000; Reid et al., 2000) has          Fig. 1b, the values of this function are as follows: p(5) ¼ 1,
+made it possible, in principle, to enter arbitrary field pattern       p(1) ¼ 2, p(6) ¼ 3, etc. For the pattern in Fig. 1a, the function
+sequences into programmable navigation computers and                   p($) is an identity function because p(i) ¼ i. The inverse
+then for the machine to follow them precisely.                         function pÀ1ð$Þ : T/T gives the traversal sequence of the field
+                                                                       tracks by the machine. For example pÀ1ð3Þ ¼ 6, means that
+    The objective of this paper is to present an algorithmic           the 3rd track covered by the machine is the 6th field track.
+approach towards computing traversal sequences for                     Hence, the traversal sequence for the entire field is given by
+headland patterns, which improve field efficiency by minimis-          the permutation s ¼ CpÀ1ð1Þ; pÀ1ð2Þ; .; pÀ1ðkTkÞD. For example,
+ing the total non-working travelled distance. In the next              the traversal sequence for the pattern in Fig. 1b is
+section, the traversal of a headland pattern is expressed as           s ¼ C5; 1; 6; 2; 7; .D and for the pattern in Fig. 1a it is
+the traversal of a weighted graph. Next, the problem of finding        s ¼ C1; 2; 3; .D.
+an optimal traversal sequence is shown to be equivalent to
+finding the shortest tour in the graph, also known as the              2.1. Headland manoeuvres
+TSP. The problem is formulated as a binary integer
+programming (BIP) problem which effectively solves the TSP             Fig. 2 illustrates some of the most common manoeuvres for an
+problem. Finally, experimental results for some case studies           agricultural machine operating in a headland pattern. These
+are presented which demonstrate the effectiveness of the               are the double round corner (P-turn), the loop, or forward-
+proposed approach.                                                     turn (U-turn) and the reverse, or switch-back-turn (T-turn)
+                                                                       (Witney, 1996; Hunt, 2001). The last two types of turn arise
+                                                                       from the kinematic restrictions of the machine and they are
+                                                                       executed only when P-turns cannot be performed. Which of
+                                                                       the two (U or T ) will be executed is determined by factors
+                                                                       such as the type of implement the machine caries, the opera-
+                                                                       tor's skill and attitude, and the available space etc. The execu-
+                                                                       tion of a P-turn is restricted by the constraint x > 2rmin, where
+                                                                       x is the distance from the exit-point of the current track to the
+                                                                       entry-point of the next track and rmin is the minimum turning
+                                                                       radius of the machine. The farm equipment industry gener-
+                                                                       ally defines the minimum turning radius of a machine, as
+                                                                       the radius of the circle within which the machine can make
+                                                                       its shortest turn. Such a definition reports the radius of the
+4                                         biosystems engineering 101 (2008) 1­12
+
+                                                                  Given that a P-turn can be executed only if 2rmin d$w, the
+                                                               minimum length of a manoeuvre of degree d is given by the
+
+                                                               function:
+
+                                                                           &  UðdÞ; d > 2rmin=w
+                                                                              PðdÞ; d 2rmin=w
+                                                               L minðdÞ ¼                                                        (2)
+
+Fig. 2 ­ Manoeuvres in the headland turns (a) loop turn        note that this function gives us a theoretical minimum
+(U-turn), (b) double round corner (P-turn), (c) reverse turn   distance based only on vehicle dynamics under the assump-
+(T-turn).                                                      tions of an ``ideal'' driver and non slip conditions. The
+                                                               measured travelled distance after executing a manoeuvre of
+path of an extreme part of the machine. In this work the       degree d in the field would actually be Lmin(d ) þ 3d. For a given
+turning radius refers to the distance from the instantaneous   combination of rmin and w, the term 3d is a positive number
+centre of curvature (ICC) to the midpoint between the two      that represents the additional distance due to factors such
+rear wheels, while the steer-able wheels are at their maxi-    as the driver's skill, soil condition and tyre­soil interaction,
+mum steering angle (Fig. 3) (Dudek & Jenkin, 2000).            vehicle dynamics, etc. This term cannot be modelled
+                                                               analytically and, therefore, it can be thought of as being
+    For shake of presentation simplicity only the P-turn and   a stochastic variable.
+the U-turn are considered in this work. This assumption
+does not affect the formulation and the solution of the            From the definitions of the manoeuvre degree and the
+optimisation problem as it will be seen later.                 function pÀ1ð$Þ it easily arises that the manoeuvre degree of
+                                                               the two tracks covered consecutively by the machine at the
+                                                               steps i, and i þ 1, can be written as di ¼ jpÀ1ði þ 1Þ À pÀ1ðiÞj.
+                                                               Hence, for any field track coverage sequence
+                                                               s ¼< pÀ1ð1Þ; pÀ1ð2Þ; .; pÀ1ðkTkÞ > the total distance travelled
+                                                               during the turnings at the headlands is given by:
+
+                                                                           kX TkÀ1  À               Á kX TkÀ1
+                                                               JturnðsÞ ¼           L min pÀ1ði þ 1Þ À pÀ1ðiÞ ¼       L minðdiÞ  (3)
+
+                                                                           i¼1                                   i¼1
+
+2.2. Non-working turning distance                              2.3. Field headland traversal graph
+
+We define the degree of a manoeuvre as the number              The problem of interest is the minimisation of the distance
+
+dij ¼ ji À jj, where i is the track through which the machine  travelled JturnðsÞ during the turning of a machine at the head-
+exits at the beginning of the manoeuvre and j is the track
+                                                               land. Considering this, the length of each in field track is not
+
+the machine enters at the manoeuvre's end. The minimum         important for the problem, since all tracks have to be traversed
+
+lengths for a manoeuvre of degree d, for the U-turn and        anyway. What is important is the sequence in which the tracks
+
+P-turns, respectively, can be computed by the kinematic        are processed, since the total turning distance depends on this
+
+equations of motion of a non-holonomic vehicle and are given   sequence. Hence, we can represent the traversal of a field head-
+
+by the following expressions (Bochtis et al., 2006):           land pattern as the traversal of an undirected weighted graph
+
+                             2rmin þ d$w                       G ¼ fT; Ag where T is the set of graph nodes and A ¼ T Â T is
+                                 4rmin
+UðdÞ ¼ rmin  3p À 4 sinÀ1                                      the set of arcs. Each node in the graph corresponds to a single
+
+and                                                            track and the number of nodes is equal to the number of tracks.
+
+                                                               Traversing all field tracks is equivalent to visiting all nodes in G.
+
+PðdÞ ¼ d$w þ ðp À 2Þrmin                              (1)      Each arc, Aij, (i s j ), joins node i to node j, in this sequence. Each
+
+                                                               arc Aij is associated with a cost cij which corresponds to the dis-
+
+                                                               tance that a machine has to travel in order to go from the end of
+
+                                                               track i to the beginning of track j, i.e., cij ¼ Lminðji À jjÞ ¼ LminðdijÞ.
+                                                               Clearly, such a graph represents the coverage of a field by
+
+                                                               a machine of a certain implement width, working in a headland
+
+                                                               pattern; it does not represent the geometry, or shape of a given
+
+                                                               field. Fig. 4 illustrates simple examples of this representation.
+
+                                                               In Fig. 4a, a field is divided into four tracks based on the operat-
+
+                                                               ing width of the implement. It is assumed that the minimum
+
+                                                               turning radius of the machine with the implement makes it
+
+                                                               possible to use a P-turn only between tracks 1 and 4; all the
+
+                                                               other tracks can be connected only by U-turns. Hence the
+
+                                                               manoeuvring length is
+
+                                                                           &  UðdÞ  d  ¼  1;  2
+                                                                              PðdÞ  d  ¼  3
+                                                               LminðdÞ ¼                         :
+
+Fig. 3 ­ Minimum turning radius for a vehicle with                In Fig. 4b the field and the implement width are the same as
+Ackerman steering.                                             in the previous case, but a machine with smaller minimum
+                                        biosystems engineering 101 (2008) 1­12                                              5
+
+                                                                       In practice, any machine that is going to operate inside
+                                                                   a field has to have an initial location, which is its current phys-
+                                                                   ical position before the operation starts, and a final location
+                                                                   which is its desired position after the operation has been
+                                                                   completed. These locations are defined by the problem type.
+                                                                   For example in the harvesting case these locations may
+                                                                   correspond to the locations of a transport truck, or a silo
+                                                                   where the harvester unloads its grain hopper. In the case of
+                                                                   a spraying operation they could correspond to the locations
+                                                                   where the machine refuels or simply to the barn where the
+                                                                   sprayer parks. Therefore, the total operation of covering
+                                                                   a set T of tracks in a headland pattern must be represented
+                                                                   by an extended graph G0 which contains the field coverage
+                                                                   graph G, plus two additional nodes. The initial location is
+                                                                   represented by node 0 and the final location by node kTk þ 1;
+                                                                   letting N ¼ TWf0; kTk þ 1g be the set of the nodes of the new
+                                                                   graph. No arc terminates at node 0, and no arc originates
+                                                                   from node kTk þ 1. The cost of connecting node 0 to any other
+                                                                   node j is equal to the distance c0j so that the machine has to
+                                                                   move from its initial position to reach track j. Similarly, the
+                                                                   cost of going from any node j to node kTk þ 1, is equal to the
+                                                                   driving distance cj Nþ1 from the track j to the final position.
+
+                                                                       If there is no feasible route between any pair of nodes, the
+                                                                   cost that is associated with this arc is infinite (or a very large
+                                                                   positive number). Finally, it is assumed that the graph con-
+                                                                   tains at least one sequence of nodes connecting node 0 to
+                                                                   node kTk þ 1, with finite cost, i.e., that there is at least one
+                                                                   feasible traversal sequence for the field.
+
+                                                                       The traversal graph can be easily extended to model the
+                                                                   coverage of numerous separate fields, each covered by a head-
+                                                                   land pattern (see Appendix).
+
+                                                                   3. Optimisation of headland pattern
+                                                                   traversal
+
+                                                                   For any traversal sequence s ¼ CpÀ1ð1Þ; pÀ1ð2Þ; .; pÀ1ðkTkÞD, the
+                                                                   total non-working distance is given by:
+
+                                                                   JðsÞ ¼ c0pÀ1ð1Þ þ JturnðsÞ þ cpÀ1ðkTkÞkTkþ1:             (4)
+
+Fig. 4 ­ Combinations of operating width and minimum                  This distance is the sum of the total turning distance at the
+turning radius for the same field and their corresponding          headlands and the distances from the initial position to the
+graphs.                                                            first track and from the last track to the final position. The
+                                                                   optimal traversal sequence of the headland pattern which
+turning radius is used, and so the cost of each connection         maximises field efficiency is the permutation s* which consti-
+                                                                   tutes the solution of the following optimisation problem:
+between the graph vertices is changed:
+
+           &  UðdÞ  d  ¼  1                                        sÃ ¼ argmin JðsÞ:                                        (5)
+              PðdÞ  d  ¼  2;
+LminðdÞ ¼                        :                                 s
+
+                              3
+
+   Finally, if an implement with larger width is used, and a dif-  Fig. 5 ­ Three different fields with the same operation
+ferent graph is created. In Fig. 4c the graph for an implement     graph, for a given machine implement.
+dividing the previous field into three tracks is shown.
+
+    Using this graphical representation, the problem of cover-
+ing a field in a headland pattern is equivalent to traversing
+all nodes of its coverage graph; different field shapes with
+equivalent graphs correspond to the same problem. For exam-
+ple, the coverage of each one of the three fields in Fig. 5, for
+a given machine­implement combination, is represented by
+the same graph and consequently corresponds to the same
+problem; only the turning costs may differ.
+6                                 biosystems engineering 101 (2008) 1­12
+
+   Solving the above problem is equivalent to finding the          two ends and also at intermediate points, in order to make it
+                                                                   easier for the drivers to identify and follow them.
+shortest route in the extended graph G0, which starts at
+                                                                       All the corresponding BIP problems were solved using an
+node 0 and finishes at node kTk þ 1 and visits every node          implementation of the Clarke­Wright savings algorithm
+                                                                   (Clarke & Wright, 1964; Snyder & Daskin, 2004). Each optimal
+only once. This is equivalent to solving the TSP, a well-known     node sequence was transformed to a motion sequence. This
+                                                                   is carried out using another Cþþ program, which in a first in-
+discrete or combinatorial optimisation problem (Gutin &            stance transforms the node sequence into a field work pattern
+                                                                   and an accompanying sequence of manoeuvre types and in
+Punnen, 2007). The TSP is an non-deterministic polynomial          the second instance transforms these sequences into
+                                                                   a sequence of Universal Transverse Mercator (UTM) path-
+hard (NP-hard) problem (Garey & Johnson, 1979) and various         coordinates.
+
+heuristic algorithms have been developed to find near-opti-            In practice, the track sequence followed by an operator de-
+                                                                   pends on the field, the machine, the operation and of course
+mal (and sometimes optimal) solutions for very large prob-         the experience of the operator. In order to compare the optimal
+                                                                   sequences with a standard set of ``traditional'' field patterns,
+lem instances. Examples of such algorithms are simulated           the established system of splitting fields into blocks was
+                                                                   used. These blocks come about as follows: the driver starts
+annealing, tabu search, genetic algorithms, etc. (Glover &         from the first track of the block. After the completion of the op-
+                                                                   eration in this track, he drives the machine into the track
+Kochenberger, 2002).                                               which he considers more ``convenient'' to carry out the ma-
+                                                                   noeuvre, e.g., of degree a. Then, he returns to the first adjacent
+    Alternatively, the TSP can be formulated as a BIP problem      uncultivated track by performing a manoeuvre of degree a À 1.
+                                                                   Following this, he performs a manoeuvre of the same degree
+(Wolsey, 1998). Let us define for each arc Aij where isj; iskTk þ  a as the first and so on. The direction of travel of the machine,
+1; js0 the decision variable xij which is xij ¼ 1 if and only if   during its operation in the initial track of a block, alternates
+                                                                   from one block to another. Fig. 6 illustrates the patterns where
+immediately after visiting node i the machine travels to node j;   blocks are formed by three tracks (a) and by five tracks (b). In
+                                                                   the following, this type of pattern will be represented by the
+otherwise xij ¼ 0. Then, the minimisation of the non-working       symbol bl(i), where i is the number of tracks which constitute
+                                                                   one block. In order to generalise this type of patterns, we can
+travelled distance can be expressed using the following.           consider that the continuous headland pattern is the degener-
+                                                                   ative case where each block is constituted by one track. So, the
+    For any traversal sequence s ¼ CpÀ1ð1Þ; pÀ1ð2Þ; .; pÀ1ðkTkÞD   continuous headland pattern will be symbolised bl(1).
+
+the total non-working distance is given by:                        5. Experimental results
+
+Minimise :   XX     cij xij                               (6)      A number of field operation examples are presented in order
+                                                                   to demonstrate the optimal paths that result from the
+             iN jN                                                 above-mentioned optimisation. The implemented algorithm
+                                                                   can easily handle problem instances with hundreds of tracks.
+             X                                                     However, for illustration purposes the examples presented
+Subject to : xij ¼ 1 ciT                                  (7)      here correspond to small-sized problems. The field operations
+                                                                   took place at the farm of the Aristotle University of Thessalo-
+             jN                                                    niki, Northern Greece [403201300N, 225901700E].
+
+X   x0j ¼ 1                                               (8)      5.1. Headland traversal of a single-field
+
+jN
+
+X      X
+    xih À xhj ¼ 0 chT                                     (9)
+
+iN     jN
+
+X                                                         (10)
+    xi;kTkþ1 ¼ 1
+
+iN
+
+XX     xij kSk À 1 cS4N; kSk > 1                          (11)
+
+iS jS
+
+xijf0; 1g ci; jN:                                         (12)
+
+   The constraints in Eq. (7) state that the track represented by
+a node must be traversed only once. Eq. (8) ensures that the
+route of the machine originates at node 0. Eq. (9) ensures
+that if the machine enters track h, it will exit from that track
+after the operation. Eq. (10) ensures that the route of the
+machine ends at node kTk þ 1. Eq. (11) is the well-known
+``sub-tour elimination constraint'' which excludes any
+disjoint sub-tours from a feasible solution. Finally, Eq. (12)
+constrains the variables to use only binary values.
+
+    The BIP problem can be solved by various techniques, such
+as branch-and-bound, branch-and-cut, Lagrangean relaxa-
+tion, etc. (Wolsey, 1998).
+
+4. Materials and methods                                           A very simple problem consisting of covering a single-field
+                                                                   was solved first. It corresponded to the cultivation of a small
+A number of field operation experiments were performed in          field (approximately 24 m Â 30 m) using a disk harrow of work-
+order to demonstrate the optimal patterns resulting from           ing width 2.89 m. The field was divided by the harrow working
+the above-mentioned methodology. The tractor that was              width into eight tracks. The minimum turning radius of the
+used in all the experiments was a Ford 64.40. The trajectory       tractor used was measured as 3.5 m. The planned operation
+of the tractor was recorded using an ``AgGPS 106 Smart An-         demanded that the machine start from an initial position (a
+tenna'' EGNOS-enabled DGPS receiver from Trimble, CA,              barn) on the north-west side of the field, and return to the
+USA. The field tracks were marked and numbered at their            same position after the cultivation.
+
+                                                                       A driver was asked to perform the cultivation following
+                                                                   three different traditional headland patterns. The first was
+biosystems engineering 101 (2008) 1­12                                      7
+
+                                                                            Fig. 7 ­ Cultivation of an eight-track field using the straight
+                                                                            alternation pattern; the track numbers show the value of
+                                                                            p(i).
+
+Fig. 6 ­ Traditional block patterns (a) bl(3) with three tracks             operating width 2.5 m. The dimensions of the fields were ap-
+per block and (b) bl(5) with five tracks per block.                         proximately: field 1: 50 Â 80 m2, (20 tracks), field 2:
+                                                                            30 Â 40 m2, (12 tracks) and field 3: 30 Â 70 m2, (12 tracks). Their
+the continuous headland pattern (Fig. 7) where sblð1Þ ¼
+C1; 2; 3; 4; 5; 6; 7; 8D. In this operation the total dead distance         locations are shown in Fig. 11, together with the initial and
+was measured to be 174.14 m.
+                                                                            final tractor locations, both at the depot. The three fields
+    In the second pattern, the driver was asked to operate
+according by alternate overlapping (i.e., to avoid U-turns) by us-          were represented by a single virtual field covered by a set T ¼
+ing the most appropriate block length, which for the particular
+field geometry and turning radius lead to the track sequence of             D1WD2WD3 ¼ f1; 2; .; 44g with 44 tracks.
+the seven tracks per block: sblð7Þ ¼ C1; 5; 2; 6; 3; 7; 4; 8D (Fig. 8). In      The corresponding BIP problem was solved and the best
+this operation the total dead distance was measured as
+132.35 m.                                                                   field sequence was found to be: field 1, field 2 and field 3. The op-
+                                                                            timal track sequence for field 1, field 2 and field 3 were s1Ã ¼
+    In the third pattern, the operator was asked to use five                C20; 17; 14; 11; 8; 12; 9; 3; 6; 2; 5; 1; 4; 7; 10; 13; 16; 19; 15; 18D, sÃ2 ¼
+tracks per block (resulting in a sequence C1,4,2,5,3,6,7,8D). At            C1; 5; 11; 7; 3; 9; 2; 6; 10; 4; 8; 12D and s3Ã ¼ C2; 6; 10; 4; 8; 12; 9; 3; 7;
+the end the operation the driver was forced to perform two                  11; 5; 1D, respectively. Fig. 12a­c illustrates the GPS trace from
+T-turns in order to complete the operation (Fig. 10). In this op-
+eration the total dead distance was measured as 152.84 m.                   the execution of the optimal headland traversal sequence for
+
+    Finally, the optimal sequence of the tracks was computed
+by the optimisation procedure and was found to be sÃ ¼
+C1; 4; 7; 3; 6; 8; 5; 2D (Fig. 9). The operator was asked to follow
+this sequence and the total dead distance for this sequence
+was measured as 99.65 m.
+
+    The dead distances of each of the four operations are given
+in Table 1. The last row shows the % savings for the dead dis-
+tance achieved by adopting the optimum pattern instead of
+one of the driver-chosen patterns.
+
+5.2. Headland traversal of numerous fields
+
+In the next experiment the same tractor (rmin ¼ 3.5 m) was                  Fig. 8 ­ Eight-track field cultivation using the pattern bl(7);
+used to cultivate three different fields using a cultivator with            the track numbers show the value of p(i).
+8  biosystems engineering 101 (2008) 1­12
+
+                                                                                  Table 1 ­ Measured dead distances during turnings for
+                                                                                  four different patterns
+
+                                                                                  Pattern            s*            sbl(1)  sbl(7)  sbl(5)
+
+                                                                                  Dead distance (m)  99.65         174.14  132.35  152.84
+                                                                                  Savings (%)a       ­              42.8    24.7    34.8
+
+                                                                                  a JðsblÞ À JðsÃÞ=JðsblÞ Â 100%.
+
+                                                                                  turning distances using the optimal and driver-chosen
+                                                                                  sequences, i.e., the ratio of the turning distance difference
+                                                                                  over the turning distance using the driver-chosen pattern.
+
+                                                                                  5.3. Comparison of theoretical and measured savings
+
+Fig. 9 ­ The Eight-track field cultivation using the optimal                      Given an arbitrary track traversal sequence and an optimal
+sequence; the track numbers show the value of p(i).                               sequence, the turning distance savings can be computed
+                                                                                  theoretically, using Eq. (3) to compute the corresponding total
+each field. The total path is optimal in the sense that it                        turning distances. The savings reported in the previous exper-
+minimises the total non-working distance travelled during                         iments were based on measurements from a set of experiment
+headland turnings and out-of-the field distance (from the                         instances. In order to compare the theoretical or predicted vs.
+depot to the first field, from one field to the other, and from                   the measured savings when using optimal patterns instead
+the last field back to the depot).                                                of traditional ones, three cultivations were performed on three
+                                                                                  fields A, B, C, with different operating width for each field. The
+    When the machine operator was asked to use his own judge-                     operating width was 3 m in field A, 4.5 m in field B and 6 m in
+ment, he visited the fields in the same sequence, but the track                   field C. The total width of each field was such that the tractor
+sequences he followed for covering each field were as follows:                    covered 40 tracks. Hence, field A was 120 m wide, field B
+sd1r ¼ sblð19Þ ¼ C1; 11; 2; 12; 3; 13; 4; 14; 5; 15; 6; 16; 7; 17; 8; 18; 9; 19;  180 m, and field C 240 m. The best driver-chosen block pattern
+10; 20D and s2dr ¼ sd3r ¼ sblð11Þ ¼ C1; 7; 2; 8; 3; 9; 4; 10; 5; 11; 6; 12D.      was selected for each field. FiezlffldfflfflfflfflAfflffl}|wfflfflfflfflafflfflffls{ czofflfflvfflfflefflfflfflrffl}e|dfflfflfflfflwfflfflfflffli{th a pattern
+The non-working travelled distances measured during the                           of 5 tracks per block: sblð5Þ ¼ C 1; 4; 2; 5; 3 ; 6; 9; 7; 10; 8 ; .D, field B
+headlands turnings for all fields and for both traversal
+sequences (algorithmic and operator-selected) are given in                                                                                  zfflffl}|fflffl{ zfflffl}|fflffl{ zfflffl}|fflffl{
+Table 2. The last column shows the % savings for the measured                     with three tracks per block: sblð3Þ ¼ C 1; 3; 2 ; 4; 6; 5 ; 7; 9; 8 ; .D
+                                                                                  and field C with the continuous pattern: sblð1Þ ¼ C1; 2; 3; .D. In
+                                                                                  each field the driver was asked to follow the corresponding
+                                                                                  driver-chosen block pattern and the optimal pattern computed
+                                                                                  by the optimisation.
+
+Fig. 10 ­ Eight-track field cultivation using the overlapping                     Fig. 11 ­ Locations of the three dispersed fields for the
+alternation pattern; the track numbers show the value of                          cultivation operation.
+p(i).
+                                   biosystems engineering 101 (2008) 1­12                               9
+
+                Fig. 12 ­ Optimal machine paths for covering (a) field 1, (b) field 2 and (c) field 3.
+
+    Table 3 presents for each experiment the dead distance        Column 7 shows the same savings percentage based on the
+measured in the field (column 4) and the corresponding theo-      theoretical distances (from Eq. 3).
+retical distance as it is computed by Eq. (3) (column 5). Column
+6 shows the % savings for the measured turning distances          6. Discussion
+with the optimal and driver-chosen sequences, i.e., the ratio
+of the turning distance with the driver-chosen pattern.           Experimental results showed that by using algorithmically
+                                                                  computed optimal sequences instead of operator-selected
+Table 2 ­ Measured dead distances during turnings at the          ones, the total non-working distance can be reduced
+headlands for the three fields                                    significantly. The savings on the non-working distance
+                                                                  depend on the operation (e.g., field geometry, operating width,
+Fields Non-working turning Savings, % in turning                  machine minimum turning radius) and can be as high as 50%.
+                                                                  Furthermore, one must consider the fact that finding the most
+       distance at headlands, m    distance                       appropriate block length for the traditional overlapping pat-
+                                                                  tern requires adequate experience from the operator. If the
+       Optimal  Driver                                            operator does not evaluate properly the combination of the
+                                                                  headland lengths, implement width and machine kinematics,
+       sequence, s* sequence, sdr                                 his choice will be far from the optimum. Sub-optimal patterns
+                                                                  may necessitate corrections which will increase the total dead
+1      258.54   565.40             54.27                          distance. This fact was clearly demonstrated at the third sin-
+                                   13.62                          gle-field operation, where the operator was asked to use five
+2      181.57   210.20             27.10
+
+3      176.57   242.21
+
+Total  616.68   1017.81            39.41
+10                                  biosystems engineering 101 (2008) 1­12
+
+Table 3 ­ Theoretical and measured dead distances and corresponding savings
+
+Comparison  Pattern      Operating  MeaJs¼urPed3i¼91dðeLamdindðdisiÞtaþn3cdei Þ, m,  TheoretJi¼caPl di3¼e91aLdmdinisðdtaiÞnce, m,     Savings                     Savings
+                         width, m                                                                                                  measured, %                theoretical, %
+
+A           Optimal      3           J(s*) ¼ 618.25                                         J(s*) ¼ 554.25                                             35.84       34.66
+                                    J(sbl(5)) ¼ 963.65                                     J(sbl(5)) ¼ 848.32
+            Traditional
+
+B           Optimal      4.5        J(s*) ¼ 599.36                                          J(s*) ¼ 542.31                                             28.95       26.70
+                                                                                           J(sbl(3)) ¼ 739.82
+            Traditional             J(sbl(3)) ¼ 843.65
+
+C           Optimal      6            J(s*) ¼ 674.53                                        J(s*) ¼ 650.40                                             32.87       29.60
+                                    J(sbl(1)) ¼ 1004.83                                    J(sbl(1)) ¼ 923.88
+            Traditional
+
+tracks per block. This pattern proved to be inappropriate,                           problem instances is not unique, i.e., different track
+because at the end of the field the driver was forced to perform
+two T-turns in order to complete the operation (Fig. 10). A big-                     sequences may minimise the total turning distance. These
+ger problem could arise in cases where there is not adequate
+space for an U-turn. For example, an implement such as                               solutions are generated randomly from the algorithms that
+a cultivator may reversing impractical. In such cases the
+driver would have to manoeuvre the machine inside the field                          are usually used for this kind of optimisation problems.
+interior.
+                                                                                     Hence, the execution of such randomly generated optimal
+    Beyond the minimising the non-working distance when
+turning a machine, the algorithmically computed optimal se-                          patterns may lead to a more ``fairly'' distributed compaction
+quences also minimise the out-of-field travelled distance. For
+example, when operating in the single-field experiments, the                         at the headlands than the repeated execution of the same
+optimal sequence caused the machine to start its operation
+from track 1 and complete it after traversing track 2 (Fig. 9).                      pattern over the years.
+This makes sense, since the machine had to complete the
+route ``barn-field-barn'' and so, it had to enter to the field                       Regarding the comparison of theoretical and experimental
+and exit the field from as close as possible to the barn (track
+1). This fact can also be noticed at the numerous field opera-                       savings, as it was expected the theoretical turning distance
+tions experiment (Fig. 11). As illustrated in Fig. 12a, according
+to the optimum path the machine had to start from the depot                          was always shorter than the measured one, for any traversal
+and enter the first field close to its southern corner. After
+covering field 1, it had to exit the field again close to its south-                 pattern; yet, their difference was relatively small (3.6­12%).
+ern corner and drive to field 2. For the operation in field 2 the
+machine had to enter and exit the field from opposite sides of                       This small difference arises mainly from the driver's inability
+the field (Fig. 12b). Finally, for field 3 (Fig. 12c) the machine had
+to enter and exit the field from the western field tracks (tracks                    to execute perfect shaped turn and the interaction between
+1 and 2). The reason was that the starting location for the
+route (the last track of field 2) and the final location (the depot)                 soil and vehicle dynamics. The closeness of the theoretically
+were located both at the west side of the field. Notice that the
+entry and exit tracks for each field are computed                                    and experimentally measured turning distances implies that
+automatically by the optimisation. In the case of the driver-
+chosen pattern, as it appears from the sequence s1dr, the driver                     Eq. (3) can be used to compute a reasonable approximation
+started the operation in field 1, from track 1, which was
+located at the north side of the field. So, the tractor had to                       o(Pf i3t¼9h1eedti )urisninsmg adlils.taTnhceesm, ei.aes.,utrhede  cumulative  distance term
+travel across the field headland without operating. Similarly,                                                                                         savings in  dead distance
+after operating in field 3, he travelled across the headland in
+order to reach the depot. So, in this case a distance equal to                       were very close to the theoretical ones (in the order of 1.18,
+the sum of the lengths of the two headlands (about 80 m)
+was travelled, more than with the optimal patterns.                                  2.25  and 3.27 for the corresponding operations                               itnerfimeldPsi3¼A91,edBi
+                                                                                     and   C, respectively) because the approximation
+    A point that has to be noticed is the absence of any U-turns
+with the optimal patterns. This fact leads to two significant                        is small and it is also present in both the numerator and de-
+benefits that arise from the adoption of the optimal patterns.
+The first is reduced soil disturbance because smooth P-turns                         nominator of the savings ratio.
+result in smaller lateral forces during manoeuvring. The sec-
+ond benefit is a reduction in the headland area itself. Due to                       7. Conclusions
+the larger space that is required to execute U-turns, the
+absence of this kind of turns decreases the required space at                        An algorithmic approach for computing traversal sequences
+the headlands. Furthermore, the optimal solution for most                            for an agricultural machine operating in parallel tracks has
+                                                                                     been developed. The computed sequences are optimal in the
+                                                                                     sense that they minimise the total non-working distance trav-
+                                                                                     elled. Field coverage was expressed as the traversal of
+                                                                                     a weighted graph and the problem of finding an optimal tra-
+                                                                                     versal sequence was shown to be equivalent to finding the
+                                                                                     shortest tour in the graph. The optimisation was formulated
+                                                                                     and solved as a BIP problem.
+
+                                                                                         Experimental results showed that by using algorithmically
+                                                                                     computed optimal sequences instead of operator-selected
+                                                                                     ones, the total non-working distance could be reduced by up
+                                                                                     to 50% depending on the operation. The reduction of non-
+                                                                                     working distance entails equivalent reduction of the fuel
+                                                                                     consumption as well as of the non-productive time. Moreover,
+                                                                                     apart from improved efficiency, the adoption of optimal head-
+                                                                                     land patterns may also lead to reduced soil compaction in the
+                                                                                     headland area. The optimal patterns consist mainly of
+                                                                                     P-turns and fewer ­ if any ­ U-turns. The smooth P-turns
+                                              biosystems engineering 101 (2008) 1­12                                                                         11
+
+result in smaller lateral forces during manoeuvring and conse-                  When track i belongs to field a and track j belongs to field b,
+quently in less compaction.
+                                                                           the cost cij is set equal to the inter-field distance Dab plus two
+    Beyond the reduction of the soil compaction at the head-               signed terms which account for the distance (in multiples of
+land area, the proposed optimal patterns reduce the headland
+area itself. Due to the larger space that is required for the              the operating width, w) of track i from the first track in field
+execution of U-turns, the absence of this kind of turns
+decreases the proportion of the field area that constitutes                a, and the distance of track j from the first track of field b,
+the headland area and consequently the proportion of the
+low productivity area, resulting in economic benefits.                     respectively:
+
+    The optimal track sequences are often counter-intuitive for                        "                 X aÀ1          !# "                     X bÀ1   !#
+human operators. However, the programmable navigation-
+aid systems supported by the terminals or auto-steering                    cij ¼ DabHw$ i À 1 þ kTmk Æ w$ j À 1 þ kTmk                                       (14)
+systems which have been developed in recent years make it
+feasible for a vehicle to follow arbitrary optimal patterns. In                                          m¼1                                     m¼1
+addition to its application in present day navigation systems,
+this technique is directly applicable to route planning of                 in   the    above    expression        the   terms     1  þ  PxÀ1     kTm  k  correspond  to
+autonomous agricultural vehicles.
+                                                                                                                                            m¼1
+
+                                                                           the number of the first track in Dx. The upper signs are used
+
+                                                                           when a < b, i.e., field a, comes before field b in the arbitrarily
+
+                                                                           numbered field sequence (e.g., a ¼ 2, b ¼ 4), whereas the lower
+
+                                                                           signs are used when a > b. The sign change can be expressed
+
+                                                                           algebraically as ða À bÞ=ja À bj. To summarise, the cost cij is
+
+                                                                           given by:
+
+                                                                                   8
+                                                                                   ><  Lminðji  À  jjÞ;  if a  ¼  b
+                                                                                   :>                 &  iÀ       aPÀ1             !
+                                                                           cij  ¼                                                 1
+                                                                                       Dab þ jaaÀÀbbjw                  kTm k  þ
+Appendix.
+Extension to numerous fields                                                       "   X bÀ1                   !#m)¼1
+
+                                                                                À jÀ               kTmk þ 1 ; if asb:                                        ð15Þ
+
+The traversal graph can be easily extended to model the cov-                           m¼1
+
+erage of numerous separate fields, each covered by a headland              Again, it is assumed that the graph contains at least one se-
+                                                                           quence of nodes connecting node 0 to node kTk þ 1 with finite
+pattern. Consider k fields arbitrarily numbered from 1 to k,               cost, i.e., that there is at least one feasible traversal sequence
+                                                                           connecting all tracks in all fields.
+with the ith field covered by a set of tracks Ti ¼ f1; 2; .; kTikg.
+The union of all tracks can be thought of as a `virtual' field
+
+which is covered by a set of tracks T ¼ D1WD2W/WDk where
+
+the set Di represents the same tracks as Ti with an appropriate
+
+offset in their indexing, i.e.,                                            references
+
+       8                                      9                            Ansorge D; Godwin R J (2007). The effect of tyres and a rubber
+       <                                 2; . Xi Tj=;;                         track at high axle loads on soil compaction. Part 1: single axle
+Di  ¼  :  X iÀ1 Tj    þ  1; X iÀ1 Tj  þ                 i ¼ 1; .; k  (13)      studies. Biosystems Engineering, 98(1), 115­126.
+
+          j¼1            j¼1             j¼1                               ASAE. (2005). ASAE S495.1 NOV2005. Uniform Terminology for
+                                                                               Agricultural Machinery Management. ASABE, St. Joseph,
+for example, if T1 ¼ f1; 2; 3g and T2 ¼ f1; 2g then D1 ¼ f1; 2; 3g             Michigan.
+and D2 ¼ f3 þ 1; 3 þ 2g¼ f4; 5g, respectively, and T ¼
+f1; 2; 3; 4; 5g.                                                           Bailey J (1997). Tractor-based systems for traffic control in arable
+                                                                               crops. Landwards, 52(2), 2.
+    The extended traversal graph G0 for the virtual field is
+defined exactly as the graph for the single-field case. It                 Benson E R; Hansen A C; Reid J F; Warman B L; Brand M A
+contains all the nodes in the track set, T, the nodes which                    (2002). Development of an In-field Grain Handling Simulation
+correspond to the initial and final position, and the set of                   in ARENA. ASAE Paper No. 02-3104. ASAE, St. Joseph,
+arcs, A, which connect all nodes. However, the cost cij                        Michigan.
+associated with arc Aij must be calculated differently,
+depending on whether tracks i and j belong to the same field               Blackmore B S; Griepentrog H W (2006). Autonomous vehicles and
+or not. If they do, then cij is equal to the turning cost Lmin(dij),           robotics, In: CIGR Handbook of Agricultural Engineering, Vol.
+just as in the single-field case. Otherwise, the cost of going                 VI, pp 204­215.
+from the end of track i in a field a, to the beginning of track
+j in a field b, depends on the relative position of the different          Bochtis D; Vougioukas S; Tsatsarelis C (2006). A vehicle routing
+fields a, and b, and the positions of the tracks in their                      problem formulation of agricultural field operations planning
+respective field.                                                              for self-propelled machines, In: XVI CIGR Word Congress,
+                                                                               Bonn, Germany. Abstract in Book of Abstracts, pp 301­302,
+    In principle, one could calculate these costs exactly based                (Full paper on CD 6pp).
+on geometry and on the dynamics of the machine. Let Dab be
+the Euclidean distance between the beginning of the first                  Clarke G; Wright J (1964). Scheduling of vehicles from a central
+track of field a, and the beginning of the first track of field                depot to a number of delivery points. Operations Research,
+b; obviously Dab ¼ Dba. In typical situations, this inter-field                12(4), 568­581.
+distance is much larger than the distance between any two
+tracks of the same field and orders of magnitude larger                    Dudek G; Jenkin M (2000). Computational Principles of Mobile
+than the turning radius of the machine. Therefore, for all                     Robotics. Cambridge University Press.
+practical purposes it should suffice to assign the costs cij
+based on estimates of straight-line distances. Such an esti-               Garey M; Johnson D (1979). Computers and Intractability: a Guide
+mate is given next.                                                            to the Theory of NP-Completeness. Freeman, San Francisco,
+                                                                               CA, USA.
+
+                                                                           Glover F; Kochenberger G (2002). Handbook of Metaheuristics.
+                                                                               Kluwer Academic Publishers, Norwell, MA, USA.
+
+                                                                           Gutin G; Punnen A (2007). The Traveling Salesman Problem and
+                                                                               Its Variations. Springer.
+12  biosystems engineering 101 (2008) 1­12
+
+Hansen A C; Hornbaker R H; Zhang Q (2003). Monitoring and analysis             Report #04T-018. Department of Industrial & Systems
+    of in-field grain handling operations. ASEA Paper No 701P1103e.            Engineering, Lehigh University.
+    Proceedings of International Conference on Crop Harvesting,            Sørensen C G; Bak T; Jo¨ rgensen R N (2004). Mission planner for
+    Louisville, Kentucky, USA. ASAE, St. Joseph, Michigan.                     agricultural robotics, In: AgEng 2004, Leuven, Belgium, 12­16
+                                                                               September 2004. Abstract in Book of Abstracts, pp 894­895
+Hunt D (2001). Farm Power and Machinery Management (tenth                      (Full paper on CD 8pp).
+    ed.). Iowa State Press, Ames, Iowa.                                    Taylor R K; Schrock M D; Staggenborg S A (2002). Extracting
+                                                                               Machinery Management Information from GPS Data. ASAE, St.
+Keicher R; Seufert H (2000). Automatic guidance for agricultural               Joseph, Michigan. Paper No. 02-10008.
+    vehicles in Europe. Computers and Electronics in Agriculture,          Witney B (1996). Choosing and Using Farm Machines. Land
+    25, 169­194.                                                               Technology, Edinburgh.
+                                                                           Wolsey L A (1998). Integer Programming. John Wiley and Sons,
+Keller T (2005). A model for the prediction of the contact area and the        New York.
+    distribution of vertical stress below agricultural tyres from readily  Vougioukas S; Blackmore S; Nielsen J; Fountas S (2006). A two-
+    available tyre parameters. Biosystems Engineering, 92(1), 85­96.           stage optimal motion planner for autonomous agricultural
+                                                                               vehicles. Precision Agriculture, 7, 361­377.
+Oksanen T (2007). Path planning algorithms for agricultural field          Zhang Q; Reid J F; Noguchi N (1999). Agricultural vehicle
+    machines. PhD Thesis, Helsinki University of Technology                    navigation using multiple guidance sensors, In:
+    Automation, Technology Laboratory, Finland.                                Proceedings of International Conference on Field and
+                                                                               Service Robotics.
+Reid J F; Zhang Q; Noguchi N; Dickson M (2000). Agricultural
+    automatic guidance research in North America. Computers
+    and Electronics in Agriculture, 25, 155­167.
+
+Snyder L; Daskin M (2004). A Random-Key Genetic Algorithm for
+    the Generalized Traveling Salesman Problem. Technical
+

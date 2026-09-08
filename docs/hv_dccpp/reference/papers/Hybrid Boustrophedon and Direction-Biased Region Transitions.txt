@@ -1,0 +1,1514 @@
+Article
+
+Hybrid Boustrophedon and Direction-Biased Region Transitions
+for Mobile Robot Coverage Path Planning: A Region-Based
+Multi-Cost Framework
+
+Suat Karakaya 1,* and Mehmet Zeki Konyar 2
+
+                                        1 Mechatronics Engineering Department, Kocaeli University, 41001 Kocaeli, Türkiye
+                                        2 Software Engineering Department, Kocaeli University, 41001 Kocaeli, Türkiye; mzeki.konyar@kocaeli.edu.tr
+
+                                        * Correspondence: suat.karakaya@kocaeli.edu.tr
+
+                                        Abstract
+
+Received: 23 October 2025               Achieving efficient Coverage Path Planning (CPP) in indoor and semi-structured settings
+Revised: 17 November 2025               necessitates both organized area segmentation and dependable transitions between cov-
+Accepted: 20 November 2025              erage zones. This research introduces an improved region-guided CPP framework that
+Published: 29 November 2025             incorporates rectangular region expansion, Boustrophedon-based coverage within regions,
+                                        and an obstacle-aware planner for transitioning between regions. In contrast to conven-
+Citation: Karakaya, S.; Konyar, M.Z.    tional methods that depend solely on A*-based routing, the suggested transition module
+Hybrid Boustrophedon and                utilizes a multi-weighted cost model that integrates Euclidean distance, obstacle density,
+Direction-Biased Region Transitions     and heading changes to create smoother, more context-sensitive links between regions. The
+for Mobile Robot Coverage Path          approach is assessed on five representative grid maps inspired by the layouts of build-
+Planning: A Region-Based Multi-Cost     ing corridors and greenhouse-like strip structures. Performance indicators--including
+Framework. Appl. Sci. 2025, 15, 12666.  intra-region coverage distance, inter-region transition cost, overall path distance, coverage
+https://doi.org/10.3390/                ratio, and computation duration--illustrate the method's efficiency. Experimental findings
+app152312666                            indicate consistent coverage rates ranging from 96% to 99%, with total computation times
+                                        between 312 and 844 ms. When compared to traditional global Boustrophedon and spiral
+Copyright: © 2025 by the authors.       scanning methods, the proposed system attains noticeably shorter transition paths and
+Licensee MDPI, Basel, Switzerland.      enhanced navigation efficiency, particularly in narrow corridors and cluttered environ-
+This article is an open access article  ments. In summary, the framework provides a modular, computationally efficient, and
+distributed under the terms and         obstacle-aware solution that is well-suited for autonomous mobile robot coverage path
+conditions of the Creative Commons      planning tasks.
+Attribution (CC BY) license
+(https://creativecommons.org/           Keywords: Coverage Path Planning; inter-region transition; mobile robots; region obstacle-
+licenses/by/4.0/).                      aware planning; region segmentation
+
+                                        1. Introduction
+
+                                              Recent advancements in mobile robot technology necessitate the ability of these sys-
+                                        tems to autonomously cover expansive areas in various industrial and service applications.
+                                        Key applications include industrial cleaning robots [1], agricultural spraying and fertiliz-
+                                        ing [2], land surveying [3], environmental monitoring [4], search and rescue missions [5],
+                                        and indoor security solutions [6]. The aim of overarching across all these applications is
+                                        for the robot to maximize area coverage while completing the specified task with minimal
+                                        energy, time, and redundancy costs. Coverage Path Planning (CPP) refers to the process of
+                                        identifying paths that enable a mobile robot to consistently traverse accessible areas and
+                                        visit every point at least once [7]. In the existing literature, this issue is addressed using a
+
+Appl. Sci. 2025, 15, 12666                        https://doi.org/10.3390/app152312666
+Appl. Sci. 2025, 15, 12666                                                                                                                                              2 of 28
+
+                            variety of strategies for known environments (off-line planning) or sensor-based unknown
+                            environments (on-line planning) [8]. In particular, in complex environments with structural
+                            obstacles, establishing systematic coverage routes is critical for optimizing total coverage
+                            efficiency and minimizing energy consumption [9].
+
+                                  CPP methods are generally categorized into two primary approaches: (i) region-
+                            based techniques that involve pre-partitioning the area according to its geometry or topol-
+                            ogy [10], and (ii) global planners that utilize pattern or probability-based methods within
+                            the zone [11]. Among these classifications, one widely used technique, boustrophedon
+                            decomposition, advocates for dividing the area into sub-regions based on obstacles and
+                            ensuring coverage for each region through zigzag scanning in rows [12,13]. Research
+                            conducted by Gabriely and Rimon [14] has demonstrated that mobile robots can follow sys-
+                            tematic coverage routes that do not overlap in grid-based planning. Acar and Choset [15]
+                            have illustrated that topological complexity can be diminished using Morse-based decom-
+                            position. Additionally, approaches such as Voronoi-based navigation [16], spiral-based
+                            scanning [17], and sensor field modeling [18] have showcased systematic coverage strate-
+                            gies depending on the environment. However, an aspect frequently neglected in existing
+                            methods is the impact of inter-region transition paths on total coverage times [19]. While
+                            numerous strategies effectively implement intra-region coverage techniques, they often
+                            overlook the sequence and expense of inter-region transitions or consider them under static
+                            assumptions [20]. In real-world scenarios, the paths that the robot takes between regions
+                            significantly influence both energy consumption and overall coverage efficiency [21,22].
+                            This research introduces a comprehensive coverage planning approach to rectify existing
+                            gaps in the literature. The suggested system defines expanding rectangular areas on grid-
+                            based obstacle maps using a region-growing technique, and generates a boustrophedon
+                            coverage path for each area, while the order of transitions between regions is determined
+                            by solving the Traveling Salesman Problem (TSP). Additionally, comparative performance
+                            evaluations of coverage are conducted utilizing metrics such as coverage efficiency, path
+                            length, and operational load [23­25].
+
+                                  In the realm of grid-based coverage and mobile robot path planning, the A* algorithm
+                            continues to be a fundamental technique because of its reliable structure and optimal
+                            heuristic performance when paired with admissible cost functions. Its extensive use in
+                            more recent research [26­30] underscores its role as a standard approach for planning
+                            transitions between regions. Therefore, in this research, we utilize A*-based transition
+                            logic as a reference point to evaluate the proposed multi-weighted transition planner. This
+                            approach not only aligns with the current best practices but also allows for a fair and
+                            relevant benchmarking process.
+
+                            2. Related Work
+
+                                  Coverage Path Planning (CPP) algorithms form the fundamental components in
+                            various applications aimed at achieving complete area coverage for mobile robots. In
+                            existing literature, these algorithms are generally categorized into two primary groups: (i)
+                            Full coverage strategies and (ii) regional planning and optimization methods for transitions.
+
+                            2.1. Full Coverage Path Planning Approaches
+
+                                  The objective of full coverage methods is for the robot to thoroughly scan all accessible
+                            areas at minimal cost. A widely used method known as Boustrophedon decomposition
+                            topologically partitions the area and applies a two-way zigzag path to each region [9] pro-
+                            posed dynamic zoning strategies based on this structure to reduce directional changes [26]
+                            introduced path strategies that allow the robot to systematically scan by partitioning the
+                            workspace into a grid format [27­37] aimed to generate paths in unknown environments
+Appl. Sci. 2025, 15, 12666                                                                                                                                              3 of 28
+
+                            through entropy-based planning. Some research has incorporated physical parameters
+                            such as terrain type, multi-robot configurations, energy constraints, and slope details into
+                            the coverage planning. However, these techniques often overlook the costs associated with
+                            inter-region transitions.
+
+                                  A*-based planning has been widely used in previous CPP research because of its
+                            predictable behavior and suitability for grid-based maps. Zhao et al. [36] utilized A*
+                            in intricate, energy-limited settings, while Champagne Gareau et al. [38] incorporated
+                            it into a branch-and-bound approach to evaluate its performance against their optimal
+                            planner. These instances reinforce A*'s position as a standard benchmark for connectivity
+                            between regions. According to recent studies, Coverage Path Planning (CPP) aims to ensure
+                            complete area coverage with minimal overlap and path redundancy, while optimizing
+                            overall execution time and energy consumption in robotic applications [39­41].
+
+                            2.2. Region-Based Partitioning and Transition Optimization
+
+                                  Region-based CPP strategies facilitate the application of more localized planning
+                            strategies by segmenting the area into sub-regions. Acar and Choset [32] executed this
+                            decomposition topologically using Morse-based methods. Zelinsky et al. [33] conducted
+                            task allocation among robots by dividing the area for decentralized multi-robot coverage
+                            arrangements. TSP-based methods condense each area to a central point and seek to
+                            minimize transition costs by identifying the shortest path between these points. For
+                            instance, Yang et al. [34] enhanced region ranking with TSP-heuristics yet independently
+                            planned intra-region coverage paths separate from transition paths.
+
+                            2.3. Contribution of This Study
+
+                                  The unique contributions of this study to literature are as follows:
+
+                            1. A systematic and overlap-free creation of rectangular regions that expand maximally
+                                   on grid-based maps featuring obstacles.
+
+                            2. The generation of internal paths for full coverage with the least turns, utilizing a
+                                   boustrophedon pattern CPP approach for each area.
+
+                            3. Derivation of the shortest total transition path using Multi-Weighted Transition
+                                   Cost Model.
+
+                            4. An integrated optimization of both intra-region and inter-region paths using a unified
+                                   cost function. This integration allows the study to address local and global path
+                                   planning comprehensively, diverging from traditional CPP methods, and providing a
+                                   balance between feasibility and efficiency within complex map structures.
+
+                            3. Problem Definition and Optimization Model
+
+                            3.1. Problem Statement
+
+                                  Coverage Path Planning (CPP) for autonomous mobile robots seeks to ensure thorough
+                            and efficient coverage of restricted and unknown free regions filled with obstacles, whether
+                            artificial or natural. This study endeavors to generate cyclically expanding rectangular sub-
+                            regions in environments that accommodate obstacle information, advancing beyond the
+                            conventional grid-based and often static classical CPP methods. Bidirectional coverage in a
+                            boustrophedon format is employed within each region, while the overall coverage trajectory
+                            is established by solving the Traveling Salesman Problem (TSP) for transitions between
+                            regions. Within this context, the proposed system interactively tackles the following
+                            fundamental issues:
+                            · Region Growing Segmentation: Development of overlap-free and connected rect-
+
+                                  angular regions with maximum expansion potential in free areas, considering
+                                  obstacle information.
+Appl. Sci. 2025, 15, 12666                                              4 of 28
+
+                            · Intra-Region Coverage: Implementation of a Boustrophedon style method for direc-
+                                  tional and complete coverage within each rectangular area.
+
+                            · Inter-Region Transition: Reduction of the overall transition cost among regions through
+                                  TSP-like route optimization centered around each region. The structure introduced
+                                  adds to the existing literature by offering a distinct coverage strategy capable of
+                                  decreasing both overall coverage duration and energy expenses in dynamic settings
+                                  that traditional fixed-grid methods struggle to address.
+
+                            3.2. Optimization Framework
+
+                                  For a specified map, the goal is to minimize the total coverage route by focusing on
+                            these objectives:
+
+                            · The full free area of the map must be comprehensively covered:  = \O.
+                            · Each rectangular section must achieve complete coverage using a Boustrophedon-style
+
+                                  path.
+                            · Transitions between different regions need to be optimized to reduce the total distance.
+
+                                  Decision Variables:
+
+                            · R = {r1, r2, . . . , rn}: Rectangular coverage areas formed in unblocked sections
+                            · pi  R: Center coordinates for every region
+                            · T = {t1, t2, . . . , tn}: TSP cycle that determines the order of visits
+                            · Pi = {(xk, yk)}km=i 1: Boustrophedon coverage path generated within region ri
+
+                                  Objective Function:
+                                  The overall cost function, which integrates coverage within regions and transitions
+                            between regions (Equation (1)), employs a cost decomposition approach that has been used
+                            in recent optimization studies focused on regions [14,16,34,35]. The aim is to minimize the
+                            total cost Ctotal: This cost represents the aggregate length of paths for intra-region coverage
+                            as well as inter-region transitions (Equation (1)):
+
+                            n  Ctotal =       +  n-1  |pTj  -  pTj+1 |
+                            i=1  CCPP (Pi  )     j=1                    (1)
+
+                                  Here:
+
+                            · CCPP(Pi): Path length necessary for the intra-region Boustrophedon coverage
+                            · |pTj - pTj+1 |: Euclidean distance between two successive region centers
+
+                                  Constraints:
+
+                            · Full Coverage: Each unblocked cell must be covered exactly once; overlaps or gaps
+                                  are prohibited (Equation (2)).
+
+                            (x, y)    !ri : (x, y)  ri  (x, y)  Pi      (2)
+
+                            · Transition Compatibility: Each region in the TSP sequence must be visited exactly
+                                  once (Equation (3)).
+
+                                 i = j, Ti = Tj                         (3)
+
+                            · Transition Path Validity: Paths for inter-region transitions must not interfere with
+                                  obstacles. In this study, transition paths are enhanced to navigate around impediments
+                                  between region segments employing the Multi-Weighted Transition Cost Model.
+Appl. Sci. 2025, 15, 12666                                                                                                                                              5 of 28
+
+                            4. Proposed Methodology
+
+                            4.1. Methodological Overview
+                                  This research introduces a consolidated coverage planning framework that guarantees
+
+                            autonomous robots will systematically and efficiently cover all accessible spaces in grid-
+                            based environments cluttered with fixed obstacles. Figure 1 summarizes the proposed
+                            method's workflow. Initially, the input obstacle grid map is segmented into rectangular
+                            regions (Region Growing). Full coverage is then conducted within each region using
+                            a directional boustrophedon pattern (Intra-Region CPP). Smaller and more fragmented
+                            regions are merged according to the FSM (Fill-Similarity Measure) ratio to boost structural
+                            efficiency. The transition path connecting the centers of the new regions is optimized
+                            using the solution to the Traveling Salesman Problem (TSP) (Inter-Region TSP). Ultimately,
+                            the intra-region and inter-region paths are integrated into a single framework to create a
+                            Comprehensive Global Coverage Path.
+
+                            Figure 1. General structure of the proposed coverage planning system.
+
+                                  The introduced method features a multi-stage, modular framework comprising the
+                            following components:
+                            · Geometric Obstacle-Aware Region Growing Segmentation: Division of obstacle-free areas
+
+                                  into contiguous and uniform rectangular regions optimized for maximum expansion.
+                            · Directional Boustrophedon Based Coverage: Ensuring full coverage with a path
+
+                                  generated in a regular zig-zag manner for each rectangular sub-region.
+                            · TSP-Solution for Minimum Transition Route between Regions: Optimizing the transi-
+
+                                  tions between the centers of each region using a Nearest Neighbor-based solution to
+                                  the Traveling Salesman Problem (TSP) to minimize the overall path length.
+
+                                  Additionally, to more accurately represent the modular dependencies of the proposed
+                            framework, directional arrows have been incorporated to show the flow of information
+Appl. Sci. 2025, 15, 12666                                                         6 of 28
+
+                            between the Region Growing, Intra-region CPP, and FSM­Inter-region TSP modules. For
+                            example, the FSM unit manages both intra- and inter-region transitions utilizing the path
+                            outputs from local CPP blocks along with the data from the region center. These feedback
+                            loops are essential for producing a cohesive global coverage path and have now been
+                            visually highlighted in Figure 1.
+
+                                  The primary objective of this comprehensive structure is to overcome traditional
+                            segmentation strategies; that is, to generate regions that are formally compatible and non-
+                            overlapping in complex environments where fixed grid or heuristic division methods are
+                            insufficient, and to create an optimal global energy-distance coverage plan. In this study,
+                            the robot is represented as a point, and map inflation is utilized on all obstacles to represent
+                            the true collision boundary according to the robot's physical dimensions.
+
+                            4.2. Grid-Based Obstacle-Aware Region Growing
+
+                                  In this phase, the preprocessed map's free (obstacle-free) cells are segmented into
+                            maximum-sized rectangular coverage regions through regular expansion. The algorithm
+                            verifies the following conditions while inspecting the growth of the regions horizontally
+                            and vertically from their starting points:
+
+                            Expansion Condition:
+
+                            · map(i, j) = 0 and used(i, j) = 0: The target cell must be unoccupied and not
+                                  utilized previously.
+
+                            · Expansion proceeds as long as there are gaps in all four directions (north, south, east,
+                                  and west).
+
+                            Region Definition:
+
+                            · Each region is represented by a coordinate box.
+                            · All cells within rmin, rmax, cmin, cmax belong to region Ri (Equation (4)).
+
+                            rmin  i  rmax, cmin  j  cmax                           (4)
+
+                                  It is important to note that this phase, unlike traditional cell decomposition techniques,
+                            has an expansion constraint that adjusts to the distribution of obstacles and seeks to
+                            minimize the number of regions. Each new region is identified in a manner that avoids
+                            overlapping with existing ones by expanding to cover the maximum area.
+
+                            4.3. Coverage Path Planning (Boustrophedon Scanning) and Inter-Region Path Planning (TSP)
+
+                                  For every rectangular sub-region, the robot's path is established using a row-based zig-
+                            zag (Boustrophedon) pattern. The goal is to cover each free cell just once while minimizing
+                            the number of changes in direction throughout this process. The path is aligned in a manner
+                            that fits the geometry of the region (parallel to its width).
+
+                                  Definition of Waypoints: The coverage path assigned to each region is described as
+                            follows (Equation (5)):
+
+                            Pk = (xk1, yk1), (xk2, yk2), . . . , xkmk , ykmk       (5)
+
+                                  Total Intra-Region Path Length The total of the path lengths calculated for all regions
+                            is expressed as follows (Equation (6)):
+
+                              Lintra =Nrmk -1  |  Pk  (l  +  1)  -  Pk  (l  )  |2  (6)
+                            k=1         l=1
+Appl. Sci. 2025, 15, 12666                                                                                 7 of 28
+
+                                  Here |· |2, denotes the Euclidean distance. The zig-zag scanning pattern can be auto-
+                            matically determined based on both the operating amplitude of the robot and the ratio of
+                            latitude to longitude.
+
+                                  Each rectangular coverage area is characterized by its geometric center. The shortest
+                            path connecting these centers is determined by finding a solution to the Traveling Salesman
+                            Problem (TSP).
+
+                                  Region Center Definition: When a region is labeled as Rk = (rmin, rmax, cmin, cmax),
+                            the coordinates of its center are defined as follows (Equation (7)):
+
+                                                     Ck =  cmin   +  cmax ,  rmin  +  rmax                 (7)
+                                                                  2                2
+
+                                  Total Cost of Transition: The overall cost of the TSP tour among regional centers is
+                            given by (Equation (8)):
+
+                                                        Linter =  Nr - 1  CTi - CTi+1 |2                   (8)
+                                                                  i=1
+
+                                  In this case, T = {T1, T2, . . . , TNr }, represents the permutation that dictates the
+                            visiting order. This order can be derived using the Nearest Neighbor algorithm or other
+                            alternative TSP solutions. This step facilitates the efficient integration of the global path
+                            plan in scenarios involving multi-region coverage while significantly influencing overall
+                            energy consumption and coverage duration.
+
+                            4.4. Region Merging via Fill-Similarity Measure (FSM)
+
+                            Although the rectangular regions generated during the region growing phase are
+
+                            created with a focus on maximum expansion, some regions may become compressed into
+
+                            narrow spaces due to the map's geometry and obstacle layout, resulting in them being
+
+                            relatively small in size. Such small regions lower overall coverage efficiency, increase
+
+                            the frequency of direction changes, and prolong the robot's movement time. As a result,
+
+                            a metric known as the Fill-Similarity Measure (FSM) is proposed to merge regions that
+
+                            are smaller than a specified limit established after the region growing process with their
+
+                            suitable larger adjacent regions. This metric quantitatively assesses the coverage efficiency
+
+                            of the rectangular union between two regions and facilitates merge decisions based on
+
+                            geometric considerations.
+
+                            FSM Ratio Definition: The FSM ratio for two regions Ri and Rj is defined as
+
+                            follows (Equation (9)):
+
+                                                       FSM Ri, Rj    = A(Ri) + A Rj                        (9)
+                                                                           A Ri  Rj
+
+                            Here:
+
+                            · A(Rk): Area of region Rk (measured in pixels or number of cells)
+                            · Ri  Rj: The least common rectangle enclosing the boundaries of both regions
+
+                                  The closer this ratio is to 1, the more "gapless" and efficient the newly formed region
+                            from the merge will be. In practical terms, a threshold value  is defined for the FSM ratio
+                            (for example,  = 0.85). If the FSM Ri, Rj   condition is met, these two regions are
+                            considered suitable for merging.
+
+                                  Merge Algorithm:
+
+                            · Detection of small regions: Regions with an area less than Amin are classified as small.
+                            · Searching for the optimal match: For each small region, the large neighboring region
+
+                                  with the highest FSM ratio is determined.
+Appl. Sci. 2025, 15, 12666                                                                                                                                              8 of 28
+
+                            · Greedy merge: is executed on the first match whose FSM ratio surpasses the
+                                  defined threshold.
+
+                            · Reassignment of temporary regions: Small regions that cannot be merged are "shad-
+                                  owed" to the nearest large region.
+
+                                  Figure 2 illustrates the progressive and sequential structure of the region merging
+                            algorithm based on the FSM (Fill-Similarity Measure) ratio. Initially identified solely as a
+                            large area, R5 was assessed sequentially alongside the small areas that were geometrically
+                            adjacent to it, and the merge was conducted according to their suitability status. First, when
+                            evaluating the R4 area in terms of FSM ratio with R5, it remained above the established
+                            threshold value ( = 0.85), yielding an FSM45 value of 0.92. This ratio indicates that the
+                            common rectangular boundary formed by the combination of the two areas is largely filled.
+                            Consequently, R4 was merged with R5 to create a new combined area, R45. Following
+                            this integration, the subsequent small area, R3, was evaluated against R45, once again
+                            exceeding the threshold value with FSM345 equating to 0.89. The FSM ratio indicates that
+                            the merger is effectively efficient, even with a slight reduction in the occupancy rate. In
+                            a similar manner, the assessment for the R2 area resulted in a value of FSM2345 = 0.86,
+                            confirming the merger as suitable. However, the smallest area, R1, although physically
+                            next to R2345, was calculated to have an FSM ratio of FSM12345 = 0.78. Since this value fell
+                            below the predefined threshold, the R1 area was excluded from the system, and the merger
+                            did not proceed. Thus, an effective, controlled, and limited area expansion strategy was
+                            executed by considering not only geometric adjacency but also occupancy rates. The FSM
+                            ratios calculated for each merger iteration and the decisions made based on these ratios are
+                            compiled in Table 1.
+
+                            Figure 2. FSM-based chained region merging steps.
+
+                            Table 1. Step-by-step region merging process and decision status based on FSM ratio.
+
+                            Stage     Merging Regions  FSM Rate                Decision
+
+                            FSM45     R5 + R4          0.92                    Merged
+                            FSM345    R45 + R3         0.89                    Merged
+                            FSM2345   R345 + R2        0.86                    Merged
+                            FSM12345  R2345 + R1       0.78                    Excluded
+
+                                  An elevated FSM ratio (approaching 1.0) signifies that the combination of two areas
+                            forms a highly effective rectangular space with minimal voids, which is advantageous for
+                            decreasing unnecessary directional shifts and enhancing path compactness. In contrast,
+Appl. Sci. 2025, 15, 12666                                                                                                                                               9 of 28
+
+                            a lower FSM ratio indicates that merging could lead to inefficiencies, such as disjointed
+                            shapes or ineffective space usage. Therefore, regions yielding FSM values below a certain
+                            threshold (e.g., FSM < 0.85) are omitted from merging to ensure high coverage quality.
+                            Consequently, the FSM metric strikes a balance between geometric compactness and the
+                            viability of merging, thereby enhancing overall path planning efficiency.
+
+                                  This approach can be represented as a specific variant of the classical "Set Union" and
+                            "Area Optimization" problems. The FSM ratio serves as a ratio-based objective function
+                            aiming to maximize the filling efficiency of the rectangular area that will result from the
+                            union. Therefore, it prevents the inclusion of unnecessary gaps within the coverage area
+                            and overly small areas into the system. This union process substantially enhances the path
+                            planning efficiency of the system by operating with fewer but larger areas, thereby reducing
+                            the total cost of the integrated objective function. The algorithm is structured for low
+                            computational cost, making it suitable for implementation in the MATLAB environment.
+
+                            4.5. Obstacle-Aware and Directionally Biased Transition Planning
+
+                                  In the standard version of our framework, transitions between regions are deter-
+                            mined using a greedy selection approach along with A*-based pathfinding. Although
+                            this combined solution provides an efficient and practical method for path construction in
+                            organized environments, it has four key limitations when used in maps characterized by a
+                            high density of obstacles or restricted spatial arrangements.
+
+                            4.5.1. Limitations of A*-Based Inter-Region Transition
+
+                                  Although A*-based methods are widely used as a standard in grid-based planning,
+                            their implementation during inter-region transitions reveals significant challenges, par-
+                            ticularly as the complexity of the environment increases. The limitations discussed
+                            here emphasize critical issues concerning spatial reasoning, obstacle detection, and
+                            planning methodologies.
+
+                            (i) Dominance of Euclidean Proximity: In the A*-based method, the main criterion for
+                                   decision-making is the Euclidean distance between the endpoints of segments. This
+                                   distance-focused approach overlooks important semantic factors such as risk levels,
+                                   passage width, and the closeness to obstacles.
+
+                            (ii) Insensitivity to Obstacle Density: While A* effectively avoids collisions, it fails to
+                                   differentiate between narrow passageways and wide corridors, nor does it impose
+                                   penalties on paths that traverse areas with high densities of obstacles. This can lead to
+                                   transitions that are technically valid but not feasible in practice.
+
+                            (iii) Ignorance of Heading Variation: The traditional A* planning cost function does not
+                                   consider the angular discrepancy between the robot's orientation and the direction
+                                   of the transition. This oversight increases energy expenditure for differential or
+                                   nonholonomic robots.
+
+                            (iv) Short-Sighted Optimization: Greedy sequencing of segments aims to minimize local
+                                   costs without considering the overall optimality of the entire tour. This drawback
+                                   becomes more pronounced in larger maps, where the effects of inefficient transitions
+                                   accumulate over time.
+
+                            4.5.2. Proposed Multi-Weighted Transition Cost Model
+
+                                  To address the shortcomings highlighted in the previous section, it is proposed a more
+                            exhaustive transition model. This enhanced approach builds upon the standard A*-based
+                            transition planner by incorporating a multi-objective cost function that considers not only
+                            geometric distances but also environmental constraints and directional consistency. In this
+                            subsection, we will detail the elements of the proposed cost function and its mathematical
+Appl. Sci. 2025, 15, 12666                                                                                 10 of 28
+
+                            representation. To overcome these challenges, we propose a multi-objective cost function
+                            defined as (Equation (10)):
+
+                            Cij =  · deuclid(pi, pj) +  · obs(pi, pj) +  · angle(pi, pj)                   (10)
+
+                            where
+
+                            · deuclid(pi, pj): The Euclidean distance from the exit of region Ri to the entry of re-
+                                  gion Rj.
+
+                            · obs(pi, pj): The normalized density of obstacles along the transition route identified
+                                  by A*.
+
+                            · angle(pi, pj): The absolute difference in angle regarding heading direction.
+                            · , , : Adjustable scalar weights.
+
+                                  The scalar parameters , , and  used in the proposed transition cost function are
+                            essential for balancing geometric, environmental, and kinematic aspects. The selection of
+                            these parameters is dependent on the specific application. For example, in environments
+                            that are cluttered, like greenhouses, it is beneficial to assign a higher value to  to impose
+                            penalties for transitions occurring close to obstacles. On the other hand, in spacious
+                            corridors or open fields, it may be more advantageous to focus on  to prioritize shorter
+                            routes. When dealing with nonholonomic robots, where the cost of turning is significant, it
+                            is important to set  to a higher value to encourage transitions that maintain directional
+                            consistency. In our approach, we employed a grid search method across typical scenarios to
+                            identify suitable values (e.g.,  = 1.0,  = 2.0,  = 1.5). This modular structure also facilitates
+                            the future integration of learning-based techniques for parameter tuning.
+
+                                  This cost function promotes transitions that are not only more concise but also navigate
+                            through less congested spaces while preserving a smooth directional flow. The obstacle
+                            density is approximated as (Equation (11)):
+
+                                               obs          =  1  L    m(xk,  yk  )                        (11)
+                                                               L  k=1
+
+                            where (xk, yk) represent the grid coordinates along the A* path, m(·)  {0, 1} and is the
+                            binary occupancy map.
+
+                            In a similar fashion, the cost associated with heading deviation is articulated as
+
+                            (Equation (12)):
+
+                                              angle pi, pj     = i - tan-1    yj - yi                      (12)
+                                                                              xj - xi
+
+                            where i represents the robot's orientation at the exit location of region Ri.
+
+                            4.5.3. Incorporation into the Global Planner
+
+                                  Incorporating the proposed cost model into the global planner entails reinterpreting
+                            the inter-region transition as a graph traversal problem. Each endpoint of the region
+                            segment acts as a node in the graph, and the feasible transitions are represented as weighted
+                            edges. The cost model substitutes the traditional Euclidean metric to facilitate more
+                            informed transition choices throughout the planning horizon. The subsequent steps outline
+                            the integration methodology.
+
+                                  Let G = (V, E) be a directed graph where V represents the endpoints of segments and
+                            E denotes the viable transition paths assessed through A*. Each edge eij  E is assigned a
+                            weight Cij, as previously defined. The planner progressively develops a tour over G by
+                            utilizing a modified greedy approach with constrained lookahead:
+
+                            · Begin with any chosen starting segment Rs.
+Appl. Sci. 2025, 15, 12666                                                                           11 of 28
+
+                            · At each iteration, assess all possible transitions to unvisited segments by employing Cij.
+                            · Choose the segment that has the lowest weighted cost.
+                            · Continue this process until every segment has been visited.
+
+                                  This approach produces a route that effectively balances travel efficiency, smooth
+                            maneuverability, and environmental consciousness.
+
+                                  Beyond its theoretical foundation, the proposed transition model delivers several prac-
+                            tical advantages that improve the planner's effectiveness in real-world robotic applications.
+                            These benefits are summarized as follows:
+
+                            · Enhanced alignment with nonholonomic constraints,
+                            · Flexible for cluttered or semi-structured settings,
+                            · Works well with real-time grid-based systems,
+                            · Scalable to medium-scale maps (approximately 50 × 50 grids) with planning times
+
+                                  under 1000 ms.
+
+                                  This model more effectively connects local path generation with global path opti-
+                            mization compared to planners that rely solely on A* or Euclidean transitions. Validation
+                            through experiments is presented in the Results Section.
+
+                                  The overall structure of this system is illustrated in Figure 3. In the figure's notation,
+                            each Rk denotes a region formed in the coverage plan. Each region is designed to have
+                            two endpoints (p1, p2). The term Llntk represents the length of the Boustrophedon-style
+                            coverage (CPP) path implemented within the Rk region; Lk signifies the cost of Multi-
+                            Weighted Transition based connection path employed to shift to the next region. Together,
+                            these two elements make up the total connection cost for the respective step (Equation (13)):
+
+                            Ltotalk = Llntk + Lk                                                     (13)
+
+                            Figure 3. Connection model based on intra-coverage and switching costs.
+
+                                  Here, k signifies the sequence order of connections in the segment. Throughout
+                            each transition, a greedy strategy is utilized, favoring the connection with the minimum
+                            Ltotalk value.
+
+                                  Optimizing both intra-region coverage paths (intra-region CPP) and inter-region
+                            transition paths (inter-region TSP) is vital for the overall performance of the system. Conse-
+                            quently, the final objective function of this study is presented in a weighted form based on
+                            the total costs of both components (Equation (14)):
+
+                            min(Lintra +  · Linter)                                                  (14)
+
+                            where
+
+                            · Lintra: Sum of boustrophedon path lengths across all rectangular areas.
+                            · Linter: Total length of the transit route between centers of regions.
+                            ·   R+: User-definable scale factor that modifies the weight of the transition cost.
+Appl. Sci. 2025, 15, 12666                                                                           12 of 28
+
+                                  This formulation allows for comprehensive coverage planning within the area and
+                            strategic transitions between regions to be addressed within a single integrated framework.
+                            It provides solution adaptability, especially in maps with multiple regions, and system
+                            dynamics can be adjusted using parametric modifications. This method is designed for
+                            application in the MATLAB environment to optimize both coverage path efficiency and
+                            the total distance for inter-regional transition routes. The entire mathematical framework
+                            is supported by validation scenarios on complex multi-regional maps. The subsequent
+                            pseudocode presents the proposed algorithm for planning transitions between regions,
+                            merging spatial, environmental, and directional factors into a cohesive decision-making
+                            process (Algorithm 1).
+
+                            Algorithm 1. Obstacle-Aware Inter-Region Transition Planner.
+
+                            Input:
+
+                            R = {R1, R2, . . ., Rn}    //Set of rectangular regions
+                            p_i, _i                         //Exit point and heading of each region
+
+                            map_data                      //Binary occupancy grid
+
+                            , ,                           //Weight parameters
+
+                            Output:
+
+                            P_global                        //Ordered list of region visits
+
+                            1: Initialize S  {1, . . ., n}, P_global  [ ]
+
+                            2: current  SelectInitialRegion(S)
+
+                            3: Remove current from S
+
+                            4: while S = Ø do
+
+                            5:       min_cost  
+
+                            6:       for each j  S do
+
+                            7:        path_astar  AStar(p_current, p_j, map_data)
+
+                            8:        d  EuclideanDistance(p_current, p_j)
+
+                            9:          MeanOccupancy(path_astar)
+
+                            10:         |_current - atan2(y, x)|
+
+                            11:       C  ·d + · + ·
+
+                            12:       if C < min_cost then
+
+                            13:                min_cost  C
+
+                            14:                next  j
+
+                            15:                best_path  path_astar
+
+                            16:            end if
+
+                            17:       end for
+
+                            18:       Append next to P_global
+
+                            19:       current  next
+
+                            20:       Remove next from S
+
+                            21: end while
+
+                            22: Return P_global
+
+                                  In each iteration, the planner assesses all possible transitions from the current region
+                            to unvisited options through a multi-weighted cost function. While A* is utilized as
+                            a subroutine to identify collision-free routes between segment endpoints, the choice of
+                            transition is directed by a specialized cost model that incorporates Euclidean distance,
+                            obstacle density, and heading deviation. This approach facilitates a more adaptable and
+                            realistic strategy for traversing regions, particularly in environments that are cluttered or
+                            semi-structured. The result is a globally ranked list of region visits that reduces the overall
+                            transition cost while maintaining local coverage completeness.
+Appl. Sci. 2025, 15, 12666                                                                                   13 of 28
+
+                            5. Results
+
+                                  To assess the effectiveness of the proposed method that combines region growing,
+                            Boustrophedon coverage, and inter-regional TSP based path planning, the following per-
+                            formance metrics are considered:
+
+                            · Number of Regions (Nr): Total number of non-overlapping rectangular sub-regions
+                                  generated from the Region growing algorithm.
+
+                            · Intra-Region Coverage Path Length (L): The cumulative length of coverage paths
+                                  produced by the Boustrophedon scanning method in each rectangular region.
+
+                            · Inter-Region Transition Cost (Lint): The total length of transition paths determined
+                                  by the Traveling Salesman Problem (TSP) approach, solved via the nearest neighbor
+                                  method, through the center point of each region.
+
+                            · Total Path Cost (Ltotal): The overall cost of coverage and transition paths (Equation (15)):
+
+                                                                                          Ltotal = L + Lint  (15)
+
+                            · The proportion of the total area covered by the robot compared to the accessible
+                                  (obstacle-free) zones on the map.
+
+                            · Running Time (s): The duration required to execute the entire algorithm (including
+                                  segmentation, coverage, and transition planning).
+
+                            5.1. Test Maps and Setup
+
+                                  Figure 4a presents Map-1, a representative testing environment that has been dig-
+                            itally reconstructed from the actual floor plan of the Faculty of Engineering where this
+                            research took place. The map encompasses a section measuring 30 m × 30 m, featur-
+                            ing large classrooms, corridor intersections, clusters of offices, and open-access spaces.
+                            Each area is divided using axis-aligned rectangular sections that correspond to the build-
+                            ing's structural design, ensuring that the orientation of regions aligns with the prevailing
+                            architectural directions.
+
+                                                                                    (a)
+
+                            Figure 4. Cont.
+Appl. Sci. 2025, 15, 12666  14 of 28
+
+                                                                  (b)
+
+                            Figure 4. (a). Structural Building Layout (Map-1). (b). Irregular Geometry Evaluation.
+
+                                  In this setting, the majority of transitions happen along horizontal and vertical hall-
+                            ways that are largely unobstructed, enabling the proposed planner to exhibit its greatest
+                            efficiency in environments characterized by low clutter and structured layouts. The seg-
+                            mentation of regions is distinctly aligned with spatial boundaries, preventing any overlap
+                            or fragmentation.
+
+                                  The inset zoomed in at the bottom of the figure emphasizes an important aspect
+                            of the algorithm: the process of merging regions. In locations where fragmentation is
+                            excessive--such as tightly knit stair-step-like sub-regions--neighboring regions that possess
+                            compatible coverage paths are selectively merged to create larger, more cohesive areas.
+                            This action, illustrated by the merged green regions and simplified inter-paths (P17 to
+                            P22), decreases the number of necessary transitions while ensuring complete coverage.
+                            The merging process is steered by factors like adjacency, alignment of coverage, and
+                            continuity of obstacles, effectively highlighting the planner's flexibility in transforming
+                            overly segmented structures into optimized macro-regions. The visual symbols used in
+                            Figures 5­9 are explained in Table 2.
+
+                                  In Figure 4b, there are numerous irregular edges, particularly in the central and lower-
+                            left areas, where free-space corridors do not align perfectly with horizontal or vertical lines.
+                            Although the region growing process is based on an axis-aligned framework, the FSM-based
+                            techniques for region merging and post-processing enable the method to accommodate
+                            these atypical shapes by: Allowing for partial fills in regions bounded by diagonal lines,
+                            Preventing excessive segmentation of curved or angled areas, and Effectively sustaining
+                            coverage with minimal changes in direction.
+
+                                  Figure 5 depicts Map-2, a grid-based environment that has a semi-structured design
+                            intended to replicate repetitive indoor configurations such as greenhouses, storage facilities,
+                            or industrial shelving systems. The workspace features parallel longitudinal sections
+                            aligned along the horizontal axis, interspersed with sparse, strategically placed obstacles
+                            that partially influence the planner's inter-region transition behavior without creating
+                            complete blockages.
+
+                                  Each rectangular section is similar in size, allowing for uniform intra-region Bous-
+                            trophedon coverage. Nonetheless, the placement of obstacles introduces asymmetries in
+                            transitions between regions, particularly within the lower region cluster, where changes in
+                            direction and merging patterns become increasingly important. The segment layout in the
+Appl. Sci. 2025, 15, 12666                                                                                                                                             15 of 28
+
+                            central vertical corridor reveals symmetrical constraints that mimic aisle-based movement
+                            patterns typical in agricultural row coverage or palletized storage designs.
+
+                            Figure 5. Dense Free Grid Structure (Map-2).
+
+                            Figure 6. Symmetrical Gate Structure (Map-3).
+Appl. Sci. 2025, 15, 12666                                                                  16 of 28
+
+                            Figure 7. Agriculture/Greenhouse-like Strip Structure (Map-4).
+                            Figure 8. Semi-structured Mixed Geometry (Map-5).
+Appl. Sci. 2025, 15, 12666                                                                         17 of 28
+
+                            Figure 9. Zigzag converage paths and TSP-based inter-region passages.
+
+                            Table 2. Symbol legend table.
+
+                            Symbol                                            Definition
+                                                           Coverage path (Boustrophedon sweep)
+                                     Light Green Line
+                                           Red Line                      Inter-region path
+
+                                        Red Dot over                        Region center
+                                    Green-Hatched Box
+                                                                         Region boundary
+                                          Blue Line
+
+                                  This map was chosen to assess the planner's ability to take advantage of structural
+                            repetition, reduce unnecessary turns, and ensure smooth navigation in environments
+                            characterized by high coverage regularity, while still requiring obstacle-aware transition
+                            planning. The algorithm's adaptable response to this semi-uniform setup illustrates both
+                            its reliability and its ability to react to slight architectural irregularities.
+
+                                  Map-3 (Figure 6) represents a symmetrically partitioned gated environment, featuring
+                            a prominent central obstacle that imposes architectural constraints by dividing the map
+                            into four distinct zones. The cross-shaped obstruction serves as a choke point, enforc-
+                            ing narrow and centralized passageways that challenge both coverage consistency and
+                            transition feasibility.
+
+                                  This layout serves as a critical benchmark for evaluating the proposed Obstacle-Aware
+                            Inter-Region Transition Planner, which must navigate limited-access gates while preserving
+                            optimal segment visitation. Unlike uniform or semi-structured maps, here the planner
+                            is required to reason about passage availability, directional continuity, and symmetrical
+                            alignment, all of which interact nontrivially with the cost function's angular deviation and
+                            obstacle density terms.
+
+                                  Notably, segment orientations are adaptively aligned to the map's architectural sym-
+                            metry, and the planner successfully constructs transitions that minimize costly detours
+                            through narrow gates. The resulting trajectory highlights the framework's capability to
+                            maintain coverage efficiency even under severe spatial constraints.
+Appl. Sci. 2025, 15, 12666                                                                                                                                             18 of 28
+
+                                  This scenario approximates environments such as automated greenhouses with zonal
+                            gates, controlled-access warehouses, or modular laboratory floors, where efficient and
+                            adaptive inter-region routing is paramount.
+
+                                  Map-4 (Figure 7) models an agricultural or greenhouse-like setting featuring a series of
+                            elongated, narrow segments, each with small stationary obstacles placed at regular intervals.
+                            These obstacles create minor interruptions within the otherwise straight coverage strips,
+                            mimicking real-world elements such as planting rows, irrigation systems, or pathways.
+
+                                  The map provides a demanding situation for planning transitions between regions,
+                            requiring the robot to execute brief, frequent, and accurately directed movements while
+                            steering clear of overlap and dead ends. The suggested Obstacle-Aware Inter-Region
+                            Transition Planner shows great proficiency in handling these frequent navigation challenges
+                            by utilizing its angular bias and penalties for obstacle density. Importantly, the planner
+                            maintains directionality along the horizontal axis, minimizing the need for frequent heading
+                            changes and ensuring smooth movement.
+
+                                  This setup is particularly applicable to precision agriculture, automated greenhouse
+                            operations, and tasks involving inspection in narrow lanes, where traversal limitations are
+                            stringent and collision tolerance is low. The system's capacity to create locally optimized,
+                            high-frequency transitions in tight spaces further underscores its effectiveness in confined
+                            and repetitive environments.
+
+                                  Map-5 (Figure 8) illustrates a semi-structured design with a combination of geometric
+                            patterns, where rectangular coverage zones are positioned both horizontally and vertically
+                            around a prominent central obstacle. This arrangement is especially pertinent for hybrid
+                            indoor environments, like multifunctional office spaces or adaptable warehouse areas,
+                            where fixed partitions and irregular spatial uses coexist.
+
+                                  The large rectangular obstacle located at the center acts as a navigational bottleneck,
+                            requiring intelligent routing between regions to ensure continuous overall coverage. The
+                            algorithm effectively tackles this issue through its Obstacle-Aware Inter-Region Transition
+                            Planner, which assesses visibility corridors and detour costs dynamically during the path
+                            generation process. The transitions in this map are primarily vertical and need to be
+                            calculated with high accuracy due to frequent obstructions and narrower corridor widths.
+
+                                  Additionally, the irregular shapes and orientations of segments challenge the algo-
+                            rithm's adaptive segmentation strategy, demonstrating its strength in settings that stray
+                            from standard orthogonal or uniform grid layouts. The framework successfully illustrates
+                            context-sensitive transition generation while maintaining total coverage and execution
+                            time, highlighting its practical effectiveness for real-world semi-structured designs.
+
+                                  Table 3 presents a quantitative evaluation of the proposed algorithm's performance
+                            across five different map configurations. It is clear from the metrics that Map-1 exhibits the
+                            greatest intra-segment coverage path length L = 797, mainly due to its large and sparse
+                            areas, while also experiencing the longest inter-region transitions Lint = 3333, leading to
+                            the highest total path cost Ltotal = 34, 130 and a processing time of 842 ms. Nevertheless,
+                            the region merging process, which lowered the segment count from 17 to 11, significantly
+                            reduced unnecessary transitions and enhanced spatial continuity, thus justifying the slightly
+                            elevated computational expense.
+
+                                  In comparison, Map-5, despite containing a central obstacle and areas with mixed
+                            orientations, recorded the shortest total path length Ltotal = 1237, the lowest intra-coverage
+                            cost L = 69, and the quickest execution time (316 ms). These findings indicate that compact
+                            segment distributions with well-aligned connectivity paths result in better performance in
+                            terms of coverage efficiency and real-time functionality.
+Appl. Sci. 2025, 15, 12666                                                                           19 of 28
+
+                            Table 3. Performance metrics for different test maps.
+
+                            Map    # Seg-  La    Lint                              Ltotal  %         Duration
+                                   ments                                                   Coverage  (ms)
+                            Map-1                33,333                            34,130
+                            Map-2  (17  11) 797  2428                              2565    98.6      842
+                            Map-3                2030                              2266    96.8      412
+                            Map-4  11      137   1514                              2089    97.3      389
+                            Map-5                1168                              1237    96.1      561
+                                   11      236                                             98.1      316
+
+                                   22      575
+
+                                   7       69
+
+                                  Map-2 and Map-4, which feature repetitive and elongated structures, show an increase
+                            in intra-segment costs due to their narrow and stretched segment shapes. However, their
+                            reduced inter-region costs and segment regularity lead to acceptable coverage rates (96.8%
+                            and 96.1%, respectively) within moderate time frames.
+
+                                  Map-3 provides a balanced structure that is particularly useful for evaluating inter-
+                            region transition planning. With an obstacle centrally positioned that necessitates a sym-
+                            metric transition design, the algorithm maintained a solid balance between path length
+                            and responsiveness.
+
+                                  In summary, the findings imply that the proposed framework is especially effec-
+                            tive in semi-structured environments where obstacles are either sparse or consistently ar-
+                            ranged, and the segment geometry facilitates strategic merging or alignment. The adaptive
+                            inter-region planning component guarantees that transitions are performed dynamically,
+                            resulting in coverage ratios that consistently exceed 96% across all scenarios.
+
+                                  All time measurements for the various algorithms were conducted in a MATLAB
+                            R2024a environment on a system equipped with an Intel Core i5 (11th generation) processor,
+                            32 GB of DDR4 RAM, and an Intel Arc graphics card (Intel Corp., Santa Clara, CA, USA).
+                            During the assessment, the algorithm was executed solely on the CPU with no use of GPU
+                            acceleration. On this hardware setup, it was observed that the proposed method finished
+                            in an average of 842 ms for scenarios with high transition costs, such as Map-1, and in 316
+                            ms for simpler structures like Map-5. These results indicate the computational viability of
+                            the method for real-time applications.
+
+                                  The suggested region-based segmentation combined with Boustrophedon coverage
+                            and Obstacle-Aware Inter-Region Transition-based transition planning was benchmarked
+                            against two prominent basic approaches from the literature. or performance evaluation, a
+                            comparative analysis was conducted against the Global Boustrophedon [12,22,39,41] and
+                            Spiral Decomposition (Spiral CPP) [40] approaches, which have been presented in the
+                            literature as robust and efficient algorithms for coverage path planning:
+
+                            · Global Boustrophedon Path Planning (G-BPP): A classical technique that examines the
+                                  obstacle-free area as a unified whole.
+
+                            · Cell-by-Cell Spiral Decomposition (Spiral CPP): A pattern that traverses all map cells
+                                  in a spiral fashion and alters direction in localized areas.
+
+                                  Map-3 was selected for this comparison due to its structure, which is neither overly
+                            complex nor overly simplistic in terms of the number of segments and placements of obsta-
+                            cles. It features both narrow passages and uniform segment orientations, presenting mixed
+                            environmental characteristics that can evaluate the proposed method's performance both
+                            within segments and between them. It is understood that spherical or spiral methodologies
+                            in the literature generally do not perform optimally in such geometries. The assessments
+                            for each method were conducted on the same system configuration under identical starting
+                            and ending conditions. The durations reported only account for the path planning process,
+                            excluding visualization or I/O operations.
+Appl. Sci. 2025, 15, 12666                                                            20 of 28
+
+                                  Table 4 displays the results of comparative evaluations of the proposed approach
+                            alongside two established baseline methods--Global Boustrophedon Path Planning (G-
+                            BPP) and Spiral Coverage Path Planning (Spiral CPP)--on Map-3, characterized by multiple
+                            obstacle zones containing narrow corridors and complex free-space areas.
+
+                            Table 4. Comparative performance outputs of the methods on Map-3 (highlighting strengths of the
+                            proposed method.
+
+Method                             Segment Structure   La   Lint  Ltotal  % Coverage  Duration (ms)
+
+Proposed Method                            Partial    236   2030  2266         97.3          389
+Global Boustrophedon (G-BPP) [36]       Single part   1986    -   1980         87.5          645
+Spiral CPP                              Single part   2145    -   2145         92.1          568
+
+                                  The Proposed Method utilizes a hybrid strategy for region segmentation that combines
+                            rectangular decomposition with partial merging. It achieves a notably reduced intra-region
+                            coverage length La = 236 and inter-region connection cost Lint = 203, culminating in a total
+                            path length Ltotal = 2266 that is significantly shorter than those reported by the global spiral
+                            and boustrophedon methods, which have total lengths of 2145 and 1980, respectively.
+
+                                  While G-BPP shows a slightly lower overall distance than the proposed method,
+                            its coverage ratio (87.5%) is significantly lower, indicating substantial unmapped areas,
+                            likely due to interruptions caused by obstacles in the global sweeping pattern. Spiral CPP
+                            achieves better coverage (92.1%) but suffers from a longer path length due to its redundant
+                            looping characteristics. In contrast, the proposed method secures a high coverage rate
+                            of 97.3%, showcasing superior adaptability to the topology of the map while minimizing
+                            unnecessary overlaps. Furthermore, the computational time of 389 ms demonstrates the
+                            method's efficiency, as it is considerably quicker than G-BPP (645 ms) and Spiral CPP (568
+                            ms), emphasizing the scalability and real-time applicability of the proposed technique.
+                            These results indicate that a hierarchical segmentation strategy combined with inter-region
+                            optimization not only improves area coverage but also offers more compact and efficient
+                            paths, particularly in complicated indoor or semi-structured settings. The findings support
+                            the need for integrating inter-region coordination strategies--such as partial merging and
+                            local CPP path planning--as essential elements in advanced coverage frameworks.
+
+                                  To further interpret the outcomes presented in Table 4, each performance metric is
+                            analyzed in terms of its contribution to the overall system efficiency as follows:
+
+                            · Coverage: In the proposed method, the ratio of unskipped areas remains high due to
+                                  segment-based coverage. The Global Boustrophedon and Spiral methods tend to omit
+                                  certain regions in narrow passages characterized by complex obstacle arrangements.
+
+                            · Total Cost (Ltotal): The transitions in the suggested approach are optimized using the
+                                  Obstacle-Aware Inter-Region Transition algorithm, resulting in a more balanced sum
+                                  of the internal and external paths. In contrast, the Spiral method has a longer inner
+                                  coverage, but its overall cost may be lower due to the absence of transitions.
+
+                            · Duration: The proposed method achieves a time advantage as its path planning is
+                                  more localized, attributed to its segment-based structure.
+
+                                  The five experimental maps (Map-1 through Map-5) were intentionally chosen to
+                            represent a wide array of coverage scenarios commonly encountered in indoor robotic
+                            applications. Map-1 illustrates a large-scale, sparse layout that highlights lengthy paths
+                            within segments and costly transitions between regions. Maps 2 and 4 model structured
+                            grid environments characterized by repetitive, elongated segments--common in warehouse
+                            shelving or crop row inspection, making them suitable for evaluating narrow coverage
+                            strips and maintaining region continuity. Map-3 features a symmetrical hybrid design
+Appl. Sci. 2025, 15, 12666                                                   21 of 28
+
+                            focused around an obstacle, providing a standard for assessing balanced transitions and
+                            symmetric path planning. Lastly, Map-5 showcases a semi-structured layout with varying
+                            geometric orientations and a significant central obstruction, resembling realistic mixed-use
+                            spaces such as dynamic offices or adaptable industrial areas. These configurations were
+                            selected to comprehensively test the proposed strategies for region growing, merging, and
+                            obstacle-aware transitions across different levels of complexity and layout irregularities.
+
+                            5.2. Comparative Evaluation with Standard A* Planner
+
+                                  To further assess the effectiveness and practical use of the proposed segment-based
+                            coverage planning algorithm, comparative analysis was performed against the traditional
+                            A* planner on a realistically scaled map (Map-1 see Figure 4), measuring 30 m × 30 m
+                            and divided into a 268 × 268 grid. This environment was structured to simulate an
+                            industrial warehouse setting, featuring wide corridors and sparse partitioned areas--
+                            making it an ideal test environment for evaluating both local coverage efficiency and
+                            global transition behavior.
+
+                                  Table 5 provides a comprehensive comparison across seven essential performance
+                            metrics: intra-segment path length (L), total path length (Ltotal), path overlap ratio (POR),
+                            execution time (Duration), number of direction changes, memory utilization, and scalability
+                            on larger grid maps. The results reveal several significant differences:
+
+                            Table 5. Performance metrics comparing the proposed region-guided planner and the A-based
+                            baseline on Map-3, highlighting improvements in path efficiency, execution time, and resource usage.
+
+                                      Metric         Proposed Method    A*   Unit
+
+                              La (Intra-segment)              1418    2445   grid
+                               Ltotal (Total Path)            1646    2445   grid
+                                                              2.7%    18.1%
+                                       POR                     486     705     %
+                                    Duration                           111    ms
+                                  Dir. Changes                 42      17.3  count
+                                  Mem. Usage                   9.7     3.66   MB
+                            Scalability (100 × 100)           1.92            sec
+
+                                  Efficiency in Coverage: The suggested method achieves a notably reduced intra-
+                            segment path length (L = 1418) in comparison to the conventional A* algorithm
+                            (L = 2445), attributable to its organized Boustrophedon sweeps across clearly defined
+                            rectangular areas.
+
+                                  Global Optimality: Despite the total path length (Ltotal) accounting for both coverage
+                            and inter-region transitions, the proposed technique still yields a lower total (1646 vs. 2445),
+                            showcasing its efficient coordination across segments.
+
+                                  Minimal Redundancy: The overlap ratio of the path (POR) is significantly decreased
+                            from 18.1% (A*) to 2.7%, demonstrating that the proposed method minimizes redundant
+                            revisits to areas that have already been covered.
+
+                                  Execution Time and Resources: This new approach demands roughly 31% less process-
+                            ing time (486 ms vs. 705 ms) and utilizes less memory (9.7 MB vs. 17.3 MB), emphasizing
+                            its computational efficacy.
+
+                                  Trajectory Smoothness: The count of directional changes is substantially lower (42 vs.
+                            111), suggesting smoother navigation paths that could lead to reduced actuator strain and
+                            lower energy use.
+
+                                  Scalability: When applied to a larger grid (100 × 100), the proposed algorithm ex-
+                            hibits improved scalability, taking nearly half the time compared to the standard A*
+                            (1.92 s vs. 3.66 s).
+Appl. Sci. 2025, 15, 12666                                                                                                                                             22 of 28
+
+                                  As illustrated in Table 5, these findings collectively highlight the strength and efficiency
+                            of the proposed framework in structured and semi-structured settings, particularly where
+                            reducing path redundancy, computational duration, and mechanical effort are essential
+                            operational objectives.
+
+                            5.3. Complexity Analysis of the Algorithm
+
+                                  The structure of the proposed algorithm consists of three key components:
+
+                            · Rectangular segmentation through Region Growing,
+                            · Row-wise Boustrophedon coverage path generation for each segment,
+                            · Solution for transition paths between segment centers utilizing the proposed algorithm.
+
+                                  Each component's computational complexity is individually analyzed. These analyses
+                            are supported by both theoretical asymptotic complexity and empirical timing results.
+
+                                  Region Segmentation (Region Growing):
+
+                            · Input: n × n dimensional grid map
+                            · Process: Rectangular expansion into surrounding empty space by visiting each cell no
+
+                                  more than once
+                            · Complexity: O n2
+
+                                  As each cell is processed only once, and expansion operations are executed with
+                            constant-time linear checks. In combined segment configurations like Map-1, the additional
+                            "region merging" procedure does not increase complexity since it involves linear scanning
+                            and area overlap checks on segment sets.
+
+                                  Boustrophedon Coverage Path Generation:
+                                  A zig-zag scan (Boustrophedon) is conducted row by row for each rectangular segment.
+
+                            · For an average segment size of hi × wi: O(hi · wi) per segment.
+                            · Total for all segments: Ni=r1 O(hiwi) = O n2 .
+
+                                  This is because the overall processing load for covering all free space is constrained by
+                            the total number of cells in the map.
+
+                                  Transition Between Segments:
+                                  For total Nr segments:
+
+                            · The nearest connection point is determined each step.
+                            · Transition complexity: O(nlog n) (assuming it operates on a grid in an obstacle-
+
+                                  rich environment)
+                            · For transition sequence total: O(Nr · nlog n)
+
+                                  Nevertheless, in the experimental scenario, since Obstacle-Aware Inter-Region Tran-
+                            sition is only applied between segment centers and is restricted to valid cells, the actual
+                            complexity is: O(Nr · dlog d), (d  n)
+
+                                  Total Complexity of the Algorithm
+                                  The combined complexity for the entire algorithm flow is: O n2 + Nr · dlogd
+                                  Here:
+                            · n2: Maximum burden from grid size
+                            · Nr: Number of segments (n  Nr  n2)
+                            · d: Average number of valid cells between segments (relatively small in sparse grids)
+
+                                  This structure allows the algorithm to maintain an acceptable computational load for
+                            real-time applications, particularly for medium to large grid sizes (50 × 50­200 × 200).
+Appl. Sci. 2025, 15, 12666                                                                              23 of 28
+
+                            6. Discussions
+
+                                  In prior stages of the coverage algorithm, it is presumed that the Boustrophedon path
+                            created for each rectangular area concludes at both ends of the area (starting and ending
+                            points). These terminal points of the path are identified as connection nodes (segment
+                            terminals) within the global coverage path. When the end segments from all areas are
+                            eliminated in this manner, the challenge that emerges is to link these segment ends to form
+                            the global coverage route. As part of the suggested method, a directional Boustrophedon
+                            path is generated for each rectangular coverage area; this path moves from the starting
+                            point to cover every free cell individually, with turns based on rows. In the example
+                            depicted in Figure 9, the paths generated across four distinct regions are illustrated, and
+                            the order of transition between regions is established according to the solution of the
+                            Traveling Salesman Problem (TSP). Each sequence of transitions (1  2  3) is represented
+                            by dashed lines. Furthermore, obstacles (shown as gray areas) are represented as restrictive
+                            zones that constrain both the coverage direction within regions and the path for transitions
+                            between regions. Consequently, the global coverage path is designed in an integrated
+                            fashion considering both local optimizations and transition costs.
+
+                                  Problem Definition: Given N rectangular regions, each represented by the following
+                            segment (Equation (16)):
+
+                            Si = psi tart, pei nd , i = 1, 2, . . . , N                                 (16)
+
+                                  Here:
+
+                            · psi tart and pei nd  R: denotes the initial and final coordinates of the intra-regional
+                                  path.
+
+                            · Total length for each segment: L(Si) = psi tart - pei nd
+
+                                  The objective is to sequence the connection paths between these segment ends, factor-
+                            ing in the obstacles present on the map while minimizing the overall transition cost.
+
+                                  Cost Model: A valid path ij is determined between the endpoints of two segments
+                            employing the A* algorithm, taking obstacle details into account, with its cost calculated as
+                            follows (Equation (17)):
+
+                            Cij = Cost Si  Sj = ij +L Sj                                                (17)
+
+                                  Here:
+
+                            · ij : Length of the passageway identified by A*
+                            · L Sj : Internal path length of the newly incorporated segment
+
+                                  The total system cost can be represented as follows (Equation (18)):
+
+                              min(N          N-1  |k ,k+1                |)
+                            k=1              k=1
+                            P
+                                 L(Sk  )  +                                                             (18)
+
+                                  Here:
+
+                            · : A permutation that indicates the order of connecting segments
+                            · P: A collection of all valid segment arrangements
+
+                                  The start and ending points of the Boustrophedon path formulated within each rectan-
+                            gular coverage area are identified as the segment ends of that area. These endpoints act as
+                            nodes for the formation of the global coverage route. To minimize the overall transition
+                            costs between segments, a connectivity analysis is executed among these nodes and valid
+                            routes are generated while considering obstacles. Although traditional full optimization
+Appl. Sci. 2025, 15, 12666                                                                                                                                             24 of 28
+
+                            methods based on the Traveling Salesman Problem (TSP) offer theoretically optimal solu-
+                            tions for such connectivity challenges, they quickly escalate the computational complexity,
+                            particularly as the number of segments increases. Thus, the traditional A* assisted method
+                            offers a greedy selection approach prioritizing computational efficiency along with the
+                            obstacle-awareness, yielding a practical and modular solution. The algorithm begins by
+                            fixing the starting segment and assessing the transition paths from the exit end of the
+                            current segment to the endpoints of the unused segments utilizing the A* algorithm. The
+                            total cost for each transition is computed by taking into account both the A* path length
+                            and the coverage path length of the newly added segment. The lowest cost among these
+                            options is selected, and the next segment is incorporated into the trajectory. Segments can
+                            be connected in various orientations (from start to finish or the reverse); the algorithm
+                            automatically selects the more advantageous orientation. This iterative process continues
+                            until all segments are covered. This arrangement can be interpreted as a directed, weighted
+                            graph problem, where the nodes represent segment endpoints and the edges indicate valid
+                            transition paths discovered through the A* algorithm.
+
+                                  While the conventional A*-assisted segment transition strategy offers a robust frame-
+                            work regarding computational efficiency and usability, it does have certain limitations.
+                            These limitations become especially noticeable in environments with intricate obstacle
+                            arrangements and tight passage scenarios:
+
+                            · Decision-Making Based on Geometric Distance: Even though the A* algorithm en-
+                                  hances passage routes between segment endpoints while accounting for obstacles, the
+                                  overall route planning is predominantly influenced by geometric distances. This can
+                                  result in a preference for routes that are shorter in distance but have a high density
+                                  of obstacles.
+
+                            · Non-Directional Heuristic Strategy: The heuristic values used in the passage decisions
+                                  do not consider the robot's current heading, which can lead to unnecessary turns and
+                                  zigzag maneuvers for robots that are less maneuverable. This can increase both energy
+                                  usage and the total time required for the task.
+
+                            · Possibility of Getting Trapped in Temporary Optima: A greedy selection method
+                                  might favor the least expensive local passage at each decision point, even if it results
+                                  in more expensive choices later on. This raises the likelihood of straying from the
+                                  global optimum.
+
+                            · Neglect of Obstacle Density: Although the A* algorithm avoids traversing obstacles, it
+                                  does not incorporate the environmental impact of obstacle density (such as narrow
+                                  pathways within a constricted corridor) into its cost function. This may result in risky
+                                  or confined areas being overlooked.
+
+                            · Scalability Issues: In extensive maps with an increasing number of segments, the
+                                  computation of each passageway using A* incurs a greater computational cost. This
+                                  cost can become significant, particularly during the selection of directions and the
+                                  assessment of passage alternatives.
+
+                                  For these reasons, a more advanced passage cost model has been developed to enhance
+                            both passage stability and minimize total coverage time, except in simpler maps where
+                            the existing system is effective. In this regard, a multi-weighted passage cost function is
+                            introduced in the second version of the study, which takes into account environmental
+                            density of obstacles, changes in orientation, and geometric distance simultaneously. To
+                            enhance the understanding of the performance trade-offs associated with the proposed
+                            framework, Table 6 outlines the primary benefits and drawbacks of its core components,
+                            which encompass region segmentation, intra/inter-region planning, and computational
+                            expenses. This table provides a clear perspective on the method's advantages and areas
+                            where improvements can be made.
+Appl. Sci. 2025, 15, 12666                                                                             25 of 28
+
+                            Table 6. Summary of Advantages and Limitations of the Proposed Framework.
+
+Aspect                      Advantage                                  Limitation
+Map Decomposition
+[7,10,12,13]                Region Growing facilitates adaptive        It may generate numerous small
+                            rectangular partitioning, enhancing the    regions in cluttered settings if merging
+Intra-Region Coverage [31]  suitability for boustrophedon approaches.  is not applied.
+
+Inter-Region Planning [35]  Boustrophedon traversal ensures            It assumes the presence of static and
+                            comprehensive coverage with minimal        flat surfaces; variations in slope or
+Region Merging (FSM)        changes in direction.                      height have not been accounted for yet.
+[13,14,22]
+                            Utilizes a multi-cost TSP approach that    The TSP-derived route may not be
+Computational Cost          considers directional bias and hurdle      ideal in highly dynamic or chaotic
+[36,38]                     proximity.                                 settings.
+
+Modularity                  Combines less effective smaller areas      Adjustments to the threshold setting
+[7,8,28]                    based on fill-efficiency, minimizing       () may be necessary based on map
+                            coverage fragmentation.                    density and dimensions.
+Comparison with Baselines
+[7,38,40]                   Demonstrates efficiency (e.g., an average  Currently, it is implemented in
+                            runtime of 486 ms) and is scalable for     MATLAB; deploying in real-time
+                            real-time applications.                    might require adapting to embedded
+                                                                       systems.
+                            Each phase (segmentation, CPP,
+                            transitions) can be upgraded separately.   Dependencies between modules might
+                                                                       create integration challenges in
+                            Surpasses Spiral and A*-based CPP in       customized platforms.
+                            terms of path length, coverage, and
+                            execution speed.                           The benchmarking is confined to
+                                                                       structured and semi-structured indoor
+                                                                       environments.
+
+                                  Integration with Real-Time Trajectory Planning: Although the framework presented
+                            emphasizes high-level coverage decomposition and route optimization, its modular struc-
+                            ture allows for incorporation with low-level real-time trajectory planners. After creating the
+                            global coverage path (which includes intra-region Boustrophedon paths and inter-region
+                            TSP transitions) either offline or in a semi-online manner, a reactive trajectory controller
+                            (like Model Predictive Control (MPC), the Dynamic Window Approach (DWA), or Time
+                            Elastic Band (TEB)) can be utilized to follow the path in dynamic settings. Additionally,
+                            the FSM module can be enhanced to observe real-time data such as obstacle proximity,
+                            localization drift, or battery status, and initiate local replanning for specific segments while
+                            maintaining coherence in the overall route. This ensures that the proposed approach is
+                            suitable for real-time operation on field robots with limited onboard processing capabilities.
+
+                            7. Conclusions
+
+                                  In this research, a modular and flexible framework for coverage path planning based
+                            on regions was introduced, featuring automatic rectangular segmentation, Boustrophedon-
+                            based coverage for individual areas, and an obstacle-aware transition planner that is
+                            directionally biased for navigating between regions. Unlike traditional methods that
+                            depend solely on Euclidean distance or standard A* search algorithms, the proposed
+                            transition planner combines geometric distance, obstacle density, and heading changes into
+                            a comprehensive multi-weighted cost model. This facilitates more realistic and efficient
+                            connections between segments, especially in cluttered or narrow environments.
+
+                                  The approach was tested on five different grid maps that depict structured indoor
+                            settings, elongated agricultural fields, and mixed scenarios. The results of the experiments
+                            showed consistently high coverage rates, ranging from 96% to 99%, with overall plan-
+                            ning times between 316 and 842 ms on a typical hardware system. Implementing region
+Appl. Sci. 2025, 15, 12666                                                                                                                                             26 of 28
+
+                            merging on complex maps (e.g., Map-1) considerably minimizes the number of transitions,
+                            enhancing both efficiency and trajectory compactness.
+
+                                  A comparative evaluation on Map-3 indicates that the proposed framework surpasses
+                            traditional global coverage methods and spiral scanning techniques, particularly in cases
+                            of spatial fragmentation. The advantages of the algorithm are found in its sensitivity to
+                            obstacles, directionally informed transition choices, and its appropriateness for real-time
+                            robotic applications.
+
+                                  Despite its strengths, there are certain limitations--such as the restriction to axis-
+                            aligned rectangular regions, dependence on heuristic ordering of regions, and occasional
+                            performance decline when there are too many segments. Nevertheless, the suggested frame-
+                            work provides a practical and adaptable solution for coverage planning in both structured
+                            and semi-structured settings, establishing a foundation for future developments involving
+                            adaptive segmentation, multi-robot coordination, and terrain-aware motion planning.
+
+                            8. Future Work
+
+                                  To enhance the applicability and robustness of the proposed coverage planning frame-
+                            work based on regions, several important research avenues will be explored:
+
+                                  Generalization to Freeform Segmentation: Future iterations of the zoning module will
+                            offer the ability to create convex and concave polygonal sub-regions. This improvement is
+                            designed to facilitate effective coverage in areas with irregular shapes, curved edges, or
+                            obstacles that are not aligned with the axes.
+
+                                  Dynamic environments: While the proposed framework shows significant efficiency
+                            and modularity in static, structured settings, its current design presumes that obstacle
+                            arrangements stay constant throughout the mission. This presumption is valid in various
+                            real-world environments, like warehouses, greenhouses, or semi-structured indoor spaces,
+                            where changes in layout are minimal. However, in scenarios where obstacles can emerge
+                            or shift unexpectedly (such as the presence of humans or dynamic storage systems), this
+                            constraint may hinder real-time adaptability. To address this challenge, the framework
+                            could incorporate a reactive replanning mechanism, enabling the inter-region transition
+                            module to utilize incremental planning algorithms like D* Lite or Anytime D* to adjust
+                            to environmental changes. These enhancements can be seamlessly integrated into the
+                            modular architecture without modifying the region segmentation or intra-region coverage
+                            components, maintaining the overall design while improving adaptability.
+
+                                  Slope- and Energy-Aware Coverage: The plan is to incorporate terrain slope and the
+                            energy consumption of robots into both the coverage and movement planning processes.
+                            This will enable the planner to develop routes that are more energy-efficient, particularly
+                            in outdoor environments or on uneven ground.
+
+                                  Global Region Ordering via Metaheuristics: Instead of depending on greedy methods,
+                            the sequencing of global segments will be refined using meta-heuristic techniques such
+                            as Genetic Algorithms (GA), Simulated Annealing (SA), or Ant Colony Optimization
+                            (ACO). The goal is to reduce the total costs of coverage and transitions through a globally
+                            informed strategy.
+
+                                  Extension to Multi-Robot Coordination: The proposed framework will be modified for
+                            multi-robot systems, tackling challenges like cooperative allocation of sub-regions, collision
+                            avoidance, and dynamic reassignment of tasks in both uniform and diverse robotic teams.
+
+                                  Real-World Implementation and Testing: The algorithm will be executed on a tangi-
+                            ble mobile robot that has capabilities for localization, mapping, and avoiding obstacles.
+                            Experimental trials will be carried out to evaluate the robustness of the system in real-
+                            world scenarios that include sensor inaccuracies, actuator errors, and partial observation of
+                            the environment.
+Appl. Sci. 2025, 15, 12666  27 of 28
+
+                                            Author Contributions: Conceptualization, S.K.; Methodology, S.K.; Software, S.K. and M.Z.K.;
+                                            Validation, S.K. and M.Z.K.; Formal analysis, S.K.; Investigation, S.K.; Resources, S.K. and M.Z.K.;
+                                            Data curation, S.K. and M.Z.K.; Writing--original draft, S.K. and M.Z.K.; Writing--review and editing,
+                                            S.K. and M.Z.K.; Visualization, S.K.; Supervision, M.Z.K.; Project administration, M.Z.K.; Funding
+                                            acquisition, M.Z.K. All authors have read and agreed to the published version of the manuscript.
+
+                                            Funding: This research did not receive any external funding.
+
+                                            Data Availability Statement: The original contributions presented in this study are included in the
+                                            article. Further inquiries can be directed to the corresponding author.
+
+                                            Acknowledgments: This study was conducted at the MAVI Laboratory of the Faculty of Engineering.
+                                            The authors confirm that there was no external funding obtained for this study.
+
+                                            Conflicts of Interest: The authors declare no conflict of interest.
+
+References
+
+1. Jensen-Nau, K.R.; Hermans, T.; Leang, K.K. Near-Optimal Area-Coverage Path Planning of Energy-Constrained Aerial Robots
+       with Application in Autonomous Environmental Monitoring. IEEE Trans. Autom. Sci. Eng. 2021, 18, 1453­1468. [CrossRef]
+
+2. Vadapalli, A.; Peravali, S.; Dadi, V.R. Smart agricultural system using IoT. Int. J. Adv. Res. Sci. Eng. 2020, 9, 5807­5819.
+3. Carvalho, A.E.; Ferreira, J.F.; Portugal, D. 3D traversability analysis and path planning based on mechanical effort for UGVs in
+
+       forest environments. Robot. Auton. Syst. 2024, 171, 104560. [CrossRef]
+4. Han, L.; Zhao, Y.; Lv, H.; Zhang, Y.; Liu, H.; Bi, G.; Han, Q. Enhancing Remote Sensing Image Super-Resolution with Efficient
+
+       Hybrid Conditional Diffusion Model. Remote Sens. 2023, 15, 3452. [CrossRef]
+5. Lyu, M.; Zhao, Y.; Huang, C.; Huang, H. Unmanned Aerial Vehicles for Search and Rescue: A Survey. Remote Sens. 2023, 15, 3266.
+
+       [CrossRef]
+6. Sier, H.; Li, Q.; Yu, X.; Peña Queralta, J.; Zou, Z.; Westerlund, T. A Benchmark for Multi-Modal LiDAR SLAM with Ground Truth
+
+       in GNSS-Denied Environments. Remote Sens. 2023, 15, 3314. [CrossRef]
+7. Galceran, E.; Carreras, M. A survey on coverage path planning for robotics. Robot. Auton. Syst. 2013, 61, 1258­1276. [CrossRef]
+8. Coombes, M.; Fletcher, T.; Chen, W.-H.; Liu, C. Optimal Polygon Decomposition for UAV Survey Coverage Path Planning in
+
+       Wind. Sensors 2018, 18, 2132. [CrossRef]
+9. Zhu, D.; Latombe, J.-C. New heuristic algorithms for efficient hierarchical path planning. IEEE Trans. Robot. Autom. 1991, 7, 9­20.
+
+       [CrossRef]
+10. Choset, H. Coverage for robotics--A survey of recent results. Ann. Math. Artif. Intell. 2001, 31, 113­126. [CrossRef]
+11. Yamauchi, B. A frontier-based approach for autonomous exploration. In Proceedings of the IEEE International Symposium on
+
+       Computational Intelligence in Robotics and Automation, Monterey, CA, USA, 10­11 July 1997; pp. 146­151.
+12. Choset, H.; Pignon, P.A. Coverage path planning: The boustrophedon cellular decomposition. In Field and Service Robotics;
+
+       Springer: London, UK, 1998; pp. 203­209.
+13. Acar, E.U.; Choset, H. Sensor-based coverage of unknown environments: Incremental construction of morse decompositions. Int.
+
+       J. Robot. Res. 2002, 21, 345­366. [CrossRef]
+14. Gabriely, Y.; Rimon, E. Spanning-tree based coverage of continuous areas by a mobile robot. Ann. Math. Artif. Intell. 2001, 31,
+
+       77­98. [CrossRef]
+15. Acar, E.U.; Choset, H. Complete sensor-based coverage with extended-decomposition. In Proceedings of the IEEE/RSJ Interna-
+
+       tional Conference on Intelligent Robots and Systems, Maui, HI, USA, 29 October­3 November 2000; Volume 3, pp. 2828­2834.
+16. Latombe, J.-C. Robot Motion Planning; Springer: Boston, MA, USA, 1991; pp. 154­196.
+17. Hert, S.; Tiwari, S.; Lumelsky, V. A terrain-covering algorithm for an AUV. Auton. Robot. 1996, 3, 91­119. [CrossRef]
+18. Howard, A.; Mataric, M.J.; Sukhatme, G.S. Mobile sensor network deployment using potential fields. In Proceedings of the
+
+       IEEE/RSJ International Conference on Intelligent Robots and Systems, Lausanne, Switzerland, 30 September­4 October 2002;
+       Volume 2, pp. 1292­1298.
+19. Hazon, N.; Kaminka, G.A. Redundancy, efficiency, and robustness in multi-robot coverage. In Proceedings of the 2008 IEEE
+       International Conference on Robotics and Automation, Pasadena, CA, USA, 19­23 May 2008; pp. 735­741.
+20. Koenig, S.; Liu, Y. Terrain coverage with ant robots: A simulation study. In Proceedings of the 5th International Conference on
+       Autonomous Agents, Montreal, QC, Canada, 28 May­1 June 2001; pp. 600­607.
+21. Tiwari, S.; Sukhatme, G.S. Coverage planning with energy and time constraints. In Field and Service Robotics; Springer:
+       Berlin/Heidelberg, Germany, 2002; pp. 349­360.
+22. Rekleitis, I.; New, A.P.; Rankin, E.; Dudek, G. Efficient boustrophedon multi-robot coverage: An algorithmic approach. Ann. Math.
+       Artif. Intell. 2008, 52, 109­142. [CrossRef]
+Appl. Sci. 2025, 15, 12666  28 of 28
+
+23. Zelinsky, A.; Jarvis, R.A.; Byrne, J.; Yuta, S. Planning paths of complete coverage of an unstructured environment by a mobile
+       robot. In Proceedings of the 1993 IEEE International Conference on Robotics and Automation, Atlanta, GA, USA, 2­6 May 1993;
+       pp. 533­538.
+
+24. Choset, H.; Lynch, K.M.; Hutchinson, S.; Kantor, G.; Burgard, W.; Kavraki, L.E.; Thrun, S. Principles of Robot Motion: Theory,
+       Algorithms, and Implementation; MIT Press: Cambridge, MA, USA, 2005.
+
+25. Gonzalez-Banos, H.H.; Latombe, J.-C. Navigation strategies for exploring indoor environments. Int. J. Robot. Res. 2002, 21,
+       829­848. [CrossRef]
+
+26. Gabriely, Y.; Rimon, E. Competitive on-line coverage of grid environments by a mobile robot. Comput. Geom. 2002, 24, 197­224.
+       [CrossRef]
+
+27. Yoon, S.; Fern, A.; Givan, R. FF-Replan: A baseline for probabilistic planning. In Proceedings of the 18h International Conference
+       on Automated Planning and Scheduling, Sydney, Australia, 14­18 September 2008; pp. 352­359.
+
+28. Cabreira, T.M.; Brisolara, L.B.; Ferreira, P.R. Survey on coverage path planning with unmanned aerial vehicles. Drones 2019, 3, 4.
+       [CrossRef]
+
+29. Ayanian, N.; Kumar, V. Decentralized feedback controllers for multiagent teams in environments with obstacles. IEEE Trans.
+       Robot. 2012, 28, 1197­1209. [CrossRef]
+
+30. Shivgan, R.; Dong, Z. Energy-Efficient Drone Coverage Path Planning using Genetic Algorithm. In Proceedings of the 2020 IEEE
+       21st International Conference on High Performance Switching and Routing (HPSR), Newark, NJ, USA, 11­14 May 2020; pp. 1­6.
+       [CrossRef]
+
+31. Chen, X.; Diao, W.; Zhang, S.; Wei, Z.; Liu, C. SA-SatMVS: Slope Feature-Aware and Across-Scale Information Integration for
+       Large-Scale Earth Terrain Multi-View Stereo. Remote Sens. 2024, 16, 3474. [CrossRef]
+
+32. Acar, E.U.; Choset, H. Robust sensor-based coverage of unstructured environments. In Proceedings of the 2001 IEEE/RSJ Interna-
+       tional Conference on Intelligent Robots and Systems, Maui, HI, USA, 29 October­3 November 2001; Volume 3, pp. 1705­1711.
+
+33. Zelinsky, A. Decentralized coverage control for multiple robots. In Proceedings of the International Symposium Robot Research,
+       Atlanta, GA, USA, 2­6 May 1993; pp. 70­83.
+
+34. Yang, S.; Huang, J.; Li, W.; Xiang, X. A Novel Discrete Group Teaching Optimization Algorithm for TSP Path Planning with
+       Unmanned Surface Vehicles. J. Mar. Sci. Eng. 2022, 10, 1305. [CrossRef]
+
+35. Wu, C.; Fu, X. An agglomerative greedy brain storm optimization algorithm for solving the tsp. IEEE Access 2020, 8, 201606­201621.
+       [CrossRef]
+
+36. Zhao, L.; Bai, Y. Energy efficient coverage path planning for USV-assisted inland bathymetry under current effects: An analysis
+       on sweep direction. Ocean Eng. 2024, 305, 117910. [CrossRef]
+
+37. Muñoz, J.; López, B.; Quevedo, F.; Monje, C.A.; Garrido, S.; Moreno, L.E. Multi UAV Coverage Path Planning in Urban
+       Environments. Sensors 2021, 21, 7365. [CrossRef] [PubMed]
+
+38. Champagne Gareau, J.; Beaudry, É.; Makarenkov, V. Fast and optimal branch-and-bound planner for the grid-based coverage
+       path planning problem based on an admissible heuristic function. Front. Robot. AI 2023, 9, 1076897. [CrossRef] [PubMed]
+
+39. Jayalakshmi, K.P.; Nair, V.G.; Sathish, D. A Comprehensive Survey on Coverage Path Planning for Mobile Robots in Dynamic
+       Environments. IEEE Access 2025, 13, 60158­60185. [CrossRef]
+
+40. Li, L.; Shi, D.; Jin, S.; Yang, S.; Lian, Y.; Liu, H. SP2E: Online Spiral Coverage with Proactive Prevention Extremum for Unknown
+       Environments. J. Intell. Robot. Syst. 2023, 108, 30. [CrossRef]
+
+41. Fevgas, G.; Lagkas, T.; Argyriou, V.; Sarigiannidis, P. Coverage Path Planning Methods Focusing on Energy Efficient and
+       Cooperative Strategies for Unmanned Aerial Vehicles. Sensors 2022, 22, 1235. [CrossRef]
+
+Disclaimer/Publisher's Note: The statements, opinions and data contained in all publications are solely those of the individual
+author(s) and contributor(s) and not of MDPI and/or the editor(s). MDPI and/or the editor(s) disclaim responsibility for any injury to
+people or property resulting from any ideas, methods, instructions or products referred to in the content.
+

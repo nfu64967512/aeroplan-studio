@@ -109,6 +109,8 @@ class MapWidget(MapWidgetBase):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.corners: List[Tuple[float, float]] = []
+        # 已完成的作業區（多區模式）。只用於顯示，規劃資料在 MainWindow。
+        self.survey_areas: List[List[Tuple[float, float]]] = []
         self.markers = []
         self.paths = []
         self.path_colors = []   # 與 self.paths 同長，每條路徑對應一個 hex 顏色
@@ -155,6 +157,20 @@ class MapWidget(MapWidgetBase):
 
         self.custom_page = ClickCapturePage(self.web_view, self)
         self.web_view.setPage(self.custom_page)
+
+        # ⚠⚠ 地圖變黑底的原因在這裡。
+        #   全域 QSS 的第一條是 `QWidget { background: {{BG_PRIMARY}} }`，
+        #   而 BG_PRIMARY 是 **#000000**（`ui/resources/aeroplan_theme/tokens.py`）。
+        #   那條規則沒有排除 QWebEngineView，所以 web view 這個 QWidget 會被漆黑；
+        #   網頁只要有任何一層是透明的（Leaflet 容器、圖磚還沒載完的空隙、
+        #   folium 產生的外層 div），黑色就會透上來，整張圖看起來像蒙了一層黑。
+        #   兩道一起做才保險：
+        #     1. 這裡把**網頁自己的**底色釘成不透明白色 —— 圖磚之下永遠是白的。
+        #     2. QSS 另外加一條 `QWebEngineView { background: #ffffff; }` 把
+        #        通用規則蓋掉（見 aeroplan_theme.qss）。
+        from PyQt6.QtGui import QColor
+        self.custom_page.setBackgroundColor(QColor(255, 255, 255))
+        self.web_view.setStyleSheet("background: #ffffff;")
 
         ws = self.custom_page.settings()
         ws.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
@@ -579,9 +595,73 @@ class MapWidget(MapWidgetBase):
             self.temp_html_file = str(out_path)
 
             self.web_view.setUrl(QUrl.fromLocalFile(self.temp_html_file))
+            self._diagnose_dark_once()
 
         except Exception as e:
             logger.error(f"渲染地圖失敗: {e}")
+
+    # ─────────────────────────────────────
+    # 「2D 地圖看起來黑黑的」自我診斷
+    # ─────────────────────────────────────
+    def _diagnose_dark_once(self):
+        """頁面載入後量一次實際的算繪樣式，把結果寫進 log。
+
+        ⚠ 這是**儀器不是修法**。之前對這個症狀猜過兩輪都錯：
+          第一輪猜全域 QSS 的 `QWidget { background:#000000 }` 漆到 web view 上，
+          但同一份樣式表下的 3D Cesium 是亮的，反證掉了；
+          第二輪查 HTML，裡面只有 toast 與角落小框是深色，沒有全螢幕黑罩。
+        所以改成讓程式自己回報：地圖容器與圖磚窗格的實際底色、圖磚的
+        opacity（Leaflet 淡入被打斷時會卡在中間值，疊在深色底上就會整片變暗）、
+        以及有沒有蓋滿視窗的元素。只跑一次，不影響效能。
+        """
+        if getattr(self, '_dark_diag_done', False):
+            return
+        self._dark_diag_done = True
+
+        def _report(val):
+            logger.warning(f'[2D 地圖底色診斷] {val}')
+
+        js = """
+        (function () {
+            function bg(el) {
+                if (!el) { return 'missing'; }
+                var cs = getComputedStyle(el);
+                return cs.backgroundColor + ' | opacity=' + cs.opacity
+                     + ' | filter=' + cs.filter;
+            }
+            var out = {
+                html: bg(document.documentElement),
+                body: bg(document.body),
+                container: bg(document.querySelector('.leaflet-container')),
+                tilePane: bg(document.querySelector('.leaflet-tile-pane')),
+                mapPane: bg(document.querySelector('.leaflet-map-pane'))
+            };
+            var tiles = document.querySelectorAll('img.leaflet-tile');
+            var op = [];
+            for (var i = 0; i < tiles.length && i < 40; i++) {
+                op.push(getComputedStyle(tiles[i]).opacity);
+            }
+            out.tileCount = tiles.length;
+            out.tileOpacities = Array.from(new Set(op)).join(',');
+            var covering = [];
+            var all = document.body.querySelectorAll('*');
+            for (var j = 0; j < all.length; j++) {
+                var r = all[j].getBoundingClientRect();
+                if (r.width >= innerWidth * 0.9 && r.height >= innerHeight * 0.9) {
+                    var c = getComputedStyle(all[j]);
+                    if (c.backgroundColor !== 'rgba(0, 0, 0, 0)') {
+                        covering.push(all[j].className + '=' + c.backgroundColor);
+                    }
+                }
+            }
+            out.fullScreenLayers = covering.slice(0, 6).join(' ; ');
+            return JSON.stringify(out);
+        })();
+        """
+        from PyQt6.QtCore import QTimer
+        # 等圖磚載進來再量，否則 opacity 一定還在淡入中
+        QTimer.singleShot(
+            4000, lambda: self.custom_page.runJavaScript(js, _report))
 
     # ─────────────────────────────────────
     # JavaScript 注入（核心修正）
@@ -603,7 +683,10 @@ class MapWidget(MapWidgetBase):
 
         js_code = f"""
 <style>
-html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden; }}
+html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden;
+              background:#ffffff; }}
+/* ⚠ Leaflet 容器預設 #ddd；這裡明寫是為了不讓 Qt 那層黑色透上來 */
+.leaflet-container {{ background:#ffffff !important; }}
 .folium-map {{ width:100% !important; height:100vh !important; }}
 body > div {{ width:100% !important; height:100% !important; }}
 .leaflet-control, .leaflet-control * {{ cursor:pointer !important; }}
@@ -1267,12 +1350,73 @@ body > div {{ width:100% !important; height:100% !important; }}
         """
         self.custom_page.runJavaScript(js)
 
+    def display_survey_areas(self, polygons: list):
+        """畫出「已完成」的作業區（多區模式）。
+
+        與 `_boundaryLayer`（正在畫的那一塊，藍色）分開：這些用綠色並標序號，
+        讓使用者一眼看出哪些已經收進清單、哪一塊還在畫。
+
+        ⚠ 這是**顯示**功能。畫不出來時不可以影響規劃 —— 呼叫端
+        `MainWindow._render_committed_areas` 已經包了 try/except。
+        """
+        import json
+        self.survey_areas = [list(p) for p in (polygons or []) if len(p) >= 3]
+        data = json.dumps([[[c[0], c[1]] for c in poly]
+                           for poly in self.survey_areas])
+        js = """
+        (function() {
+            var map = window.currentMap;
+            if (!map) { return; }
+            if (window._surveyAreaLayers) {
+                window._surveyAreaLayers.forEach(function(l) { map.removeLayer(l); });
+            }
+            window._surveyAreaLayers = [];
+            var polys = %s;
+            polys.forEach(function(pts, i) {
+                var lay = L.polygon(pts, {
+                    color: '#2E7D32', weight: 2,
+                    fill: true, fillColor: '#4CAF50', fillOpacity: 0.18
+                }).addTo(map);
+                lay.bindTooltip('Area ' + (i + 1),
+                                {permanent: true, direction: 'center'});
+                window._surveyAreaLayers.push(lay);
+            });
+        })();
+        """ % data
+        self.custom_page.runJavaScript(js)
+        logger.info(f"顯示 {len(self.survey_areas)} 塊已完成的作業區")
+
     def move_corner(self, index: int, lat: float, lon: float):
         """移動邊界點"""
         if 0 <= index < len(self.corners):
             self.corners[index] = (lat, lon)
             self._render_map()
             logger.info(f"移動角點 #{index + 1}: ({lat:.6f}, {lon:.6f})")
+
+    def remove_last_corner(self):
+        """刪除最後一個邊界點並重繪。回傳被刪的 (lat, lon)，沒有點時回傳 None。
+
+        ⚠ 舊版沒有這個方法。`DualMapWidget.remove_last_corner()` 的第一行就是
+        `self.map_2d.remove_last_corner()` —— **沒有** hasattr 保護 —— 所以只要
+        地圖是雙圖模式，按下「刪除最後一點」就直接 AttributeError，整個誤點
+        救援流程在那一行斷掉。`main_window.on_delete_last_corner()` 用
+        `getattr` 取得的是 DualMapWidget 的版本，取得成功、進去才炸。
+
+        語意與 3D 的 `CesiumMapWidget.remove_last_corner()` 對齊：pop 一顆、
+        重繪、回傳被刪的點。
+
+        `markers` 要跟著 pop —— `clear_corners()` 是兩份一起清的，只動一邊
+        會讓兩份長度從此對不上。
+        """
+        if not self.corners:
+            return None
+        removed = self.corners.pop()
+        if self.markers:
+            self.markers.pop()
+        self._render_map()
+        logger.info(f"刪除角點 #{len(self.corners) + 1}: "
+                    f"({removed[0]:.6f}, {removed[1]:.6f})")
+        return removed
 
     # ─────────────────────────────────────
     # 路徑顯示
@@ -1984,6 +2128,71 @@ body > div {{ width:100% !important; height:100% !important; }}
 })();
 """)
         logger.info("已透過 JS 清除所有顯示圖層（無頁面重載）")
+
+    def clear_fc_mission(self):
+        """清除「從飛控讀回來的 AUTO 航線」疊圖（JS 移除圖層，不重載頁面）。
+
+        對應 3D 的 `CesiumMapWidget.clear_fc_mission()`（發 `clearMissionOverlay()`），
+        也是 `DualMapWidget.clear_fc_mission()` 逐張圖找的那個名字。
+
+        ⚠ 2D 目前**畫不出**這一層：`DualMapWidget.display_fc_mission()` 用
+        `hasattr(self.map_2d, 'display_fc_mission')` 守著，而 `MapWidget` 沒有
+        那個方法，所以讀回的航線只上得了 3D。這裡先照 2D 既有的
+        `window._swarmLayers` 慣例把清除側接好（`window._fcMissionLayers`），
+        等繪製側補上就是成對的；在那之前它是個安全的 no-op。
+        """
+        self.custom_page.runJavaScript("""
+(function(){
+    if(window._fcMissionLayers){
+        window._fcMissionLayers.forEach(function(l){
+            try{window.currentMap.removeLayer(l);}catch(e){}
+        });
+        window._fcMissionLayers=[];
+    }
+})();
+""")
+
+    def clear_all(self):
+        """清掉 2D 圖上所有**規劃疊圖** —— 「清除全部」在 2D 這一側的實作。
+
+        ⚠️ 舊版根本沒有這個方法。`DualMapWidget.clear_all()` 是用
+        `if hasattr(m, 'clear_all')` 逐張圖呼叫的，於是 2D 這張**被靜靜跳過**：
+        使用者按下「清除全部」，log 一路印到「已清除全部」全部綠燈，琥珀
+        虛線的電子圍籬卻還留在 2D 圖上（2026-08-27 案發）。沒有例外、沒有
+        警告 —— 那個 hasattr 守衛把「方法不存在」翻譯成了「什麼都不做」。
+
+        語意與 3D 的 `CesiumMapWidget.clear_all()` 對齊：角點 / 路徑 / 轉場 /
+        掃描圓 / 起飛點 / 禁航區 / 電子圍籬，外加兩個**不吃重繪**的 JS 圖層
+        （群飛覆蓋、飛控讀回的航線）。
+
+        不動的東西：即時 UAV（另有「清除 UAV」按鈕）、使用者在「管理 Fence」
+        建立的圍籬區 —— 那是飛安設定，有自己的管理介面，不該被一顆泛用
+        清除鈕靜靜刪掉。
+        """
+        # ① 隨 _render_map() 重建的持久化狀態。只清畫面沒有用：欄位還在的話，
+        #    下一次任何重繪都會把同一批東西原地畫回來。
+        self.corners.clear()
+        self.markers.clear()
+        self.paths.clear()
+        self.path_colors.clear()
+        self._path_tooltips.clear()
+        self.transit_paths.clear()
+        self._circle_center = None
+        self._circle_radius_m = 0.0
+        self._home_point = None
+        self._nfz_zones.clear()
+        self._geofence = None
+
+        # ② JS 直接掛上去的圖層。這兩層不吃 _render_map() 的重繪，必須各自
+        #    出手清，而且要**無條件**呼叫 —— 拿 `if self._swarm_data:` 之類的
+        #    前置條件擋，只要狀態與畫面不同步就會漏清。
+        self.clear_swarm_display()
+        self.clear_fc_mission()
+
+        # ③ 最後才重繪，而且只重繪這一次：重繪 = 整頁重載，多一次就是多一次
+        #    白畫面閃爍。
+        self._render_map()
+        logger.info("已清除 2D 全部疊圖")
 
     def reset_view(self):
         """重置視圖"""

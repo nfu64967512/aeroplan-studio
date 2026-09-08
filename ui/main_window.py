@@ -260,6 +260,9 @@ def resolve_upload_speed_radius(planned: dict, panel_params: dict) -> tuple:
     return speed, radius
 from mission import MissionManager
 from core.global_planner.coverage_planner import CoveragePlanner, CoverageParameters, ScanPattern
+from core.geometry.polygon import (
+    coverage_angle_to_compass, fw_scan_angle_to_compass,
+)
 from core.global_planner.astar import AStarPlanner
 from core.global_planner.rrt import RRTPlanner, RRTStarPlanner
 from core.global_planner.fixed_wing_planner import (
@@ -290,6 +293,61 @@ logger = get_logger()
 MIN_CORNERS = 3   # 最少邊界點數量
 MAX_CORNERS = 100  # 最大邊界點數量
 _WP_LIMIT = 655   # Mission Planner 單次最大匯入航點數
+
+# HV-DCCPP 兩個構型的顯示名稱（數值以 docs/平台參數表.md 為準，這裡只給人看）
+HV_PLATFORM_NAMES = {'A': 'Pioneer PNP', 'B': 'HERO PNP'}
+
+# ── 關視窗時還在跑的 HV-DCCPP 規劃執行緒（見 _hv_park_running_worker）────────
+#   放在模組層級是刻意的：這裡是唯一在視窗死後還握著它的地方。
+_HV_ORPHAN_WORKERS: set = set()
+
+
+def _hv_wait_for_orphan_workers(timeout_ms: int = 60000) -> None:
+    """程式要結束了：等寄放中的規劃執行緒跑完。"""
+    for w in list(_HV_ORPHAN_WORKERS):
+        try:
+            if w.isRunning():
+                logger.info('[HV-DCCPP] 等待背景規劃收尾…')
+                w.wait(timeout_ms)
+        except RuntimeError:
+            pass
+        _HV_ORPHAN_WORKERS.discard(w)
+
+
+def _hv_park_running_worker(window, worker) -> None:
+    """把「視窗要關了但還在跑」的規劃執行緒從視窗手上接過來。
+
+    ⚠⚠ 為什麼不能不管它：
+      * 若 worker 是 MainWindow 的 QObject 子物件，視窗被銷毀時 Qt 會對一個
+        **還在跑的 QThread** 呼叫解構子 ⇒ qFatal（`QThread: Destroyed while thread
+        is still running`），整個程式 abort，而不是正常關閉。
+      * 就算 parent=None，只要 Python 這邊沒人再參考它，GC 一收就是同一種死法。
+      * 也不能 terminate()：numpy/scipy 的 C 層會留下不一致狀態。
+      * 更不能「等它自己停」：hv 的求解器沒有取消點，而且轉接層會把 progress
+        回呼丟出來的例外吞掉 —— stop() 只能讓結果不被採用，停不了計算。
+    所以：拆掉所有連到（即將消失的）視窗的信號，把物件存到模組層級，
+    程式結束前再統一等它們收尾。
+    """
+    try:
+        window._hv_disconnect_worker(worker)
+    except Exception:
+        pass
+    _HV_ORPHAN_WORKERS.add(worker)
+    try:
+        worker.finished.connect(lambda w=worker: _HV_ORPHAN_WORKERS.discard(w))
+    except Exception:
+        pass
+    try:
+        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtCore import Qt as _Qt
+        app = QApplication.instance()
+        if app is not None:
+            # UniqueConnection：多關幾次視窗也只會接一次
+            app.aboutToQuit.connect(_hv_wait_for_orphan_workers,
+                                    _Qt.ConnectionType.UniqueConnection)
+    except Exception:
+        pass
+    logger.warning('[HV-DCCPP] 視窗關閉時規劃仍在執行，已寄放該執行緒等它自行結束')
 
 
 class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
@@ -395,7 +453,13 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
     def init_variables(self):
         """初始化變數"""
         self.current_mission = None
-        self.corners = []  # 邊界點
+        self.corners = []  # 邊界點（**正在畫**的那一塊區）
+        # ── 模式二：多個作業區 ────────────────────────────────────────
+        #   ⚠ 刻意不動 `self.corners` 的語義 —— 全檔有 83 處在用它（既有單區
+        #     規劃、圍籬建構、匯出、螺旋規劃…），改語義會牽動一大片。
+        #     所以另開一個「已完成的區」清單，`corners` 維持「正在畫的那一塊」。
+        #     兩者都空時，行為與改動前**逐位元相同**。
+        self.survey_areas: list = []      # [[(lat, lon), ...], ...] 已完成的作業區
         self.waypoints = []  # 航點（扁平化，供單台匯出使用）
         self.spiral_waypoint_altitudes: list = []  # 螺旋掃描每航點高度（alt_step > 0 時有效）
         self.sub_paths = []  # 各子區域路徑（分割模式時使用）
@@ -456,6 +520,15 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         self.picking_home_point: bool = False
 
         self._dccpp_result = None  # 當前 DCCPP 最佳化結果
+
+        # ── HV-DCCPP（異構雙構型 VTOL）狀態 ──
+        self._hv_worker = None        # HvPlanningWorker（背景規劃執行緒）
+        self._hv_coordinator = None   # hv_dccpp 的 HvDccppCoordinator（匯出／上傳／重規劃）
+        self._hv_classes: dict = {}   # {drone_id: 'A'|'B'}
+        self._hv_display_ctx: dict = {}
+        self._hv_last_report: dict = {}   # 最近一次 on_report 的重點（未覆蓋、被夾的參數…）
+        self._hv_on_done = None           # 背景規劃完成後要叫的回呼（見 _hv_notify_done）
+        self._hv_alternates = None    # [(lat, lon), ...] 備降點；目前由呼叫端填，UI 尚未提供點選
 
         # 即時路徑生成設定（已停用：改由「預覽」按鈕 / Enter 鍵手動觸發，見 on_preview_paths）
         # 保留屬性以維持 _schedule_path_generation / _auto_generate_path 方法的向後相容
@@ -846,6 +919,9 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         self.vtol_recon_panel.pick_area_requested.connect(
             self.parameter_panel.open_click_map_requested.emit)
         self.vtol_recon_panel.clear_area_requested.connect(self.on_clear_corners)
+        # 模式二：多個作業區
+        self.vtol_recon_panel.commit_area_requested.connect(self.commit_current_area)
+        self.vtol_recon_panel.clear_areas_requested.connect(self.clear_all_survey_areas)
         self.vtol_recon_panel.delete_last_corner_requested.connect(
             self.on_delete_last_corner)
         # 自動建構的電子圍籬狀態也餵給 VTOL 面板 —— 否則地圖上明明畫著圍籬，
@@ -1389,6 +1465,78 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         a = math.sin(dlat/2)**2 + math.cos(lat1)*math.cos(lat2)*math.sin(dlon/2)**2
         return R * 2 * math.asin(math.sqrt(a))
 
+    # ══════════════════════════════════════════════════════════════
+    #  模式二：多個作業區
+    # ══════════════════════════════════════════════════════════════
+    def survey_area_polygons(self) -> list:
+        """要送去規劃的所有作業區。
+
+        = 已完成的區 + （正在畫的那一塊，如果它已經有 3 個角點）。
+        兩者都沒有就回空清單 —— 呼叫端本來就會先擋。
+        """
+        out = [list(p) for p in getattr(self, 'survey_areas', []) if len(p) >= 3]
+        cur = list(getattr(self, 'corners', []) or [])
+        if len(cur) >= 3:
+            out.append(cur)
+        return out
+
+    def commit_current_area(self) -> bool:
+        """把正在畫的那一塊收進清單，然後清空畫布準備畫下一塊。"""
+        cur = list(self.corners or [])
+        if len(cur) < MIN_CORNERS:
+            QMessageBox.warning(
+                self, '區域未完成',
+                f'目前只有 {len(cur)} 個角點，至少要 {MIN_CORNERS} 個才能構成一塊區。')
+            return False
+        self.survey_areas.append(cur)
+        self.corners.clear()
+        self.map_widget.clear_corners()
+        self._sync_area_counts()
+        self._render_committed_areas()
+        logger.info(f'作業區 #{len(self.survey_areas)} 完成（{len(cur)} 個角點）；'
+                    f'畫布已清空，可以畫下一塊')
+        self.statusBar().showMessage(
+            f'已完成第 {len(self.survey_areas)} 塊作業區，繼續圈下一塊或直接規劃', 8000)
+        return True
+
+    def clear_all_survey_areas(self):
+        """清掉所有已完成的區（不動正在畫的那一塊 —— 那個由既有的清除鈕負責）。"""
+        n = len(self.survey_areas)
+        self.survey_areas.clear()
+        self._sync_area_counts()
+        self._render_committed_areas()
+        logger.info(f'已清除 {n} 塊已完成的作業區')
+        self.statusBar().showMessage(f'已清除 {n} 塊作業區', 5000)
+
+    def _sync_area_counts(self):
+        """把「已完成幾塊 / 正在畫幾點」同步到面板。"""
+        for name in ('vtol_recon_panel', 'parameter_panel'):
+            panel = getattr(self, name, None)
+            fn = getattr(panel, 'set_area_count', None)
+            if callable(fn):
+                try:
+                    fn(len(self.survey_areas), len(self.corners or []))
+                except Exception as e:      # noqa: BLE001
+                    logger.warning(f'{name}.set_area_count 失敗：{e}')
+
+    def _render_committed_areas(self):
+        """在地圖上畫出已完成的區。
+
+        ⚠ 地圖端沒有這個能力時只記一行 log，**不要**讓規劃因此失敗 ——
+        區域清單是資料，畫不畫得出來是顯示問題，兩者不該綁在一起。
+        """
+        fn = getattr(self.map_widget, 'display_survey_areas', None)
+        if callable(fn):
+            try:
+                fn([list(p) for p in self.survey_areas])
+                return
+            except Exception as e:          # noqa: BLE001
+                logger.warning(f'display_survey_areas 失敗：{e}')
+        elif self.survey_areas:
+            logger.info(f'地圖沒有 display_survey_areas，'
+                        f'{len(self.survey_areas)} 塊已完成的區不會被畫出來'
+                        f'（不影響規劃）')
+
     def on_delete_last_corner(self):
         """刪除最後一個角點（誤點救援）—— 2D 與 3D 同時生效。
 
@@ -1413,6 +1561,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             self.map_widget._render_map()
         # 更新 UI（各分頁的角點計數：基本演算法 + VTOL 偵察都靠這個）
         self.parameter_panel.update_corner_count(len(self.corners))
+        self._sync_area_counts()
         self.update_statusbar()
         logger.info(f"刪除角點: ({removed[0]:.6f}, {removed[1]:.6f}), "
                     f"剩餘 {len(self.corners)} 個（2D+3D 同步）")
@@ -1471,6 +1620,11 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             gap_spacings_m = self.flight_params.get('gap_spacings_m') or None
             v_spacing_m = self.flight_params.get('v_spacing_m', 0.0) or None
 
+            # 圍籬要對齊掃描角。只有 GRID 會照 params.angle 排掃描線；
+            # SPIRAL / CIRCULAR 完全不看它，那時要傳 None 讓圍籬維持軸對齊。
+            fence_angle = (coverage_angle_to_compass(params.angle)
+                           if pattern == ScanPattern.GRID else None)
+
             if n_regions > 1:
                 sub_paths = planner.plan_subdivided_coverage(
                     self.corners, params,
@@ -1483,7 +1637,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 path = [pt for sp in sub_paths for pt in sp]
                 if not path:
                     return
-                self.map_widget.display_paths(sub_paths, self.flight_params['altitude'])
+                self.map_widget.display_paths(sub_paths, self.flight_params['altitude'],
+                                              scan_angle_deg=fence_angle)
                 # 顯示轉場路徑（如啟用高度錯層）
                 self._update_transit_paths(planner, sub_paths)
             else:
@@ -1491,7 +1646,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 path = planner.plan_coverage(self.corners, params)
                 if not path:
                     return
-                self.map_widget.display_path(path, self.flight_params['altitude'])
+                self.map_widget.display_path(path, self.flight_params['altitude'],
+                                             scan_angle_deg=fence_angle)
                 self.map_widget.clear_transit_paths()
 
             # 計算總飛行距離
@@ -1656,6 +1812,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         remaining = MAX_CORNERS - len(self.corners)
         logger.info(f"新增邊界點 #{len(self.corners)}: ({lat:.6f}, {lon:.6f}) [剩餘: {remaining}]")
         self.parameter_panel.update_corner_count(len(self.corners))
+        self._sync_area_counts()
         self.update_statusbar()
 
     def on_manual_corner_added(self, lat, lon):
@@ -1674,6 +1831,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         remaining = MAX_CORNERS - len(self.corners)
         logger.info(f"手動新增邊界點 #{len(self.corners)}: ({lat:.6f}, {lon:.6f}) [剩餘: {remaining}]")
         self.parameter_panel.update_corner_count(len(self.corners))
+        self._sync_area_counts()
         self.update_statusbar()
 
     def on_corner_moved(self, index, lat, lon):
@@ -1786,6 +1944,11 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             is_fixed_wing = self.current_vehicle_type == '固定翼'
 
             path = None
+            # 圍籬對齊用的掃描方位角（羅盤：0=北、順時針）。
+            # ⚠️ 預設 None＝維持軸對齊。下面只有**真的照掃描角排線**的分支才寫它；
+            #    圓心螺旋 / A* / RRT / DWA 都不看掃描角，留 None 才不會把圍籬
+            #    轉到一個航線沒走的方向。
+            fence_angle = None
 
             # ── 固定翼三階段路徑規劃（螺旋/同心圓/網格均啟用）──────────
             # _preview_fixed_wing_mission 內部已完整處理：
@@ -1932,6 +2095,10 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                     circle_base_altitude=self.flight_params['altitude'],
                 )
 
+                # 只有 GRID 照 params.angle 排掃描線；SPIRAL/CIRCULAR 不看它。
+                if pattern == ScanPattern.GRID:
+                    fence_angle = coverage_angle_to_compass(params.angle)
+
                 n_regions = self.flight_params.get('subdivisions', 1)
                 spacing_m = self.flight_params.get('region_spacing', 0.0)
                 gap_spacings_m = self.flight_params.get('gap_spacings_m') or None
@@ -1963,7 +2130,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                     self.sub_paths = sub_paths  # 保存各子區域路徑供匯出使用
                     # 扁平化供匯出使用，各子區域之間不插入多餘航點
                     path = [pt for sp in sub_paths for pt in sp]
-                    self.map_widget.display_paths(sub_paths, self.flight_params['altitude'])
+                    self.map_widget.display_paths(sub_paths, self.flight_params['altitude'],
+                                                  scan_angle_deg=fence_angle)
                     # 顯示轉場路徑
                     self._update_transit_paths(planner, sub_paths)
                 else:
@@ -2061,6 +2229,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                     pattern=ScanPattern.GRID
                 )
                 path = planner.plan_coverage(self.corners, params)
+                fence_angle = coverage_angle_to_compass(params.angle)
 
             if not path:
                 QMessageBox.warning(self, "路徑生成失敗", "無法生成覆蓋路徑，請檢查邊界點設定")
@@ -2090,7 +2259,10 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             # 多區域時 display_paths 已在規劃迴圈中呼叫，此處只處理單區域
             n_reg = self.flight_params.get('subdivisions', 1)
             if n_reg <= 1:
-                self.map_widget.display_path(path, self.flight_params['altitude'])
+                # ⚠ 這一行是**四個分支共用的尾巴**（多邊形網格、A*、DWA、預設）。
+                #   fence_angle 只有真正照掃描角排線的分支會設，其餘留 None。
+                self.map_widget.display_path(path, self.flight_params['altitude'],
+                                             scan_angle_deg=fence_angle)
 
             # 更新狀態列
             _wp_txt = f"航點: {len(path)}"
@@ -2210,6 +2382,13 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             fw_params = self._build_fw_params()
             scan_mode = algorithm  # 'spiral' | 'circular' | 'grid'
             scan_angle = self.flight_params.get('angle', 0.0)   # 網格掃描角度（度）
+            # 圍籬對齊用的羅盤方位；預設 None＝維持軸對齊。
+            # ⚠️⚠️ 本方法的兩條網格分支吃**同一個** scan_angle，但下游規劃器的
+            #   慣例不同：多分區走 CoverageParameters（自東順時針，羅盤=角+90），
+            #   單區域走 CoveragePathPlanner（自北逆時針，羅盤=−角）。
+            #   scan_angle=30 時兩者實際飛的方向差 30°。這是既有的規劃器歧異；
+            #   這裡各自用對應的轉換，讓圍籬跟著**真正飛的那個方向**。
+            fw_fence_angle = None
 
             # 決定中心點與任務多邊形：優先使用圓心模式，其次使用邊界點
             # 網格掃描必須使用邊界多邊形，圓心模式下跳過圓形多邊形邏輯
@@ -2311,6 +2490,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                     circle_base_altitude=fw_params.mission_altitude_m,
                     circle_direction=fw_params.circle_direction,
                 )
+                if _pattern == ScanPattern.GRID:
+                    fw_fence_angle = coverage_angle_to_compass(scan_angle)
                 cov_planner = CoveragePlanner()
                 sub_scan_paths = cov_planner.plan_subdivided_coverage(
                     mission_polygon, coverage_params,
@@ -2328,7 +2509,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 path, _trimmed, _orig_n = self._trim_to_wp_limit(path, "固定翼多分區")
                 self.waypoints = path
 
-                self.map_widget.display_fw_paths(takeoff_ll, sub_scan_paths, landing_ll)
+                self.map_widget.display_fw_paths(takeoff_ll, sub_scan_paths, landing_ll,
+                                                 scan_angle_deg=fw_fence_angle)
 
                 takeoff_dist = _path_dist(takeoff_ll)
                 landing_dist = _path_dist(landing_ll)
@@ -2397,6 +2579,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 else:
                     if scan_mode == 'grid':
                         # 使用 CoveragePathPlanner（燈泡型轉彎）取代預設網格生成
+                        # 圍籬角度由該函式**自己**回報（它內部有一條會換慣例的
+                        # 退路），這裡不自己算。
                         result = self._generate_grid_with_coverage_planner(
                             mission_polygon, fw_params, scan_angle,
                             planner, takeoff_path, landing_path,
@@ -2646,7 +2830,11 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                     _trimmed = True
 
                 mission_ll = result['mission_latlon']
-                self.map_widget.display_fw_paths(takeoff_ll, mission_ll, landing_ll)
+                # 只有真正排掃描線的那條分支會填這個 key；螺旋/同心圓沒有掃描角，
+                # 拿不到就維持 None＝軸對齊圍籬。
+                fw_fence_angle = result.get('fence_scan_angle_deg')
+                self.map_widget.display_fw_paths(takeoff_ll, mission_ll, landing_ll,
+                                                 scan_angle_deg=fw_fence_angle)
                 # 提供完整 3D 高度資訊給 Cesium 地圖
                 if hasattr(self.map_widget, 'set_fw_result'):
                     self.map_widget.set_fw_result(result)
@@ -3326,8 +3514,12 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
 
         if not cov_result.poses_3d:
             # 退回原方法
-            logger.warning("CoveragePathPlanner 無可用路徑，退回 generate_full_mission")
-            return planner.generate_full_mission(
+            # ⚠️⚠️ 這條退路換了掃描角慣例：generate_full_mission 把
+            #   scan_angle_deg 直接塞進 CoverageParameters.angle（自東順時針），
+            #   而上面 CoveragePathPlanner 是自北逆時針。scan_angle=30 時兩者
+            #   實際飛的方向差 30°，所以圍籬角度**必須**跟著這條分支重算，
+            #   不能沿用呼叫端算好的那個。
+            _fb = planner.generate_full_mission(
                 polygon=mission_polygon,
                 home_lat=home_lat,
                 home_lon=home_lon,
@@ -3335,6 +3527,9 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 scan_pattern='grid',
                 scan_angle_deg=scan_angle,
             )
+            if isinstance(_fb, dict):
+                _fb['fence_scan_angle_deg'] = coverage_angle_to_compass(scan_angle)
+            return _fb
 
         mission_latlon = self._poses_to_latlon(cov_result.poses_3d, ref_lat, ref_lon)
         _mission_path = [(lat, lon, _alt) for lat, lon in mission_latlon]
@@ -3350,6 +3545,9 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             'mission_latlon': mission_latlon,
             'landing_path': landing_path,
             'full_path': takeoff_ll + mission_latlon + landing_ll,
+            # 這條分支**實際**用的掃描方向，換算成羅盤（0=北、順時針），供圍籬對齊。
+            # 由產生路徑的分支自己填，呼叫端不要另外猜（上面退路用的是別套慣例）。
+            'fence_scan_angle_deg': fw_scan_angle_to_compass(scan_angle),
         }
 
     def on_export_waypoints(self):
@@ -3974,6 +4172,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
 
         # 更新 UI
         self.parameter_panel.update_corner_count(len(self.corners))
+        self._sync_area_counts()
         self.update_statusbar()
         logger.info(f"已同步 {len(corners)} 個角點")
 
@@ -5080,7 +5279,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             msg += '請檢查 log 取得詳細診斷。'
             QMessageBox.warning(self, 'Fence 繞行未生效', msg)
 
-    def _on_dccpp_coverage_requested(self, params: dict):
+    def _on_dccpp_coverage_requested(self, params: dict, *, run_async: bool = True,
+                                     on_done=None):
         """
         處理 DCCPP 最佳化覆蓋請求
 
@@ -5088,16 +5288,46 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         1. 驗證邊界點 >= 3
         2. 組裝 areas / drones 資料結構
         3. 呼叫 SwarmCoordinator.plan_coverage_dccpp()
-        4. 將結果轉為 swarm_raw 格式並在地圖顯示
+        4. 將結果轉為 swarm_raw 格式並在地圖顯示（`_display_dccpp_result`）
         5. 更新狀態列
+
+        Args:
+            params:    面板送來的參數字典（ParameterPanel.get_dccpp_params 或
+                       VTOLReconPanel.get_params）
+            run_async: HV-DCCPP 分支是否丟到背景執行緒。
+                       ⚠ 呼叫端若在本函式回來後立刻讀 `self._dccpp_result`（舊寫法），
+                       **必須**傳 False，否則會讀到上一次的結果或 None 而且不會報錯。
+                       新的呼叫端請改用 `on_done`。
+            on_done:   `on_done(ok: bool)`，在**結果已經顯示完**之後呼叫一次。
+                       同步路徑當場叫、背景路徑等 worker 回來才叫；失敗／取消時
+                       以 `ok=False` 呼叫 —— 呼叫端才不會永遠停在「規劃中…」。
         """
         from PyQt6.QtWidgets import QMessageBox
         try:
-            if len(self.corners) < 3:
+            # ⚠ 多區模式：已完成的區也算數。只看 `self.corners` 的話，
+            #   使用者按了「完成本區」之後畫布是空的，就會被誤擋。
+            if not self.survey_area_polygons():
                 QMessageBox.warning(
                     self, "邊界點不足",
-                    "請先在地圖上設定至少 3 個邊界點，再執行 DCCPP 最佳化。"
+                    "請先在地圖上設定至少 3 個邊界點，再執行 DCCPP 最佳化。\n"
+                    "（多區模式：按「完成本區」收起來的區也算。）"
                 )
+                if on_done:
+                    on_done(False)
+                return
+
+            # ⚠ 這道閘門必須在**清地圖之前**，而且對每一種規劃都要問：
+            #   背景規劃還在跑時再送一次（不論是不是 HV），下面的
+            #   clear_all_display_layers_js() 會先把圖層清掉，接著舊的那趟
+            #   完成時又用舊結果覆蓋 self._dccpp_result —— 畫面與匯出全部對不上，
+            #   而且不會有任何錯誤訊息。舊版是靠 UI 凍結擋住這件事的。
+            if self._hv_planning_in_flight():
+                QMessageBox.information(
+                    self, "HV-DCCPP",
+                    "背景規劃仍在執行中，請等它結束再送出新的規劃。\n"
+                    "（規劃無法中途取消：hv 的求解器沒有取消點）")
+                if on_done:
+                    on_done(False)
                 return
 
             import math
@@ -5114,21 +5344,46 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             mounting_angle = float(params.get('mounting_angle_deg', 0.0))
             coord_mode    = params.get('coordination_mode', 'uncoordinated')
             dem_path      = params.get('dem_path', '')
+            # ⚠⚠⚠ 「VTOL 偵查」頁的 get_params() **沒有 dem_path 這個鍵**
+            #   （DEM 選檔在「參數」頁，而那一頁從不設 hv_dccpp）⇒ HV 規劃一律
+            #   拿到空字串 ⇒ terrain_func=None ⇒ 轉接層把地形當成海平面 0 m 的平面。
+            #   後果：對地淨空與下降走廊的地形檢查**結構上永遠不會觸發**。
+            #   使用者已經載入 DEM 時就把它接回來（`_on_dem_loaded` 存的那一份）。
+            if not dem_path:
+                _dm = getattr(self, '_dem_manager', None)
+                _p = getattr(_dm, 'dem_path', None) if _dm is not None else None
+                if _p:
+                    dem_path = str(_p)
+                    logger.info(f'覆蓋規劃：面板沒帶 dem_path，改用已載入的 DEM {dem_path}')
+                elif params.get('hv_dccpp'):
+                    logger.warning(
+                        '覆蓋規劃：沒有任何 DEM ⇒ HV-DCCPP 會把地形當成海平面 0 m 的'
+                        '平面，對地淨空與下降走廊的地形檢查不會生效')
 
             # ── 組裝區域 ──
             # ⚠ `scan_angle_deg` 一定要放進來：規劃器在 auto_scan_angle=False 時
             #   走 `area_dict.get('scan_angle_deg', 0.0)`。舊版沒帶這個鍵 ⇒ 就算
             #   關掉自動選角，掃描方向也永遠是 0°，使用者改角度完全沒反應。
             scan_angle_deg = float(params.get('scan_angle_deg', 0.0))
-            areas = [{'area_id': 1, 'polygon': list(self.corners), 'priority': 1.0,
-                      'scan_angle_deg': scan_angle_deg}]
+            # 模式二：使用者可以圈**好幾塊**小區。`survey_areas` 是已完成的那些，
+            # `corners` 是正在畫的那一塊（沒畫完就不算）。兩者都沒有時退回舊行為。
+            _polys = self.survey_area_polygons()
+            areas = [{'area_id': i + 1, 'polygon': list(p), 'priority': 1.0,
+                      'scan_angle_deg': scan_angle_deg}
+                     for i, p in enumerate(_polys)]
+            if len(areas) > 1:
+                logger.info(f'[DCCPP] 多區模式：{len(areas)} 塊作業區'
+                            f'（各 {[len(p) for p in _polys]} 個角點）')
             if not auto_scan:
                 logger.info(
                     f'[DCCPP] 手動掃描角度 {scan_angle_deg:.1f}°（0°=北，順時針）')
 
             # ── 組裝無人機 ──
-            centroid_lat = sum(c[0] for c in self.corners) / len(self.corners)
-            centroid_lon = sum(c[1] for c in self.corners) / len(self.corners)
+            # ⚠ 質心要取**所有**區的角點，不是只取正在畫的那一塊，否則多區時
+            #   沒設起飛點的話會把 home 放在最後一塊區的中心。
+            _all_pts = [c for p in _polys for c in p]
+            centroid_lat = sum(c[0] for c in _all_pts) / len(_all_pts)
+            centroid_lon = sum(c[1] for c in _all_pts) / len(_all_pts)
             # 優先使用使用者設定的起飛點，否則用多邊形質心
             if self.home_point is not None:
                 base_lat, base_lon = self.home_point
@@ -5168,7 +5423,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             # 降落滑行距離：將觸地點沿進場反方向提前此距離，
             # 確保 DCCPP 規劃的降落點不會和起飛點重疊
             user_landing_rollout = float(params.get('landing_rollout', 0.0))
-            dccpp_result = coordinator.plan_coverage_dccpp(
+            _is_vtol = str(vehicle_type).lower() == 'vtol'
+            plan_kwargs = dict(
                 areas=areas,
                 drones=drones,
                 coverage_width_m=fov_width_m,
@@ -5188,11 +5444,61 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 # 非 VTOL 時為 None，走原本的固定翼跑道起降。
                 vtol_transition_alt_m=(
                     float(params.get('transition_alt', 0.0) or 0.0)
-                    if str(params.get('vehicle_type', '')).lower() == 'vtol'
-                    else None
+                    if _is_vtol else None
                 ),
             )
 
+            # 顯示階段要用到、但在規劃前就決定好的值。
+            # ⚠ corners_snapshot 一定要在這裡拍：規劃跑在背景執行緒時使用者仍可
+            #   在地圖上改邊界點，事後再讀 self.corners 會畫出與實際飛的路徑不一致
+            #   的多邊形與面積，而且完全不會報錯。
+            display_ctx = dict(
+                params=params, corners_snapshot=list(self.corners),
+                centroid_lat=centroid_lat, centroid_lon=centroid_lon,
+                altitude=altitude, speed=speed, turn_radius=turn_radius,
+                vehicle_type=vehicle_type, auto_scan=auto_scan,
+            )
+
+            # ── HV-DCCPP（異構雙構型 VTOL）分支 ──
+            #   面板勾選且 vehicle_type == 'vtol' 才接手；其餘一律走既有 DCCPP。
+            #   見 docs/AEROPLAN_接入手冊.md §5 與 docs/adr/0007-hv-dccpp-planner.md。
+            if self._configure_hv_dccpp(coordinator, params, vehicle_type) and run_async:
+                self._hv_on_done = on_done
+                self._start_hv_planning(coordinator, plan_kwargs, display_ctx)
+                return          # ★ 後處理與 on_done 改由 finished_ok 觸發
+
+            dccpp_result = coordinator.plan_coverage_dccpp(**plan_kwargs)
+            # HV 分支同步跑時也要把轉接器留下來（匯出／上傳／重規劃要用）
+            self._hv_coordinator = getattr(coordinator, 'hv_coordinator', None)
+            self._display_dccpp_result(dccpp_result, **display_ctx)
+            if on_done:
+                on_done(True)
+
+        except Exception as e:
+            logger.error(f"DCCPP 最佳化失敗: {e}", exc_info=True)
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "DCCPP 失敗", f"DCCPP 最佳化路徑規劃失敗：\n{e}")
+            if on_done:
+                on_done(False)
+
+    def _display_dccpp_result(self, dccpp_result: dict, *, params: dict,
+                              corners_snapshot: list,
+                              centroid_lat: float, centroid_lon: float,
+                              altitude: float, speed: float, turn_radius: float,
+                              vehicle_type: str, auto_scan: bool):
+        """把 DCCPP 規劃結果套用到 UI：避讓後處理、地圖、統計、metrics。
+
+        由 `_on_dccpp_coverage_requested` 直接呼叫（同步路徑），或由
+        `HvPlanningWorker.finished_ok` 觸發（HV-DCCPP 背景執行緒路徑）。
+        內容是原本寫在 handler 裡的後處理，**逐行照搬**，只有兩處改動：
+          * 兩次 `list(self.corners)` 改讀 `corners_snapshot`（規劃前拍的快照）；
+          * 自己帶一個 try/except，讓「規劃失敗」與「顯示失敗」不會互相掩蓋。
+
+        ⚠ 這裡的每一件事都碰 widget，只能在 GUI 執行緒跑。
+        """
+        import math          # noqa: F401 — 巢狀 _haversine 用得到
+        from PyQt6.QtWidgets import QMessageBox
+        try:
             # 註：fence-zone 避讓延後到「起降航段組裝完成後」才執行，
             # 否則 takeoff/landing 加上去的 home ↔ scan-area 連線會繞過避讓
             # 檢查（穿越 NFZ）。見下方 auto_landing 區塊之後的呼叫。
@@ -5345,6 +5651,10 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                     # 各段分別保留，讓 map_widget 以不同線型/顏色繪製
                     total_wps += len(apath.waypoints)
                     start_pos = (apath.waypoints[0].lat, apath.waypoints[0].lon) if apath.waypoints else (centroid_lat, centroid_lon)
+                    # 構型（只有 HV-DCCPP 有）：讓 2D/3D 一眼看得出哪幾架是
+                    # Pioneer、哪幾架是 HERO —— 兩者的轉彎半徑與作業高度差很多，
+                    # 混在一起看只會看到「一堆顏色」。同構規劃時是 None，畫法不變。
+                    _cls = getattr(apath, 'cls', None)
                     drones_data.append({
                         'drone_id': uav_id,
                         'start_position': start_pos,
@@ -5353,6 +5663,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                         'operation_paths': op_pts,
                         'transfer_paths': xfer_pts,
                         'landing_paths': landing_pts,
+                        'uav_class': _cls,
+                        'platform': HV_PLATFORM_NAMES.get(_cls or '', ''),
                     })
             else:
                 # ── 備用：從 MDTSPResult 提取 ──
@@ -5435,7 +5747,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
 
             swarm_data = {
                 'drones': drones_data,
-                'areas': [{'area_id': 1, 'polygon': list(self.corners)}],
+                'areas': [{'area_id': 1, 'polygon': list(corners_snapshot)}],
                 'stats': {
                     'total_drones': len(drones_data),
                     'total_waypoints': total_wps,
@@ -5465,13 +5777,18 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             dccpp_result['cruise_speed_mps'] = float(speed)
             dccpp_result['turn_radius_m'] = float(turn_radius)
             self._dccpp_result = dccpp_result
-            self.map_widget.display_swarm_raw(swarm_data)
+            # 圍籬對齊規劃器**實際**用的掃描角（`_eff`，羅盤 0=北順時針，
+            # 與 GeofenceConstraintManager 同慣例）。
+            # ⚠ 回退到舊 solver 時 `_eff` 是 None —— 必須原樣傳下去。寫成
+            #   `_eff or 0.0` 會讓每一趟退回的航次都建出**正北**對齊的圍籬，
+            #   而畫面上跟正確的圍籬長得一模一樣，看不出來。
+            self.map_widget.display_swarm_raw(swarm_data, scan_angle_deg=_eff)
 
             vtype_label = {"fixed_wing": "固定翼", "vtol": "VTOL (4+1)", "multirotor": "多旋翼"}.get(vehicle_type, "多旋翼")
 
             # ── 更新任務統計面板 ──
             try:
-                _area_m2 = CoveragePlanner().calculate_coverage_area(list(self.corners))
+                _area_m2 = CoveragePlanner().calculate_coverage_area(list(corners_snapshot))
             except Exception:
                 _area_m2 = 0.0
             self.waypoint_label.setText(f"航點: {total_wps}")
@@ -5505,11 +5822,263 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 'estimated_time': total_makespan,
                 'makespan': total_makespan,
             }
-
         except Exception as e:
-            logger.error(f"DCCPP 最佳化失敗: {e}", exc_info=True)
-            from PyQt6.QtWidgets import QMessageBox
+            logger.error(f"DCCPP 結果顯示失敗: {e}", exc_info=True)
             QMessageBox.warning(self, "DCCPP 失敗", f"DCCPP 最佳化路徑規劃失敗：\n{e}")
+
+    # ══════════════════════════════════════════════════════════════════
+    # HV-DCCPP（異構雙構型 VTOL 覆蓋規劃）
+    #   套件 hv_dccpp；接法與參數對照見 docs/AEROPLAN_接入手冊.md，
+    #   決策見 docs/adr/0007-hv-dccpp-planner.md、0008-planning-in-worker-thread.md。
+    # ══════════════════════════════════════════════════════════════════
+    def _hv_class_of(self, drone: dict) -> str:
+        """逐機構型 A/B。
+
+        ⚠ 這個回呼**不能省**：面板組出來的 drone dict 只有 drone_id / name /
+        position / speed / heading / turn_radius / vehicle_type / fov_width，
+        沒有任何構型線索，轉接層的 default_class_of 最後一條規則會把整隊當成
+        構型 A（Pioneer，24.6 kg、200 m 轉彎半徑、120 m 最低高度）——
+        結果完全錯誤而且不會報錯。
+        """
+        return (getattr(self, '_hv_classes', None) or {}).get(int(drone.get('drone_id', 0)), 'A')
+
+    def _hv_fence_zones(self):
+        """禁飛區 + 威脅區（GEOFENCE 是 inclusion，語意相反，不能送給 hv）。"""
+        try:
+            from mission.fence_zone import FenceZoneRegistry, ZoneCategory
+            reg = FenceZoneRegistry.instance()
+            return reg.by_category(ZoneCategory.NFZ) + reg.by_category(ZoneCategory.THREAT)
+        except Exception as e:      # noqa: BLE001
+            logger.warning(f'[HV-DCCPP] 取不到 fence zone：{e}')
+            return []
+
+    def _configure_hv_dccpp(self, coordinator, params: dict, vehicle_type: str) -> bool:
+        """決定這一次規劃要不要走 HV-DCCPP，要的話把旗標設到 coordinator 上。
+
+        Returns:
+            True 表示已切到 HV 分支（coordinator.use_hv_dccpp 已打開）。
+        """
+        enabled = (str(vehicle_type).lower() == 'vtol'
+                   and bool(params.get('hv_dccpp', False)))
+        coordinator.use_hv_dccpp = enabled
+        if not enabled:
+            self._hv_classes = {}
+            return False
+
+        # 兩種構型的台數是各自獨立填的（面板「機隊組成」）；總台數 = 兩者相加。
+        # 舊版只有 hv_num_a、B 靠總數相減，這裡兩個都收，對不起來時以相加為準，
+        # 免得畫面上的台數與實際規劃的機隊不一致而且沒人看得出來。
+        n_a = max(0, int(params.get('hv_num_a', 1) or 0))
+        n_b = params.get('hv_num_b')
+        n_total = int(params.get('num_drones', 0) or 0)
+        if n_b is None:
+            n_a = min(n_a, n_total)
+            n_b = max(0, n_total - n_a)
+        else:
+            n_b = max(0, int(n_b))
+            if n_a + n_b != n_total:
+                logger.warning(
+                    f'[HV-DCCPP] 台數對不上：Pioneer {n_a} + HERO {n_b} = {n_a + n_b}，'
+                    f'但 num_drones={n_total}；以相加值為準')
+        # {drone_id: 'A'|'B'} — 前 n_a 台是構型 A（Pioneer + LiDAR），其餘是 B（HERO + 相機）
+        self._hv_classes = {i + 1: ('A' if i < n_a else 'B')
+                            for i in range(n_a + n_b)}
+
+        coordinator.hv_class_of = self._hv_class_of
+        coordinator.hv_params = dict(params)
+        coordinator.hv_home = self.home_point
+        coordinator.hv_alternates = getattr(self, '_hv_alternates', None)
+        coordinator.hv_wind = params.get('hv_wind')
+        # ★ 在 GUI 執行緒先把禁飛區取好再交給規劃器：FenceZoneRegistry 是主執行緒的
+        #   QObject 單例，規劃跑在背景執行緒時不該由那邊去讀它。
+        coordinator.hv_fence_zones = self._hv_fence_zones()
+        logger.info(
+            f'[HV-DCCPP] 啟用：構型 A {n_a} 台 / 構型 B {n_total - n_a} 台，'
+            f'home={self.home_point}, 風={params.get("hv_wind")}, '
+            f'C2={params.get("hv_c2_range_km")} km')
+        if not self._hv_classes:
+            logger.warning('[HV-DCCPP] num_drones=0，沒有任何飛機可規劃')
+        return True
+
+    def _hv_planning_in_flight(self) -> bool:
+        """背景規劃是否還在跑（任何規劃請求都要先問這一句）。"""
+        worker = getattr(self, '_hv_worker', None)
+        return worker is not None and worker.isRunning()
+
+    def _hv_disconnect_worker(self, worker) -> None:
+        """把 worker 的四條信號從本視窗拆掉（視窗要關、或要換一個 worker 時）。"""
+        for sig in ('progress', 'report', 'failed', 'finished_ok', 'cancelled'):
+            try:
+                getattr(worker, sig).disconnect()
+            except (TypeError, RuntimeError):
+                pass          # 本來就沒接 / C++ 物件已消失
+
+    def _start_hv_planning(self, coordinator, plan_kwargs: dict, display_ctx: dict) -> None:
+        """把 HV-DCCPP 規劃丟到背景執行緒（大情境數十秒，同步跑會讓視窗「沒有回應」）。"""
+        from ui.workers.planning_worker import HvPlanningWorker
+
+        if self._hv_planning_in_flight():
+            # 正常情況下 `_on_dccpp_coverage_requested` 的閘門已經先擋掉了；
+            # 這裡是防止有人日後從別的地方直接呼叫進來。
+            logger.warning('[HV-DCCPP] 已有規劃在執行，忽略這次請求')
+            return
+
+        old = getattr(self, '_hv_worker', None)
+        if old is not None:
+            # 上一趟的 worker：拆信號並交給 Qt 回收，否則每規劃一次就多留一個
+            # QThread（連同它的 coordinator、地形網格與 CostCache）在記憶體裡。
+            self._hv_disconnect_worker(old)
+            try:
+                old.deleteLater()
+            except RuntimeError:
+                pass
+
+        self._hv_display_ctx = dict(display_ctx)
+        # ★ 必須存成成員：區域變數會被 GC 回收，QThread 直接消失。
+        # ★ parent=None（不掛在 MainWindow 底下）：規劃沒跑完就關視窗時，
+        #   Qt 會連同子物件一起銷毀，而在「還在跑的 QThread」上呼叫解構子是 qFatal
+        #   ⇒ 整個程式 abort 而不是正常關閉。改由 closeEvent 的 _hv_park_running_worker
+        #   接手（見該函式）。
+        self._hv_worker = HvPlanningWorker(coordinator, plan_kwargs, parent=None)
+        self._hv_worker.progress.connect(self._on_hv_progress)
+        self._hv_worker.report.connect(self._on_hv_report)
+        self._hv_worker.failed.connect(self._on_hv_failed)
+        self._hv_worker.finished_ok.connect(self._on_hv_finished)
+        self._hv_worker.cancelled.connect(self._on_hv_cancelled)
+        self.statusBar().showMessage('HV-DCCPP 規劃中…', 0)
+        self._hv_worker.start()
+
+    def _on_hv_progress(self, frac: float, msg: str):
+        """進度回報。⚠ 0.40 → 0.90 之間沒有中間進度（plan_mission 整段無回呼）。"""
+        self.statusBar().showMessage(f'HV-DCCPP {frac * 100:.0f}%：{msg}', 0)
+
+    #: `notes` 裡真的會改變飛行結果、必須讓操作員看到的幾種（其餘只寫進 log）
+    _HV_LOUD_NOTES = (
+        'coverage_altitude_clamped',    # 你輸入的作業高度被夾到構型下限
+        'fov_width_mismatch',           # 面板的刈幅與感測器推導值差 > 25%
+        'alternate_auto_placed',        # 系統自己放了一個備降點（不見得能降落）
+        'coverage_altitude_ignored',
+        'overlap_rate_out_of_range',
+        # ⚠⚠ 轉接層從來不呼叫 hv_dccpp.validate()（全 repo grep 不到），
+        #   所以 SwarmCoordinator 的 HV 分支自己補跑一次，失敗時走這個前綴。
+        #   時空去衝突與能量預算只有它會檢查，preflight 不會。
+        'validate_failed',
+        # ⚠⚠⚠ 混編機隊 + 只切出一個胞的作業區 ⇒ 整份計畫是空的
+        #   （makespan=0.0、assembled_paths=None）而 status 仍是 GO_WITH_WARNINGS
+        'no_aircraft_assigned',
+        # 部分機隊閒置：只顯示「1/2 架」的話使用者不知道要調哪個旋鈕
+        'partial_fleet_assigned',
+        # ⚠⚠⚠ AGL 上限 − 最低固定翼作業高度 < 高度帶下限 ⇒ 該構型分不到工作，
+        #   全部落空時整趟是 NO_GO，而上游訊息把四個原因擠在同一句話裡。
+        'altitude_band_too_narrow',
+        # 最低固定翼作業高度被調到表 1 值以下：合法（表 1 說要依法規調整），
+        # 但會同時降低寫進飛控的 FENCE_ALT_MIN 與 Q_RTL_ALT。
+        'min_fw_lowered',
+        # 高度帶下限被調到規格預設 20 以下：同時放寬 GSD 可達性判準。
+        'dh_band_min_relaxed',
+    )
+
+    def _on_hv_report(self, payload: dict):
+        """preflight / 規劃報告：status、warnings、**notes**、uncovered。
+
+        ⚠ `notes` 不能只記個數量：手冊 §8 與 §15 裡最會影響操作員判斷的幾則
+        （作業高度被夾、刈幅對不上、備降點是系統自己放的、參數被忽略）
+        都是走 `notes` 而不是 `warnings`。
+        """
+        timing = payload.get('timing_ms') or {}
+        notes = list(payload.get('notes') or [])
+        # HV 分支補跑的 validate()：走 payload 的獨立鍵，避免跟 preflight 的 notes 打架
+        for _vn in (payload.get('validation_notes')
+                    or ([payload['validation_note']] if payload.get('validation_note') else [])):
+            notes.append(str(_vn))
+        warnings = list(payload.get('warnings') or [])
+        logger.info(
+            f"[HV-DCCPP] status={payload.get('status')} "
+            f"errors={len(payload.get('errors') or [])} "
+            f"warnings={len(warnings)} notes={len(notes)} "
+            f"total={float(timing.get('total', 0.0)):.0f} ms")
+        for w in warnings:
+            logger.warning(f'[HV-DCCPP] {w}')
+        loud = []
+        for n in notes:
+            text = str(n)
+            if text.startswith(self._HV_LOUD_NOTES):
+                loud.append(text)
+                logger.warning(f'[HV-DCCPP] {text}')
+            else:
+                logger.info(f'[HV-DCCPP] note: {text}')
+        # 存起來給 _on_hv_finished 在後處理**之後**再顯示一次
+        # （後處理最後一定會用「DCCPP 最佳化完成」蓋掉狀態列）
+        self._hv_last_report = {'loud_notes': loud,
+                                'uncovered': list(payload.get('uncovered') or []),
+                                'status': payload.get('status')}
+        for u in self._hv_last_report['uncovered']:
+            logger.error(f'[HV-DCCPP] 未覆蓋：{u}')
+
+    def _hv_show_report_banner(self):
+        """把 `_on_hv_report` 收集到的重點顯示出來（要在後處理之後叫，否則會被蓋掉）。"""
+        rep = getattr(self, '_hv_last_report', None) or {}
+        uncovered, loud = rep.get('uncovered') or [], rep.get('loud_notes') or []
+        if uncovered:
+            from PyQt6.QtWidgets import QMessageBox
+            self.statusBar().showMessage(f'⚠ HV-DCCPP 有未覆蓋區域：{uncovered}', 0)
+            QMessageBox.warning(
+                self, 'HV-DCCPP 覆蓋不完整',
+                '下列區域沒有被完全覆蓋：\n  ' + '\n  '.join(str(u) for u in uncovered)
+                + '\n\n（多半要改機隊組成或放寬約束，見接入手冊 §15.2 第 13 條）')
+        elif loud:
+            self.statusBar().showMessage('HV-DCCPP：' + '；'.join(loud[:3]), 15000)
+
+    def _hv_notify_done(self, ok: bool):
+        """呼叫並清掉這一趟的 `on_done`。
+
+        ⚠ 一定要在成功、失敗、取消三條路上都叫到，否則 VTOL 偵察面板那種
+        「按下去就顯示『規劃中 …』」的呼叫端會永遠停在那個字樣。
+        """
+        cb = getattr(self, '_hv_on_done', None)
+        self._hv_on_done = None
+        if cb is None:
+            return
+        try:
+            cb(bool(ok))
+        except Exception as e:      # noqa: BLE001 - 回呼壞掉不該連累規劃流程
+            logger.error(f'[HV-DCCPP] on_done 回呼失敗：{e}', exc_info=True)
+
+    def _on_hv_failed(self, msg: str):
+        """⚠⚠ 失敗對話框一定要帶上 `_on_hv_report` 收到的重點。
+
+        上游的 NO_GO 只寫「所有區域皆無可行構型（感測相容／高度帶／鏈路／方向）」,
+        四個原因擠在同一句話裡；真正說得出「AGL 上限 120 − 最低作業高度 120 = 0 m」
+        的是我們自己補的那些 note。只記進 log 檔的話,使用者在畫面上只會看到那句
+        沒有資訊量的話。
+        """
+        from PyQt6.QtWidgets import QMessageBox
+        self.statusBar().clearMessage()
+        logger.error(f'[HV-DCCPP] 規劃失敗：{msg}')
+        loud = list((getattr(self, '_hv_last_report', None) or {}).get('loud_notes') or [])
+        text = msg if not loud else (msg + '\n\n' + '\n'.join(f'• {n}' for n in loud))
+        QMessageBox.critical(self, 'HV-DCCPP 失敗', text)
+        self._hv_notify_done(False)
+
+    def _on_hv_cancelled(self):
+        """規劃跑完了但結果已被放棄（呼叫過 stop()，多半是關視窗）。"""
+        logger.info('[HV-DCCPP] 規劃結果已放棄（使用者取消）')
+        try:
+            self.statusBar().clearMessage()
+        except RuntimeError:
+            pass          # 視窗已經沒了
+        self._hv_notify_done(False)
+
+    def _on_hv_finished(self, result: dict):
+        """背景規劃完成 → 回到 GUI 執行緒做後處理（與同步路徑同一支）。"""
+        worker = getattr(self, '_hv_worker', None)
+        coordinator = getattr(worker, 'coordinator', None)
+        self._hv_coordinator = getattr(coordinator, 'hv_coordinator', None)
+        ctx = getattr(self, '_hv_display_ctx', None) or {}
+        self._display_dccpp_result(result, **ctx)
+        # 後處理會把狀態列改成「DCCPP 最佳化完成…」，所以警示要在它之後才顯示
+        self._hv_show_report_banner()
+        self._hv_notify_done(True)
 
     def _on_dem_loaded(self, dem_path: str):
         """使用者選取 DEM → 載入並在 3D 地圖上疊加 heatmap"""
@@ -7059,14 +7628,41 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                                               0.0, turn_radius, 0.0, 0.0))
                     return wps_local
 
-                # 每個 UAV 建立獨立 wps；以 uav_id 為 key（不再用 link_idx）
-                for uav_id, bpath in sorted_paths:
-                    path_wps = _build_wps_for_path(bpath)
-                    if path_wps:
-                        per_uav_wps[int(uav_id)] = path_wps
+                # ── HV-DCCPP：改用轉接層的 8-tuple（手冊 §12.3）──
+                #   _build_wps_for_path 的 TAKEOFF 分支先做 `if idx == 0: continue`
+                #   才檢查 takeoff_emitted，而 hv 縮點後的路徑起飛段**只有一個航點**
+                #   且就在 idx 0 ⇒ 整份任務不會有起飛指令，飛控直接從第一個
+                #   NAV_WAYPOINT 開始。to_upload_tuples 在 idx 0 照樣輸出
+                #   NAV_VTOL_TAKEOFF + DO_VTOL_TRANSITION(4)。
+                _hv = getattr(self, '_hv_coordinator', None)
+                _hv_owns_result = (
+                    _hv is not None
+                    and getattr(_hv, 'last_result', None) is self._dccpp_result)
+                if _hv_owns_result:
+                    try:
+                        per_uav_wps = {
+                            int(k): v for k, v in _hv.upload_tuples(
+                                is_vtol=is_vtol,
+                                vtol_transition_alt_m=float(vtol_transition_alt)).items()
+                            if v}
                         logger.info(
-                            f'[SITL] DCCPP path 已建立: UAV-{uav_id}  ({len(path_wps)} 點)'
-                        )
+                            f'[SITL] HV-DCCPP upload_tuples: '
+                            f'{ {k: len(v) for k, v in per_uav_wps.items()} }')
+                    except Exception as e:      # noqa: BLE001
+                        logger.error(
+                            f'[SITL] HV-DCCPP upload_tuples 失敗，退回 _build_wps_for_path：{e}',
+                            exc_info=True)
+                        _hv_owns_result = False
+
+                # 每個 UAV 建立獨立 wps；以 uav_id 為 key（不再用 link_idx）
+                if not _hv_owns_result:
+                    for uav_id, bpath in sorted_paths:
+                        path_wps = _build_wps_for_path(bpath)
+                        if path_wps:
+                            per_uav_wps[int(uav_id)] = path_wps
+                            logger.info(
+                                f'[SITL] DCCPP path 已建立: UAV-{uav_id}  ({len(path_wps)} 點)'
+                            )
                 # 若只有 1 筆路徑，維持舊行為（讓 wps 非空觸發上傳判斷）
                 if per_uav_wps:
                     first_uav_id = sorted(per_uav_wps.keys())[0]
@@ -7147,13 +7743,18 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
     # ══════════════════════════════════════════════════════════════════
 
     def _on_vtol_recon_plan(self, params: dict):
-        """VTOL 偵察分頁按下「執行 DCCPP 偵察規劃」。
+        """VTOL 偵察分頁按下「執行 ⋯ 偵察規劃」。
 
-        直接複用既有的 DCCPP 流程（params 裡 vehicle_type 已釘成 'vtol'），
-        跑完再把每架的航程 / 時間整理成摘要表回填面板。
+        這一頁有兩套規劃器可選（面板的「規劃演算法」下拉）：
+          * `planner='dccpp'`    —— 專案既有實作，同步跑（1 秒等級）。
+          * `planner='hv_dccpp'` —— 本專案的異構雙構型版本，丟背景執行緒
+            （12 台的大情境要數十秒，同步跑會讓視窗「沒有回應」）。
+        兩條路徑都走 `_on_dccpp_coverage_requested`，結果一樣是那 6 鍵字典，
+        所以下面整理摘要表的程式碼共用。
         """
         panel = self.vtol_recon_panel
-        if len(self.corners) < 3:
+        # ⚠ 多區模式：已完成的區也算數（見 survey_area_polygons）
+        if not self.survey_area_polygons():
             QMessageBox.warning(self, "尚未劃定偵察區",
                                 "請先在地圖上標出至少 3 個邊界點。")
             panel.set_plan_status("尚未規劃")
@@ -7164,9 +7765,21 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             panel.set_plan_status("感測器參數無效")
             return
 
-        self._on_dccpp_coverage_requested(params)
+        use_hv = bool(params.get('hv_dccpp'))
+        logger.info(f"[VTOL 偵察] 規劃演算法 = {params.get('planner', 'dccpp')}"
+                    f"（{'背景執行緒' if use_hv else '同步'}）")
+        panel.set_plan_status(
+            ("HV-DCCPP 規劃中 …（大情境需數十秒）" if use_hv else "DCCPP 規劃中 …"))
+        # ★ 結果一律由 on_done 接手：HV 走背景執行緒，這個函式回來時還沒有結果。
+        #   以前這裡直接讀 self._dccpp_result，那在非同步下會讀到上一次的值而且不報錯。
+        self._on_dccpp_coverage_requested(
+            params, run_async=use_hv,
+            on_done=lambda ok: self._on_vtol_recon_planned(params, ok))
 
-        result = getattr(self, '_dccpp_result', None)
+    def _on_vtol_recon_planned(self, params: dict, ok: bool):
+        """規劃（不論哪一套）顯示完成後：整理每架的航程／時間回填面板。"""
+        panel = self.vtol_recon_panel
+        result = getattr(self, '_dccpp_result', None) if ok else None
         if not result:
             panel.set_plan_status("規劃未產生結果（詳見日誌）")
             panel.set_plan_result([], "規劃未產生結果（詳見日誌）")
@@ -7211,12 +7824,29 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 )
                 dist_m += _m.hypot(h, float(b.alt) - float(a.alt))
             t_min = estimate_flight_time_s(apath, speed, Q_PILOT_SPD_UP) / 60.0
-            rows.append((uav_id, len(wps), dist_m / 1000.0, t_min))
+            # 構型：異構規劃時每一列要看得出是 Pioneer 還是 HERO
+            # （兩者的轉彎半徑 200/120 m、最低作業高度 120/100 m 差很多）
+            _cls = getattr(apath, 'cls', None)
+            rows.append((uav_id, len(wps), dist_m / 1000.0, t_min,
+                         HV_PLATFORM_NAMES.get(_cls or '', '')))
 
         makespan = float(result.get('total_makespan', 0.0) or 0.0)
+        # ⚠ 規劃器可能只用了機隊的一部分（小作業區用不到那麼多台），
+        #   而且**不會有任何訊息**說某幾台沒分到工作。要在摘要裡講出來，
+        #   否則使用者是在起飛前才發現有飛機沒有任務。
+        asked = int(params.get('num_drones', len(rows)) or len(rows))
+        idle = max(0, asked - len(rows))
+        by_cls = {}
+        for r in rows:
+            if len(r) > 4 and r[4]:
+                by_cls[r[4]] = by_cls.get(r[4], 0) + 1
+        cls_txt = ('｜' + '、'.join(f'{k}×{v}' for k, v in sorted(by_cls.items()))
+                   if by_cls else '')
+        idle_txt = f'｜⚠ {idle} 台沒有分到工作' if idle else ''
         summary = (
-            f"規劃完成：{len(rows)} 架 ｜ 總航程 "
+            f"規劃完成：{len(rows)}/{asked} 架{cls_txt} ｜ 總航程 "
             f"{sum(r[2] for r in rows):.2f} km ｜ makespan {makespan / 60.0:.1f} min"
+            f"{idle_txt}"
         )
         panel.set_plan_result(rows, summary)
         logger.info(f'[VTOL 偵察] {summary}')
@@ -8023,6 +8653,21 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             if self._stot_close_decision() is False:
                 event.ignore()
                 return
+        except Exception:
+            pass
+        # HV-DCCPP 規劃執行緒：不能殺、不能丟著不管，只能寄放（見 _hv_park_running_worker）。
+        try:
+            _hv_worker = getattr(self, '_hv_worker', None)
+            if _hv_worker is not None:
+                if _hv_worker.isRunning():
+                    _hv_worker.stop()               # 放棄結果（規劃本身停不下來）
+                    if not _hv_worker.wait(3000):
+                        _hv_park_running_worker(self, _hv_worker)
+                    else:
+                        self._hv_disconnect_worker(_hv_worker)
+                else:
+                    self._hv_disconnect_worker(_hv_worker)
+                self._hv_worker = None
         except Exception:
             pass
         # 確保 SITL 執行緒安全停止

@@ -328,6 +328,21 @@ class DualMapWidget(MapWidgetBase):
             swarm_data    = getattr(m, '_swarm_data', None),
         )
 
+    def ensure_3d(self) -> bool:
+        """確保 3D Cesium 圖台**真的在顯示**；已經在 3D 就什麼都不做。
+
+        給「只有 3D 才畫得出來」的功能用（覆蓋熱力圖、漏掃標示）。
+        回傳是否成功切到 3D。
+        """
+        if self._mode == _MODE_3D:
+            return True
+        self._switch_mode(_MODE_3D)
+        return self._mode == _MODE_3D
+
+    def is_3d(self) -> bool:
+        """目前是否顯示 3D Cesium 圖台。"""
+        return self._mode == _MODE_3D
+
     def _on_fly_clicked(self):
         """飛向路徑（3D 模式才有效果）"""
         if self._mode == _MODE_3D:
@@ -503,17 +518,17 @@ class DualMapWidget(MapWidgetBase):
     # ─────────────────────────────────────────────────────────────────
 
     # ── 路徑顯示（每次自動建構 Geofence —— 強制飛安政策）───────────
-    def display_path(self, path, altitude: float = 50.0):
+    def display_path(self, path, altitude: float = 50.0, scan_angle_deg=None):
         self.map_2d.display_path(path, altitude)
         self.map_3d.display_path(path, altitude)
-        self._auto_build_fence([path], altitude)
+        self._auto_build_fence([path], altitude, scan_angle_deg=scan_angle_deg)
 
-    def display_paths(self, paths_list, altitude: float = 50.0):
+    def display_paths(self, paths_list, altitude: float = 50.0, scan_angle_deg=None):
         self.map_2d.display_paths(paths_list, altitude)
         self.map_3d.display_paths(paths_list, altitude)
-        self._auto_build_fence(paths_list, altitude)
+        self._auto_build_fence(paths_list, altitude, scan_angle_deg=scan_angle_deg)
 
-    def display_fw_paths(self, takeoff, mission, landing):
+    def display_fw_paths(self, takeoff, mission, landing, scan_angle_deg=None):
         self.map_2d.display_fw_paths(takeoff, mission, landing)
         self.map_3d.display_fw_paths(takeoff, mission, landing)
         # 三段都要納入圍籬範圍；固定翼建議 buffer ≥ 100m
@@ -521,13 +536,47 @@ class DualMapWidget(MapWidgetBase):
         for p in (takeoff, mission, landing):
             if p:
                 all_paths.append(p)
-        self._auto_build_fence(all_paths, altitude=None, buffer_m=120.0)
+        self._auto_build_fence(all_paths, altitude=None, buffer_m=120.0,
+                               scan_angle_deg=scan_angle_deg)
+
+    # ── 飛控任務航線（讀回的那一份）──────────────────────────────
+    def display_fc_mission(self, path2d, path3d, loiters=None,
+                           color: str = '#00E5FF', home=None):
+        """把飛控讀回來的任務同時疊到 2D 與 3D。
+
+        ⚠️⚠️ **刻意不呼叫 `_auto_build_fence`** —— 上面每個 display_* 都會呼叫
+        它，那是「強制飛安政策」，對**規劃出來的**航線是對的。但讀回的任務是
+        觀測，不是規劃：拿它重建圍籬會把「上傳電子圍籬」按鈕的來源
+        （`_last_fence_bundle`）換成包住 AUTO 航線的矩形，而使用者完全不會
+        知道自己按下的是別的東西。觀測不可以有副作用。
+
+        2D 收二元組、3D 收三元組 —— 兩個**不同**的參數，不是同一份轉型。
+        混用會讓 folium 丟 ValueError 並讓整張 2D 圖靜靜消失
+        （見 `mission/mission_view.py` 的模組 docstring）。
+        """
+        if hasattr(self.map_2d, 'display_fc_mission'):
+            self.map_2d.display_fc_mission(path2d, loiters, color, home=home)
+        if hasattr(self.map_3d, 'display_fc_mission'):
+            self.map_3d.display_fc_mission(path3d, loiters, color, home=home)
+
+    def clear_fc_mission(self):
+        for m in (self.map_2d, self.map_3d):
+            if hasattr(m, 'clear_fc_mission'):
+                m.clear_fc_mission()
 
     # ── Geofence 自動建構 ─────────────────────────────────────────
-    def _auto_build_fence(self, paths_list, altitude=None, buffer_m: float = 30.0):
+    def _auto_build_fence(self, paths_list, altitude=None, buffer_m: float = 30.0,
+                          scan_angle_deg=None):
         """
         強制飛安：將所有航點包進矩形圍籬並上 3D 地圖渲染。
         失敗（航點 <2 個、shapely 計算錯誤等）僅記錄，不阻斷顯示。
+
+        ``scan_angle_deg`` 給了就產生**對齊掃描角**的矩形（羅盤慣例：0=北、
+        順時針為正）。軸對齊矩形在斜掃描角下可以比實際需要大到 2 倍
+        （45° 掃描角、矩形作業區實測 2.06×）。
+
+        ⚠️ 沒有掃描角的航線（圓心螺旋、A*、DWA、手繪、匯入）一律傳 ``None``
+        並維持軸對齊 —— 硬湊一個角度會把圍籬轉到航線沒有走的方向。
         """
         try:
             from mission.geofence_manager import GeofenceConstraintManager
@@ -550,9 +599,17 @@ class DualMapWidget(MapWidgetBase):
             return
         try:
             mgr = GeofenceConstraintManager(buffer_radius_m=buffer_m)
-            bundle = mgr.build(waypoints=flat)
+            bundle = mgr.build(waypoints=flat, scan_angle_deg=scan_angle_deg)
         except Exception as e:
-            logger.warning(f'[Geofence] 建構失敗: {e}')
+            # ⚠️⚠️ 舊版只記一行 warning 就 return，**沒有**清掉
+            # `_last_fence_bundle`（上面航點不足那一支有清）。結果是建構失敗時
+            # 兩張圖仍畫著**上一趟**的圍籬，而「上傳電子圍籬」按鈕會把那個
+            # 舊矩形送上飛控 —— 使用者完全看不出自己上傳的是別的東西。
+            # 建構失敗 = 沒有有效圍籬，就要長得像沒有。
+            logger.warning(f'[Geofence] 建構失敗（已清除舊圍籬）: {e}')
+            self.map_3d.clear_geofence()
+            self._clear_fence_2d()
+            self._last_fence_bundle = None
             self.fence_built.emit(None)
             return
         self._last_fence_bundle = bundle
@@ -615,25 +672,30 @@ class DualMapWidget(MapWidgetBase):
         self.map_3d.clear_home_point_overlay()
 
     # ── 群飛 ─────────────────────────────────────────────────────────
-    def display_swarm_coverage(self, swarm_mission, coverage_paths=None):
+    def display_swarm_coverage(self, swarm_mission, coverage_paths=None,
+                               scan_angle_deg=None):
         self.map_2d.display_swarm_coverage(swarm_mission, coverage_paths)
         self.map_3d.display_swarm_coverage(swarm_mission, coverage_paths)
         # 強制飛安：群飛協同覆蓋路徑也綁定矩形圍籬（與 display_paths 一致）
         try:
             self._auto_build_fence(
                 self._coverage_to_paths(swarm_mission, coverage_paths),
-                buffer_m=60.0)
+                buffer_m=60.0, scan_angle_deg=scan_angle_deg)
         except Exception as e:
             logger.warning(f'[Geofence] 群飛覆蓋圍籬建構略過: {e}')
 
-    def display_swarm_raw(self, swarm_data: dict):
+    def display_swarm_raw(self, swarm_data: dict, scan_angle_deg=None):
         self.map_2d.display_swarm_raw(swarm_data)
         self.map_3d.display_swarm_raw(swarm_data)
         # 強制飛安：DCCPP / 蜂群結果同樣綁定圍籬，涵蓋所有 UAV 作業 + 轉場路徑。
         # 先前此路徑未建構圍籬 → _last_fence_bundle=None → 無法顯示/上傳/匯出圍籬。
+        #
+        # ⚠ 這裡的圍籬同時包住起降段與轉場段，而那些航段**不是**沿掃描角飛的。
+        #   所以對齊掃描角在這條路徑上省下來的面積會比純作業區的 2.06× 少很多。
         try:
             self._auto_build_fence(
-                self._swarm_raw_to_paths(swarm_data), buffer_m=60.0)
+                self._swarm_raw_to_paths(swarm_data), buffer_m=60.0,
+                scan_angle_deg=scan_angle_deg)
         except Exception as e:
             logger.warning(f'[Geofence] DCCPP/蜂群圍籬建構略過: {e}')
 
@@ -642,14 +704,26 @@ class DualMapWidget(MapWidgetBase):
     def _swarm_raw_to_paths(swarm_data) -> list:
         """從 display_swarm_raw 的 swarm_data 取出所有 UAV 路徑（list of paths）。
 
-        相容鍵：``operation_paths`` / ``transfer_paths``（皆為 list-of-paths）
-        以及單一 ``path``。每個點為 (lat, lon[, alt])。
+        ⚠ 必須涵蓋**全部五種**航段，尤其是起降段 —— 2026-08-25 修：
+        舊版只取 ``operation_paths`` / ``transfer_paths``，把
+        ``takeoff_paths`` / ``entry_paths`` / ``landing_paths`` 漏掉了。
+        那三段正是**唯一會碰到地面**的航段（VTOL 從 0 m 垂直爬到轉換高度、
+        再垂直降回 0 m）。漏掉的後果不只是畫面上圍籬「浮在天上」：
+
+          * ``alt_min = max(最低航點 − 20, 2)``，只餵作業段 ⇒ 最低是巡航高度
+            120 m ⇒ 圍籬地板 100 m。
+          * 這是 **inclusion** 圍籬 —— 地板 100 m 表示飛機在 100 m 以下
+            全部算「在圍籬外」。上傳飛控後 FENCE_ACTION 會在**還停在地面時**
+            就判定越界，起飛與降落整段都在違規區。
+
+        相容鍵：五種 list-of-paths 以及單一 ``path``。每個點為 (lat, lon[, alt])。
         """
         paths = []
         for d in (swarm_data or {}).get('drones', []) or []:
             if not isinstance(d, dict):
                 continue
-            for key in ('operation_paths', 'transfer_paths'):
+            for key in ('takeoff_paths', 'entry_paths', 'operation_paths',
+                        'transfer_paths', 'landing_paths'):
                 for p in (d.get(key) or []):
                     if p:
                         paths.append(p)
@@ -701,13 +775,50 @@ class DualMapWidget(MapWidgetBase):
         self.map_2d.add_corner(lat, lon)
         self.map_3d.add_corner(lat, lon)
 
+    def display_survey_areas(self, polygons: list):
+        """已完成的作業區（多區模式）—— 2D 一定畫，3D 有能力才畫。
+
+        ⚠ 沒有這個明確的方法時 `__getattr__` 也會代理到 2D，但那是**碰巧**能動。
+        寫出來是為了讓「3D 目前不畫」變成有意識的決定而不是意外。
+        """
+        self.map_2d.display_survey_areas(polygons)
+        fn = getattr(self.map_3d, 'display_survey_areas', None)
+        if callable(fn):
+            fn(polygons)
+
+    def remove_last_corner(self):
+        """刪除最後一個邊界點 —— **2D 與 3D 一起刪**。
+
+        ⚠ 這是 2026-08-25 修的：舊流程只動 2D，3D 的角點留著不動，
+        於是「刪除上一點」在 3D 看起來沒作用，而且兩邊索引開始漂移。
+        add_corner 是兩邊都加，刪除本來就該對稱。
+        """
+        removed = self.map_2d.remove_last_corner()
+        if hasattr(self.map_3d, 'remove_last_corner'):
+            self.map_3d.remove_last_corner()
+        return removed
+
     def move_corner(self, index, lat, lon):
         self.map_2d.move_corner(index, lat, lon)
         self.map_3d.move_corner(index, lat, lon)
 
     def clear_all(self):
-        self.map_2d.clear_all()
-        self.map_3d.clear_all()
+        """2D + 3D 一起清空所有規劃疊圖。
+
+        ⚠️ 自動建構的圍籬（`_last_fence_bundle`）也必須一起歸零 —— 否則
+        「顯示圍籬」開關一按，或下一次 `_refresh_fence_visibility()`，
+        剛被清掉的琥珀矩形又原地長回來（清除只清了畫面，沒清來源）。
+        """
+        # 先斷掉圍籬的**來源**：只清畫面的話，「顯示圍籬」開關一按
+        # （`_refresh_fence_visibility()` 讀的就是 `_last_fence_bundle`），
+        # 剛被清掉的琥珀矩形就原地長回來。
+        self._last_fence_bundle = None
+        # 兩張圖各自的 clear_all 已經把自己的 geofence 歸零 + 重繪，
+        # 這裡不要再呼叫 clear_geofence()，否則 2D 會白白多重載一次頁面。
+        for m in (self.map_2d, self.map_3d):
+            if hasattr(m, 'clear_all'):
+                m.clear_all()
+        self.fence_built.emit(None)
 
     # ── 屬性代理（讓 main_window 直接存取 corners 等）─────────────────
     @property
@@ -717,6 +828,12 @@ class DualMapWidget(MapWidgetBase):
     @corners.setter
     def corners(self, value):
         self.map_2d.corners = value
+
+    @property
+    def markers(self):
+        """2D 的角點標記清單。舊版沒有這個代理，main_window 存取
+        ``map_widget.markers`` 會 AttributeError（刪除流程整個中斷）。"""
+        return self.map_2d.markers
 
     @property
     def paths(self):

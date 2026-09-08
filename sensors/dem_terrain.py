@@ -65,6 +65,9 @@ class DEMTerrainManager(TerrainManagerBase):
         返回:
             True 表示載入成功
         """
+        # 記下來源路徑：UI 端要用它把同一份 DEM 轉交給規劃器（見 main_window 的
+        # 覆蓋規劃入口），否則「載入 DEM」與「規劃時用到 DEM」是兩件不相干的事。
+        self.dem_path = str(file_path)
         # ── 嘗試 rasterio ──
         try:
             return self._load_rasterio(file_path)

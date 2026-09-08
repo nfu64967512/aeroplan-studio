@@ -1,0 +1,44 @@
+情境 gui_uniform_1a3b（路徑 gui）：規劃 2.79s  makespan 2199.6s  status GO_WITH_WARNINGS
+validate passed=True conflicts=0 uncovered=0
+感測器 {'A': 'rgb', 'B': 'rgb'}   酬載需求 {'default': 'rgb'}
+  A1 A strips=5 wp=499 15.96km  t_off=1323s t_land=2200s  E=246/654Wh
+  B2 B strips=7 wp=374 13.51km  t_off=360s t_land=1197s  E=82/172Wh
+  B3 B strips=4 wp=207 10.43km  t_off=0s t_land=668s  E=72/182Wh
+  B4 B strips=4 wp=200 10.50km  t_off=270s t_land=943s  E=72/182Wh
+匯出: {'A1': 109, 'B2': 121, 'B3': 75, 'B4': 70}
+
+機隊 ['A1', 'B2', 'B3', 'B4']  makespan 2200s  speedup 10.0  → 牆鐘約 3.7 分鐘
+
+已終止 0 個本次的 ArduPlane 行程
+SITL 已啟動: [('A1', 5760, 27036), ('B2', 5770, 29680), ('B3', 5780, 300), ('B4', 5790, 10320)]
+  A1 心跳 OK (sysid 1, port 5760)
+  B2 心跳 OK (sysid 2, port 5770)
+  B3 心跳 OK (sysid 3, port 5780)
+  B4 心跳 OK (sysid 4, port 5790)
+
+參數讀回：68/68 相符
+  A1 上傳 109 → 讀回 109 OK
+  B2 上傳 121 → 讀回 121 OK
+  B3 上傳 75 → 讀回 75 OK
+  B4 上傳 70 → 讀回 70 OK
+  A1 armed（等 5s）
+  B2 armed（等 0s）
+  B3 armed（等 0s）
+  B4 armed（等 0s）
+
+放行時刻（牆鐘秒）: {'B3': 0.0, 'B4': 27.0, 'B2': 36.0, 'A1': 132.3}
+  > B3 放行切 AUTO（牆鐘 0.0s，規劃 t_off=0s）
+    [    0s] A1:  0.0m  B2:  0.0m  B3: 14.4m  B4:  0.0m
+    [   21s] A1:  0.1m  B2:  0.0m  B3:140.3m  B4:  0.0m
+  > B4 放行切 AUTO（牆鐘 27.1s，規劃 t_off=270s）
+  > B2 放行切 AUTO（牆鐘 76.2s，規劃 t_off=360s） 切換被拒
+    [   80s] A1:  0.1m  B2:  0.0m  B3:140.3m  B4: 53.5m
+    [  100s] A1:  0.1m  B2:  0.0m  B3:140.3m  B4: 53.5m
+    [  120s] A1:  0.1m  B2:  0.0m  B3:140.3m  B4: 53.5m
+  > A1 放行切 AUTO（牆鐘 173.2s，規劃 t_off=1323s） 切換被拒
+    [  180s] A1:  0.1m  B2:  0.0m  B3:140.3m  B4: 53.5m
+    [  200s] A1:  0.1m  B2:  0.0m  B3:140.3m  B4: 53.5m
+    [  220s] A1:  0.1m  B2:  0.0m  B3:140.3m  B4: 53.5m
+    [  240s] A1:  0.1m  B2:  0.0m  B3:140.3m  B4: 53.5m
+    [  260s] A1:  0.1m  B2:  0.0m  B3:140.3m  B4: 53.5m
+    [  280s] A1:  0.1m  B2:  0.0m  B3:140.3m  B4: 53.5m

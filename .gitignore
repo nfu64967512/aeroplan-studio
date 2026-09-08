@@ -102,7 +102,16 @@ assets/leaflet/
 
 # ── 2026-08-19 首次把 8 月的工作納管時新增 ──────────────────────────
 # 航次產物:每趟數十 MB 的逐拍 CSV/log,可由 SITL 重生,不進版控
-runs/
+# ⚠ git **不會進入被排除的目錄**,所以不能寫 `runs/` 再用 `!` 撈回子項 ——
+#   必須逐層排除「內容」(`dir/*`)並逐層放行父目錄,否則 negation 無效。
+runs/*
+!runs/artifacts/
+runs/artifacts/*
+# ⚠ 例外:HV4SITL* 是 VTOL 偵查那條論文線的**證據**,不是可重生的中間產物 ——
+#   規劃與實飛的對照、參數/任務讀回、覆蓋率與間距回算都在裡面,而且下一趟會覆寫。
+#   全部是 txt/json/csv/waypoints/png,11 趟合計約 6 MB。
+#   (runs/artifacts 全目錄 1.9 GB,其餘航次仍然排除。)
+!runs/artifacts/HV4SITL*
 
 # 文獻 PDF(56 MB)。⚠️ docs/lit/*.md 與 docs/lit/ardupilot/ 的參考原始碼**要**進版控
 docs/lit/pdf/

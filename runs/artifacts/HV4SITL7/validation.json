@@ -1,0 +1,8 @@
+{
+ "passed": false,
+ "conflicts": 0,
+ "coverage_ok": false,
+ "energy_ok": true,
+ "min_sep_h_m": 360.7615509584507,
+ "min_sep_v_m": Infinity
+}

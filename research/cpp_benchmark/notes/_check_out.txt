@@ -1,0 +1,18 @@
+case          n_out   cov(raw)  ends  fin  det  max_km    bal    wp   sec
+rect n=8          8   1.000000  True True True   24.45  1.014   951  1.50  OK
+rect n=1          1   1.000000  True True True  175.70  1.000   806  0.48  OK
+rect n=16        16   1.000000  True True True   14.60  1.036  1011  0.98  OK
+four n=8          8   1.000000  True True True   27.82  1.007   916  2.22  OK
+L n=4             4   1.000000  True True True   16.62  1.005   402  0.37  OK
+L rot37 n=4       4   1.000000  True True True   17.25  1.002   419  0.32  OK
+hole n=5          5   1.000000  True True True   30.33  1.003   559  6.02  OK
+tri n=6           6   1.000000  True True True   12.49  1.005   333  3.75  OK
+tiny n=4          3   1.000000  True True True    8.57  1.012     9  0.00  OK
+3 mixed n=6       6   1.000000  True True True   21.32  1.002   752  2.74  OK
+
+ALL OK
+
+== 決定性：同一支跑三次，逐點相同？ ==
+  grid_nn            三次總長 [196.646806494, 196.646806494, 196.646806494]  逐點相同=True
+  grid_nn_v2(rev1)   三次總長 [194.825529881, 194.825529881, 194.825529881]  逐點相同=True
+  grid_nn_v2b(rev2)  三次總長 [192.883649964, 192.883649964, 192.883649964]  逐點相同=True

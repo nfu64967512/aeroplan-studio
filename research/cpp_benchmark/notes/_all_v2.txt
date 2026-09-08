@@ -1,0 +1,89 @@
+
+=== S1 single 5.0x4.0 km rect ===  20.00 km2  n=8
+method            n  total km   max km     cov    ovh    red    bal  scan km2/h   waste      s
+boustrophedon     7     216.6    31.53  99.62%  1.757  1.267  1.019       45.50    3.5%    0.0
+DCCPP             8     226.4    32.25  99.95%  1.831  1.256  1.140       44.63    3.6%    0.0
+HARVEST           8     280.0    45.36  98.25%  2.303  1.769  1.296       31.19   16.5%    0.0
+darp              8     202.4    26.02 100.00%  1.636  1.113  1.029       55.34    3.2%    1.9
+darp_v2           8     202.3    25.53 100.00%  1.635  1.110  1.009       56.41    3.2%   23.3
+                v2 vs v1 scan_rate +1.94%   max -1.88%
+
+=== S2 four 1.25x4.0 km blocks ===  20.00 km2  n=8
+method            n  total km   max km     cov    ovh    red    bal  scan km2/h   waste      s
+boustrophedon     8     242.4    34.84 100.00%  1.959  1.211  1.150       41.34   17.5%    0.0
+DCCPP             8     241.4    34.93 100.00%  1.951  1.155  1.158       41.22   17.9%    0.0
+HARVEST           8     280.7    38.71 100.00%  2.269  1.407  1.103       37.20   27.3%    0.0
+darp              8     230.3    31.01 100.00%  1.861  1.143  1.077       46.44   17.2%    0.1
+darp_v2           8     226.9    30.64 100.00%  1.834  1.167  1.080       46.99   17.0%    2.7
+                v2 vs v1 scan_rate +1.19%   max -1.19%
+
+=== S3 L-shape concave ===  12.00 km2  n=4
+method            n  total km   max km     cov    ovh    red    bal  scan km2/h   waste      s
+boustrophedon     4     126.5    33.10  99.48%  1.712  1.138  1.047       25.97    5.9%    0.0
+DCCPP             4     154.4    44.79  99.97%  2.081  1.085  1.160       19.28   19.2%    0.0
+HARVEST           4     160.5    49.09 100.00%  2.162  1.375  1.224       17.60   21.0%    0.0
+darp              4     128.0    32.12 100.00%  1.724  1.114  1.004       26.90    6.2%    0.4
+darp_v2           4     124.1    31.18 100.00%  1.672  1.121  1.005       27.71    6.3%   21.9
+                v2 vs v1 scan_rate +3.02%   max -2.93%
+
+=== S4 tilted 37 deg ===  20.00 km2  n=8
+method            n  total km   max km     cov    ovh    red    bal  scan km2/h   waste      s
+boustrophedon     8     220.0    30.47 100.00%  1.778  1.252  1.108       47.27    4.2%    0.0
+darp              8     202.4    26.02 100.00%  1.636  1.113  1.029       55.34    3.2%    2.1
+darp_v2           8     202.3    25.53 100.00%  1.635  1.110  1.009       56.41    3.2%   23.1
+                v2 vs v1 scan_rate +1.94%   max -1.88%
+
+=== S5 L-shape n=8 ===  12.00 km2  n=8
+method            n  total km   max km     cov    ovh    red    bal  scan km2/h   waste      s
+boustrophedon     7     136.9    21.22  99.30%  1.857  1.297  1.086       40.42    5.3%    0.0
+darp              8     134.1    17.79 100.00%  1.806  1.231  1.061       48.57    6.1%    1.5
+darp_v2           8     138.1    17.37 100.00%  1.861  1.181  1.006       49.73    9.0%   24.1
+                v2 vs v1 scan_rate +2.39%   max -2.36%
+
+=== S6 plus/cross n=4 ===  8.16 km2  n=4
+method            n  total km   max km     cov    ovh    red    bal  scan km2/h   waste      s
+boustrophedon     4     149.9    60.73  99.98%  2.970  1.150  1.621        9.67   24.5%    0.0
+darp              4      90.0    22.85 100.00%  1.782  1.051  1.016       25.71   12.5%    0.5
+darp_v2           4      90.0    22.58 100.00%  1.784  1.053  1.003       26.02   12.5%    5.7
+                v2 vs v1 scan_rate +1.20%   max -1.18%
+
+=== S7 donut n=4 ===  14.04 km2  n=4
+method            n  total km   max km     cov    ovh    red    bal  scan km2/h   waste      s
+boustrophedon     4     162.0    41.95  99.57%  1.874  1.082  1.035       24.00   16.0%    0.0
+darp              4     142.4    35.72  99.83%  1.642  1.056  1.003       28.25    8.4%    1.5
+darp_v2           4     142.4    35.61  99.83%  1.642  1.062  1.000       28.34    8.4%   10.2
+                v2 vs v1 scan_rate +0.30%   max -0.31%
+
+=== S8 scatter 5 blocks n=6 ===  8.48 km2  n=6
+method            n  total km   max km     cov    ovh    red    bal  scan km2/h   waste      s
+boustrophedon     6     153.7    34.38  99.52%  2.944  1.306  1.342       17.67   49.2%    0.0
+darp              6     123.2    24.75 100.00%  2.348  1.080  1.206       24.66   38.6%    0.0
+darp_v2           6     121.9    21.82 100.00%  2.325  1.104  1.073       27.99   39.9%    0.9
+                v2 vs v1 scan_rate +13.48%   max -11.84%
+
+=== S9 four blocks n=3 ===  20.00 km2  n=3
+method            n  total km   max km     cov    ovh    red    bal  scan km2/h   waste      s
+boustrophedon     3     207.7    71.11 100.00%  1.679  1.057  1.027       20.25   15.1%    0.0
+darp              3     206.3    70.39 100.00%  1.667  1.062  1.024       20.46   14.2%    0.0
+darp_v2           3     205.5    68.52 100.00%  1.661  1.061  1.000       21.02   14.4%    0.1
+                v2 vs v1 scan_rate +2.73%   max -2.66%
+
+=== S10 thin strip 6000x90 n=4 ===  0.54 km2  n=4
+method            n  total km   max km     cov    ovh    red    bal  scan km2/h   waste      s
+boustrophedon     1      12.0    12.00 100.00%  3.592  1.000  1.000        3.24   47.3%    0.0
+darp              4      12.6     6.00 100.00%  3.761  1.123  1.910        6.48   45.5%    0.0
+darp_v2           4      12.6     6.00 100.00%  3.761  1.123  1.910        6.48   45.5%    0.1
+                v2 vs v1 scan_rate +0.00%   max +0.00%
+
+=== n sweep, single 5x4 km rect (scan_rate km2/h) ===
+  n     bous     darp  darp_v2   v2 gain      s
+  1     7.75     7.78     7.78    +0.00%    0.0
+  2    14.70    15.00    15.07    +0.49%    1.4
+  3    21.41    21.64    22.66    +4.71%    8.4
+  4    27.70    29.36    29.70    +1.14%   20.6
+  5    34.45    35.34    35.63    +0.82%   28.0
+  6    39.21    42.39    42.93    +1.29%   14.4
+  7    45.50    48.19    49.03    +1.75%   43.0
+  8    45.50    55.34    56.41    +1.94%   26.5
+ 11    54.18    72.58    73.62    +1.43%   29.7
+ 16    66.95    92.95    95.26    +2.49%   60.9

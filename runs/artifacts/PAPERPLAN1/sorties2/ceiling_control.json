@@ -1,0 +1,168 @@
+{
+ "design": "single variable: HV4W55 and HV4W55R differ only in the planning ceiling (119.5 vs 120.0 m). Plan wind 5 m/s @ 270 and SITL wind 5 m/s @ 270 in both; same scenario, same fleet, same spawn stations, same exported item counts (82/53/84); the three per-aircraft .param files are byte-identical between the two.",
+ "per_trial": {
+  "HV4W55": {
+   "ceiling_m": 119.5,
+   "coverage_altitude_m": 119.5,
+   "sim_wind": {
+    "spd_mps": 5.0,
+    "dir_from_deg": 270.0,
+    "turb": 0.0,
+    "profile_type": 1.0
+   },
+   "plan_wind": [
+    5.0,
+    270.0
+   ],
+   "dataflash_log": {
+    "A1": "sitl/vtol/i100/logs/00000015.BIN",
+    "B2": "sitl/vtol/i101/logs/00000015.BIN",
+    "B3": "sitl/vtol/i102/logs/00000015.BIN"
+   },
+   "exported": {
+    "per_uav": {
+     "A1": {
+      "n_items_total": 82,
+      "n_rel_alt_items": 81,
+      "n_other_frame_items": 1,
+      "max_rel_alt_m": 119.5526,
+      "n_above_120": 0,
+      "max_excess_m": 0.0
+     },
+     "B2": {
+      "n_items_total": 53,
+      "n_rel_alt_items": 52,
+      "n_other_frame_items": 1,
+      "max_rel_alt_m": 119.5332,
+      "n_above_120": 0,
+      "max_excess_m": 0.0
+     },
+     "B3": {
+      "n_items_total": 84,
+      "n_rel_alt_items": 83,
+      "n_other_frame_items": 1,
+      "max_rel_alt_m": 119.5331,
+      "n_above_120": 0,
+      "max_excess_m": 0.0
+     }
+    },
+    "fleet_max_exported_rel_alt_m": 119.5526,
+    "fleet_items_above_120": 0
+   },
+   "flown_altitude": {
+    "A1": {
+     "flown_max_rel_alt_m": 119.6221,
+     "flown_time_above_120_s": 0.0,
+     "pos_samples": 7919,
+     "pos_rate_hz": 6.15
+    },
+    "B2": {
+     "flown_max_rel_alt_m": 119.6356,
+     "flown_time_above_120_s": 0.0,
+     "pos_samples": 3093,
+     "pos_rate_hz": 5.29
+    },
+    "B3": {
+     "flown_max_rel_alt_m": 119.6752,
+     "flown_time_above_120_s": 0.0,
+     "pos_samples": 5488,
+     "pos_rate_hz": 5.81
+    }
+   },
+   "flown_max_rel_alt_m": 119.6752,
+   "flown_time_above_120_s_fleet": 0.0,
+   "planned_makespan_s": 1260.453960577981,
+   "flown_makespan_s": 1294.0,
+   "planned_total_km": 30.66,
+   "flown_total_km": 31.87,
+   "planned_min_sep_h_m": 105.69924202560053,
+   "flown_min_sep_h_m_dataflash": 100.769
+  },
+  "HV4W55R": {
+   "ceiling_m": 120.0,
+   "coverage_altitude_m": 120.0,
+   "sim_wind": {
+    "spd_mps": 5.0,
+    "dir_from_deg": 270.0,
+    "turb": 0.0,
+    "profile_type": 1.0
+   },
+   "plan_wind": [
+    5.0,
+    270.0
+   ],
+   "dataflash_log": {
+    "A1": "sitl/vtol/i100/logs/00000020.BIN",
+    "B2": "sitl/vtol/i101/logs/00000020.BIN",
+    "B3": "sitl/vtol/i102/logs/00000020.BIN"
+   },
+   "exported": {
+    "per_uav": {
+     "A1": {
+      "n_items_total": 82,
+      "n_rel_alt_items": 81,
+      "n_other_frame_items": 1,
+      "max_rel_alt_m": 120.0526,
+      "n_above_120": 38,
+      "max_excess_m": 0.0526
+     },
+     "B2": {
+      "n_items_total": 53,
+      "n_rel_alt_items": 52,
+      "n_other_frame_items": 1,
+      "max_rel_alt_m": 120.0331,
+      "n_above_120": 13,
+      "max_excess_m": 0.0331
+     },
+     "B3": {
+      "n_items_total": 84,
+      "n_rel_alt_items": 83,
+      "n_other_frame_items": 1,
+      "max_rel_alt_m": 120.0331,
+      "n_above_120": 37,
+      "max_excess_m": 0.0331
+     }
+    },
+    "fleet_max_exported_rel_alt_m": 120.0526,
+    "fleet_items_above_120": 88
+   },
+   "flown_altitude": {
+    "A1": {
+     "flown_max_rel_alt_m": 120.1066,
+     "flown_time_above_120_s": 140.05,
+     "pos_samples": 8139,
+     "pos_rate_hz": 6.32
+    },
+    "B2": {
+     "flown_max_rel_alt_m": 120.1422,
+     "flown_time_above_120_s": 73.57,
+     "pos_samples": 3412,
+     "pos_rate_hz": 5.83
+    },
+    "B3": {
+     "flown_max_rel_alt_m": 120.1742,
+     "flown_time_above_120_s": 141.31,
+     "pos_samples": 5496,
+     "pos_rate_hz": 5.82
+    }
+   },
+   "flown_max_rel_alt_m": 120.1742,
+   "flown_time_above_120_s_fleet": 354.93,
+   "planned_makespan_s": 1260.4260664854269,
+   "flown_makespan_s": 1293.0,
+   "planned_total_km": 30.66,
+   "flown_total_km": 31.88,
+   "planned_min_sep_h_m": 105.46410835682013,
+   "flown_min_sep_h_m_dataflash": 100.939
+  }
+ },
+ "delta_120_minus_1195": {
+  "exported_items_above_120": 88,
+  "flown_time_above_120_s": 354.93,
+  "flown_max_rel_alt_m": 0.499,
+  "planned_makespan_s": -0.0279,
+  "flown_makespan_s": -1.0,
+  "planned_total_km": 0.0,
+  "flown_total_km": 0.01
+ }
+}

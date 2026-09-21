@@ -1,0 +1,91 @@
+{
+ "paper_cell_1560x800": {
+  "tag": "paper_cell_1560x800",
+  "plan_s": 11.4,
+  "status": "GO_WITH_WARNINGS",
+  "makespan_s": 1260.43,
+  "validate_passed": true,
+  "conflicts": 0,
+  "uncovered": 0,
+  "min_sep_h_m": 105.464,
+  "total_distance_m": 30658.3,
+  "wall_clock_min_at_speedup_5": 4.2,
+  "per_uav": {
+   "A1": {
+    "cls": "A",
+    "strips": 3,
+    "distance_km": 10.293,
+    "energy_used_wh": 195.2,
+    "energy_margin_wh": 704.8,
+    "t_takeoff_s": 656.0,
+    "t_land_s": 1260.4
+   },
+   "B2": {
+    "cls": "B",
+    "strips": 2,
+    "distance_km": 7.926,
+    "energy_used_wh": 63.3,
+    "energy_margin_wh": 190.7,
+    "t_takeoff_s": 0.0,
+    "t_land_s": 533.9
+   },
+   "B3": {
+    "cls": "B",
+    "strips": 4,
+    "distance_km": 12.439,
+    "energy_used_wh": 79.1,
+    "energy_margin_wh": 174.9,
+    "t_takeoff_s": 106.0,
+    "t_land_s": 894.4
+   }
+  },
+  "cells": [],
+  "n_cells_interlacing": 0,
+  "n_cells": 0
+ },
+ "interlaced_3000x3000": {
+  "tag": "interlaced_3000x3000",
+  "plan_s": 32.6,
+  "status": "GO_WITH_WARNINGS",
+  "makespan_s": 3842.61,
+  "validate_passed": true,
+  "conflicts": 0,
+  "uncovered": 0,
+  "min_sep_h_m": 190.632,
+  "total_distance_m": 145343.9,
+  "wall_clock_min_at_speedup_5": 12.8,
+  "per_uav": {
+   "A1": {
+    "cls": "A",
+    "strips": 11,
+    "distance_km": 51.095,
+    "energy_used_wh": 529.7,
+    "energy_margin_wh": 370.3,
+    "t_takeoff_s": 1288.0,
+    "t_land_s": 3842.6
+   },
+   "B2": {
+    "cls": "B",
+    "strips": 11,
+    "distance_km": 45.879,
+    "energy_used_wh": 191.7,
+    "energy_margin_wh": 62.3,
+    "t_takeoff_s": 722.0,
+    "t_land_s": 3323.1
+   },
+   "B3": {
+    "cls": "B",
+    "strips": 11,
+    "distance_km": 48.369,
+    "energy_used_wh": 200.3,
+    "energy_margin_wh": 53.7,
+    "t_takeoff_s": 0.0,
+    "t_land_s": 2738.8
+   }
+  },
+  "cells": [],
+  "n_cells_interlacing": 0,
+  "n_cells": 0
+ },
+ "_note": "PLANNING ONLY. CEIL=120.0 m applied as waiver_max_agl_m and coverage_altitude_m, the same pair HV_PLAN_CEIL_M sets."
+}

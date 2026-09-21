@@ -1,0 +1,220 @@
+{
+  "paper10": [
+    [
+      "S1",
+      4
+    ],
+    [
+      "S1",
+      8
+    ],
+    [
+      "S1",
+      16
+    ],
+    [
+      "S2",
+      4
+    ],
+    [
+      "S2",
+      8
+    ],
+    [
+      "S3",
+      4
+    ],
+    [
+      "S3",
+      8
+    ],
+    [
+      "S4",
+      4
+    ],
+    [
+      "S4",
+      8
+    ],
+    [
+      "S5",
+      16
+    ]
+  ],
+  "checker_config": {
+    "d_sep_m": 100.0,
+    "dh_sep_m": 50.0
+  },
+  "rows": [
+    {
+      "scenario": "S1",
+      "n": 4,
+      "dccpp_sep": 0,
+      "dccpp_pad": 12,
+      "dccpp_coverage": 1.0,
+      "dccpp_sec": 0.1,
+      "ca_detected": 12,
+      "ca_actions": 12,
+      "dccpp_ca_sep": 0,
+      "dccpp_ca_pad": 12,
+      "harvest_sep": 16,
+      "harvest_pad": 12,
+      "harvest_coverage": 1.0,
+      "harvest_max_agl_m": 170.16,
+      "harvest_sec": 34.2
+    },
+    {
+      "scenario": "S1",
+      "n": 8,
+      "dccpp_sep": 5,
+      "dccpp_pad": 40,
+      "dccpp_coverage": 1.0,
+      "dccpp_sec": 0.0,
+      "ca_detected": 56,
+      "ca_actions": 56,
+      "dccpp_ca_sep": 5,
+      "dccpp_ca_pad": 40,
+      "harvest_sep": 86,
+      "harvest_pad": 56,
+      "harvest_coverage": 1.0,
+      "harvest_max_agl_m": 170.14,
+      "harvest_sec": 57.9
+    },
+    {
+      "scenario": "S1",
+      "n": 16,
+      "dccpp_sep": 36,
+      "dccpp_pad": 192,
+      "dccpp_coverage": 1.0,
+      "dccpp_sec": 0.0,
+      "ca_detected": 240,
+      "ca_actions": 240,
+      "dccpp_ca_sep": 36,
+      "dccpp_ca_pad": 192,
+      "harvest_sep": 347,
+      "harvest_pad": 240,
+      "harvest_coverage": 1.0,
+      "harvest_max_agl_m": 170.16,
+      "harvest_sec": 328.9
+    },
+    {
+      "scenario": "S2",
+      "n": 4,
+      "dccpp_sep": 0,
+      "dccpp_pad": 8,
+      "dccpp_coverage": 1.0,
+      "dccpp_sec": 0.4,
+      "ca_detected": 12,
+      "ca_actions": 12,
+      "dccpp_ca_sep": 0,
+      "dccpp_ca_pad": 8,
+      "harvest_sep": 8,
+      "harvest_pad": 8,
+      "harvest_coverage": 1.0,
+      "harvest_max_agl_m": 170.13,
+      "harvest_sec": 40.5
+    },
+    {
+      "scenario": "S2",
+      "n": 8,
+      "dccpp_sep": 7,
+      "dccpp_pad": 41,
+      "dccpp_coverage": 1.0,
+      "dccpp_sec": 0.0,
+      "ca_detected": 56,
+      "ca_actions": 56,
+      "dccpp_ca_sep": 7,
+      "dccpp_ca_pad": 41,
+      "harvest_sep": 47,
+      "harvest_pad": 46,
+      "harvest_coverage": 1.0,
+      "harvest_max_agl_m": 170.16,
+      "harvest_sec": 64.9
+    },
+    {
+      "scenario": "S3",
+      "n": 4,
+      "dccpp_sep": 2,
+      "dccpp_pad": 9,
+      "dccpp_coverage": 1.0,
+      "dccpp_sec": 0.0,
+      "ca_detected": 12,
+      "ca_actions": 12,
+      "dccpp_ca_sep": 2,
+      "dccpp_ca_pad": 9,
+      "harvest_sep": 33,
+      "harvest_pad": 12,
+      "harvest_coverage": 1.0,
+      "harvest_max_agl_m": 170.12,
+      "harvest_sec": 33.4
+    },
+    {
+      "scenario": "S3",
+      "n": 8,
+      "dccpp_sep": 34,
+      "dccpp_pad": 49,
+      "dccpp_coverage": 1.0,
+      "dccpp_sec": 0.0,
+      "ca_detected": 56,
+      "ca_actions": 56,
+      "dccpp_ca_sep": 34,
+      "dccpp_ca_pad": 49,
+      "harvest_sep": 59,
+      "harvest_pad": 30,
+      "harvest_coverage": 1.0,
+      "harvest_max_agl_m": 170.15,
+      "harvest_sec": 181.2
+    },
+    {
+      "scenario": "S4",
+      "n": 4,
+      "dccpp_sep": 0,
+      "dccpp_pad": 7,
+      "dccpp_coverage": 1.0,
+      "dccpp_sec": 0.1,
+      "ca_detected": 12,
+      "ca_actions": 12,
+      "dccpp_ca_sep": 0,
+      "dccpp_ca_pad": 7,
+      "harvest_sep": 9,
+      "harvest_pad": 7,
+      "harvest_coverage": 1.0,
+      "harvest_max_agl_m": 170.1,
+      "harvest_sec": 10.2
+    },
+    {
+      "scenario": "S4",
+      "n": 8,
+      "dccpp_sep": 5,
+      "dccpp_pad": 37,
+      "dccpp_coverage": 1.0,
+      "dccpp_sec": 0.0,
+      "ca_detected": 57,
+      "ca_actions": 57,
+      "dccpp_ca_sep": 5,
+      "dccpp_ca_pad": 37,
+      "harvest_sep": 50,
+      "harvest_pad": 37,
+      "harvest_coverage": 1.0,
+      "harvest_max_agl_m": 170.15,
+      "harvest_sec": 58.9
+    },
+    {
+      "scenario": "S5",
+      "n": 16,
+      "dccpp_sep": 25,
+      "dccpp_pad": 177,
+      "dccpp_coverage": 1.0,
+      "dccpp_sec": 0.0,
+      "ca_detected": 240,
+      "ca_actions": 240,
+      "dccpp_ca_sep": 25,
+      "dccpp_ca_pad": 177,
+      "harvest_sep": 304,
+      "harvest_pad": 240,
+      "harvest_coverage": 1.0,
+      "harvest_max_agl_m": 170.14,
+      "harvest_sec": 567.1
+    }
+  ]
+}

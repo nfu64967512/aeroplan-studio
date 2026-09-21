@@ -1,0 +1,39 @@
+{
+ "rows": [
+  {
+   "uav": "A1",
+   "takeoff_site": "TO_A1",
+   "want_lat": 23.949999999968718,
+   "want_lon": 120.89990170530359,
+   "got_lat": 23.9500323,
+   "got_lon": 120.8999361,
+   "err_m": 5.01,
+   "ok": false,
+   "settle_s": 15.1
+  },
+  {
+   "uav": "B2",
+   "takeoff_site": "TO_B2",
+   "want_lat": 23.949999999999996,
+   "want_lon": 120.9,
+   "got_lat": 23.9500329,
+   "got_lon": 120.9000345,
+   "err_m": 5.07,
+   "ok": false,
+   "settle_s": 3.1
+  },
+  {
+   "uav": "B3",
+   "takeoff_site": "TO_B3",
+   "want_lat": 23.949999999968718,
+   "want_lon": 120.90009829469643,
+   "got_lat": 23.9500334,
+   "got_lon": 120.9001329,
+   "err_m": 5.12,
+   "ok": false,
+   "settle_s": 3.1
+  }
+ ],
+ "spawn_spread_m": 10.0,
+ "tol_m": 2.0
+}

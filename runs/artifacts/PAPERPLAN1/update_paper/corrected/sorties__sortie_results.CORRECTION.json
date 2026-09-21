@@ -1,0 +1,315 @@
+{
+ "corrected_by_label": "update_paper",
+ "corrections": {
+  "K3": {
+   "recomputed": {
+    "arc": {
+     "A1": {
+      "heading_swept_deg": [
+       19.15,
+       84.25
+      ],
+      "n_steps_above_threshold": 11,
+      "n_trace_rows": 15,
+      "net_chord_m": 4.338,
+      "path_length_m": 4.739,
+      "residual_max_abs_deg": 1.0,
+      "residual_median_deg": -0.32,
+      "settle_s": 15.2,
+      "step_m_range": [
+       0.407,
+       0.499
+      ],
+      "steps": [
+       {
+        "bearing_deg": 18.74,
+        "dt_from_s": 2.03,
+        "dt_to_s": 3.03,
+        "groundspeed_mps": 0.046,
+        "heading_deg": 19.15,
+        "residual_deg": -0.41,
+        "step_m": 0.4108
+       },
+       {
+        "bearing_deg": 26.63,
+        "dt_from_s": 3.03,
+        "dt_to_s": 4.04,
+        "groundspeed_mps": 0.012,
+        "heading_deg": 27.1,
+        "residual_deg": -0.47,
+        "step_m": 0.4105
+       },
+       {
+        "bearing_deg": 35.1,
+        "dt_from_s": 4.04,
+        "dt_to_s": 5.06,
+        "groundspeed_mps": 0.082,
+        "heading_deg": 34.65,
+        "residual_deg": 0.45,
+        "step_m": 0.407
+       },
+       {
+        "bearing_deg": 41.48,
+        "dt_from_s": 5.06,
+        "dt_to_s": 6.07,
+        "groundspeed_mps": 0.083,
+        "heading_deg": 41.8,
+        "residual_deg": -0.32,
+        "step_m": 0.4151
+       },
+       {
+        "bearing_deg": 47.65,
+        "dt_from_s": 6.07,
+        "dt_to_s": 7.08,
+        "groundspeed_mps": 0.081,
+        "heading_deg": 48.65,
+        "residual_deg": -1.0,
+        "step_m": 0.4127
+       },
+       {
+        "bearing_deg": 55.93,
+        "dt_from_s": 7.08,
+        "dt_to_s": 8.08,
+        "groundspeed_mps": 0.083,
+        "heading_deg": 55.15,
+        "residual_deg": 0.78,
+        "step_m": 0.4177
+       },
+       {
+        "bearing_deg": 60.74,
+        "dt_from_s": 8.08,
+        "dt_to_s": 9.1,
+        "groundspeed_mps": 0.082,
+        "heading_deg": 61.3,
+        "residual_deg": -0.56,
+        "step_m": 0.4092
+       },
+       {
+        "bearing_deg": 66.78,
+        "dt_from_s": 9.1,
+        "dt_to_s": 10.11,
+        "groundspeed_mps": 0.082,
+        "heading_deg": 67.2,
+        "residual_deg": -0.42,
+        "step_m": 0.4211
+       },
+       {
+        "bearing_deg": 73.18,
+        "dt_from_s": 10.11,
+        "dt_to_s": 11.11,
+        "groundspeed_mps": 0.082,
+        "heading_deg": 72.8,
+        "residual_deg": 0.38,
+        "step_m": 0.4252
+       },
+       {
+        "bearing_deg": 78.44,
+        "dt_from_s": 11.11,
+        "dt_to_s": 12.12,
+        "groundspeed_mps": 0.084,
+        "heading_deg": 78.65,
+        "residual_deg": -0.21,
+        "step_m": 0.4991
+       },
+       {
+        "bearing_deg": 83.98,
+        "dt_from_s": 12.12,
+        "dt_to_s": 13.13,
+        "groundspeed_mps": 0.082,
+        "heading_deg": 84.25,
+        "residual_deg": -0.27,
+        "step_m": 0.4193
+       }
+      ],
+      "usable": true,
+      "why_not_usable": null
+     },
+     "B2": {
+      "heading_swept_deg": null,
+      "n_steps_above_threshold": 0,
+      "n_trace_rows": 3,
+      "net_chord_m": 0.056,
+      "path_length_m": 0.057,
+      "residual_max_abs_deg": null,
+      "residual_median_deg": null,
+      "settle_s": 3.0,
+      "step_m_range": null,
+      "steps": [],
+      "usable": false,
+      "why_not_usable": "this aircraft settled before the trace began; its trace only records sub-centimetre residual motion, so it fixes the END STATE but says nothing about the path"
+     },
+     "B3": {
+      "heading_swept_deg": null,
+      "n_steps_above_threshold": 0,
+      "n_trace_rows": 3,
+      "net_chord_m": 0.046,
+      "path_length_m": 0.047,
+      "residual_max_abs_deg": null,
+      "residual_median_deg": null,
+      "settle_s": 3.1,
+      "step_m_range": null,
+      "steps": [],
+      "usable": false,
+      "why_not_usable": "this aircraft settled before the trace began; its trace only records sub-centimetre residual motion, so it fixes the END STATE but says nothing about the path"
+     }
+    },
+    "bearing_range_deg": [
+     43.6,
+     44.38
+    ],
+    "ground_weathervane": {
+     "A1": {
+      "n": 1423,
+      "sim_alt_max_m": 101.73,
+      "sim_alt_min_m": 100.09,
+      "sim_wind_dir_from_deg": 180.0,
+      "window_s": 212.96,
+      "yaw_first_deg": 127.12,
+      "yaw_last_deg": 174.42,
+      "yaw_monotonic_increasing": true
+     },
+     "B2": {
+      "n": 2959,
+      "sim_alt_max_m": 101.77,
+      "sim_alt_min_m": 100.09,
+      "sim_wind_dir_from_deg": 180.0,
+      "window_s": 444.88,
+      "yaw_first_deg": 126.91,
+      "yaw_last_deg": 179.45,
+      "yaw_monotonic_increasing": true
+     },
+     "B3": {
+      "n": 29,
+      "sim_alt_max_m": 101.87,
+      "sim_alt_min_m": 100.09,
+      "sim_wind_dir_from_deg": 180.0,
+      "window_s": 2.64,
+      "yaw_first_deg": 126.72,
+      "yaw_last_deg": 129.47,
+      "yaw_monotonic_increasing": false
+     }
+    },
+    "per_uav": {
+     "A1": {
+      "bearing_deg": 44.38,
+      "d_east_m": 3.5011,
+      "d_north_m": 3.5775,
+      "err_m": 5.0056,
+      "got_lat_identical": true,
+      "got_lon_identical": true,
+      "settle_s_previous_run": 15.1,
+      "settle_s_this_run": 15.2
+     },
+     "B2": {
+      "bearing_deg": 43.94,
+      "d_east_m": 3.5118,
+      "d_north_m": 3.6439,
+      "err_m": 5.0607,
+      "got_lat_identical": true,
+      "got_lon_identical": true,
+      "settle_s_previous_run": 3.1,
+      "settle_s_this_run": 3.0
+     },
+     "B3": {
+      "bearing_deg": 43.6,
+      "d_east_m": 3.5225,
+      "d_north_m": 3.6993,
+      "err_m": 5.1081,
+      "got_lat_identical": true,
+      "got_lon_identical": true,
+      "settle_s_previous_run": 3.1,
+      "settle_s_this_run": 3.1
+     }
+    },
+    "truth_vs_estimate": {
+     "A1": {
+      "ekf_pos_first_sample": {
+       "d_east_m": 3.5621,
+       "d_north_m": 3.7436
+      },
+      "sim_truth_first_sample": {
+       "d_east_m": 3.5621,
+       "d_north_m": 3.7436
+      },
+      "truth_minus_ekf_m": 0.0
+     },
+     "B2": {
+      "ekf_pos_first_sample": {
+       "d_east_m": 3.5525,
+       "d_north_m": 3.7436
+      },
+      "sim_truth_first_sample": {
+       "d_east_m": 3.5627,
+       "d_north_m": 3.7436
+      },
+      "truth_minus_ekf_m": 0.0102
+     },
+     "B3": {
+      "ekf_pos_first_sample": {
+       "d_east_m": 3.5429,
+       "d_north_m": 3.7436
+      },
+      "sim_truth_first_sample": {
+       "d_east_m": 3.553,
+       "d_north_m": 3.7436
+      },
+      "truth_minus_ekf_m": 0.0102
+     }
+    }
+   },
+   "replacement": "「機體在地面自由偏航轉向來風，位移鎖在機體縱軸；~5 m 是該圓弧的弦。位移的量值未能自原始碼導出，照實聲明。」見 PAPER_TEXT_ZH.md C2-i。",
+   "why_wrong": "位移方位角是 43.60°–44.38°（東北）。純順風只能解釋北向分量。",
+   "wrong": "「180° 對機首朝北是純順風，把停放機體往北推 ~5 m」"
+  },
+  "K4": {
+   "recomputed": {
+    "file_bit_identity": {
+     "report.json": {
+      "identical": false,
+      "sha_now": "b8b487592e7d",
+      "sha_prev": "e8a250f57f82"
+     },
+     "scenario.json": {
+      "identical": true,
+      "sha_now": "fe9581b5ae93",
+      "sha_prev": "fe9581b5ae93"
+     },
+     "spawn_readback.json": {
+      "identical": false,
+      "sha_now": "dcf5127cd5e1",
+      "sha_prev": "509033866cf3"
+     },
+     "validation.json": {
+      "identical": true,
+      "sha_now": "3942d671a6a3",
+      "sha_prev": "3942d671a6a3"
+     },
+     "wind_readback.json": {
+      "identical": true,
+      "sha_now": "0639bc346e6d",
+      "sha_prev": "0639bc346e6d"
+     }
+    },
+    "rigid_translation_max_spacing_delta_m": 0.0218,
+    "spawn_positions_identical": {
+     "A1": true,
+     "B2": true,
+     "B3": true
+    }
+   },
+   "replacement": "「**生成位置**逐位元重現；檔案本身不同。」",
+   "why_wrong": "檔案不同：spawn_readback.json 的 settle_s 與 report.json 的 timing_ms。",
+   "wrong": "「兩次獨立執行逐位元重現」"
+  }
+ },
+ "final_text_lives_in": [
+  "runs/artifacts/PAPERPLAN1/update_paper/TABLES_ZH.md",
+  "runs/artifacts/PAPERPLAN1/update_paper/PAPER_TEXT_ZH.md"
+ ],
+ "original": "runs/artifacts/PAPERPLAN1/sorties/sortie_results.json",
+ "original_bytes": 40598,
+ "original_is_unmodified": true,
+ "original_sha256_at_correction_time": "227c6db214c02efce99d95feb0641596595fe254fa21c7535619bae21d6008c6",
+ "recomputation_scripts": "runs/artifacts/PAPERPLAN1/update_paper/scripts/up_*.py",
+ "what_in_this_file_is_wrong": "status_reason 與 spawn_diagnosis 的順風說法與「逐位元重現」"
+}

@@ -1,0 +1,65 @@
+{
+ "key": "gui_legal_120_1a2b",
+ "path": "gui",
+ "n_a": 1,
+ "n_b": 2,
+ "altitude_m": 119.5,
+ "hfov_deg": 60.0,
+ "vfov_deg": 45.0,
+ "overlap_rate": 0.3,
+ "wind": [
+  5.0,
+  180.0
+ ],
+ "areas": [
+  {
+   "area_id": 1,
+   "priority": 1.0,
+   "polygon": [
+    [
+     23.946400676672784,
+     120.89233937984075
+    ],
+    [
+     23.946400676672784,
+     120.90766062015926
+    ],
+    [
+     23.953599323327214,
+     120.90766062015926
+    ],
+    [
+     23.953599323327214,
+     120.89233937984075
+    ]
+   ]
+  }
+ ],
+ "nfz": [],
+ "note": "實際機隊 1 Pioneer + 2 HERO；與 HV4SITL14 同幾何同空域，只少一台 ⇒ 乾淨 A/B",
+ "sim_wind": {
+  "spd_mps": 5.0,
+  "dir_from_deg": 180.0,
+  "turb": 0.0,
+  "profile_type": 1.0
+ },
+ "sensor_kinds": {
+  "A": "rgb",
+  "B": "rgb"
+ },
+ "speedup": 5.0,
+ "spawn_spread_m": 10.0,
+ "takeoff_sites": {
+  "A1": "TO_A1",
+  "B2": "TO_B2",
+  "B3": "TO_B3"
+ },
+ "waiver_max_agl_m": 119.5,
+ "h_ceil_m": 119.5,
+ "min_fw_agl_m": {
+  "A": 100.0,
+  "B": 100.0
+ },
+ "dh_band_min_m": 15.0,
+ "target_gsd": 0.05
+}

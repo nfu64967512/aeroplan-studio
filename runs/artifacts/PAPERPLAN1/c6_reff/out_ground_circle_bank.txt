@@ -1,0 +1,19 @@
+=== spec claim check: min ground-circle radius so that bank <= phi_max, vs R_theo(1+W/Va)^2 ===
+  [A] W= 0.0 left : need R_g/R_theo= 1.0000 (worst track    0.0 deg) ; claim (1+W/Va)^2= 1.0000 ; diff=+0.0000% ; R_g,req= 130.00 m vs R_eff= 200.00 m ; bank on R_eff circle=13.26 deg (limit 20)
+  [A] W= 0.0 right: need R_g/R_theo= 1.0000 (worst track    0.0 deg) ; claim (1+W/Va)^2= 1.0000 ; diff=+0.0000% ; R_g,req= 130.00 m vs R_eff= 200.00 m ; bank on R_eff circle=13.26 deg (limit 20)
+  [A] W= 5.0 left : need R_g/R_theo= 1.5192 (worst track    0.0 deg) ; claim (1+W/Va)^2= 1.5192 ; diff=+0.0000% ; R_g,req= 197.50 m vs R_eff= 200.00 m ; bank on R_eff circle=19.69 deg (limit 20)
+  [A] W= 5.0 right: need R_g/R_theo= 1.5192 (worst track    0.0 deg) ; claim (1+W/Va)^2= 1.5192 ; diff=+0.0000% ; R_g,req= 197.50 m vs R_eff= 200.00 m ; bank on R_eff circle=19.69 deg (limit 20)
+  [A] W= 8.0 left : need R_g/R_theo= 1.8826 (worst track    0.0 deg) ; claim (1+W/Va)^2= 1.8826 ; diff=+0.0000% ; R_g,req= 244.74 m vs R_eff= 244.74 m ; bank on R_eff circle=19.92 deg (limit 20)
+  [A] W= 8.0 right: need R_g/R_theo= 1.8826 (worst track    0.0 deg) ; claim (1+W/Va)^2= 1.8826 ; diff=+0.0000% ; R_g,req= 244.74 m vs R_eff= 244.74 m ; bank on R_eff circle=19.92 deg (limit 20)
+  [A] W=12.0 left : need R_g/R_theo= 2.4278 (worst track    0.0 deg) ; claim (1+W/Va)^2= 2.4278 ; diff=-0.0000% ; R_g,req= 315.61 m vs R_eff= 315.61 m ; bank on R_eff circle=19.92 deg (limit 20)
+  [A] W=12.0 right: need R_g/R_theo= 2.4278 (worst track    0.0 deg) ; claim (1+W/Va)^2= 2.4278 ; diff=-0.0000% ; R_g,req= 315.61 m vs R_eff= 315.61 m ; bank on R_eff circle=19.92 deg (limit 20)
+  [B] W= 0.0 left : need R_g/R_theo= 1.0000 (worst track    0.0 deg) ; claim (1+W/Va)^2= 1.0000 ; diff=+0.0000% ; R_g,req=  75.00 m vs R_eff= 120.00 m ; bank on R_eff circle=17.05 deg (limit 25)
+  [B] W= 0.0 right: need R_g/R_theo= 1.0000 (worst track    0.0 deg) ; claim (1+W/Va)^2= 1.0000 ; diff=+0.0000% ; R_g,req=  75.00 m vs R_eff= 120.00 m ; bank on R_eff circle=17.05 deg (limit 25)
+  [B] W= 5.0 left : need R_g/R_theo= 1.5956 (worst track    0.0 deg) ; claim (1+W/Va)^2= 1.5956 ; diff=+0.0000% ; R_g,req= 119.67 m vs R_eff= 120.00 m ; bank on R_eff circle=26.07 deg (limit 25)
+  [B] W= 5.0 right: need R_g/R_theo= 1.5956 (worst track    0.0 deg) ; claim (1+W/Va)^2= 1.5956 ; diff=+0.0000% ; R_g,req= 119.67 m vs R_eff= 120.00 m ; bank on R_eff circle=26.07 deg (limit 25)
+  [B] W= 8.0 left : need R_g/R_theo= 2.0194 (worst track    0.0 deg) ; claim (1+W/Va)^2= 2.0194 ; diff=+0.0000% ; R_g,req= 151.45 m vs R_eff= 151.45 m ; bank on R_eff circle=26.14 deg (limit 25)
+  [B] W= 8.0 right: need R_g/R_theo= 2.0194 (worst track    0.0 deg) ; claim (1+W/Va)^2= 2.0194 ; diff=+0.0000% ; R_g,req= 151.45 m vs R_eff= 151.45 m ; bank on R_eff circle=26.14 deg (limit 25)
+  [B] W=12.0 left : need R_g/R_theo= 2.6620 (worst track    0.0 deg) ; claim (1+W/Va)^2= 2.6620 ; diff=+0.0000% ; R_g,req= 199.65 m vs R_eff= 199.65 m ; bank on R_eff circle=26.14 deg (limit 25)
+  [B] W=12.0 right: need R_g/R_theo= 2.6620 (worst track    0.0 deg) ; claim (1+W/Va)^2= 2.6620 ; diff=+0.0000% ; R_g,req= 199.65 m vs R_eff= 199.65 m ; bank on R_eff circle=26.14 deg (limit 25)
+
+wrote ground_circle_bank.json

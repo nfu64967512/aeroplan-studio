@@ -1,0 +1,32 @@
+{
+  "A_W5": {
+    "numeric_max_rho_m": 197.496,
+    "analytic_m": 197.496,
+    "numeric_min_rho_m": 76.566
+  },
+  "A_W8": {
+    "numeric_max_rho_m": 244.743,
+    "analytic_m": 244.743,
+    "numeric_min_rho_m": 51.255
+  },
+  "A_W12": {
+    "numeric_max_rho_m": 315.614,
+    "analytic_m": 315.614,
+    "numeric_min_rho_m": 25.381
+  },
+  "B_W5": {
+    "numeric_max_rho_m": 119.668,
+    "analytic_m": 119.668,
+    "numeric_min_rho_m": 40.72
+  },
+  "B_W8": {
+    "numeric_max_rho_m": 151.454,
+    "analytic_m": 151.454,
+    "numeric_min_rho_m": 25.139
+  },
+  "B_W12": {
+    "numeric_max_rho_m": 199.654,
+    "analytic_m": 199.654,
+    "numeric_min_rho_m": 10.18
+  }
+}

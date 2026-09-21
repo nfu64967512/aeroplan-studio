@@ -1,0 +1,19 @@
+scenario wind: 5.0 m/s from 270.0 deg (west wind), single layer 0-3000 m AGL, gust 6.5 m/s
+WindField.max_speed() = 5.0000 m/s   (this is what ardupilot.export/recommended_params uses)
+  [A] policy=max_layer z in [80.0, 120.0] -> W_R=5.0000 m/s -> R_eff=200.00 m  (R_plan=200, W*=5.167 -> R_plan branch (wind correction INERT))
+  [A] policy=op_layer  z in [80.0, 120.0] -> W_R=5.0000 m/s -> R_eff=200.00 m  (R_plan=200, W*=5.167 -> R_plan branch (wind correction INERT))
+  [B] policy=max_layer z in [70.0, 120.0] -> W_R=5.0000 m/s -> R_eff=120.00 m  (R_plan=120, W*=5.033 -> R_plan branch (wind correction INERT))
+  [B] policy=op_layer  z in [70.0, 120.0] -> W_R=5.0000 m/s -> R_eff=120.00 m  (R_plan=120, W*=5.033 -> R_plan branch (wind correction INERT))
+
+=== ground speed along the survey headings (5 m/s from 270 = blowing toward +x / east) ===
+  wind blowing-toward vector = (+5.000, +0.000) m/s (ENU east,north)
+  [A] V_a=21.5 track east (tailwind)  -> V_g=26.500 m/s
+  [A] V_a=21.5 track west (headwind)  -> V_g=16.500 m/s
+  [A] V_a=21.5 track north (cross)    -> V_g=20.911 m/s
+  [A] V_a=21.5 track south (cross)    -> V_g=20.911 m/s
+  [B] V_a=19.0 track east (tailwind)  -> V_g=24.000 m/s
+  [B] V_a=19.0 track west (headwind)  -> V_g=14.000 m/s
+  [B] V_a=19.0 track north (cross)    -> V_g=18.330 m/s
+  [B] V_a=19.0 track south (cross)    -> V_g=18.330 m/s
+
+wrote wind_policy_readout.json

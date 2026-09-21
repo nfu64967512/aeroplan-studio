@@ -1,0 +1,4 @@
+requested multi_sortie=False  -> EFFECTIVE hv.cfg.multi_sortie = False
+   uncovered: [['Z3_1', 'no_feasible_insertion']]
+requested multi_sortie=True  -> EFFECTIVE hv.cfg.multi_sortie = True
+   uncovered: [['Z3_1', 'no_feasible_insertion']]

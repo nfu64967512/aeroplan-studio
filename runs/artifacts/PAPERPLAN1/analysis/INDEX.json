@@ -1,0 +1,127 @@
+{
+ "files": {
+  "docs/hv_dccpp/AASRC2026_abstract/fig4_wind.png": {
+   "bytes": 178678,
+   "sha256": "408f9f0c8be9dfb659d63bbda7d259efa299fdafa43227c13bc725185f77a65f"
+  },
+  "docs/hv_dccpp/AASRC2026_abstract/fig4_wind.svg": {
+   "bytes": 289261,
+   "sha256": "d329a50d5c7fca45c7764ffe0155c2bea46b22ab3cff9cc750104055fcd0d5fd"
+  },
+  "docs/hv_dccpp/AASRC2026_abstract/fig5_compliance.png": {
+   "bytes": 200629,
+   "sha256": "ef2e557b9b882609871369330fb924639c593c5f84c84f10ef516257a2b24418"
+  },
+  "docs/hv_dccpp/AASRC2026_abstract/fig5_compliance.svg": {
+   "bytes": 335581,
+   "sha256": "6722da5b8a28341345ed1fe5d9ff159dbda30f5dc270219f33ff4bf430b0018d"
+  },
+  "docs/hv_dccpp/AASRC2026_abstract/figures_src/fig4_data.json": {
+   "bytes": 7081,
+   "sha256": "f500ea341c5559085a64c34a24c7988308361a2e0eed1665a6fcc8ae0abfdcf5"
+  },
+  "docs/hv_dccpp/AASRC2026_abstract/figures_src/fig5_data.json": {
+   "bytes": 14089,
+   "sha256": "f8d724a7b49089e24b7358d7afc4ea08593b887e2ee4272268bafac2aeaad9c0"
+  },
+  "docs/hv_dccpp/AASRC2026_abstract/figures_src/make_fig4_wind.py": {
+   "bytes": 9479,
+   "sha256": "5e579594e6714c6b2d517f39e3697e2bdd6d224b90b811de5a6a10b795537ba1"
+  },
+  "docs/hv_dccpp/AASRC2026_abstract/figures_src/make_fig5_compliance.py": {
+   "bytes": 10705,
+   "sha256": "b1c7bc0b0286d91688497298b8ac71c190e0871a82a413e0c564a128ed8c77d1"
+  },
+  "runs/artifacts/PAPERPLAN1/analysis/out/altitude.json": {
+   "bytes": 14350,
+   "sha256": "5e1f671c97543fef7c1367d3f064463ce82b9a7a5c26aa773addd04ddbd23bc0"
+  },
+  "runs/artifacts/PAPERPLAN1/analysis/out/contradictions.json": {
+   "bytes": 9407,
+   "sha256": "47bfe08cbd44dc5986dc375ba8b320566bf586201e00311b361714ba152ae707"
+  },
+  "runs/artifacts/PAPERPLAN1/analysis/out/derived.json": {
+   "bytes": 1683,
+   "sha256": "07241ba2e6253478cb34f772d72fd071c5fdf071d4a5a6102e53eb097d1c9dfc"
+  },
+  "runs/artifacts/PAPERPLAN1/analysis/out/separation.json": {
+   "bytes": 26502,
+   "sha256": "de6a0c43587c89aaeb49df1db4689b81672e77b912994e7bad8255e702c78d10"
+  },
+  "runs/artifacts/PAPERPLAN1/analysis/out/tables.md": {
+   "bytes": 18588,
+   "sha256": "035bc07ff4dc6ed96021ec57649f48bce47507c37034fc77216d4576db88e6c0"
+  },
+  "runs/artifacts/PAPERPLAN1/analysis/out/timing.json": {
+   "bytes": 19281,
+   "sha256": "49619ba8f7ea0b93163fe8b6aadf1bed7639096ea44961383e0206a1f0c5c133"
+  },
+  "runs/artifacts/PAPERPLAN1/analysis/out/uav_kinematics.json": {
+   "bytes": 52156,
+   "sha256": "15e8d6f7ae09673547b9eeffcdaac0192a3c3e4054885ecf1314297868b12eee"
+  },
+  "runs/artifacts/PAPERPLAN1/analysis/out/verify.json": {
+   "bytes": 3484,
+   "sha256": "8833895ae2c58a974e41921d85a69b58157f86dd6210d1bf482d19cd6c410826"
+  },
+  "runs/artifacts/PAPERPLAN1/analysis/scripts/ana_alt.py": {
+   "bytes": 5824,
+   "sha256": "90cf60f60aed9449d49171c9e4de510f83e390ce1746875956a797375e1f0794"
+  },
+  "runs/artifacts/PAPERPLAN1/analysis/scripts/ana_contradictions.py": {
+   "bytes": 14574,
+   "sha256": "7e7be1b99c2ea2b89f5bdbb3b0eeae1d6d1ad94d5bd523254e16e1907775dd59"
+  },
+  "runs/artifacts/PAPERPLAN1/analysis/scripts/ana_extract.py": {
+   "bytes": 4208,
+   "sha256": "f0843bc147d47f4256320f87c1dbf5d5565eaa1e0d4458783240bd6b8117305c"
+  },
+  "runs/artifacts/PAPERPLAN1/analysis/scripts/ana_lib.py": {
+   "bytes": 6731,
+   "sha256": "1abc313bdd2fbbce1ba6f9d65c342cd35286c544fb18dbe4555e17930a4697a1"
+  },
+  "runs/artifacts/PAPERPLAN1/analysis/scripts/ana_sep.py": {
+   "bytes": 8842,
+   "sha256": "1cd03344de4a72b4734d542d756258f5c904f6b4a19c81b38a97b18b7446079e"
+  },
+  "runs/artifacts/PAPERPLAN1/analysis/scripts/ana_tables.py": {
+   "bytes": 16868,
+   "sha256": "8a8c92a9c2c1ee22af3c8c61cf9ed57a04cd22f267aabc1902b625f2d62e963b"
+  },
+  "runs/artifacts/PAPERPLAN1/analysis/scripts/ana_time.py": {
+   "bytes": 7934,
+   "sha256": "83e88a6434bd8a8dff74322c907adeb39cdf5eb1bb99be2028b69a0ea20baac2"
+  },
+  "runs/artifacts/PAPERPLAN1/analysis/scripts/ana_uav.py": {
+   "bytes": 8181,
+   "sha256": "b16e9e313876fdbbd1b3dcbc5b72d2b6943dd4ca29d3fb1794aaeef30e212d68"
+  },
+  "runs/artifacts/PAPERPLAN1/analysis/scripts/ana_verify.py": {
+   "bytes": 6586,
+   "sha256": "3136645ae5aca6dccfd11fad51b1c0d6d1e4fd534bc0965ea9cdceb96fa31449"
+  }
+ },
+ "label": "analysis",
+ "log_to_trial_mapping": {
+  "BEAMIDP1": 18,
+  "HV4SITL15": 13,
+  "HV4SITL16": 14,
+  "HV4W00": 17,
+  "HV4W05": 16,
+  "HV4W55": 15,
+  "HV4W55S": "never armed, no dataflash log written (LASTLOG still 18)",
+  "how_established": "each sitl/vtol/i10x/logs/000000NN.BIN mtime equals the matching runs/artifacts/<trial>/A1/flight.csv mtime to the 100 ns tick; independently consistent with the runbook's LASTLOG = 14 before this set and with the .t0/.t1 wall-clock epochs in runs/artifacts/PAPERPLAN1/sorties/logs/"
+ },
+ "nothing_was_run": "no SITL, no ArduPlane.exe, no MAVProxy, no planner, no git, no pip, no COM port. Read-only over the existing products.",
+ "pipeline": [
+  "ana_extract.py   18 dataflash .BIN (6 trials x 3 aircraft) -> cache/*.npz",
+  "ana_uav.py       per-aircraft clock, altitude, distance, three wind lines",
+  "ana_sep.py       pairwise separation, exact in continuous time, 3 geodesy frames",
+  "ana_time.py      planned vs flown timing, distance, coverage (shapely)",
+  "ana_alt.py       altitude compliance for D2, exported vs flown",
+  "ana_verify.py    V1 Vincenty cross-check, V2 reproduce the reporter, V3 area scale",
+  "ana_tables.py    -> out/tables.md, out/derived.json",
+  "ana_contradictions.py -> out/contradictions.json"
+ ],
+ "what": "the paper's result tables, recomputed from the raw run products by this label's own code; nothing is inherited from hv_sitl_report.py, binalt.py, binsep.py, sortie_results.json or prep_result.json"
+}

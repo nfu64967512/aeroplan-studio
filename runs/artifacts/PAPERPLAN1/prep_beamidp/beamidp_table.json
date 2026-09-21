@@ -1,0 +1,1416 @@
+[
+ {
+  "label": "NEW  (Beam-IDP active)",
+  "scenario": "beamidp_1a2b_1195",
+  "trial": "BEAMIDP1",
+  "h_ceil_m": 119.5,
+  "coverage_altitude_m": 119.5,
+  "fleet": "1A+2B",
+  "wind": [
+   5.0,
+   270.0
+  ],
+  "plan_s": 13.4,
+  "status": "GO_WITH_WARNINGS",
+  "makespan_s": 2348.04,
+  "uncovered": 0,
+  "cells": {
+   "Z1_1|B": {
+    "cls": "B",
+    "cell": "Z1_1",
+    "uav": "B3",
+    "n": 13,
+    "k": 3,
+    "triggers": true,
+    "spacing_m": 96.59,
+    "r_eff_m": 120.0,
+    "strip_len_m": 1718.3,
+    "z_op_m": 119.37,
+    "one_way_strips": 0,
+    "t_oper_s": 1263.13,
+    "p_cruise_k_unc_w": 223.7,
+    "orders": {
+     "sequential": {
+      "order": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       8,
+       9,
+       10,
+       11,
+       12
+      ],
+      "turn_time_s": 508.25,
+      "turn_dist_m": 9095.5,
+      "turn_energy_wh": 31.588,
+      "cell_time_s": 1771.39,
+      "cell_energy_wh": 110.093,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "skip_k_fixed": {
+      "order": [
+       0,
+       3,
+       6,
+       9,
+       12,
+       1,
+       4,
+       7,
+       10,
+       2,
+       5,
+       8,
+       11
+      ],
+      "turn_time_s": 352.49,
+      "turn_dist_m": 6377.0,
+      "turn_energy_wh": 21.908,
+      "cell_time_s": 1615.63,
+      "cell_energy_wh": 100.412,
+      "d_turn_time_pct": -30.65,
+      "d_turn_dist_pct": -29.89,
+      "d_cell_time_pct": -8.79
+     },
+     "beam_idp_planned": {
+      "order": [
+       6,
+       3,
+       0,
+       4,
+       1,
+       5,
+       8,
+       11,
+       7,
+       10,
+       12,
+       9,
+       2
+      ],
+      "turn_time_s": 330.12,
+      "turn_dist_m": 5961.4,
+      "turn_energy_wh": 20.517,
+      "cell_time_s": 1593.26,
+      "cell_energy_wh": 99.022,
+      "d_turn_time_pct": -35.05,
+      "d_turn_dist_pct": -34.46,
+      "d_cell_time_pct": -10.06
+     },
+     "held_karp_opt": {
+      "order": [
+       11,
+       8,
+       5,
+       2,
+       0,
+       3,
+       6,
+       9,
+       12,
+       10,
+       7,
+       4,
+       1
+      ],
+      "turn_time_s": 302.55,
+      "turn_dist_m": 5449.3,
+      "turn_energy_wh": 18.803,
+      "cell_time_s": 1565.68,
+      "cell_energy_wh": 97.308,
+      "d_turn_time_pct": -40.47,
+      "d_turn_dist_pct": -40.09,
+      "d_cell_time_pct": -11.61
+     }
+    }
+   },
+   "Z2_1|A": {
+    "cls": "A",
+    "cell": "Z2_1",
+    "uav": "A1",
+    "n": 6,
+    "k": 5,
+    "triggers": true,
+    "spacing_m": 96.59,
+    "r_eff_m": 200.0,
+    "strip_len_m": 1727.5,
+    "z_op_m": 119.49,
+    "one_way_strips": 0,
+    "t_oper_s": 509.66,
+    "p_cruise_k_unc_w": 617.5,
+    "orders": {
+     "sequential": {
+      "order": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5
+      ],
+      "turn_time_s": 328.52,
+      "turn_dist_m": 6746.1,
+      "turn_energy_wh": 56.347,
+      "cell_time_s": 838.18,
+      "cell_energy_wh": 143.764,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "skip_k_fixed": {
+      "order": [
+       0,
+       5,
+       1,
+       2,
+       3,
+       4
+      ],
+      "turn_time_s": 269.3,
+      "turn_dist_m": 5535.2,
+      "turn_energy_wh": 46.191,
+      "cell_time_s": 778.96,
+      "cell_energy_wh": 133.607,
+      "d_turn_time_pct": -18.03,
+      "d_turn_dist_pct": -17.95,
+      "d_cell_time_pct": -7.06
+     },
+     "beam_idp_planned": {
+      "order": [
+       1,
+       5,
+       0,
+       4,
+       2,
+       3
+      ],
+      "turn_time_s": 234.92,
+      "turn_dist_m": 4829.8,
+      "turn_energy_wh": 40.294,
+      "cell_time_s": 744.58,
+      "cell_energy_wh": 127.71,
+      "d_turn_time_pct": -28.49,
+      "d_turn_dist_pct": -28.41,
+      "d_cell_time_pct": -11.17
+     },
+     "held_karp_opt": {
+      "order": [
+       3,
+       1,
+       5,
+       0,
+       4,
+       2
+      ],
+      "turn_time_s": 228.49,
+      "turn_dist_m": 4697.3,
+      "turn_energy_wh": 39.19,
+      "cell_time_s": 738.15,
+      "cell_energy_wh": 126.607,
+      "d_turn_time_pct": -30.45,
+      "d_turn_dist_pct": -30.37,
+      "d_cell_time_pct": -11.93
+     }
+    }
+   },
+   "Z2_1_B_k6|B": {
+    "cls": "B",
+    "cell": "Z2_1_B_k6",
+    "uav": "B2",
+    "n": 7,
+    "k": 3,
+    "triggers": true,
+    "spacing_m": 96.59,
+    "r_eff_m": 120.0,
+    "strip_len_m": 1718.9,
+    "z_op_m": 119.49,
+    "one_way_strips": 0,
+    "t_oper_s": 680.38,
+    "p_cruise_k_unc_w": 223.7,
+    "orders": {
+     "sequential": {
+      "order": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6
+      ],
+      "turn_time_s": 254.12,
+      "turn_dist_m": 4547.7,
+      "turn_energy_wh": 15.794,
+      "cell_time_s": 934.51,
+      "cell_energy_wh": 58.08,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "skip_k_fixed": {
+      "order": [
+       0,
+       3,
+       6,
+       1,
+       4,
+       2,
+       5
+      ],
+      "turn_time_s": 161.87,
+      "turn_dist_m": 2917.8,
+      "turn_energy_wh": 10.061,
+      "cell_time_s": 842.26,
+      "cell_energy_wh": 52.347,
+      "d_turn_time_pct": -36.3,
+      "d_turn_dist_pct": -35.84,
+      "d_cell_time_pct": -9.87
+     },
+     "beam_idp_planned": {
+      "order": [
+       2,
+       5,
+       1,
+       4,
+       0,
+       3,
+       6
+      ],
+      "turn_time_s": 152.52,
+      "turn_dist_m": 2753.8,
+      "turn_energy_wh": 9.479,
+      "cell_time_s": 832.9,
+      "cell_energy_wh": 51.766,
+      "d_turn_time_pct": -39.98,
+      "d_turn_dist_pct": -39.45,
+      "d_cell_time_pct": -10.87
+     },
+     "held_karp_opt": {
+      "order": [
+       5,
+       2,
+       6,
+       3,
+       0,
+       4,
+       1
+      ],
+      "turn_time_s": 152.47,
+      "turn_dist_m": 2753.8,
+      "turn_energy_wh": 9.476,
+      "cell_time_s": 832.85,
+      "cell_energy_wh": 51.763,
+      "d_turn_time_pct": -40.0,
+      "d_turn_dist_pct": -39.45,
+      "d_cell_time_pct": -10.88
+     }
+    }
+   },
+   "Z3_1|A": {
+    "cls": "A",
+    "cell": "Z3_1",
+    "uav": "A1",
+    "n": 7,
+    "k": 5,
+    "triggers": true,
+    "spacing_m": 96.59,
+    "r_eff_m": 200.0,
+    "strip_len_m": 1727.6,
+    "z_op_m": 119.37,
+    "one_way_strips": 0,
+    "t_oper_s": 594.63,
+    "p_cruise_k_unc_w": 617.5,
+    "orders": {
+     "sequential": {
+      "order": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6
+      ],
+      "turn_time_s": 394.22,
+      "turn_dist_m": 8095.3,
+      "turn_energy_wh": 67.616,
+      "cell_time_s": 988.85,
+      "cell_energy_wh": 169.608,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "skip_k_fixed": {
+      "order": [
+       0,
+       5,
+       1,
+       6,
+       2,
+       3,
+       4
+      ],
+      "turn_time_s": 275.79,
+      "turn_dist_m": 5673.5,
+      "turn_energy_wh": 47.303,
+      "cell_time_s": 870.42,
+      "cell_energy_wh": 149.295,
+      "d_turn_time_pct": -30.04,
+      "d_turn_dist_pct": -29.92,
+      "d_cell_time_pct": -11.98
+     },
+     "beam_idp_planned": {
+      "order": [
+       6,
+       1,
+       5,
+       0,
+       4,
+       2,
+       3
+      ],
+      "turn_time_s": 269.34,
+      "turn_dist_m": 5541.1,
+      "turn_energy_wh": 46.197,
+      "cell_time_s": 863.97,
+      "cell_energy_wh": 148.188,
+      "d_turn_time_pct": -31.68,
+      "d_turn_dist_pct": -31.55,
+      "d_cell_time_pct": -12.63
+     },
+     "held_karp_opt": {
+      "order": [
+       3,
+       4,
+       0,
+       5,
+       1,
+       6,
+       2
+      ],
+      "turn_time_s": 247.81,
+      "turn_dist_m": 5100.6,
+      "turn_energy_wh": 42.505,
+      "cell_time_s": 842.45,
+      "cell_energy_wh": 144.496,
+      "d_turn_time_pct": -37.14,
+      "d_turn_dist_pct": -36.99,
+      "d_cell_time_pct": -14.81
+     }
+    }
+   },
+   "Z3_1_B_k7|B": {
+    "cls": "B",
+    "cell": "Z3_1_B_k7",
+    "uav": "B2",
+    "n": 6,
+    "k": 3,
+    "triggers": true,
+    "spacing_m": 96.59,
+    "r_eff_m": 120.0,
+    "strip_len_m": 1718.9,
+    "z_op_m": 119.37,
+    "one_way_strips": 0,
+    "t_oper_s": 583.21,
+    "p_cruise_k_unc_w": 223.7,
+    "orders": {
+     "sequential": {
+      "order": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5
+      ],
+      "turn_time_s": 211.77,
+      "turn_dist_m": 3789.8,
+      "turn_energy_wh": 13.162,
+      "cell_time_s": 794.98,
+      "cell_energy_wh": 49.409,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "skip_k_fixed": {
+      "order": [
+       0,
+       3,
+       1,
+       4,
+       2,
+       5
+      ],
+      "turn_time_s": 137.02,
+      "turn_dist_m": 2461.8,
+      "turn_energy_wh": 8.516,
+      "cell_time_s": 720.23,
+      "cell_energy_wh": 44.763,
+      "d_turn_time_pct": -35.3,
+      "d_turn_dist_pct": -35.04,
+      "d_cell_time_pct": -9.4
+     },
+     "beam_idp_planned": {
+      "order": [
+       3,
+       0,
+       4,
+       1,
+       5,
+       2
+      ],
+      "turn_time_s": 128.83,
+      "turn_dist_m": 2327.0,
+      "turn_energy_wh": 8.007,
+      "cell_time_s": 712.04,
+      "cell_energy_wh": 44.254,
+      "d_turn_time_pct": -39.17,
+      "d_turn_dist_pct": -38.6,
+      "d_cell_time_pct": -10.43
+     },
+     "held_karp_opt": {
+      "order": [
+       3,
+       0,
+       4,
+       1,
+       5,
+       2
+      ],
+      "turn_time_s": 128.83,
+      "turn_dist_m": 2327.0,
+      "turn_energy_wh": 8.007,
+      "cell_time_s": 712.04,
+      "cell_energy_wh": 44.254,
+      "d_turn_time_pct": -39.17,
+      "d_turn_dist_pct": -38.6,
+      "d_cell_time_pct": -10.43
+     }
+    }
+   }
+  },
+  "uav": {
+   "A1": {
+    "cls": "A",
+    "strips": 13,
+    "distance_m": 41742.1,
+    "energy_wh": 459.15,
+    "margin_wh": 440.85
+   },
+   "B2": {
+    "cls": "B",
+    "strips": 13,
+    "distance_m": 37171.2,
+    "energy_wh": 165.31,
+    "margin_wh": 88.69
+   },
+   "B3": {
+    "cls": "B",
+    "strips": 13,
+    "distance_m": 33808.9,
+    "energy_wh": 153.92,
+    "margin_wh": 100.08
+   }
+  },
+  "fleet_turn_totals": {
+   "seq_t": 1696.88,
+   "bid_t": 1115.73,
+   "seq_l": 32274.35,
+   "bid_l": 21413.1,
+   "hk_t": 1060.15,
+   "skip_t": 1196.48,
+   "skip_l": 22965.32,
+   "hk_l": 20328.06
+  },
+  "makespan_sequential_estimate_s": 2541.8,
+  "makespan_estimate_note": "ESTIMATE ONLY: adds the fleet turn-time delta spread over the fleet; entry/RTB legs and 4-D deconfliction are NOT re-planned."
+ },
+ {
+  "label": "PAPER (as flown HV4SITL15/16, cap 120)",
+  "scenario": "gui_legal_120_1a2b",
+  "trial": "HV4SITL15",
+  "h_ceil_m": 120.0,
+  "coverage_altitude_m": 120.0,
+  "fleet": "1A+2B",
+  "wind": [
+   5.0,
+   270.0
+  ],
+  "plan_s": 12.4,
+  "status": "GO_WITH_WARNINGS",
+  "makespan_s": 1260.43,
+  "uncovered": 0,
+  "cells": {
+   "Z2_1|A": {
+    "cls": "A",
+    "cell": "Z2_1",
+    "uav": "A1",
+    "n": 1,
+    "k": 5,
+    "triggers": false,
+    "spacing_m": 96.99,
+    "r_eff_m": 200.0,
+    "strip_len_m": 1695.4,
+    "z_op_m": 120.0,
+    "one_way_strips": 0,
+    "t_oper_s": 83.37,
+    "p_cruise_k_unc_w": 617.5,
+    "orders": {
+     "sequential": {
+      "order": [
+       0
+      ],
+      "turn_time_s": 0.0,
+      "turn_dist_m": 0.0,
+      "turn_energy_wh": 0.0,
+      "cell_time_s": 83.37,
+      "cell_energy_wh": 14.299,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "skip_k_fixed": {
+      "order": [
+       0
+      ],
+      "turn_time_s": 0.0,
+      "turn_dist_m": 0.0,
+      "turn_energy_wh": 0.0,
+      "cell_time_s": 83.37,
+      "cell_energy_wh": 14.299,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "beam_idp_planned": {
+      "order": [
+       0
+      ],
+      "turn_time_s": 0.0,
+      "turn_dist_m": 0.0,
+      "turn_energy_wh": 0.0,
+      "cell_time_s": 83.37,
+      "cell_energy_wh": 14.299,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     }
+    }
+   },
+   "Z2_1_B_k1|B": {
+    "cls": "B",
+    "cell": "Z2_1_B_k1",
+    "uav": "B2",
+    "n": 2,
+    "k": 3,
+    "triggers": false,
+    "spacing_m": 96.99,
+    "r_eff_m": 120.0,
+    "strip_len_m": 1685.6,
+    "z_op_m": 119.99,
+    "one_way_strips": 0,
+    "t_oper_s": 190.63,
+    "p_cruise_k_unc_w": 223.7,
+    "orders": {
+     "sequential": {
+      "order": [
+       0,
+       1
+      ],
+      "turn_time_s": 42.32,
+      "turn_dist_m": 757.4,
+      "turn_energy_wh": 2.63,
+      "cell_time_s": 232.95,
+      "cell_energy_wh": 14.478,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "skip_k_fixed": {
+      "order": [
+       0,
+       1
+      ],
+      "turn_time_s": 42.32,
+      "turn_dist_m": 757.4,
+      "turn_energy_wh": 2.63,
+      "cell_time_s": 232.95,
+      "cell_energy_wh": 14.478,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "beam_idp_planned": {
+      "order": [
+       1,
+       0
+      ],
+      "turn_time_s": 42.32,
+      "turn_dist_m": 757.4,
+      "turn_energy_wh": 2.63,
+      "cell_time_s": 232.95,
+      "cell_energy_wh": 14.478,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "held_karp_opt": {
+      "order": [
+       0,
+       1
+      ],
+      "turn_time_s": 42.32,
+      "turn_dist_m": 757.4,
+      "turn_energy_wh": 2.63,
+      "cell_time_s": 232.95,
+      "cell_energy_wh": 14.478,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     }
+    }
+   },
+   "Z3_1|A": {
+    "cls": "A",
+    "cell": "Z3_1",
+    "uav": "A1",
+    "n": 1,
+    "k": 5,
+    "triggers": false,
+    "spacing_m": 96.99,
+    "r_eff_m": 200.0,
+    "strip_len_m": 1695.4,
+    "z_op_m": 120.0,
+    "one_way_strips": 0,
+    "t_oper_s": 83.36,
+    "p_cruise_k_unc_w": 617.5,
+    "orders": {
+     "sequential": {
+      "order": [
+       0
+      ],
+      "turn_time_s": 0.0,
+      "turn_dist_m": 0.0,
+      "turn_energy_wh": 0.0,
+      "cell_time_s": 83.36,
+      "cell_energy_wh": 14.299,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "skip_k_fixed": {
+      "order": [
+       0
+      ],
+      "turn_time_s": 0.0,
+      "turn_dist_m": 0.0,
+      "turn_energy_wh": 0.0,
+      "cell_time_s": 83.36,
+      "cell_energy_wh": 14.299,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "beam_idp_planned": {
+      "order": [
+       0
+      ],
+      "turn_time_s": 0.0,
+      "turn_dist_m": 0.0,
+      "turn_energy_wh": 0.0,
+      "cell_time_s": 83.36,
+      "cell_energy_wh": 14.299,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     }
+    }
+   },
+   "Z3_1_B_k1|B": {
+    "cls": "B",
+    "cell": "Z3_1_B_k1",
+    "uav": "B3",
+    "n": 2,
+    "k": 3,
+    "triggers": false,
+    "spacing_m": 96.99,
+    "r_eff_m": 120.0,
+    "strip_len_m": 1685.5,
+    "z_op_m": 120.0,
+    "one_way_strips": 0,
+    "t_oper_s": 190.63,
+    "p_cruise_k_unc_w": 223.7,
+    "orders": {
+     "sequential": {
+      "order": [
+       0,
+       1
+      ],
+      "turn_time_s": 42.32,
+      "turn_dist_m": 757.4,
+      "turn_energy_wh": 2.63,
+      "cell_time_s": 232.94,
+      "cell_energy_wh": 14.478,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "skip_k_fixed": {
+      "order": [
+       0,
+       1
+      ],
+      "turn_time_s": 42.32,
+      "turn_dist_m": 757.4,
+      "turn_energy_wh": 2.63,
+      "cell_time_s": 232.94,
+      "cell_energy_wh": 14.478,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "beam_idp_planned": {
+      "order": [
+       0,
+       1
+      ],
+      "turn_time_s": 42.32,
+      "turn_dist_m": 757.4,
+      "turn_energy_wh": 2.63,
+      "cell_time_s": 232.94,
+      "cell_energy_wh": 14.478,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "held_karp_opt": {
+      "order": [
+       1,
+       0
+      ],
+      "turn_time_s": 42.32,
+      "turn_dist_m": 757.4,
+      "turn_energy_wh": 2.63,
+      "cell_time_s": 232.94,
+      "cell_energy_wh": 14.478,
+      "d_turn_time_pct": -0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": -0.0
+     }
+    }
+   },
+   "Z4_1|A": {
+    "cls": "A",
+    "cell": "Z4_1",
+    "uav": "A1",
+    "n": 1,
+    "k": 5,
+    "triggers": false,
+    "spacing_m": 96.99,
+    "r_eff_m": 200.0,
+    "strip_len_m": 1695.5,
+    "z_op_m": 119.99,
+    "one_way_strips": 0,
+    "t_oper_s": 83.37,
+    "p_cruise_k_unc_w": 617.5,
+    "orders": {
+     "sequential": {
+      "order": [
+       0
+      ],
+      "turn_time_s": 0.0,
+      "turn_dist_m": 0.0,
+      "turn_energy_wh": 0.0,
+      "cell_time_s": 83.37,
+      "cell_energy_wh": 14.3,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "skip_k_fixed": {
+      "order": [
+       0
+      ],
+      "turn_time_s": 0.0,
+      "turn_dist_m": 0.0,
+      "turn_energy_wh": 0.0,
+      "cell_time_s": 83.37,
+      "cell_energy_wh": 14.3,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "beam_idp_planned": {
+      "order": [
+       0
+      ],
+      "turn_time_s": 0.0,
+      "turn_dist_m": 0.0,
+      "turn_energy_wh": 0.0,
+      "cell_time_s": 83.37,
+      "cell_energy_wh": 14.3,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     }
+    }
+   },
+   "Z4_1_B_k1|B": {
+    "cls": "B",
+    "cell": "Z4_1_B_k1",
+    "uav": "B3",
+    "n": 2,
+    "k": 3,
+    "triggers": false,
+    "spacing_m": 96.99,
+    "r_eff_m": 120.0,
+    "strip_len_m": 1685.4,
+    "z_op_m": 120.0,
+    "one_way_strips": 0,
+    "t_oper_s": 190.61,
+    "p_cruise_k_unc_w": 223.7,
+    "orders": {
+     "sequential": {
+      "order": [
+       0,
+       1
+      ],
+      "turn_time_s": 42.32,
+      "turn_dist_m": 757.4,
+      "turn_energy_wh": 2.63,
+      "cell_time_s": 232.93,
+      "cell_energy_wh": 14.477,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "skip_k_fixed": {
+      "order": [
+       0,
+       1
+      ],
+      "turn_time_s": 42.32,
+      "turn_dist_m": 757.4,
+      "turn_energy_wh": 2.63,
+      "cell_time_s": 232.93,
+      "cell_energy_wh": 14.477,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "beam_idp_planned": {
+      "order": [
+       1,
+       0
+      ],
+      "turn_time_s": 42.32,
+      "turn_dist_m": 757.4,
+      "turn_energy_wh": 2.63,
+      "cell_time_s": 232.93,
+      "cell_energy_wh": 14.477,
+      "d_turn_time_pct": -0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": -0.0
+     },
+     "held_karp_opt": {
+      "order": [
+       1,
+       0
+      ],
+      "turn_time_s": 42.32,
+      "turn_dist_m": 757.4,
+      "turn_energy_wh": 2.63,
+      "cell_time_s": 232.93,
+      "cell_energy_wh": 14.477,
+      "d_turn_time_pct": -0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": -0.0
+     }
+    }
+   }
+  },
+  "uav": {
+   "A1": {
+    "cls": "A",
+    "strips": 3,
+    "distance_m": 10293.0,
+    "energy_wh": 195.24,
+    "margin_wh": 704.76
+   },
+   "B2": {
+    "cls": "B",
+    "strips": 2,
+    "distance_m": 7925.9,
+    "energy_wh": 63.26,
+    "margin_wh": 190.74
+   },
+   "B3": {
+    "cls": "B",
+    "strips": 4,
+    "distance_m": 12439.4,
+    "energy_wh": 79.08,
+    "margin_wh": 174.92
+   }
+  },
+  "fleet_turn_totals": {
+   "seq_t": 126.95,
+   "bid_t": 126.95,
+   "seq_l": 2272.17,
+   "bid_l": 2272.17,
+   "hk_t": 126.95,
+   "skip_t": 126.95,
+   "skip_l": 2272.17,
+   "hk_l": 2272.17
+  },
+  "makespan_sequential_estimate_s": 1260.4,
+  "makespan_estimate_note": "ESTIMATE ONLY: adds the fleet turn-time delta spread over the fleet; entry/RTB legs and 4-D deconfliction are NOT re-planned."
+ },
+ {
+  "label": "PAPER (same geometry at the 119.5 m cap)",
+  "scenario": "gui_legal_120_1a2b@119.5",
+  "trial": "PAPERPLAN1_PREP",
+  "h_ceil_m": 119.5,
+  "coverage_altitude_m": 119.5,
+  "fleet": "1A+2B",
+  "wind": [
+   5.0,
+   270.0
+  ],
+  "plan_s": 12.3,
+  "status": "GO_WITH_WARNINGS",
+  "makespan_s": 1260.45,
+  "uncovered": 0,
+  "cells": {
+   "Z2_1|A": {
+    "cls": "A",
+    "cell": "Z2_1",
+    "uav": "A1",
+    "n": 1,
+    "k": 5,
+    "triggers": false,
+    "spacing_m": 96.59,
+    "r_eff_m": 200.0,
+    "strip_len_m": 1695.4,
+    "z_op_m": 119.5,
+    "one_way_strips": 0,
+    "t_oper_s": 83.37,
+    "p_cruise_k_unc_w": 617.5,
+    "orders": {
+     "sequential": {
+      "order": [
+       0
+      ],
+      "turn_time_s": 0.0,
+      "turn_dist_m": 0.0,
+      "turn_energy_wh": 0.0,
+      "cell_time_s": 83.37,
+      "cell_energy_wh": 14.299,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "skip_k_fixed": {
+      "order": [
+       0
+      ],
+      "turn_time_s": 0.0,
+      "turn_dist_m": 0.0,
+      "turn_energy_wh": 0.0,
+      "cell_time_s": 83.37,
+      "cell_energy_wh": 14.299,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "beam_idp_planned": {
+      "order": [
+       0
+      ],
+      "turn_time_s": 0.0,
+      "turn_dist_m": 0.0,
+      "turn_energy_wh": 0.0,
+      "cell_time_s": 83.37,
+      "cell_energy_wh": 14.299,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     }
+    }
+   },
+   "Z2_1_B_k1|B": {
+    "cls": "B",
+    "cell": "Z2_1_B_k1",
+    "uav": "B2",
+    "n": 2,
+    "k": 3,
+    "triggers": false,
+    "spacing_m": 96.59,
+    "r_eff_m": 120.0,
+    "strip_len_m": 1685.6,
+    "z_op_m": 119.49,
+    "one_way_strips": 0,
+    "t_oper_s": 190.63,
+    "p_cruise_k_unc_w": 223.7,
+    "orders": {
+     "sequential": {
+      "order": [
+       0,
+       1
+      ],
+      "turn_time_s": 42.35,
+      "turn_dist_m": 758.0,
+      "turn_energy_wh": 2.632,
+      "cell_time_s": 232.98,
+      "cell_energy_wh": 14.48,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "skip_k_fixed": {
+      "order": [
+       0,
+       1
+      ],
+      "turn_time_s": 42.35,
+      "turn_dist_m": 758.0,
+      "turn_energy_wh": 2.632,
+      "cell_time_s": 232.98,
+      "cell_energy_wh": 14.48,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "beam_idp_planned": {
+      "order": [
+       1,
+       0
+      ],
+      "turn_time_s": 42.35,
+      "turn_dist_m": 758.0,
+      "turn_energy_wh": 2.632,
+      "cell_time_s": 232.98,
+      "cell_energy_wh": 14.48,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "held_karp_opt": {
+      "order": [
+       0,
+       1
+      ],
+      "turn_time_s": 42.35,
+      "turn_dist_m": 758.0,
+      "turn_energy_wh": 2.632,
+      "cell_time_s": 232.98,
+      "cell_energy_wh": 14.48,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     }
+    }
+   },
+   "Z3_1|A": {
+    "cls": "A",
+    "cell": "Z3_1",
+    "uav": "A1",
+    "n": 1,
+    "k": 5,
+    "triggers": false,
+    "spacing_m": 96.59,
+    "r_eff_m": 200.0,
+    "strip_len_m": 1695.4,
+    "z_op_m": 119.5,
+    "one_way_strips": 0,
+    "t_oper_s": 83.36,
+    "p_cruise_k_unc_w": 617.5,
+    "orders": {
+     "sequential": {
+      "order": [
+       0
+      ],
+      "turn_time_s": 0.0,
+      "turn_dist_m": 0.0,
+      "turn_energy_wh": 0.0,
+      "cell_time_s": 83.36,
+      "cell_energy_wh": 14.299,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "skip_k_fixed": {
+      "order": [
+       0
+      ],
+      "turn_time_s": 0.0,
+      "turn_dist_m": 0.0,
+      "turn_energy_wh": 0.0,
+      "cell_time_s": 83.36,
+      "cell_energy_wh": 14.299,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "beam_idp_planned": {
+      "order": [
+       0
+      ],
+      "turn_time_s": 0.0,
+      "turn_dist_m": 0.0,
+      "turn_energy_wh": 0.0,
+      "cell_time_s": 83.36,
+      "cell_energy_wh": 14.299,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     }
+    }
+   },
+   "Z3_1_B_k1|B": {
+    "cls": "B",
+    "cell": "Z3_1_B_k1",
+    "uav": "B3",
+    "n": 2,
+    "k": 3,
+    "triggers": false,
+    "spacing_m": 96.59,
+    "r_eff_m": 120.0,
+    "strip_len_m": 1685.5,
+    "z_op_m": 119.5,
+    "one_way_strips": 0,
+    "t_oper_s": 190.63,
+    "p_cruise_k_unc_w": 223.7,
+    "orders": {
+     "sequential": {
+      "order": [
+       0,
+       1
+      ],
+      "turn_time_s": 42.35,
+      "turn_dist_m": 758.0,
+      "turn_energy_wh": 2.632,
+      "cell_time_s": 232.98,
+      "cell_energy_wh": 14.48,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "skip_k_fixed": {
+      "order": [
+       0,
+       1
+      ],
+      "turn_time_s": 42.35,
+      "turn_dist_m": 758.0,
+      "turn_energy_wh": 2.632,
+      "cell_time_s": 232.98,
+      "cell_energy_wh": 14.48,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "beam_idp_planned": {
+      "order": [
+       0,
+       1
+      ],
+      "turn_time_s": 42.35,
+      "turn_dist_m": 758.0,
+      "turn_energy_wh": 2.632,
+      "cell_time_s": 232.98,
+      "cell_energy_wh": 14.48,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "held_karp_opt": {
+      "order": [
+       1,
+       0
+      ],
+      "turn_time_s": 42.35,
+      "turn_dist_m": 758.0,
+      "turn_energy_wh": 2.632,
+      "cell_time_s": 232.97,
+      "cell_energy_wh": 14.48,
+      "d_turn_time_pct": -0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": -0.0
+     }
+    }
+   },
+   "Z4_1|A": {
+    "cls": "A",
+    "cell": "Z4_1",
+    "uav": "A1",
+    "n": 1,
+    "k": 5,
+    "triggers": false,
+    "spacing_m": 96.59,
+    "r_eff_m": 200.0,
+    "strip_len_m": 1695.5,
+    "z_op_m": 119.49,
+    "one_way_strips": 0,
+    "t_oper_s": 83.37,
+    "p_cruise_k_unc_w": 617.5,
+    "orders": {
+     "sequential": {
+      "order": [
+       0
+      ],
+      "turn_time_s": 0.0,
+      "turn_dist_m": 0.0,
+      "turn_energy_wh": 0.0,
+      "cell_time_s": 83.37,
+      "cell_energy_wh": 14.3,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "skip_k_fixed": {
+      "order": [
+       0
+      ],
+      "turn_time_s": 0.0,
+      "turn_dist_m": 0.0,
+      "turn_energy_wh": 0.0,
+      "cell_time_s": 83.37,
+      "cell_energy_wh": 14.3,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "beam_idp_planned": {
+      "order": [
+       0
+      ],
+      "turn_time_s": 0.0,
+      "turn_dist_m": 0.0,
+      "turn_energy_wh": 0.0,
+      "cell_time_s": 83.37,
+      "cell_energy_wh": 14.3,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     }
+    }
+   },
+   "Z4_1_B_k1|B": {
+    "cls": "B",
+    "cell": "Z4_1_B_k1",
+    "uav": "B3",
+    "n": 2,
+    "k": 3,
+    "triggers": false,
+    "spacing_m": 96.59,
+    "r_eff_m": 120.0,
+    "strip_len_m": 1685.4,
+    "z_op_m": 119.5,
+    "one_way_strips": 0,
+    "t_oper_s": 190.61,
+    "p_cruise_k_unc_w": 223.7,
+    "orders": {
+     "sequential": {
+      "order": [
+       0,
+       1
+      ],
+      "turn_time_s": 42.35,
+      "turn_dist_m": 758.0,
+      "turn_energy_wh": 2.632,
+      "cell_time_s": 232.96,
+      "cell_energy_wh": 14.479,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "skip_k_fixed": {
+      "order": [
+       0,
+       1
+      ],
+      "turn_time_s": 42.35,
+      "turn_dist_m": 758.0,
+      "turn_energy_wh": 2.632,
+      "cell_time_s": 232.96,
+      "cell_energy_wh": 14.479,
+      "d_turn_time_pct": 0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": 0.0
+     },
+     "beam_idp_planned": {
+      "order": [
+       1,
+       0
+      ],
+      "turn_time_s": 42.35,
+      "turn_dist_m": 758.0,
+      "turn_energy_wh": 2.632,
+      "cell_time_s": 232.96,
+      "cell_energy_wh": 14.479,
+      "d_turn_time_pct": -0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": -0.0
+     },
+     "held_karp_opt": {
+      "order": [
+       1,
+       0
+      ],
+      "turn_time_s": 42.35,
+      "turn_dist_m": 758.0,
+      "turn_energy_wh": 2.632,
+      "cell_time_s": 232.96,
+      "cell_energy_wh": 14.479,
+      "d_turn_time_pct": -0.0,
+      "d_turn_dist_pct": 0.0,
+      "d_cell_time_pct": -0.0
+     }
+    }
+   }
+  },
+  "uav": {
+   "A1": {
+    "cls": "A",
+    "strips": 3,
+    "distance_m": 10293.6,
+    "energy_wh": 195.21,
+    "margin_wh": 704.79
+   },
+   "B2": {
+    "cls": "B",
+    "strips": 2,
+    "distance_m": 7926.5,
+    "energy_wh": 63.25,
+    "margin_wh": 190.75
+   },
+   "B3": {
+    "cls": "B",
+    "strips": 4,
+    "distance_m": 12440.6,
+    "energy_wh": 79.08,
+    "margin_wh": 174.92
+   }
+  },
+  "fleet_turn_totals": {
+   "seq_t": 127.04,
+   "bid_t": 127.04,
+   "seq_l": 2273.87,
+   "bid_l": 2273.87,
+   "hk_t": 127.04,
+   "skip_t": 127.04,
+   "skip_l": 2273.87,
+   "hk_l": 2273.87
+  },
+  "makespan_sequential_estimate_s": 1260.5,
+  "makespan_estimate_note": "ESTIMATE ONLY: adds the fleet turn-time delta spread over the fleet; entry/RTB legs and 4-D deconfliction are NOT re-planned."
+ }
+]

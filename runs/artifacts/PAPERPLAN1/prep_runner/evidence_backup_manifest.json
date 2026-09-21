@@ -1,0 +1,284 @@
+{
+ "HV4SITL15": {
+  "n_files": 39,
+  "total_bytes": 2420789,
+  "identical": true,
+  "missing_in_backup": [],
+  "extra_in_backup": [],
+  "sha256": {
+   "A1/flight.csv": [
+    77955,
+    "94f26a6cace2421073a6b51df94307e08bd9d75aed84ccb9b7e56dd314f39221"
+   ],
+   "B2/flight.csv": [
+    77409,
+    "519f1beda21e52178e2217609fb2128babce0952c8ad8c5bb24ae1567d57dae2"
+   ],
+   "B3/flight.csv": [
+    78174,
+    "90c25c6798b363ab70b8c7587be833bd12641ddccd17fcdce408646ac8f695e5"
+   ],
+   "compare.png": [
+    203783,
+    "a14517d74b44868a03688a3d3190e67e14c6267a7c366636ff94e50864def733"
+   ],
+   "coverage_from_tracks.json": [
+    246,
+    "06028bde0b79b46f1e906c65301dc54066224704109fb872e0602d1c43b0a0c4"
+   ],
+   "flight_summary.json": [
+    821,
+    "58be684a48f0be8341a74511d6db738f5e5711ad3c4df0cde8e16c35e56e5a49"
+   ],
+   "git_state.txt": [
+    8795,
+    "174acb5467246545e03d6a78e6e69a79c68c59a63940ea6aadfb32b2540fd341"
+   ],
+   "hv_sitl_report.py": [
+    19110,
+    "13b46095f7ce1aa4b9966f7c8ef2af20fbf4cbea0f343b71887484aeb6328cf6"
+   ],
+   "hv_sitl_run.py": [
+    38101,
+    "8c310e78ce686897c29a3436e9458a67c84edb8bc135ecc091fb046350bc6fe5"
+   ],
+   "hv_sitl_scenarios.py": [
+    17156,
+    "1a19b764f5b35464273d48b1e1b330c837f00866675f515752fcac7252cef226"
+   ],
+   "hv_sitl_scout.py": [
+    4794,
+    "33b9da4148c076f1e5516bee4e3480f1f68531d42dfede8ca0829f36c02c9440"
+   ],
+   "mission_upload.json": [
+    369,
+    "2651b08bd2daa07588630e53908224328f869151e2d463637b2866e78cf1e67f"
+   ],
+   "params_readback.csv": [
+    1867,
+    "9ecb8da71def0a85e577b0982089b322ad8b08108b32f780477dca38029e9647"
+   ],
+   "partition_compare.png": [
+    138908,
+    "a81e0f64456a16f69d11b9cb486132181dfa7945c7ea4071b96b077c610308de"
+   ],
+   "plan/A1.param": [
+    4715,
+    "ae5065c88cadb2b14261dd575969af6e511ea4f94da96c494ff9c09d96c8875f"
+   ],
+   "plan/A1.plan": [
+    38969,
+    "c49f807b289d2bfff037b912923e347dfa2cd3c93e8d8f0eecc4708033b7ee83"
+   ],
+   "plan/A1.waypoints": [
+    4760,
+    "5993f58becdf102b9c5277913c4fafe5181faddd800a3ab461c69f5a558d733c"
+   ],
+   "plan/A1_fence.txt": [
+    2531,
+    "ba7cb58ca62938614ca433a9ec0592b5074ec4d100f0cce0f367f37b6eb7cc2a"
+   ],
+   "plan/A1_rally.txt": [
+    287,
+    "8d8fba5dfe3a389bf4bcb8efe41f9e629638b790f053d6f2a75ea222ddc26fd1"
+   ],
+   "plan/B2.param": [
+    4713,
+    "810789970d32cf371fff180788e928c25f52f5af340ab265636e8c53d921eb80"
+   ],
+   "plan/B2.plan": [
+    26223,
+    "fcfd978996cd540ecd41ca6c0fd650fd1292f832db1b379f36f6ea98bee7e432"
+   ],
+   "plan/B2.waypoints": [
+    3148,
+    "fbc0736a62907a629e3a781ebe79668a2b897b3edd2f5bfa8b3cf9229fb4d2ea"
+   ],
+   "plan/B2_fence.txt": [
+    2256,
+    "b58771fd17980bbfeccd7d045f202bec871e283cda841d2fcb4ef5eb6d20cd3d"
+   ],
+   "plan/B2_rally.txt": [
+    287,
+    "8d8fba5dfe3a389bf4bcb8efe41f9e629638b790f053d6f2a75ea222ddc26fd1"
+   ],
+   "plan/B3.param": [
+    4713,
+    "810789970d32cf371fff180788e928c25f52f5af340ab265636e8c53d921eb80"
+   ],
+   "plan/B3.plan": [
+    39253,
+    "f8190f9f4816e3c51bd5081b74d3e2d73be81452d3c3351095209936277552e3"
+   ],
+   "plan/B3.waypoints": [
+    4857,
+    "835c164935a80e2de7fe4d58755e51ee7ffc0c0272fa4c6ce997e8b5fac06fd2"
+   ],
+   "plan/B3_fence.txt": [
+    2256,
+    "b58771fd17980bbfeccd7d045f202bec871e283cda841d2fcb4ef5eb6d20cd3d"
+   ],
+   "plan/B3_rally.txt": [
+    287,
+    "8d8fba5dfe3a389bf4bcb8efe41f9e629638b790f053d6f2a75ea222ddc26fd1"
+   ],
+   "plan/mission_summary.json": [
+    8572,
+    "7ef22a2e63a9ba3e56b8c17a8668c576502ada347ea4af9aa6ab12db169d4563"
+   ],
+   "plan_paths.png": [
+    183311,
+    "59bb752a249d7dfa93358de18ea6722ba9c07f23a4c78ebfc9ed61b9500b21a9"
+   ],
+   "release_schedule.json": [
+    296,
+    "7561447a01f2bff4d416f6aee3ec64bd3b1b1fb26e63fed42f741972170e4f48"
+   ],
+   "report.json": [
+    5287,
+    "853e2ae8ef3db521eecbf3bbd57edc947a36259f1f5f89a92d9296d2f480a521"
+   ],
+   "scan_compare.gif": [
+    1411842,
+    "e0ad577c5ea29fbf1cc96ad78b203cdb9cd9bdc9804f7e01736576f3fd36bdb2"
+   ],
+   "scenario.json": [
+    998,
+    "00e783c3f47c4c8e0134fdfa90320f0cd95999dde72ae16e64982dc67b6e2e1d"
+   ],
+   "separation_from_tracks.json": [
+    734,
+    "b7e948a5093f51a6555369717ff8cac759511b036926c2a4e3e59ed421a493a8"
+   ],
+   "sitl_cmdlines.txt": [
+    2100,
+    "e411f1ff5c1c40bc03b9939f736fbbda7ae9e9feb57be20da20504b07d26e7cd"
+   ],
+   "spawn_readback.json": [
+    759,
+    "ba23ab54269dedb930b16ce4a7dd3fb024759780dd2057c7c84365d37a453fc8"
+   ],
+   "validation.json": [
+    147,
+    "5c20bf4a5056f3a50e91e9d98df950ed79a39370d2d17775a5202892aaa7c639"
+   ]
+  }
+ },
+ "HV4SITL16": {
+  "n_files": 27,
+  "total_bytes": 389578,
+  "identical": true,
+  "missing_in_backup": [],
+  "extra_in_backup": [],
+  "sha256": {
+   "A1/flight.csv": [
+    78516,
+    "51e55a2dc5b7c2ef678aa5069819d468168379bad6f6d4cbf4fee8bbf152f2ba"
+   ],
+   "B2/flight.csv": [
+    73206,
+    "dd55fcbbcfa08bc0b7a6c1c56ec057929a7af6276089d85cfc1bef9b20e8b199"
+   ],
+   "B3/flight.csv": [
+    74227,
+    "5a87aa7674d3e44ec6a9cfb1bbc851257df0f2ffc07478a484276ab8ee93dd4a"
+   ],
+   "mission_upload.json": [
+    369,
+    "2651b08bd2daa07588630e53908224328f869151e2d463637b2866e78cf1e67f"
+   ],
+   "params_readback.csv": [
+    5843,
+    "999e61b0289d71ff73819c1550bc18409c9d4e29fb350e0ec1a2f372fd518b05"
+   ],
+   "plan/A1.param": [
+    4715,
+    "ae5065c88cadb2b14261dd575969af6e511ea4f94da96c494ff9c09d96c8875f"
+   ],
+   "plan/A1.plan": [
+    38969,
+    "c49f807b289d2bfff037b912923e347dfa2cd3c93e8d8f0eecc4708033b7ee83"
+   ],
+   "plan/A1.waypoints": [
+    4760,
+    "5993f58becdf102b9c5277913c4fafe5181faddd800a3ab461c69f5a558d733c"
+   ],
+   "plan/A1_fence.txt": [
+    2531,
+    "ba7cb58ca62938614ca433a9ec0592b5074ec4d100f0cce0f367f37b6eb7cc2a"
+   ],
+   "plan/A1_rally.txt": [
+    287,
+    "8d8fba5dfe3a389bf4bcb8efe41f9e629638b790f053d6f2a75ea222ddc26fd1"
+   ],
+   "plan/B2.param": [
+    4713,
+    "810789970d32cf371fff180788e928c25f52f5af340ab265636e8c53d921eb80"
+   ],
+   "plan/B2.plan": [
+    26223,
+    "fcfd978996cd540ecd41ca6c0fd650fd1292f832db1b379f36f6ea98bee7e432"
+   ],
+   "plan/B2.waypoints": [
+    3148,
+    "fbc0736a62907a629e3a781ebe79668a2b897b3edd2f5bfa8b3cf9229fb4d2ea"
+   ],
+   "plan/B2_fence.txt": [
+    2256,
+    "b58771fd17980bbfeccd7d045f202bec871e283cda841d2fcb4ef5eb6d20cd3d"
+   ],
+   "plan/B2_rally.txt": [
+    287,
+    "8d8fba5dfe3a389bf4bcb8efe41f9e629638b790f053d6f2a75ea222ddc26fd1"
+   ],
+   "plan/B3.param": [
+    4713,
+    "810789970d32cf371fff180788e928c25f52f5af340ab265636e8c53d921eb80"
+   ],
+   "plan/B3.plan": [
+    39253,
+    "f8190f9f4816e3c51bd5081b74d3e2d73be81452d3c3351095209936277552e3"
+   ],
+   "plan/B3.waypoints": [
+    4857,
+    "835c164935a80e2de7fe4d58755e51ee7ffc0c0272fa4c6ce997e8b5fac06fd2"
+   ],
+   "plan/B3_fence.txt": [
+    2256,
+    "b58771fd17980bbfeccd7d045f202bec871e283cda841d2fcb4ef5eb6d20cd3d"
+   ],
+   "plan/B3_rally.txt": [
+    287,
+    "8d8fba5dfe3a389bf4bcb8efe41f9e629638b790f053d6f2a75ea222ddc26fd1"
+   ],
+   "plan/mission_summary.json": [
+    8572,
+    "6c53c8909f3bdc175ea24702a243c0245ef77b2637cb1add8366648a495eb6ef"
+   ],
+   "release_schedule.json": [
+    296,
+    "7561447a01f2bff4d416f6aee3ec64bd3b1b1fb26e63fed42f741972170e4f48"
+   ],
+   "report.json": [
+    5290,
+    "ed38d597ecaeecf554553d395d488f1ca8666b5026aae5b2f96ef9bd74a1efaa"
+   ],
+   "scenario.json": [
+    998,
+    "00e783c3f47c4c8e0134fdfa90320f0cd95999dde72ae16e64982dc67b6e2e1d"
+   ],
+   "sitl_cmdlines.txt": [
+    2100,
+    "349ad1e0ffc4cd0b5fa8f3a782213d803437a58b1ae866f8d7ce4deca6e8585d"
+   ],
+   "spawn_readback.json": [
+    759,
+    "ab7ec9de2ecbe7b8c3a9fc108d1ebed27180cec17cfb8f9f78d6158a8d0026b8"
+   ],
+   "validation.json": [
+    147,
+    "5c20bf4a5056f3a50e91e9d98df950ed79a39370d2d17775a5202892aaa7c639"
+   ]
+  }
+ }
+}

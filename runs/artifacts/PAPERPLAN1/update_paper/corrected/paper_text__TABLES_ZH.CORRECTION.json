@@ -1,0 +1,596 @@
+{
+ "corrected_by_label": "update_paper",
+ "corrections": {
+  "K1": {
+   "recomputed": {
+    "of_which_at_sample_vs_continuous_m": [
+     -0.0003,
+     0.029
+    ],
+    "of_which_flat_earth_frame_m": [
+     0.3391,
+     0.8986
+    ],
+    "per_trial": {
+     "BEAMIDP1": {
+      "binsep_native_flat_m": 181.39,
+      "delta_vs_binsep_m": 0.6165,
+      "delta_vs_reporter_m": 1.9265,
+      "exact_ellipsoid_m": 180.7735,
+      "frame_component_m": 0.6095,
+      "reporter_2s_grid_m": 182.7,
+      "sampling_component_m": 0.007
+     },
+     "HV4SITL15": {
+      "binsep_native_flat_m": null,
+      "delta_vs_binsep_m": null,
+      "delta_vs_reporter_m": 3.5105,
+      "exact_ellipsoid_m": 100.6895,
+      "frame_component_m": 0.3404,
+      "reporter_2s_grid_m": 104.2,
+      "sampling_component_m": null
+     },
+     "HV4SITL16": {
+      "binsep_native_flat_m": null,
+      "delta_vs_binsep_m": null,
+      "delta_vs_reporter_m": 0.3146,
+      "exact_ellipsoid_m": 100.6854,
+      "frame_component_m": 0.3404,
+      "reporter_2s_grid_m": 101.0,
+      "sampling_component_m": null
+     },
+     "HV4W00": {
+      "binsep_native_flat_m": 100.785,
+      "delta_vs_binsep_m": 0.35,
+      "delta_vs_reporter_m": 1.765,
+      "exact_ellipsoid_m": 100.435,
+      "frame_component_m": 0.3396,
+      "reporter_2s_grid_m": 102.2,
+      "sampling_component_m": 0.0104
+     },
+     "HV4W05": {
+      "binsep_native_flat_m": 100.659,
+      "delta_vs_binsep_m": 0.3681,
+      "delta_vs_reporter_m": 0.5091,
+      "exact_ellipsoid_m": 100.2909,
+      "frame_component_m": 0.3391,
+      "reporter_2s_grid_m": 100.8,
+      "sampling_component_m": 0.029
+     },
+     "HV4W55": {
+      "binsep_native_flat_m": 100.769,
+      "delta_vs_binsep_m": 0.3434,
+      "delta_vs_reporter_m": 3.3744,
+      "exact_ellipsoid_m": 100.4256,
+      "frame_component_m": 0.3396,
+      "reporter_2s_grid_m": 103.8,
+      "sampling_component_m": 0.0038
+     },
+     "HV4W55R": {
+      "binsep_native_flat_m": 100.939,
+      "delta_vs_binsep_m": 0.3601,
+      "delta_vs_reporter_m": 0.5211,
+      "exact_ellipsoid_m": 100.5789,
+      "frame_component_m": 0.3401,
+      "reporter_2s_grid_m": 101.1,
+      "sampling_component_m": 0.02
+     },
+     "HV4W55S": {
+      "binsep_native_flat_m": 267.075,
+      "delta_vs_binsep_m": 0.8983,
+      "delta_vs_reporter_m": 2.3233,
+      "exact_ellipsoid_m": 266.1767,
+      "frame_component_m": 0.8986,
+      "reporter_2s_grid_m": 268.5,
+      "sampling_component_m": -0.0003
+     }
+    },
+    "the_quantity_3.4_to_5.3_resembles": {
+     "name": "planned minus flown (NOT a ruler difference)",
+     "values_m": {
+      "BEAMIDP1": -0.212,
+      "HV4SITL15": 4.775,
+      "HV4SITL16": 4.779,
+      "HV4W00": 4.202,
+      "HV4W05": 4.347,
+      "HV4W55": 5.274,
+      "HV4W55R": 4.885,
+      "HV4W55S": 56.203
+     }
+    },
+    "vs_binsep_json_m": [
+     0.3434,
+     0.8983
+    ],
+    "vs_separation_from_tracks_json_m": [
+     0.3146,
+     3.5105
+    ]
+   },
+   "replacement": "見 update_paper/TABLES_ZH.md 表 2b 表註 (e) 與 (f)。",
+   "why_wrong": "不可重現。3.4–5.3 m 既不是對 2 s 網格報表的差，也不是對原生取樣平面框的差。",
+   "wrong": "「最小水平間距…與既有報表程式之值差 3.4–5.3 m」"
+  },
+  "K2": {
+   "recomputed": {
+    "float32_roundtrip_rows": [
+     {
+      "exported": "1.13",
+      "param": "TECS_CLMB_MAX",
+      "readback": "1.1299999952316284",
+      "uav": "A1"
+     },
+     {
+      "exported": "1.35",
+      "param": "TECS_SINK_MIN",
+      "readback": "1.350000023841858",
+      "uav": "A1"
+     },
+     {
+      "exported": "1.33",
+      "param": "TECS_SINK_MAX",
+      "readback": "1.3300000429153442",
+      "uav": "B2"
+     },
+     {
+      "exported": "1.19",
+      "param": "TECS_SINK_MIN",
+      "readback": "1.190000057220459",
+      "uav": "B2"
+     },
+     {
+      "exported": "1.33",
+      "param": "TECS_SINK_MAX",
+      "readback": "1.3300000429153442",
+      "uav": "B3"
+     },
+     {
+      "exported": "1.19",
+      "param": "TECS_SINK_MIN",
+      "readback": "1.190000057220459",
+      "uav": "B3"
+     }
+    ],
+    "genuinely_different_rows": [
+     {
+      "exported": "1",
+      "ok": "True",
+      "param": "Q_RTL_MODE",
+      "readback": "0.0",
+      "source": "FIRMWARE_OVERRIDE",
+      "uav": "A1"
+     },
+     {
+      "exported": "26.6",
+      "ok": "True",
+      "param": "AIRSPEED_MAX",
+      "readback": "26.0",
+      "source": "匯出檔",
+      "uav": "B2"
+     },
+     {
+      "exported": "1",
+      "ok": "True",
+      "param": "Q_RTL_MODE",
+      "readback": "0.0",
+      "source": "FIRMWARE_OVERRIDE",
+      "uav": "B2"
+     },
+     {
+      "exported": "26.6",
+      "ok": "True",
+      "param": "AIRSPEED_MAX",
+      "readback": "26.0",
+      "source": "匯出檔",
+      "uav": "B3"
+     },
+     {
+      "exported": "1",
+      "ok": "True",
+      "param": "Q_RTL_MODE",
+      "readback": "0.0",
+      "source": "FIRMWARE_OVERRIDE",
+      "uav": "B3"
+     }
+    ],
+    "identical_on_all_eight_trials": true,
+    "strict_exact": "85/96",
+    "strict_float32": "91/96"
+   },
+   "replacement": "「**到 float32 精度**之原始值比對為 91／96；逐位元為 85／96。」",
+   "why_wrong": "「嚴格」若照字面做逐位元比較會得到 85/96；91/96 只在 float32 精度下成立。",
+   "wrong": "「原始值嚴格比對 91／96」"
+  },
+  "K3": {
+   "recomputed": {
+    "arc": {
+     "A1": {
+      "heading_swept_deg": [
+       19.15,
+       84.25
+      ],
+      "n_steps_above_threshold": 11,
+      "n_trace_rows": 15,
+      "net_chord_m": 4.338,
+      "path_length_m": 4.739,
+      "residual_max_abs_deg": 1.0,
+      "residual_median_deg": -0.32,
+      "settle_s": 15.2,
+      "step_m_range": [
+       0.407,
+       0.499
+      ],
+      "steps": [
+       {
+        "bearing_deg": 18.74,
+        "dt_from_s": 2.03,
+        "dt_to_s": 3.03,
+        "groundspeed_mps": 0.046,
+        "heading_deg": 19.15,
+        "residual_deg": -0.41,
+        "step_m": 0.4108
+       },
+       {
+        "bearing_deg": 26.63,
+        "dt_from_s": 3.03,
+        "dt_to_s": 4.04,
+        "groundspeed_mps": 0.012,
+        "heading_deg": 27.1,
+        "residual_deg": -0.47,
+        "step_m": 0.4105
+       },
+       {
+        "bearing_deg": 35.1,
+        "dt_from_s": 4.04,
+        "dt_to_s": 5.06,
+        "groundspeed_mps": 0.082,
+        "heading_deg": 34.65,
+        "residual_deg": 0.45,
+        "step_m": 0.407
+       },
+       {
+        "bearing_deg": 41.48,
+        "dt_from_s": 5.06,
+        "dt_to_s": 6.07,
+        "groundspeed_mps": 0.083,
+        "heading_deg": 41.8,
+        "residual_deg": -0.32,
+        "step_m": 0.4151
+       },
+       {
+        "bearing_deg": 47.65,
+        "dt_from_s": 6.07,
+        "dt_to_s": 7.08,
+        "groundspeed_mps": 0.081,
+        "heading_deg": 48.65,
+        "residual_deg": -1.0,
+        "step_m": 0.4127
+       },
+       {
+        "bearing_deg": 55.93,
+        "dt_from_s": 7.08,
+        "dt_to_s": 8.08,
+        "groundspeed_mps": 0.083,
+        "heading_deg": 55.15,
+        "residual_deg": 0.78,
+        "step_m": 0.4177
+       },
+       {
+        "bearing_deg": 60.74,
+        "dt_from_s": 8.08,
+        "dt_to_s": 9.1,
+        "groundspeed_mps": 0.082,
+        "heading_deg": 61.3,
+        "residual_deg": -0.56,
+        "step_m": 0.4092
+       },
+       {
+        "bearing_deg": 66.78,
+        "dt_from_s": 9.1,
+        "dt_to_s": 10.11,
+        "groundspeed_mps": 0.082,
+        "heading_deg": 67.2,
+        "residual_deg": -0.42,
+        "step_m": 0.4211
+       },
+       {
+        "bearing_deg": 73.18,
+        "dt_from_s": 10.11,
+        "dt_to_s": 11.11,
+        "groundspeed_mps": 0.082,
+        "heading_deg": 72.8,
+        "residual_deg": 0.38,
+        "step_m": 0.4252
+       },
+       {
+        "bearing_deg": 78.44,
+        "dt_from_s": 11.11,
+        "dt_to_s": 12.12,
+        "groundspeed_mps": 0.084,
+        "heading_deg": 78.65,
+        "residual_deg": -0.21,
+        "step_m": 0.4991
+       },
+       {
+        "bearing_deg": 83.98,
+        "dt_from_s": 12.12,
+        "dt_to_s": 13.13,
+        "groundspeed_mps": 0.082,
+        "heading_deg": 84.25,
+        "residual_deg": -0.27,
+        "step_m": 0.4193
+       }
+      ],
+      "usable": true,
+      "why_not_usable": null
+     },
+     "B2": {
+      "heading_swept_deg": null,
+      "n_steps_above_threshold": 0,
+      "n_trace_rows": 3,
+      "net_chord_m": 0.056,
+      "path_length_m": 0.057,
+      "residual_max_abs_deg": null,
+      "residual_median_deg": null,
+      "settle_s": 3.0,
+      "step_m_range": null,
+      "steps": [],
+      "usable": false,
+      "why_not_usable": "this aircraft settled before the trace began; its trace only records sub-centimetre residual motion, so it fixes the END STATE but says nothing about the path"
+     },
+     "B3": {
+      "heading_swept_deg": null,
+      "n_steps_above_threshold": 0,
+      "n_trace_rows": 3,
+      "net_chord_m": 0.046,
+      "path_length_m": 0.047,
+      "residual_max_abs_deg": null,
+      "residual_median_deg": null,
+      "settle_s": 3.1,
+      "step_m_range": null,
+      "steps": [],
+      "usable": false,
+      "why_not_usable": "this aircraft settled before the trace began; its trace only records sub-centimetre residual motion, so it fixes the END STATE but says nothing about the path"
+     }
+    },
+    "bearing_range_deg": [
+     43.6,
+     44.38
+    ],
+    "ground_weathervane": {
+     "A1": {
+      "n": 1423,
+      "sim_alt_max_m": 101.73,
+      "sim_alt_min_m": 100.09,
+      "sim_wind_dir_from_deg": 180.0,
+      "window_s": 212.96,
+      "yaw_first_deg": 127.12,
+      "yaw_last_deg": 174.42,
+      "yaw_monotonic_increasing": true
+     },
+     "B2": {
+      "n": 2959,
+      "sim_alt_max_m": 101.77,
+      "sim_alt_min_m": 100.09,
+      "sim_wind_dir_from_deg": 180.0,
+      "window_s": 444.88,
+      "yaw_first_deg": 126.91,
+      "yaw_last_deg": 179.45,
+      "yaw_monotonic_increasing": true
+     },
+     "B3": {
+      "n": 29,
+      "sim_alt_max_m": 101.87,
+      "sim_alt_min_m": 100.09,
+      "sim_wind_dir_from_deg": 180.0,
+      "window_s": 2.64,
+      "yaw_first_deg": 126.72,
+      "yaw_last_deg": 129.47,
+      "yaw_monotonic_increasing": false
+     }
+    },
+    "per_uav": {
+     "A1": {
+      "bearing_deg": 44.38,
+      "d_east_m": 3.5011,
+      "d_north_m": 3.5775,
+      "err_m": 5.0056,
+      "got_lat_identical": true,
+      "got_lon_identical": true,
+      "settle_s_previous_run": 15.1,
+      "settle_s_this_run": 15.2
+     },
+     "B2": {
+      "bearing_deg": 43.94,
+      "d_east_m": 3.5118,
+      "d_north_m": 3.6439,
+      "err_m": 5.0607,
+      "got_lat_identical": true,
+      "got_lon_identical": true,
+      "settle_s_previous_run": 3.1,
+      "settle_s_this_run": 3.0
+     },
+     "B3": {
+      "bearing_deg": 43.6,
+      "d_east_m": 3.5225,
+      "d_north_m": 3.6993,
+      "err_m": 5.1081,
+      "got_lat_identical": true,
+      "got_lon_identical": true,
+      "settle_s_previous_run": 3.1,
+      "settle_s_this_run": 3.1
+     }
+    },
+    "truth_vs_estimate": {
+     "A1": {
+      "ekf_pos_first_sample": {
+       "d_east_m": 3.5621,
+       "d_north_m": 3.7436
+      },
+      "sim_truth_first_sample": {
+       "d_east_m": 3.5621,
+       "d_north_m": 3.7436
+      },
+      "truth_minus_ekf_m": 0.0
+     },
+     "B2": {
+      "ekf_pos_first_sample": {
+       "d_east_m": 3.5525,
+       "d_north_m": 3.7436
+      },
+      "sim_truth_first_sample": {
+       "d_east_m": 3.5627,
+       "d_north_m": 3.7436
+      },
+      "truth_minus_ekf_m": 0.0102
+     },
+     "B3": {
+      "ekf_pos_first_sample": {
+       "d_east_m": 3.5429,
+       "d_north_m": 3.7436
+      },
+      "sim_truth_first_sample": {
+       "d_east_m": 3.553,
+       "d_north_m": 3.7436
+      },
+      "truth_minus_ekf_m": 0.0102
+     }
+    }
+   },
+   "replacement": "「機體在地面自由偏航轉向來風，位移鎖在機體縱軸；~5 m 是該圓弧的弦。位移的量值未能自原始碼導出，照實聲明。」見 PAPER_TEXT_ZH.md C2-i。",
+   "why_wrong": "位移方位角是 43.60°–44.38°（東北）。純順風只能解釋北向分量。",
+   "wrong": "「180° 對機首朝北是純順風，把停放機體往北推 ~5 m」"
+  },
+  "K4": {
+   "recomputed": {
+    "file_bit_identity": {
+     "report.json": {
+      "identical": false,
+      "sha_now": "b8b487592e7d",
+      "sha_prev": "e8a250f57f82"
+     },
+     "scenario.json": {
+      "identical": true,
+      "sha_now": "fe9581b5ae93",
+      "sha_prev": "fe9581b5ae93"
+     },
+     "spawn_readback.json": {
+      "identical": false,
+      "sha_now": "dcf5127cd5e1",
+      "sha_prev": "509033866cf3"
+     },
+     "validation.json": {
+      "identical": true,
+      "sha_now": "3942d671a6a3",
+      "sha_prev": "3942d671a6a3"
+     },
+     "wind_readback.json": {
+      "identical": true,
+      "sha_now": "0639bc346e6d",
+      "sha_prev": "0639bc346e6d"
+     }
+    },
+    "rigid_translation_max_spacing_delta_m": 0.0218,
+    "spawn_positions_identical": {
+     "A1": true,
+     "B2": true,
+     "B3": true
+    }
+   },
+   "replacement": "「**生成位置**逐位元重現；檔案本身不同。」",
+   "why_wrong": "檔案不同：spawn_readback.json 的 settle_s 與 report.json 的 timing_ms。",
+   "wrong": "「兩次獨立執行逐位元重現」"
+  },
+  "K5": {
+   "recomputed": {
+    "ekf_wind": {
+     "A1": {
+      "from_deg": 180.0,
+      "n": 12647,
+      "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+      "spd_mps": 0.01
+     },
+     "B2": {
+      "from_deg": 333.43,
+      "n": 12556,
+      "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+      "spd_mps": 0.0224
+     },
+     "B3": {
+      "from_deg": 0.0,
+      "n": 10649,
+      "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+      "spd_mps": 0.01
+     }
+    },
+    "makespan_err_pct": -3.224,
+    "makespan_flown_s": 2272.343,
+    "makespan_planned_s": 2348.0447192734696,
+    "measured_east_minus_west_mps": {
+     "A1": 0.0086,
+     "B2": 0.0045,
+     "B3": 0.0038
+    },
+    "measured_north_minus_south_mps": {
+     "A1": -0.0191,
+     "B2": 0.0151,
+     "B3": 0.0062
+    },
+    "scenario_plan_wind": [
+     5.0,
+     270.0
+    ],
+    "scenario_sim_wind": {
+     "dir_from_deg": 270.0,
+     "profile_type": 1.0,
+     "spd_mps": 0.0,
+     "turb": 0.0
+    },
+    "verdict": "a 5 m/s 270 deg PLAN flown in measured still air -- the same plan-vs-sim wind mismatch this package accuses HV4SITL15/16 of",
+    "wind_readback_rows": 15
+   },
+   "replacement": "腳註刪除 makespan 一項，或原句揭露。見 TABLES_ZH.md 表 X 腳註。",
+   "why_wrong": "該架次為『規劃風 5 m/s/270°、模擬風 0』，是本文指摘 HV4SITL15/16 的同一缺陷。",
+   "wrong": "BEAMIDP1 腳註「完工時間規劃 2 348.0 → 實飛 2 272.3 s（−3.22 %）」（未揭露）"
+  },
+  "K9": {
+   "recomputed": {
+    "ca_actions": 753,
+    "ca_detected": 753,
+    "dccpp_after_own_ca_pad": 572,
+    "dccpp_after_own_ca_sep": 114,
+    "dccpp_cells_with_pad": 10,
+    "dccpp_cells_with_sep": 7,
+    "dccpp_pad": 572,
+    "dccpp_sep": 114,
+    "harvest_last_landing_s": [
+     2576.7,
+     9851.3
+    ],
+    "harvest_native_pad": 0,
+    "harvest_native_sep": 0,
+    "harvest_relifted_pad": 688,
+    "harvest_relifted_sep": 959,
+    "harvest_takeoff_queue_s": [
+     330.0,
+     6460.0
+    ],
+    "n_cells": 10,
+    "verdict": "the two arms measure different objects: the baseline is checked on RE-LIFTED tracks, HARVEST on its native MissionPlan.plans. Re-lifting HARVEST too gives 959/688. The caption must not claim one ruler."
+   },
+   "replacement": "標題刪去「（同一把尺）」；圖說首段改為「HARVEST 的 0 來自其原生四維排程，基準沒有這個排程，代價見第 7 列（起飛佇列 330–6 460 s）」，並揭露 HARVEST 重抬升後為 959／688。",
+   "why_wrong": "兩臂受檢的物件不同：基準走重抬升航跡，HARVEST 走原生 MissionPlan.plans。",
+   "wrong": "表 Z 標題「（同一把尺）」與圖說「兩把檢查尺是同一把」"
+  }
+ },
+ "final_text_lives_in": [
+  "runs/artifacts/PAPERPLAN1/update_paper/TABLES_ZH.md",
+  "runs/artifacts/PAPERPLAN1/update_paper/PAPER_TEXT_ZH.md"
+ ],
+ "original": "runs/artifacts/PAPERPLAN1/paper_text/TABLES_ZH.md",
+ "original_bytes": 20073,
+ "original_is_unmodified": true,
+ "original_sha256_at_correction_time": "c37ba4fc82921e231e8266faec7fe43f3b87f060ae7af6b9b6efd34e08369988",
+ "recomputation_scripts": "runs/artifacts/PAPERPLAN1/update_paper/scripts/up_*.py",
+ "what_in_this_file_is_wrong": "表 2b 表註 (e) 與 (b)、表 2 參數列、表 X 之 BEAMIDP1 腳註、表 Z 標題與圖說首段"
+}

@@ -1,0 +1,158 @@
+{
+ "V1_geodesic_closest_approach": {
+  "BEAMIDP1": {
+   "d_v_m": 0.0412,
+   "ecef_enu_m": 180.7735,
+   "geodesic_m": 180.7735,
+   "geodesic_minus_ecef_m": 0.0,
+   "lat_lon": {
+    "A1": [
+     23.94905001375557,
+     120.89295356818123
+    ],
+    "B2": [
+     23.9474205,
+     120.89305458500569
+    ]
+   },
+   "pair": "A1-B2",
+   "repo_frame_m": 181.383,
+   "repo_frame_optimism_m": 0.6095,
+   "t_gps_s": 1473968021.683
+  },
+  "HV4W00": {
+   "d_v_m": 28.6801,
+   "ecef_enu_m": 100.435,
+   "geodesic_m": 100.435,
+   "geodesic_minus_ecef_m": 0.0,
+   "lat_lon": {
+    "B2": [
+     23.94999670045462,
+     120.90087838929153
+    ],
+    "B3": [
+     23.9490899,
+     120.90087716565681
+    ]
+   },
+   "pair": "B2-B3",
+   "repo_frame_m": 100.7746,
+   "repo_frame_optimism_m": 0.3396,
+   "t_gps_s": 1473967033.921
+  },
+  "HV4W05": {
+   "d_v_m": 28.6509,
+   "ecef_enu_m": 100.2909,
+   "geodesic_m": 100.2909,
+   "geodesic_minus_ecef_m": 0.0,
+   "lat_lon": {
+    "B2": [
+     23.9499973,
+     120.90177003437219
+    ],
+    "B3": [
+     23.9490918,
+     120.90177016959694
+    ]
+   },
+   "pair": "B2-B3",
+   "repo_frame_m": 100.63,
+   "repo_frame_optimism_m": 0.3391,
+   "t_gps_s": 1473966729.745
+  },
+  "HV4W55": {
+   "d_v_m": 28.3942,
+   "ecef_enu_m": 100.4256,
+   "geodesic_m": 100.4256,
+   "geodesic_minus_ecef_m": 0.0,
+   "lat_lon": {
+    "B2": [
+     23.949998114999946,
+     120.90134017001054
+    ],
+    "B3": [
+     23.9490914,
+     120.90133835998856
+    ]
+   },
+   "pair": "B2-B3",
+   "repo_frame_m": 100.7652,
+   "repo_frame_optimism_m": 0.3396,
+   "t_gps_s": 1473966365.244
+  }
+ },
+ "V2_reporter_makespan_recipe": {
+  "BEAMIDP1": {
+   "median_offset_s": 79.54,
+   "offset_spread_s": 0.63,
+   "per_uav_offsets_s": [
+    79.04,
+    79.54,
+    79.67
+   ],
+   "reporter_makespan_s": 2283.5,
+   "reporter_t_land_s": {
+    "A1": 2135.63,
+    "B2": 2283.5,
+    "B3": 1880.5
+   }
+  },
+  "HV4W00": {
+   "median_offset_s": 73.54,
+   "offset_spread_s": 0.5,
+   "per_uav_offsets_s": [
+    73.54,
+    73.54,
+    74.04
+   ],
+   "reporter_makespan_s": 1219.5,
+   "reporter_t_land_s": {
+    "A1": 1219.5,
+    "B2": 529.5,
+    "B3": 864.5
+   }
+  },
+  "HV4W05": {
+   "median_offset_s": 73.54,
+   "offset_spread_s": 0.5,
+   "per_uav_offsets_s": [
+    73.54,
+    73.54,
+    74.04
+   ],
+   "reporter_makespan_s": 1246.5,
+   "reporter_t_land_s": {
+    "A1": 1246.5,
+    "B2": 566.5,
+    "B3": 917.5
+   }
+  },
+  "HV4W55": {
+   "median_offset_s": 73.04,
+   "offset_spread_s": 0.5,
+   "per_uav_offsets_s": [
+    73.04,
+    73.04,
+    73.54
+   ],
+   "reporter_makespan_s": 1294.0,
+   "reporter_t_land_s": {
+    "A1": 1294.0,
+    "B2": 570.0,
+    "B3": 929.0
+   }
+  }
+ },
+ "V3_survey_area_scale": {
+  "ellipsoidal_m_per_deg_lat": 110757.52,
+  "implied_m_per_deg_lat_if_800m": 111132.0,
+  "implied_m_per_deg_lon_if_1560m": 101819.43,
+  "nominal_north_south_extent_m": 800.0,
+  "note": "the scenario polygon was written with the flat 111132 m/deg, so the nominal 1560 x 800 m area is 1560 x 797.3 m on the ellipsoid; the planner then reads it through the exact GeoFrame, so the planner's own frame is the ellipsoidal one and the 100 m rule lives there",
+  "polygon_dlat_deg": 0.007198646654430263,
+  "polygon_dlon_deg": 0.015321240318513674,
+  "repo_m_per_deg_lat": 111132.0,
+  "repo_m_per_deg_lon": 101819.43,
+  "true_north_south_extent_m": 797.3
+ }
+}

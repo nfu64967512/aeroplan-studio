@@ -1,0 +1,52 @@
+====================================================================================================
+D1. uncoordinated (this session) vs c5_baseline step5 (previous session) -- REPRODUCTION
+====================================================================================================
+  -> 24 cells compared on 8 fields, 0 differences
+  -> VERDICT: REPRODUCED bit-for-bit
+
+====================================================================================================
+D2. coordinated vs uncoordinated -- THE FAIR-FIGHT CONTROL
+====================================================================================================
+     cell fleet | pad unc pad crd    d |  4D unc  4D crd    d | maxkm unc maxkm crd | wp unc wp crd
+---------------------------------------------------------------------------------------------------
+     S1/2  homo |       2       2    0 |       0       0    0 |    104.25    104.25 |    138    138
+     S1/2   mix |       1       1    0 |       0       0    0 |    104.25    104.25 |    138    138
+     S1/4  homo |      12      12    0 |       0       0    0 |     55.12     55.12 |    168    168
+     S1/4   mix |       8       8    0 |       0       0    0 |     55.12     55.12 |    168    168
+     S1/8  homo |      40      40    0 |       5       5    0 |     32.25     32.25 |    228    228
+     S1/8   mix |      54      54    0 |       6       6    0 |     32.25     32.25 |    228    228
+    S1/16  homo |     192     192    0 |      36      36    0 |     21.47     21.47 |    348    348
+    S1/16   mix |     181     181    0 |      41      41    0 |     21.47     21.47 |    348    348
+     S2/4  homo |       8       8    0 |       0       0    0 |     62.63     62.63 |    204    204
+     S2/4   mix |       8       8    0 |       2       2    0 |     62.63     62.63 |    204    204
+     S2/8  homo |      41      41    0 |       7       7    0 |     34.93     34.93 |    264    264
+     S2/8   mix |      56      56    0 |       8       8    0 |     34.93     34.93 |    264    264
+     S3/4  homo |       9       9    0 |       2       2    0 |     32.36     32.36 |     87     87
+     S3/4   mix |       7       7    0 |       1       1    0 |     32.36     32.36 |     87     87
+     S3/8  homo |      49      49    0 |      34      34    0 |     24.15     24.15 |    147    147
+     S3/8   mix |      49      49    0 |      24      24    0 |     24.15     24.15 |    147    147
+     S4/4  homo |       7       7    0 |       0       0    0 |     44.79     44.79 |    168    168
+     S4/4   mix |       9       9    0 |       0       0    0 |     44.79     44.79 |    168    168
+     S4/8  homo |      37      37    0 |       5       5    0 |     26.45     26.45 |    228    228
+     S4/8   mix |      37      37    0 |       5       5    0 |     26.45     26.45 |    228    228
+     S5/8  homo |      49      49    0 |       3       3    0 |    105.99    105.99 |    333    333
+     S5/8   mix |      38      38    0 |       6       6    0 |    105.99    105.99 |    333    333
+    S5/16  homo |     177     177    0 |      25      25    0 |     63.64     63.64 |    453    453
+    S5/16   mix |     181     181    0 |      27      27    0 |     63.64     63.64 |    453    453
+---------------------------------------------------------------------------------------------------
+    TOTAL       |    1252    1252    0 |     237     237    0 |
+
+cells where ANY of ['coverage', 'max_km', 'total_km', 'makespan_s', 'sep_conflicts', 'pad_conflicts', 'n_endurance_over', 'n_agl_over_120', 'n_wp_total'] moved: 0 / 24
+
+instrumentation (both arms, 48 planner runs total):
+  CoordinatedPlanner.__init__          called 24 times
+  CoordinatedPlanner.synchronize       called 0 times
+  CoordinatedPlanner._insert_holding_  called 0 times
+
+=> the object is CONSTRUCTED once per coordinated run (swarm_coordinator.py:2290)
+   and then NEVER USED: the DCCPP v2 straight-through pipeline (line 2296) returns
+   its own dict at line ~2443, and the only two consumers of coord_planner are the
+   legacy DCCPPSolver constructions at lines 2463 and 2473, which are downstream of
+   that return. coordination_mode is therefore INERT on the benchmark path.
+
+wrote C:\Users\joy46\Documents\Projects\aeroplan-studio\runs\artifacts\PAPERPLAN1\prep_baseline_control\out\stepD_arm_diff.json

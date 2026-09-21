@@ -1,0 +1,37 @@
+PRE-REGISTERED PREDICTION (written BEFORE running the control)
+label: prep_baseline_control   date: 2026-09-21
+=================================================================
+
+Question: what does coordination_mode="coordinated" do to the DCCPP baseline's
+pad-conflict and 4-D-separation counts?
+
+Source read before predicting:
+  mission/swarm_coordinator.py:1551      coordination_mode: str = "uncoordinated"
+  mission/swarm_coordinator.py:1605-1613 _use_new_dccpp = True iff core.dccpp.* imports
+  mission/swarm_coordinator.py:2288-2295 coord_planner = CoordinatedPlanner(...) built here
+  mission/swarm_coordinator.py:2296      if _use_new_dccpp:  <- DCCPP v2 straight-through pipeline
+  mission/swarm_coordinator.py:2443      ...which RETURNS its own dict
+  mission/swarm_coordinator.py:2463,2473 coordinated_planner=coord_planner  <- only consumers,
+                                         both AFTER that return, in the legacy DCCPPSolver branch
+  core/global_planner/mdtsp_solver.py:1077-1170 CoordinatedPlanner.synchronize / _insert_holding_pattern
+
+PREDICTION 1 (structural): the flag is INERT on the benchmark path.
+  core.dccpp.task_allocator / idp_solver / altitude_planner all import fine
+  (step5 of c5_baseline ran through the v2 pipeline), so _use_new_dccpp is True,
+  the v2 block returns at :2443, and the object built at :2290 is never read.
+  => every KPI number must be BIT-IDENTICAL between the two arms.
+  => CoordinatedPlanner.synchronize must be called ZERO times.
+
+PREDICTION 2 (semantic, counterfactual): even if the legacy branch ran,
+  synchronize() only prepends S-turn holding patterns so that all UAVs FINISH
+  THEIR ENTRY LEG at the same instant. It does not touch takeoff time, landing
+  time, or landing-pad occupancy, and it adds length rather than removing it.
+  => pad conflicts: unchanged or WORSE (all aircraft still launch at t=0 and
+     still return to the single home pad "H"; synchronising entry only keeps
+     them airborne together for longer).
+  => 4-D separation conflicts: unchanged or WORSE (deliberately co-locating
+     aircraft in time is the opposite of separating them).
+  => makespan / max_km: unchanged or LONGER (holding patterns are extra arc).
+
+Falsifier: if any pad/4-D/AGL/endurance count moves at all, PREDICTION 1 is
+wrong and the v2 pipeline does consume the flag somewhere I did not find.

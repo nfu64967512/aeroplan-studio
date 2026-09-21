@@ -1,0 +1,1176 @@
+{
+ "K1_separation_note_e": {
+  "per_trial": {
+   "BEAMIDP1": {
+    "binsep_native_flat_m": 181.39,
+    "delta_vs_binsep_m": 0.6165,
+    "delta_vs_reporter_m": 1.9265,
+    "exact_ellipsoid_m": 180.7735,
+    "flat_repo_frame_m": 181.383,
+    "frame_component_m": 0.6095,
+    "planner_series_m": 180.7736,
+    "reporter_2s_grid_m": 182.7,
+    "sampling_component_m": 0.007
+   },
+   "HV4SITL15": {
+    "binsep_native_flat_m": null,
+    "delta_vs_binsep_m": null,
+    "delta_vs_reporter_m": 3.5105,
+    "exact_ellipsoid_m": 100.6895,
+    "flat_repo_frame_m": 101.0299,
+    "frame_component_m": 0.3404,
+    "planner_series_m": 100.6895,
+    "reporter_2s_grid_m": 104.2,
+    "sampling_component_m": null
+   },
+   "HV4SITL16": {
+    "binsep_native_flat_m": null,
+    "delta_vs_binsep_m": null,
+    "delta_vs_reporter_m": 0.3146,
+    "exact_ellipsoid_m": 100.6854,
+    "flat_repo_frame_m": 101.0258,
+    "frame_component_m": 0.3404,
+    "planner_series_m": 100.6854,
+    "reporter_2s_grid_m": 101.0,
+    "reporter_source": "c4_params/c4_evidence.json flights.HV4SITL16.sep.min_h_m (no separation_from_tracks.json exists for this trial)",
+    "sampling_component_m": null
+   },
+   "HV4W00": {
+    "binsep_native_flat_m": 100.785,
+    "delta_vs_binsep_m": 0.35,
+    "delta_vs_reporter_m": 1.765,
+    "exact_ellipsoid_m": 100.435,
+    "flat_repo_frame_m": 100.7746,
+    "frame_component_m": 0.3396,
+    "planner_series_m": 100.435,
+    "reporter_2s_grid_m": 102.2,
+    "sampling_component_m": 0.0104
+   },
+   "HV4W05": {
+    "binsep_native_flat_m": 100.659,
+    "delta_vs_binsep_m": 0.3681,
+    "delta_vs_reporter_m": 0.5091,
+    "exact_ellipsoid_m": 100.2909,
+    "flat_repo_frame_m": 100.63,
+    "frame_component_m": 0.3391,
+    "planner_series_m": 100.2909,
+    "reporter_2s_grid_m": 100.8,
+    "sampling_component_m": 0.029
+   },
+   "HV4W55": {
+    "binsep_native_flat_m": 100.769,
+    "delta_vs_binsep_m": 0.3434,
+    "delta_vs_reporter_m": 3.3744,
+    "exact_ellipsoid_m": 100.4256,
+    "flat_repo_frame_m": 100.7652,
+    "frame_component_m": 0.3396,
+    "planner_series_m": 100.4257,
+    "reporter_2s_grid_m": 103.8,
+    "sampling_component_m": 0.0038
+   },
+   "HV4W55R": {
+    "binsep_native_flat_m": 100.939,
+    "delta_vs_binsep_m": 0.3601,
+    "delta_vs_reporter_m": 0.5211,
+    "exact_ellipsoid_m": 100.5789,
+    "flat_repo_frame_m": 100.919,
+    "frame_component_m": 0.3401,
+    "planner_series_m": 100.5789,
+    "reporter_2s_grid_m": 101.1,
+    "sampling_component_m": 0.02
+   },
+   "HV4W55S": {
+    "binsep_native_flat_m": 267.075,
+    "delta_vs_binsep_m": 0.8983,
+    "delta_vs_reporter_m": 2.3233,
+    "exact_ellipsoid_m": 266.1767,
+    "flat_repo_frame_m": 267.0753,
+    "frame_component_m": 0.8986,
+    "planner_series_m": 266.1768,
+    "reporter_2s_grid_m": 268.5,
+    "sampling_component_m": -0.0003
+   }
+  },
+  "published_claim_3.4_to_5.3_m": "NOT REPRODUCIBLE",
+  "range_frame_component_m": [
+   0.3391,
+   0.8986
+  ],
+  "range_sampling_component_m": [
+   -0.0003,
+   0.029
+  ],
+  "range_vs_binsep_m": [
+   0.3434,
+   0.8983
+  ],
+  "range_vs_reporter_m": [
+   0.3146,
+   3.5105
+  ],
+  "what_3.4_to_5.3_probably_was": {
+   "BEAMIDP1": -0.212,
+   "HV4SITL15": 4.775,
+   "HV4SITL16": 4.779,
+   "HV4W00": 4.202,
+   "HV4W05": 4.347,
+   "HV4W55": 5.274,
+   "HV4W55R": 4.885,
+   "HV4W55S": 56.203
+  }
+ },
+ "K2_param_strict_comparison": {
+  "BEAMIDP1": {
+   "n_float32_roundtrip_only": 6,
+   "n_ok": 102,
+   "n_rows": 102,
+   "source_counts": {
+    "EXPECT_FALLBACK": 6,
+    "FIRMWARE_OVERRIDE": 3,
+    "匯出檔": 93
+   },
+   "strict_exact": "85/96",
+   "strict_float32": "91/96"
+  },
+  "HV4SITL15": {
+   "n_float32_roundtrip_only": 3,
+   "n_ok": 51,
+   "n_rows": 51,
+   "source_counts": {
+    "": 51
+   },
+   "strict_exact": "37/45",
+   "strict_float32": "40/45"
+  },
+  "HV4SITL16": {
+   "n_float32_roundtrip_only": 6,
+   "n_ok": 102,
+   "n_rows": 102,
+   "source_counts": {
+    "EXPECT_FALLBACK": 6,
+    "FIRMWARE_OVERRIDE": 3,
+    "匯出檔": 93
+   },
+   "strict_exact": "85/96",
+   "strict_float32": "91/96"
+  },
+  "HV4W00": {
+   "n_float32_roundtrip_only": 6,
+   "n_ok": 102,
+   "n_rows": 102,
+   "source_counts": {
+    "EXPECT_FALLBACK": 6,
+    "FIRMWARE_OVERRIDE": 3,
+    "匯出檔": 93
+   },
+   "strict_exact": "85/96",
+   "strict_float32": "91/96"
+  },
+  "HV4W05": {
+   "n_float32_roundtrip_only": 6,
+   "n_ok": 102,
+   "n_rows": 102,
+   "source_counts": {
+    "EXPECT_FALLBACK": 6,
+    "FIRMWARE_OVERRIDE": 3,
+    "匯出檔": 93
+   },
+   "strict_exact": "85/96",
+   "strict_float32": "91/96"
+  },
+  "HV4W55": {
+   "n_float32_roundtrip_only": 6,
+   "n_ok": 102,
+   "n_rows": 102,
+   "source_counts": {
+    "EXPECT_FALLBACK": 6,
+    "FIRMWARE_OVERRIDE": 3,
+    "匯出檔": 93
+   },
+   "strict_exact": "85/96",
+   "strict_float32": "91/96"
+  },
+  "HV4W55R": {
+   "n_float32_roundtrip_only": 6,
+   "n_ok": 102,
+   "n_rows": 102,
+   "source_counts": {
+    "EXPECT_FALLBACK": 6,
+    "FIRMWARE_OVERRIDE": 3,
+    "匯出檔": 93
+   },
+   "strict_exact": "85/96",
+   "strict_float32": "91/96"
+  },
+  "HV4W55S": {
+   "n_float32_roundtrip_only": 6,
+   "n_ok": 102,
+   "n_rows": 102,
+   "source_counts": {
+    "EXPECT_FALLBACK": 6,
+    "FIRMWARE_OVERRIDE": 3,
+    "匯出檔": 93
+   },
+   "strict_exact": "85/96",
+   "strict_float32": "91/96"
+  },
+  "float32_roundtrip_rows_HV4W55": [
+   {
+    "exported": "1.13",
+    "param": "TECS_CLMB_MAX",
+    "readback": "1.1299999952316284",
+    "uav": "A1"
+   },
+   {
+    "exported": "1.35",
+    "param": "TECS_SINK_MIN",
+    "readback": "1.350000023841858",
+    "uav": "A1"
+   },
+   {
+    "exported": "1.33",
+    "param": "TECS_SINK_MAX",
+    "readback": "1.3300000429153442",
+    "uav": "B2"
+   },
+   {
+    "exported": "1.19",
+    "param": "TECS_SINK_MIN",
+    "readback": "1.190000057220459",
+    "uav": "B2"
+   },
+   {
+    "exported": "1.33",
+    "param": "TECS_SINK_MAX",
+    "readback": "1.3300000429153442",
+    "uav": "B3"
+   },
+   {
+    "exported": "1.19",
+    "param": "TECS_SINK_MIN",
+    "readback": "1.190000057220459",
+    "uav": "B3"
+   }
+  ],
+  "genuinely_different_rows_HV4W55": [
+   {
+    "exported": "1",
+    "ok": "True",
+    "param": "Q_RTL_MODE",
+    "readback": "0.0",
+    "source": "FIRMWARE_OVERRIDE",
+    "uav": "A1"
+   },
+   {
+    "exported": "26.6",
+    "ok": "True",
+    "param": "AIRSPEED_MAX",
+    "readback": "26.0",
+    "source": "匯出檔",
+    "uav": "B2"
+   },
+   {
+    "exported": "1",
+    "ok": "True",
+    "param": "Q_RTL_MODE",
+    "readback": "0.0",
+    "source": "FIRMWARE_OVERRIDE",
+    "uav": "B2"
+   },
+   {
+    "exported": "26.6",
+    "ok": "True",
+    "param": "AIRSPEED_MAX",
+    "readback": "26.0",
+    "source": "匯出檔",
+    "uav": "B3"
+   },
+   {
+    "exported": "1",
+    "ok": "True",
+    "param": "Q_RTL_MODE",
+    "readback": "0.0",
+    "source": "FIRMWARE_OVERRIDE",
+    "uav": "B3"
+   }
+  ],
+  "verdict": "literal/exact comparison = 85/96; at float32 precision = 91/96"
+ },
+ "K3_K4_spawn": {
+  "K3_verdict": "displacement bearing is north-EAST, so 'pure tailwind rolls it north' is refuted",
+  "K4_verdict": "the FILES are not bit-identical; the SPAWN POSITIONS are",
+  "actual_spacing_m": {
+   "A1-B2": 10.0165,
+   "A1-B3": 20.0328,
+   "B2-B3": 10.0164
+  },
+  "bearing_range_deg": [
+   43.6,
+   44.38
+  ],
+  "benign_270_deg_cells": {
+   "HV4W00": {
+    "A1": 0.02,
+    "B2": 0.02,
+    "B3": 0.03
+   },
+   "HV4W05": {
+    "A1": 0.13,
+    "B2": 0.18,
+    "B3": 0.21
+   },
+   "HV4W55": {
+    "A1": 0.13,
+    "B2": 0.18,
+    "B3": 0.21
+   },
+   "HV4W55R": {
+    "A1": 0.13,
+    "B2": 0.18,
+    "B3": 0.21
+   }
+  },
+  "file_bit_identity": {
+   "report.json": {
+    "identical": false,
+    "sha_now": "b8b487592e7d",
+    "sha_prev": "e8a250f57f82"
+   },
+   "scenario.json": {
+    "identical": true,
+    "sha_now": "fe9581b5ae93",
+    "sha_prev": "fe9581b5ae93"
+   },
+   "spawn_readback.json": {
+    "identical": false,
+    "sha_now": "dcf5127cd5e1",
+    "sha_prev": "509033866cf3"
+   },
+   "validation.json": {
+    "identical": true,
+    "sha_now": "3942d671a6a3",
+    "sha_prev": "3942d671a6a3"
+   },
+   "wind_readback.json": {
+    "identical": true,
+    "sha_now": "0639bc346e6d",
+    "sha_prev": "0639bc346e6d"
+   }
+  },
+  "max_abs_spacing_delta_m": 0.0218,
+  "per_uav": {
+   "A1": {
+    "bearing_deg": 44.38,
+    "d_east_m": 3.5011,
+    "d_north_m": 3.5775,
+    "err_m": 5.0056,
+    "got_lat_identical": true,
+    "got_lon_identical": true,
+    "settle_s_previous_run": 15.1,
+    "settle_s_this_run": 15.2
+   },
+   "B2": {
+    "bearing_deg": 43.94,
+    "d_east_m": 3.5118,
+    "d_north_m": 3.6439,
+    "err_m": 5.0607,
+    "got_lat_identical": true,
+    "got_lon_identical": true,
+    "settle_s_previous_run": 3.1,
+    "settle_s_this_run": 3.0
+   },
+   "B3": {
+    "bearing_deg": 43.6,
+    "d_east_m": 3.5225,
+    "d_north_m": 3.6993,
+    "err_m": 5.1081,
+    "got_lat_identical": true,
+    "got_lon_identical": true,
+    "settle_s_previous_run": 3.1,
+    "settle_s_this_run": 3.1
+   }
+  },
+  "planned_spacing_m": {
+   "A1-B2": 10.0055,
+   "A1-B3": 20.011,
+   "B2-B3": 10.0055
+  },
+  "spacing_delta_m": {
+   "A1-B2": 0.011,
+   "A1-B3": 0.0218,
+   "B2-B3": 0.0109
+  }
+ },
+ "K5_beamidp_makespan_confound": {
+  "ekf_wind": {
+   "A1": {
+    "from_deg": 180.0,
+    "n": 12647,
+    "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+    "spd_mps": 0.01
+   },
+   "B2": {
+    "from_deg": 333.43,
+    "n": 12556,
+    "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+    "spd_mps": 0.0224
+   },
+   "B3": {
+    "from_deg": 0.0,
+    "n": 10649,
+    "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+    "spd_mps": 0.01
+   }
+  },
+  "makespan_err_pct": -3.224,
+  "makespan_flown_s": 2272.343,
+  "makespan_planned_s": 2348.0447192734696,
+  "measured_east_minus_west_mps": {
+   "A1": 0.0086,
+   "B2": 0.0045,
+   "B3": 0.0038
+  },
+  "measured_north_minus_south_mps": {
+   "A1": -0.0191,
+   "B2": 0.0151,
+   "B3": 0.0062
+  },
+  "scenario_plan_wind": [
+   5.0,
+   270.0
+  ],
+  "scenario_sim_wind": {
+   "dir_from_deg": 270.0,
+   "profile_type": 1.0,
+   "spd_mps": 0.0,
+   "turb": 0.0
+  },
+  "verdict": "a 5 m/s 270 deg PLAN flown in measured still air -- the same plan-vs-sim wind mismatch this package accuses HV4SITL15/16 of",
+  "wind_readback_rows": 15
+ },
+ "K6_ceiling_cost_s": {
+  "cost_s": 0.027894,
+  "makespan_119_5_s": 1260.453960577981,
+  "makespan_120_0_s": 1260.4260664854269,
+  "verdict": "+0.0279 s, not +0.02 s"
+ },
+ "K7_appendixB_276": {
+  "HV4SITL15_floor_100m": {
+   "A1": -0.0007,
+   "B2": -0.018,
+   "B3": 0.0026
+  },
+  "HV4SITL15_floor_30m": {
+   "A1": 0.0183,
+   "B2": -0.0002,
+   "B3": 0.0128
+  },
+  "HV4SITL16_floor_100m": {
+   "A1": 0.0053,
+   "B2": -0.002,
+   "B3": -0.0192
+  },
+  "HV4SITL16_floor_30m": {
+   "A1": 0.021,
+   "B2": 0.0178,
+   "B3": -0.0027
+  },
+  "verdict": "the :276 row's source is HV4SITL16, whose triple is +0.0053 / -0.0020 / -0.0192 m/s at the 100 m cruise floor"
+ },
+ "K8_battery_telemetry": {
+  "BEAMIDP1": {
+   "A1": {
+    "enrg_tot_wh": 83.432,
+    "rows": 5029,
+    "volt_max": 12.6,
+    "volt_min": 12.6
+   },
+   "B2": {
+    "enrg_tot_wh": 71.296,
+    "rows": 5039,
+    "volt_max": 12.6,
+    "volt_min": 12.6
+   },
+   "B3": {
+    "enrg_tot_wh": 64.735,
+    "rows": 4002,
+    "volt_max": 12.6,
+    "volt_min": 12.6
+   }
+  },
+  "HV4SITL15": {
+   "A1": {
+    "enrg_tot_wh": 34.537,
+    "rows": 3292,
+    "volt_max": 12.6,
+    "volt_min": 12.6
+   },
+   "B2": {
+    "enrg_tot_wh": 28.213,
+    "rows": 1322,
+    "volt_max": 12.6,
+    "volt_min": 12.6
+   },
+   "B3": {
+    "enrg_tot_wh": 34.575,
+    "rows": 2264,
+    "volt_max": 12.6,
+    "volt_min": 12.6
+   }
+  },
+  "HV4SITL16": {
+   "A1": {
+    "enrg_tot_wh": 34.591,
+    "rows": 3294,
+    "volt_max": 12.6,
+    "volt_min": 12.6
+   },
+   "B2": {
+    "enrg_tot_wh": 28.147,
+    "rows": 1257,
+    "volt_max": 12.6,
+    "volt_min": 12.6
+   },
+   "B3": {
+    "enrg_tot_wh": 34.552,
+    "rows": 2113,
+    "volt_max": 12.6,
+    "volt_min": 12.6
+   }
+  },
+  "HV4W00": {
+   "A1": {
+    "enrg_tot_wh": 34.233,
+    "rows": 2994,
+    "volt_max": 12.6,
+    "volt_min": 12.6
+   },
+   "B2": {
+    "enrg_tot_wh": 27.98,
+    "rows": 1230,
+    "volt_max": 12.6,
+    "volt_min": 12.6
+   },
+   "B3": {
+    "enrg_tot_wh": 34.412,
+    "rows": 1945,
+    "volt_max": 12.6,
+    "volt_min": 12.6
+   }
+  },
+  "HV4W05": {
+   "A1": {
+    "enrg_tot_wh": 32.05,
+    "rows": 3055,
+    "volt_max": 12.6,
+    "volt_min": 12.6
+   },
+   "B2": {
+    "enrg_tot_wh": 26.84,
+    "rows": 1335,
+    "volt_max": 12.6,
+    "volt_min": 12.6
+   },
+   "B3": {
+    "enrg_tot_wh": 33.341,
+    "rows": 2142,
+    "volt_max": 12.6,
+    "volt_min": 12.6
+   }
+  },
+  "HV4W55": {
+   "A1": {
+    "enrg_tot_wh": 32.226,
+    "rows": 3197,
+    "volt_max": 12.6,
+    "volt_min": 12.6
+   },
+   "B2": {
+    "enrg_tot_wh": 26.967,
+    "rows": 1255,
+    "volt_max": 12.6,
+    "volt_min": 12.6
+   },
+   "B3": {
+    "enrg_tot_wh": 33.485,
+    "rows": 2284,
+    "volt_max": 12.6,
+    "volt_min": 12.6
+   }
+  },
+  "HV4W55R": {
+   "A1": {
+    "enrg_tot_wh": 32.168,
+    "rows": 3244,
+    "volt_max": 12.6,
+    "volt_min": 12.6
+   },
+   "B2": {
+    "enrg_tot_wh": 27.048,
+    "rows": 1376,
+    "volt_max": 12.6,
+    "volt_min": 12.6
+   },
+   "B3": {
+    "enrg_tot_wh": 33.508,
+    "rows": 2265,
+    "volt_max": 12.6,
+    "volt_min": 12.6
+   }
+  },
+  "HV4W55S": {
+   "A1": {
+    "enrg_tot_wh": 36.376,
+    "rows": 2279,
+    "volt_max": 12.6,
+    "volt_min": 12.6
+   },
+   "B2": {
+    "enrg_tot_wh": 26.51,
+    "rows": 2363,
+    "volt_max": 12.6,
+    "volt_min": 12.6
+   },
+   "B3": {
+    "enrg_tot_wh": 33.468,
+    "rows": 1788,
+    "volt_max": 12.6,
+    "volt_min": 12.6
+   }
+  },
+  "planner_model": {
+   "A1": {
+    "cls": "A",
+    "energy_margin_wh": 440.846,
+    "energy_used_wh": 459.154
+   },
+   "B2": {
+    "cls": "B",
+    "energy_margin_wh": 88.687,
+    "energy_used_wh": 165.313
+   },
+   "B3": {
+    "cls": "B",
+    "energy_margin_wh": 100.076,
+    "energy_used_wh": 153.924
+   }
+  },
+  "verdict": "BAT exists on every airframe in every sortie (BEAMIDP1 B2 = 5039 rows). What is missing is not telemetry but the right battery: SITL logs a generic 12.6 V pack, not the planner's Hero 254 Wh pack, so the logged energy cannot corroborate the planner's margins."
+ },
+ "K9_table_z_rulers": {
+  "ca_actions": 753,
+  "ca_detected": 753,
+  "dccpp_after_own_ca_pad": 572,
+  "dccpp_after_own_ca_sep": 114,
+  "dccpp_cells_with_pad": 10,
+  "dccpp_cells_with_sep": 7,
+  "dccpp_pad": 572,
+  "dccpp_sep": 114,
+  "harvest_last_landing_s": [
+   2576.7,
+   9851.3
+  ],
+  "harvest_native_pad": 0,
+  "harvest_native_sep": 0,
+  "harvest_relifted_pad": 688,
+  "harvest_relifted_sep": 959,
+  "harvest_takeoff_queue_s": [
+   330.0,
+   6460.0
+  ],
+  "n_cells": 10,
+  "verdict": "the two arms measure different objects: the baseline is checked on RE-LIFTED tracks, HARVEST on its native MissionPlan.plans. Re-lifting HARVEST too gives 959/688. The caption must not claim one ruler."
+ },
+ "ceiling_control_HV4W55_vs_HV4W55R": {
+  "deltas": {
+   "exported_above_120": 88,
+   "exported_max_rel_m": 0.5,
+   "flown_makespan_s": 0.303,
+   "flown_max_agl_m": 0.499,
+   "flown_t_above_120_s": 354.925,
+   "flown_total_km": 0.0037
+  },
+  "differing_files": [
+   {
+    "file": "plan/A1.waypoints",
+    "sha_a": "fcd88e5ae067",
+    "sha_b": "5993f58becdf"
+   },
+   {
+    "file": "plan/A1_fence.txt",
+    "sha_a": "8f599d694355",
+    "sha_b": "ba7cb58ca629"
+   },
+   {
+    "file": "plan/B2.waypoints",
+    "sha_a": "95ca03d7eb70",
+    "sha_b": "fbc0736a6290"
+   },
+   {
+    "file": "plan/B2_fence.txt",
+    "sha_a": "4b845f7388de",
+    "sha_b": "b58771fd1798"
+   },
+   {
+    "file": "plan/B3.waypoints",
+    "sha_a": "8cad287659a7",
+    "sha_b": "835c164935a8"
+   },
+   {
+    "file": "plan/B3_fence.txt",
+    "sha_a": "4b845f7388de",
+    "sha_b": "b58771fd1798"
+   }
+  ],
+  "exported": {
+   "max_rel_m": [
+    119.5526,
+    120.0526
+   ],
+   "n_above_120": [
+    0,
+    88
+   ],
+   "n_above_120_per_uav": {
+    "A1": [
+     0,
+     38
+    ],
+    "B2": [
+     0,
+     13
+    ],
+    "B3": [
+     0,
+     37
+    ]
+   },
+   "n_rel_items": [
+    216,
+    216
+   ]
+  },
+  "exported_items_per_uav": {
+   "A1": [
+    82,
+    82
+   ],
+   "B2": [
+    53,
+    53
+   ],
+   "B3": [
+    84,
+    84
+   ]
+  },
+  "flown": {
+   "coverage_ratio": [
+    0.999666,
+    0.999689
+   ],
+   "makespan_s": [
+    1281.906,
+    1282.209
+   ],
+   "max_agl_m": [
+    119.6752,
+    120.1742
+   ],
+   "max_agl_per_uav": {
+    "A1": [
+     119.6221,
+     120.1066
+    ],
+    "B2": [
+     119.6356,
+     120.1422
+    ],
+    "B3": [
+     119.6752,
+     120.1742
+    ]
+   },
+   "min_sep_h_m": [
+    100.4256,
+    100.5789
+   ],
+   "t_above_120_per_uav": {
+    "A1": [
+     0.0,
+     140.052
+    ],
+    "B2": [
+     0.0,
+     73.566
+    ],
+    "B3": [
+     0.0,
+     141.307
+    ]
+   },
+   "t_above_120_s": [
+    0.0,
+    354.925
+   ],
+   "total_km": [
+    31.8884,
+    31.8921
+   ]
+  },
+  "identical_files": [
+   "plan/A1.param",
+   "plan/A1_rally.txt",
+   "plan/B2.param",
+   "plan/B2_rally.txt",
+   "plan/B3.param",
+   "plan/B3_rally.txt"
+  ],
+  "planned_makespan_cost_of_1195_s": 0.027894,
+  "planned_makespan_s": {
+   "HV4W55": 1260.453960577981,
+   "HV4W55R": 1260.4260664854269
+  },
+  "scenario_fields_that_differ": {
+   "altitude_m": [
+    119.5,
+    120.0
+   ],
+   "h_ceil_m": [
+    119.5,
+    120.0
+   ],
+   "waiver_max_agl_m": [
+    119.5,
+    null
+   ]
+  },
+  "tracking_excess_m": {
+   "A1": {
+    "HV4W55": 0.0695,
+    "HV4W55R": 0.054,
+    "HV4W55S": 0.0582
+   },
+   "B2": {
+    "HV4W55": 0.1024,
+    "HV4W55R": 0.1091,
+    "HV4W55S": 0.1009
+   },
+   "B3": {
+    "HV4W55": 0.1421,
+    "HV4W55R": 0.141,
+    "HV4W55S": 0.1455
+   }
+  },
+  "wind_is_identical": true
+ },
+ "gate_to_gate_prediction_error": {
+  "BEAMIDP1": {
+   "binding_gate_err_pct": -3.477,
+   "binding_uav": "B2",
+   "dilution_factor": 0.9267,
+   "gate_err_range_pct": [
+    -6.117,
+    -3.477
+   ],
+   "makespan_err_pct": -3.224,
+   "per_uav": {
+    "A1": {
+     "cls": "A",
+     "dist_err_pct": 1.403,
+     "err_pct": -4.353,
+     "flown_gate_s": 2050.322,
+     "ground_wait_s": 74.0,
+     "plan_gate_s": 2143.637
+    },
+    "B2": {
+     "cls": "B",
+     "dist_err_pct": 4.012,
+     "err_pct": -3.477,
+     "flown_gate_s": 2100.373,
+     "ground_wait_s": 172.0,
+     "plan_gate_s": 2176.045
+    },
+    "B3": {
+     "cls": "B",
+     "dist_err_pct": 1.34,
+     "err_pct": -6.117,
+     "flown_gate_s": 1870.792,
+     "ground_wait_s": 0.0,
+     "plan_gate_s": 1992.688
+    }
+   }
+  },
+  "HV4SITL15": {
+   "binding_gate_err_pct": -0.718,
+   "binding_uav": "A1",
+   "dilution_factor": 0.4795,
+   "gate_err_range_pct": [
+    -3.647,
+    -0.718
+   ],
+   "makespan_err_pct": -0.362,
+   "per_uav": {
+    "A1": {
+     "cls": "A",
+     "dist_err_pct": 2.229,
+     "err_pct": -0.718,
+     "flown_gate_s": 600.088,
+     "ground_wait_s": 656.0,
+     "plan_gate_s": 604.426
+    },
+    "B2": {
+     "cls": "B",
+     "dist_err_pct": 2.495,
+     "err_pct": -2.003,
+     "flown_gate_s": 523.161,
+     "ground_wait_s": 0.0,
+     "plan_gate_s": 533.856
+    },
+    "B3": {
+     "cls": "B",
+     "dist_err_pct": 2.225,
+     "err_pct": -3.647,
+     "flown_gate_s": 759.673,
+     "ground_wait_s": 106.0,
+     "plan_gate_s": 788.428
+    }
+   }
+  },
+  "HV4SITL16": {
+   "binding_gate_err_pct": -0.731,
+   "binding_uav": "A1",
+   "dilution_factor": 0.4795,
+   "gate_err_range_pct": [
+    -3.717,
+    -0.731
+   ],
+   "makespan_err_pct": -0.36,
+   "per_uav": {
+    "A1": {
+     "cls": "A",
+     "dist_err_pct": 2.193,
+     "err_pct": -0.731,
+     "flown_gate_s": 600.008,
+     "ground_wait_s": 656.0,
+     "plan_gate_s": 604.426
+    },
+    "B2": {
+     "cls": "B",
+     "dist_err_pct": 2.501,
+     "err_pct": -2.029,
+     "flown_gate_s": 523.025,
+     "ground_wait_s": 0.0,
+     "plan_gate_s": 533.856
+    },
+    "B3": {
+     "cls": "B",
+     "dist_err_pct": 2.188,
+     "err_pct": -3.717,
+     "flown_gate_s": 759.125,
+     "ground_wait_s": 106.0,
+     "plan_gate_s": 788.428
+    }
+   }
+  },
+  "HV4W00": {
+   "binding_gate_err_pct": 0.4,
+   "binding_uav": "A1",
+   "dilution_factor": 0.4923,
+   "gate_err_range_pct": [
+    -0.109,
+    0.4
+   ],
+   "makespan_err_pct": 0.197,
+   "per_uav": {
+    "A1": {
+     "cls": "A",
+     "dist_err_pct": 2.245,
+     "err_pct": 0.4,
+     "flown_gate_s": 595.886,
+     "ground_wait_s": 612.0,
+     "plan_gate_s": 593.51
+    },
+    "B2": {
+     "cls": "B",
+     "dist_err_pct": 2.507,
+     "err_pct": -0.006,
+     "flown_gate_s": 519.695,
+     "ground_wait_s": 0.0,
+     "plan_gate_s": 519.727
+    },
+    "B3": {
+     "cls": "B",
+     "dist_err_pct": 2.22,
+     "err_pct": -0.109,
+     "flown_gate_s": 754.478,
+     "ground_wait_s": 100.0,
+     "plan_gate_s": 755.298
+    }
+   }
+  },
+  "HV4W05": {
+   "binding_gate_err_pct": 4.93,
+   "binding_uav": "A1",
+   "dilution_factor": 0.4923,
+   "gate_err_range_pct": [
+    4.93,
+    7.079
+   ],
+   "makespan_err_pct": 2.428,
+   "per_uav": {
+    "A1": {
+     "cls": "A",
+     "dist_err_pct": 3.868,
+     "err_pct": 4.93,
+     "flown_gate_s": 622.77,
+     "ground_wait_s": 612.0,
+     "plan_gate_s": 593.51
+    },
+    "B2": {
+     "cls": "B",
+     "dist_err_pct": 4.675,
+     "err_pct": 7.079,
+     "flown_gate_s": 556.516,
+     "ground_wait_s": 0.0,
+     "plan_gate_s": 519.727
+    },
+    "B3": {
+     "cls": "B",
+     "dist_err_pct": 3.805,
+     "err_pct": 6.95,
+     "flown_gate_s": 807.788,
+     "ground_wait_s": 100.0,
+     "plan_gate_s": 755.298
+    }
+   }
+  },
+  "HV4W55": {
+   "binding_gate_err_pct": 3.567,
+   "binding_uav": "A1",
+   "dilution_factor": 0.4796,
+   "gate_err_range_pct": [
+    3.107,
+    4.901
+   ],
+   "makespan_err_pct": 1.702,
+   "per_uav": {
+    "A1": {
+     "cls": "A",
+     "dist_err_pct": 3.813,
+     "err_pct": 3.567,
+     "flown_gate_s": 626.016,
+     "ground_wait_s": 656.0,
+     "plan_gate_s": 604.454
+    },
+    "B2": {
+     "cls": "B",
+     "dist_err_pct": 4.675,
+     "err_pct": 4.901,
+     "flown_gate_s": 560.055,
+     "ground_wait_s": 0.0,
+     "plan_gate_s": 533.89
+    },
+    "B3": {
+     "cls": "B",
+     "dist_err_pct": 3.736,
+     "err_pct": 3.107,
+     "flown_gate_s": 812.988,
+     "ground_wait_s": 106.0,
+     "plan_gate_s": 788.491
+    }
+   }
+  },
+  "HV4W55R": {
+   "binding_gate_err_pct": 3.639,
+   "binding_uav": "A1",
+   "dilution_factor": 0.4795,
+   "gate_err_range_pct": [
+    3.127,
+    4.886
+   ],
+   "makespan_err_pct": 1.728,
+   "per_uav": {
+    "A1": {
+     "cls": "A",
+     "dist_err_pct": 3.901,
+     "err_pct": 3.639,
+     "flown_gate_s": 626.419,
+     "ground_wait_s": 656.0,
+     "plan_gate_s": 604.426
+    },
+    "B2": {
+     "cls": "B",
+     "dist_err_pct": 4.678,
+     "err_pct": 4.886,
+     "flown_gate_s": 559.942,
+     "ground_wait_s": 0.0,
+     "plan_gate_s": 533.856
+    },
+    "B3": {
+     "cls": "B",
+     "dist_err_pct": 3.71,
+     "err_pct": 3.127,
+     "flown_gate_s": 813.08,
+     "ground_wait_s": 106.0,
+     "plan_gate_s": 788.428
+    }
+   }
+  },
+  "HV4W55S": {
+   "binding_gate_err_pct": 5.942,
+   "binding_uav": "B2",
+   "dilution_factor": 0.5423,
+   "gate_err_range_pct": [
+    2.903,
+    5.942
+   ],
+   "makespan_err_pct": 3.18,
+   "per_uav": {
+    "A1": {
+     "cls": "A",
+     "dist_err_pct": 3.173,
+     "err_pct": 2.903,
+     "flown_gate_s": 751.62,
+     "ground_wait_s": 210.0,
+     "plan_gate_s": 730.414
+    },
+    "B2": {
+     "cls": "B",
+     "dist_err_pct": 5.474,
+     "err_pct": 5.942,
+     "flown_gate_s": 555.144,
+     "ground_wait_s": 442.2122092176985,
+     "plan_gate_s": 524.008
+    },
+    "B3": {
+     "cls": "B",
+     "dist_err_pct": 4.631,
+     "err_pct": 4.415,
+     "flown_gate_s": 779.163,
+     "ground_wait_s": 0.0,
+     "plan_gate_s": 746.221
+    }
+   }
+  }
+ },
+ "survey_geometry": {
+  "area_km2": 1.243447,
+  "area_m2": 1243447.5,
+  "flat_approx_area_m2": 1248000.0,
+  "height_m": 797.3,
+  "m_per_deg_lat": 110757.52,
+  "m_per_deg_lon": 101791.02,
+  "swath_and_spacing": {
+   "119.5": {
+    "spacing_m": 96.5907,
+    "swath_m": 137.9867
+   },
+   "120.0": {
+    "spacing_m": 96.9948,
+    "swath_m": 138.5641
+   }
+  },
+  "width_m": 1559.6
+ }
+}

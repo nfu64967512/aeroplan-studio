@@ -1,0 +1,113 @@
+{
+  "scenario": "S4",
+  "n": 8,
+  "makespan_s": 4273.8,
+  "takeoff_span_s": 2980.0,
+  "land_gaps_s": [
+    231.9,
+    383.6,
+    231.4,
+    403.7,
+    1182.1,
+    230.0,
+    544.7
+  ],
+  "plans": [
+    {
+      "uav": "A8",
+      "cls": "A",
+      "t_takeoff_s": 0.0,
+      "t_land_s": 1066.4,
+      "d_km": 20.08,
+      "landing_site": "H",
+      "takeoff_site": "H",
+      "orbits": 0,
+      "e_used_wh": 278.3,
+      "e_margin_wh": 621.7
+    },
+    {
+      "uav": "A4",
+      "cls": "A",
+      "t_takeoff_s": 60.0,
+      "t_land_s": 1681.9,
+      "d_km": 31.7,
+      "landing_site": "H",
+      "takeoff_site": "H",
+      "orbits": 0,
+      "e_used_wh": 374.1,
+      "e_margin_wh": 525.9
+    },
+    {
+      "uav": "A5",
+      "cls": "A",
+      "t_takeoff_s": 156.0,
+      "t_land_s": 1298.3,
+      "d_km": 21.62,
+      "landing_site": "H",
+      "takeoff_site": "H",
+      "orbits": 0,
+      "e_used_wh": 291.8,
+      "e_margin_wh": 608.2
+    },
+    {
+      "uav": "A1",
+      "cls": "A",
+      "t_takeoff_s": 258.0,
+      "t_land_s": 1913.3,
+      "d_km": 32.36,
+      "landing_site": "H",
+      "takeoff_site": "H",
+      "orbits": 0,
+      "e_used_wh": 379.8,
+      "e_margin_wh": 520.2
+    },
+    {
+      "uav": "A3",
+      "cls": "A",
+      "t_takeoff_s": 686.0,
+      "t_land_s": 2317.0,
+      "d_km": 31.88,
+      "landing_site": "H",
+      "takeoff_site": "H",
+      "orbits": 0,
+      "e_used_wh": 375.7,
+      "e_margin_wh": 524.3
+    },
+    {
+      "uav": "A2",
+      "cls": "A",
+      "t_takeoff_s": 2094.0,
+      "t_land_s": 3729.1,
+      "d_km": 31.95,
+      "landing_site": "H",
+      "takeoff_site": "H",
+      "orbits": 0,
+      "e_used_wh": 376.3,
+      "e_margin_wh": 523.7
+    },
+    {
+      "uav": "A7",
+      "cls": "A",
+      "t_takeoff_s": 2408.0,
+      "t_land_s": 3499.1,
+      "d_km": 20.58,
+      "landing_site": "H",
+      "takeoff_site": "H",
+      "orbits": 0,
+      "e_used_wh": 283.0,
+      "e_margin_wh": 617.0
+    },
+    {
+      "uav": "A6",
+      "cls": "A",
+      "t_takeoff_s": 2980.0,
+      "t_land_s": 4273.8,
+      "d_km": 24.82,
+      "landing_site": "H",
+      "takeoff_site": "H",
+      "orbits": 0,
+      "e_used_wh": 317.1,
+      "e_margin_wh": 582.9
+    }
+  ]
+}

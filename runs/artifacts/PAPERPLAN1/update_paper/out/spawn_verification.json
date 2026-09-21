@@ -1,0 +1,223 @@
+{
+ "A_truth_vs_estimate": {
+  "A1": {
+   "ekf_pos_first_sample": {
+    "d_east_m": 3.5621,
+    "d_north_m": 3.7436
+   },
+   "sim_truth_first_sample": {
+    "d_east_m": 3.5621,
+    "d_north_m": 3.7436
+   },
+   "truth_minus_ekf_m": 0.0
+  },
+  "B2": {
+   "ekf_pos_first_sample": {
+    "d_east_m": 3.5525,
+    "d_north_m": 3.7436
+   },
+   "sim_truth_first_sample": {
+    "d_east_m": 3.5627,
+    "d_north_m": 3.7436
+   },
+   "truth_minus_ekf_m": 0.0102
+  },
+  "B3": {
+   "ekf_pos_first_sample": {
+    "d_east_m": 3.5429,
+    "d_north_m": 3.7436
+   },
+   "sim_truth_first_sample": {
+    "d_east_m": 3.553,
+    "d_north_m": 3.7436
+   },
+   "truth_minus_ekf_m": 0.0102
+  }
+ },
+ "B_body_axis_arc": {
+  "A1": {
+   "heading_swept_deg": [
+    19.15,
+    84.25
+   ],
+   "n_steps_above_threshold": 11,
+   "n_trace_rows": 15,
+   "net_chord_m": 4.338,
+   "path_length_m": 4.739,
+   "residual_max_abs_deg": 1.0,
+   "residual_median_deg": -0.32,
+   "settle_s": 15.2,
+   "step_m_range": [
+    0.407,
+    0.499
+   ],
+   "steps": [
+    {
+     "bearing_deg": 18.74,
+     "dt_from_s": 2.03,
+     "dt_to_s": 3.03,
+     "groundspeed_mps": 0.046,
+     "heading_deg": 19.15,
+     "residual_deg": -0.41,
+     "step_m": 0.4108
+    },
+    {
+     "bearing_deg": 26.63,
+     "dt_from_s": 3.03,
+     "dt_to_s": 4.04,
+     "groundspeed_mps": 0.012,
+     "heading_deg": 27.1,
+     "residual_deg": -0.47,
+     "step_m": 0.4105
+    },
+    {
+     "bearing_deg": 35.1,
+     "dt_from_s": 4.04,
+     "dt_to_s": 5.06,
+     "groundspeed_mps": 0.082,
+     "heading_deg": 34.65,
+     "residual_deg": 0.45,
+     "step_m": 0.407
+    },
+    {
+     "bearing_deg": 41.48,
+     "dt_from_s": 5.06,
+     "dt_to_s": 6.07,
+     "groundspeed_mps": 0.083,
+     "heading_deg": 41.8,
+     "residual_deg": -0.32,
+     "step_m": 0.4151
+    },
+    {
+     "bearing_deg": 47.65,
+     "dt_from_s": 6.07,
+     "dt_to_s": 7.08,
+     "groundspeed_mps": 0.081,
+     "heading_deg": 48.65,
+     "residual_deg": -1.0,
+     "step_m": 0.4127
+    },
+    {
+     "bearing_deg": 55.93,
+     "dt_from_s": 7.08,
+     "dt_to_s": 8.08,
+     "groundspeed_mps": 0.083,
+     "heading_deg": 55.15,
+     "residual_deg": 0.78,
+     "step_m": 0.4177
+    },
+    {
+     "bearing_deg": 60.74,
+     "dt_from_s": 8.08,
+     "dt_to_s": 9.1,
+     "groundspeed_mps": 0.082,
+     "heading_deg": 61.3,
+     "residual_deg": -0.56,
+     "step_m": 0.4092
+    },
+    {
+     "bearing_deg": 66.78,
+     "dt_from_s": 9.1,
+     "dt_to_s": 10.11,
+     "groundspeed_mps": 0.082,
+     "heading_deg": 67.2,
+     "residual_deg": -0.42,
+     "step_m": 0.4211
+    },
+    {
+     "bearing_deg": 73.18,
+     "dt_from_s": 10.11,
+     "dt_to_s": 11.11,
+     "groundspeed_mps": 0.082,
+     "heading_deg": 72.8,
+     "residual_deg": 0.38,
+     "step_m": 0.4252
+    },
+    {
+     "bearing_deg": 78.44,
+     "dt_from_s": 11.11,
+     "dt_to_s": 12.12,
+     "groundspeed_mps": 0.084,
+     "heading_deg": 78.65,
+     "residual_deg": -0.21,
+     "step_m": 0.4991
+    },
+    {
+     "bearing_deg": 83.98,
+     "dt_from_s": 12.12,
+     "dt_to_s": 13.13,
+     "groundspeed_mps": 0.082,
+     "heading_deg": 84.25,
+     "residual_deg": -0.27,
+     "step_m": 0.4193
+    }
+   ],
+   "usable": true,
+   "why_not_usable": null
+  },
+  "B2": {
+   "heading_swept_deg": null,
+   "n_steps_above_threshold": 0,
+   "n_trace_rows": 3,
+   "net_chord_m": 0.056,
+   "path_length_m": 0.057,
+   "residual_max_abs_deg": null,
+   "residual_median_deg": null,
+   "settle_s": 3.0,
+   "step_m_range": null,
+   "steps": [],
+   "usable": false,
+   "why_not_usable": "this aircraft settled before the trace began; its trace only records sub-centimetre residual motion, so it fixes the END STATE but says nothing about the path"
+  },
+  "B3": {
+   "heading_swept_deg": null,
+   "n_steps_above_threshold": 0,
+   "n_trace_rows": 3,
+   "net_chord_m": 0.046,
+   "path_length_m": 0.047,
+   "residual_max_abs_deg": null,
+   "residual_median_deg": null,
+   "settle_s": 3.1,
+   "step_m_range": null,
+   "steps": [],
+   "usable": false,
+   "why_not_usable": "this aircraft settled before the trace began; its trace only records sub-centimetre residual motion, so it fixes the END STATE but says nothing about the path"
+  }
+ },
+ "C_ground_weathervane": {
+  "A1": {
+   "n": 1423,
+   "sim_alt_max_m": 101.73,
+   "sim_alt_min_m": 100.09,
+   "sim_wind_dir_from_deg": 180.0,
+   "window_s": 212.96,
+   "yaw_first_deg": 127.12,
+   "yaw_last_deg": 174.42,
+   "yaw_monotonic_increasing": true
+  },
+  "B2": {
+   "n": 2959,
+   "sim_alt_max_m": 101.77,
+   "sim_alt_min_m": 100.09,
+   "sim_wind_dir_from_deg": 180.0,
+   "window_s": 444.88,
+   "yaw_first_deg": 126.91,
+   "yaw_last_deg": 179.45,
+   "yaw_monotonic_increasing": true
+  },
+  "B3": {
+   "n": 29,
+   "sim_alt_max_m": 101.87,
+   "sim_alt_min_m": 100.09,
+   "sim_wind_dir_from_deg": 180.0,
+   "window_s": 2.64,
+   "yaw_first_deg": 126.72,
+   "yaw_last_deg": 129.47,
+   "yaw_monotonic_increasing": false
+  }
+ },
+ "method": {
+  "min_step_m": 0.1,
+  "note": "the dataflash only starts at arming, so the arc itself can only come from the runner's pre-arm settle_trace; the dataflash independently fixes the END STATE."
+ }
+}

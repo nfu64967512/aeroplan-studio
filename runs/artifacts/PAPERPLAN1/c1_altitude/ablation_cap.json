@@ -1,0 +1,142 @@
+{
+ "120": {
+  "cap_m": 120.0,
+  "swath_m": 138.564,
+  "spacing_m": 96.995,
+  "makespan_s": 1260.43,
+  "min_sep_h_m": 105.464,
+  "passed": true,
+  "conflicts": 0,
+  "uncovered": 0,
+  "status": "GO_WITH_WARNINGS",
+  "plan_s": 14.3,
+  "uavs": {
+   "A1": {
+    "cls": "A",
+    "strips": 3,
+    "n_items": 73,
+    "dist_km": 10.293,
+    "max_export_rel_m": 120.0526
+   },
+   "B2": {
+    "cls": "B",
+    "strips": 2,
+    "n_items": 46,
+    "dist_km": 7.9259,
+    "max_export_rel_m": 120.0331
+   },
+   "B3": {
+    "cls": "B",
+    "strips": 4,
+    "n_items": 73,
+    "dist_km": 12.4394,
+    "max_export_rel_m": 120.0331
+   }
+  }
+ },
+ "119.7": {
+  "cap_m": 119.7,
+  "swath_m": 138.218,
+  "spacing_m": 96.752,
+  "makespan_s": 1260.44,
+  "min_sep_h_m": 105.603,
+  "passed": true,
+  "conflicts": 0,
+  "uncovered": 0,
+  "status": "GO_WITH_WARNINGS",
+  "plan_s": 14.3,
+  "uavs": {
+   "A1": {
+    "cls": "A",
+    "strips": 3,
+    "n_items": 73,
+    "dist_km": 10.2933,
+    "max_export_rel_m": 119.7526
+   },
+   "B2": {
+    "cls": "B",
+    "strips": 2,
+    "n_items": 46,
+    "dist_km": 7.9262,
+    "max_export_rel_m": 119.7332
+   },
+   "B3": {
+    "cls": "B",
+    "strips": 4,
+    "n_items": 73,
+    "dist_km": 12.4401,
+    "max_export_rel_m": 119.7331
+   }
+  }
+ },
+ "119.5": {
+  "cap_m": 119.5,
+  "swath_m": 137.987,
+  "spacing_m": 96.591,
+  "makespan_s": 1260.45,
+  "min_sep_h_m": 105.699,
+  "passed": true,
+  "conflicts": 0,
+  "uncovered": 0,
+  "status": "GO_WITH_WARNINGS",
+  "plan_s": 16.1,
+  "uavs": {
+   "A1": {
+    "cls": "A",
+    "strips": 3,
+    "n_items": 73,
+    "dist_km": 10.2936,
+    "max_export_rel_m": 119.5526
+   },
+   "B2": {
+    "cls": "B",
+    "strips": 2,
+    "n_items": 46,
+    "dist_km": 7.9265,
+    "max_export_rel_m": 119.5332
+   },
+   "B3": {
+    "cls": "B",
+    "strips": 4,
+    "n_items": 73,
+    "dist_km": 12.4406,
+    "max_export_rel_m": 119.5331
+   }
+  }
+ },
+ "119": {
+  "cap_m": 119.0,
+  "swath_m": 137.409,
+  "spacing_m": 96.187,
+  "makespan_s": 1260.48,
+  "min_sep_h_m": 105.949,
+  "passed": true,
+  "conflicts": 0,
+  "uncovered": 0,
+  "status": "GO_WITH_WARNINGS",
+  "plan_s": 13.7,
+  "uavs": {
+   "A1": {
+    "cls": "A",
+    "strips": 3,
+    "n_items": 73,
+    "dist_km": 10.2942,
+    "max_export_rel_m": 119.0526
+   },
+   "B2": {
+    "cls": "B",
+    "strips": 2,
+    "n_items": 46,
+    "dist_km": 7.9271,
+    "max_export_rel_m": 119.0332
+   },
+   "B3": {
+    "cls": "B",
+    "strips": 4,
+    "n_items": 73,
+    "dist_km": 12.4417,
+    "max_export_rel_m": 119.0332
+   }
+  }
+ }
+}

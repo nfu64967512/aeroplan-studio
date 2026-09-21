@@ -1,0 +1,334 @@
+{
+ "c1_vs_matrix": {
+  "ablation_119_5": {
+   "makespan_s": 1260.45,
+   "min_sep_h_m": 105.699,
+   "swath_m": 137.987,
+   "spacing_m": 96.591
+  },
+  "matrix_W55_c1195": {
+   "makespan_s": 1260.45,
+   "min_sep_h_m": 105.699
+  },
+  "ablation_120": {
+   "makespan_s": 1260.43,
+   "min_sep_h_m": 105.464,
+   "swath_m": 138.564,
+   "spacing_m": 96.995
+  },
+  "matrix_W55_c120": {
+   "makespan_s": 1260.43,
+   "min_sep_h_m": 105.464
+  },
+  "agree": true
+ },
+ "separation_flag_planned": {
+  "W00_c1195": 104.637,
+  "W05_c1195": 104.637,
+  "W55_c1195": 105.699,
+  "W55S_c1195": 322.38,
+  "W00_c120": 105.06,
+  "W05_c120": 105.06,
+  "W55_c120": 105.464,
+  "W55S_c120": 322.222
+ },
+ "exports": {
+  "HV4SITL16_cap120": {
+   "A1.waypoints": {
+    "items": 82,
+    "max_rel_m": 120.0526,
+    "items_over_120": 38
+   },
+   "B2.waypoints": {
+    "items": 53,
+    "max_rel_m": 120.0331,
+    "items_over_120": 13
+   },
+   "B3.waypoints": {
+    "items": 84,
+    "max_rel_m": 120.0331,
+    "items_over_120": 37
+   }
+  },
+  "BEAMIDP1_cap1195": {
+   "A1.waypoints": {
+    "items": 263,
+    "max_rel_m": 119.6703,
+    "items_over_120": 0
+   },
+   "B2.waypoints": {
+    "items": 165,
+    "max_rel_m": 119.5136,
+    "items_over_120": 0
+   },
+   "B3.waypoints": {
+    "items": 175,
+    "max_rel_m": 119.554,
+    "items_over_120": 0
+   }
+  },
+  "W55_c1195": {
+   "A1.waypoints": {
+    "items": 82,
+    "max_rel_m": 119.5526,
+    "items_over_120": 0
+   },
+   "B2.waypoints": {
+    "items": 53,
+    "max_rel_m": 119.5332,
+    "items_over_120": 0
+   },
+   "B3.waypoints": {
+    "items": 84,
+    "max_rel_m": 119.5331,
+    "items_over_120": 0
+   }
+  },
+  "W00_c1195": {
+   "A1.waypoints": {
+    "items": 82,
+    "max_rel_m": 119.5521,
+    "items_over_120": 0
+   },
+   "B2.waypoints": {
+    "items": 53,
+    "max_rel_m": 119.5329,
+    "items_over_120": 0
+   },
+   "B3.waypoints": {
+    "items": 84,
+    "max_rel_m": 119.5328,
+    "items_over_120": 0
+   }
+  }
+ },
+ "skip_k": {
+  "s=96.995,R=200.0": 5,
+  "s=96.995,R=120.0": 3,
+  "s=96.591,R=200.0": 5,
+  "s=96.591,R=120.0": 3
+ },
+ "skip_sequence_identity": {
+  "k=5": {
+   "identity_up_to_n": 5,
+   "first_differing_n": 6,
+   "first_differing_seq": [
+    0,
+    5,
+    1,
+    2,
+    3,
+    4
+   ]
+  },
+  "k=3": {
+   "identity_up_to_n": 3,
+   "first_differing_n": 4,
+   "first_differing_seq": [
+    0,
+    3,
+    1,
+    2
+   ]
+  }
+ },
+ "wind_triangle_W5_from270": {
+  "A_pioneer_Va21.5": {
+   "east": 26.5,
+   "west": 16.5,
+   "north": 20.911,
+   "south": 20.911,
+   "east_minus_west": 10.0
+  },
+  "B_hero_Va19.0": {
+   "east": 24.0,
+   "west": 14.0,
+   "north": 18.33,
+   "south": 18.33,
+   "east_minus_west": 10.0
+  }
+ },
+ "c4_params": {
+  "rows": 102,
+  "per_uav": {
+   "A1": 34,
+   "B2": 34,
+   "B3": 34
+  },
+  "all_ok": true,
+  "param_file_lines": {
+   "A1.param": 32,
+   "B2.param": 32,
+   "B3.param": 32
+  }
+ },
+ "flown_min_sep_all_trials": {
+  "HV4SITL10": 304.2,
+  "HV4SITL12": 485.1,
+  "HV4SITL13": 150.8,
+  "HV4SITL15": 104.2,
+  "HV4SITL3": 154.6,
+  "HV4SITL4": 541.3,
+  "HV4SITL5": 311.7,
+  "HV4SITL7": 325.6,
+  "HV4SITL8": 293.8,
+  "HV4SITL9": 239.5
+ },
+ "flown_min_sep_smallest": 104.2,
+ "HV4SITL16_has_separation_artifact": false,
+ "noenv_vs_HV4SITL15": {
+  "identical": [
+   "A1.param",
+   "A1.plan",
+   "A1.waypoints",
+   "A1_fence.txt",
+   "A1_rally.txt",
+   "B2.param",
+   "B2.plan",
+   "B2.waypoints",
+   "B2_fence.txt",
+   "B2_rally.txt",
+   "B3.param",
+   "B3.plan",
+   "B3.waypoints",
+   "B3_fence.txt",
+   "B3_rally.txt"
+  ],
+  "differing": [
+   "mission_summary.json"
+  ]
+ },
+ "beamidp_makespan_estimate": {
+  "artifact_field_makespan_sequential_estimate_s": 2541.8,
+  "per_aircraft_method_s": 2532.58,
+  "per_aircraft_shifted_landing_s": {
+   "A1": 2436.12,
+   "B2": 2532.58,
+   "B3": 2170.82
+  },
+  "per_aircraft_turn_time_deltas_s": {
+   "B3": 178.13,
+   "A1": 218.48,
+   "B2": 184.54
+  },
+  "planned_makespan_s": 2348.04,
+  "note": "two estimators disagree: the JSON field spreads the fleet turn-time delta, the prose adds each aircraft's own delta to its own landing time"
+ },
+ "beamidp_trigger_per_cell": {
+  "Z1_1|B": {
+   "cls": "B",
+   "uav": "B3",
+   "n": 13,
+   "k": 3,
+   "triggers": true
+  },
+  "Z2_1|A": {
+   "cls": "A",
+   "uav": "A1",
+   "n": 6,
+   "k": 5,
+   "triggers": true
+  },
+  "Z2_1_B_k6|B": {
+   "cls": "B",
+   "uav": "B2",
+   "n": 7,
+   "k": 3,
+   "triggers": true
+  },
+  "Z3_1|A": {
+   "cls": "A",
+   "uav": "A1",
+   "n": 7,
+   "k": 5,
+   "triggers": true
+  },
+  "Z3_1_B_k7|B": {
+   "cls": "B",
+   "uav": "B2",
+   "n": 6,
+   "k": 3,
+   "triggers": true
+  }
+ },
+ "paper_cell_orders_n_gt_1": {
+  "Z2_1_B_k1|B": {
+   "sequential": [
+    0,
+    1
+   ],
+   "skip_k_fixed": [
+    0,
+    1
+   ],
+   "beam_idp_planned": [
+    1,
+    0
+   ],
+   "held_karp_opt": [
+    0,
+    1
+   ]
+  },
+  "Z3_1_B_k1|B": {
+   "sequential": [
+    0,
+    1
+   ],
+   "skip_k_fixed": [
+    0,
+    1
+   ],
+   "beam_idp_planned": [
+    0,
+    1
+   ],
+   "held_karp_opt": [
+    1,
+    0
+   ]
+  },
+  "Z4_1_B_k1|B": {
+   "sequential": [
+    0,
+    1
+   ],
+   "skip_k_fixed": [
+    0,
+    1
+   ],
+   "beam_idp_planned": [
+    1,
+    0
+   ],
+   "held_karp_opt": [
+    1,
+    0
+   ]
+  }
+ },
+ "gitignore_status": {
+  "HV4SITL15": "trackable",
+  "HV4SITL16": "trackable",
+  "HV4SITL17": "trackable",
+  "HV4W00": "IGNORED",
+  "HV4W05": "IGNORED",
+  "HV4W55": "IGNORED",
+  "HV4W55S": "IGNORED",
+  "HV4W55R": "IGNORED",
+  "BEAMIDP1": "IGNORED",
+  "PAPERPLAN1": "IGNORED"
+ },
+ "benchmark_csv": {
+  "path": "research/cpp_benchmark/results/project_rows_5e0295f5_dirty.csv",
+  "exists": true,
+  "git_ignored": false,
+  "tracked": false,
+  "bench_py_dirty": true,
+  "swarm_coordinator_md5": "961103cb1ffeb57606568aeb868e1515"
+ },
+ "machine": {
+  "wind_parm_present": [],
+  "lastlog": "14"
+ }
+}

@@ -1,0 +1,243 @@
+C7 -- cost function wording.  Evidence pack (read-only audit, no SITL run).
+Label: c7_costfn      Date: 2026-09-21      Repo branch: quad_swarm @ 5e0295f
+Files in this directory:
+  probe_costfn.py / probe_costfn.out.txt   R_eff(W), span coefficient k, wind triangle, turn factors, export check
+  probe_legs.py    / probe_legs.out.txt    per-leg wind-triangle audit of the exported HV4SITL16 mission
+  probe_flown.py   / probe_flown.out.txt   airspeed vs groundspeed actually flown in HV4SITL16
+All three are pure-python, deterministic, < 3 s each.  Nothing was modified outside this directory.
+
+===============================================================================
+1. WHAT THE TIME COST ACTUALLY COMPUTES  -- full wind triangle, NOT headwind-only
+===============================================================================
+
+hv_dccpp/wind.py:278-291  (the single definition of ground speed used everywhere)
+
+    def ground_speed(theta_rad, v_air_mps, wind_xy):
+        _, w_par, w_perp = _components(theta_rad, wind_xy)
+        rad = v_air_mps * v_air_mps - w_perp * w_perp
+        out = np.where(rad > 0.0, np.sqrt(...) + w_par, np.nan)
+
+hv_dccpp/wind.py:271-273  (component decomposition; theta = TRACK bearing, ENU atan2(dx,dy))
+
+        w_par  = wx * st + wy * ct        # w . t_hat   (along-track)
+        w_perp = wx * ct - wy * st        # w . n_hat   (cross-track, right normal)
+
+    =>  V_g(theta) = sqrt(V_a^2 - W_perp^2) + W_par          both components, signed.
+        Headwind (theta = beta): V_a - W.  Tailwind: V_a + W.  Pure crosswind: sqrt(V_a^2 - W^2).
+
+hv_dccpp/wind.py:294-306  heading_from_track: psi = theta - arcsin(W_perp / V_a)  (crab angle)
+
+Leg times, hv_dccpp/wind.py:370-388 (line) and 390-421 (arc):
+        time_line = L / V_g(theta)
+        time_arc  = sum_j  R * delta / V_g(theta_j),  midpoint Riemann, delta <= cfg.dtheta_int_rad
+
+Consumers -- every cost in the planner goes through this:
+        hv_dccpp/costs.py:81-92    _vg_array   (vectorised copy of the same formula)
+        hv_dccpp/costs.py:370-386  op_cost     t = strip.length_m / V_g(theta_dir)
+        hv_dccpp/costs.py:388-419  _route_cost t = path_time(path, va, wxy, z_mid)  (transfer / entry / RTB)
+        hv_dccpp/costs.py:842+     CostCache   -> hv_dccpp/allocate.py:_chain -> planner makespan
+        hv_dccpp/costs.py:95-119   v_air_star  picks V_a* so that V_g <= sensor ground-speed cap
+
+VERDICT: the implementation is a full two-component wind triangle.  The abstract word
+"迎風" (headwind) is wrong about the code; the body's "含風地速" is right.  Note both are
+also incomplete as descriptions, because V_g feeds BOTH the straight legs and the arc
+integral, and V_a itself is re-selected per strip (v_air_star).
+
+Measured (probe_costfn.out.txt section 3), scenario wind 5 m/s FROM 270 deg, Pioneer V_a=21.5:
+    track   dirn            W_par    W_perp   V_g       t/1000 m   vs calm    crab
+      0     N                0.000    5.000   20.911    47.823 s    +2.82%   -13.448 deg
+     90     E  (downwind)    5.000   -0.000   26.500    37.736 s   -18.87%    +0.000 deg
+    180     S               -0.000   -5.000   20.911    47.823 s    +2.82%   +13.448 deg
+    270     W  (upwind)     -5.000    0.000   16.500    60.606 s   +30.30%    +0.000 deg
+A headwind-only model would have printed V_g = 16.500 on every one of those rows.
+
+===============================================================================
+2. R_eff -- same wind field, but MAGNITUDE ONLY, and INERT at the paper's 5 m/s
+===============================================================================
+
+hv_dccpp/platform.py:296-300
+
+    def r_eff(self, wind_speed_mps: float) -> float:
+        w = max(0.0, float(wind_speed_mps))
+        return max(self.turn_radius_planning_m,
+                   self.turn_radius_theoretical_m * (1.0 + w / self.cruise_airspeed_mps) ** 2)
+
+hv_dccpp/platform.py:302-304   W* = V_a (sqrt(R_plan/R_theo) - 1)
+hv_dccpp/wind.py:317-333       r_eff_wind_speed(): scalar W_R,c from the layer band, policy
+                               cfg.r_eff_wind_policy, default "max_layer" (hv_dccpp/mission.py:1034)
+hv_dccpp/costs.py:945          self.W_R[cls] = r_eff_wind_speed(...)   -> spec.r_eff(W_R)
+hv_dccpp/decompose.py:241-245  r_eff_for_class(): same
+hv_dccpp/dubins.py:619-624     skip_k(s, R) = max(1, ceil(2R/s))   <- the "span coefficient"
+                               called from allocate.py:228, decompose.py:548, decompose.py:825
+
+Constants actually in the tree (hv_dccpp/platform.py PLATFORM_PIONEER / PLATFORM_HERO):
+    Pioneer (A): V_a 21.5  R_theo 130.0  R_plan 200.0  phi_max 20 deg  V_a,min 18  V_a,max 35
+    HERO    (B): V_a 19.0  R_theo  75.0  R_plan 120.0  phi_max 25 deg  V_a,min 16  V_a,max None
+
+Computed (probe_costfn.out.txt section 1):
+     W [m/s]      A R_eff   A raw     bound        B R_eff   B raw     bound
+       0.00       200.00    130.00    R_plan        120.00    75.00    R_plan
+       5.00       200.00    197.50    R_plan        120.00   119.67    R_plan   <-- paper's wind
+       5.17       200.04    200.04    wind          121.37   121.37    wind
+       8.00       244.74    244.74    wind          151.45   151.45    wind
+    W* = 5.1675 m/s (A), 5.0333 m/s (B)
+
+    ==> At the paper's assumed 5 m/s, R_eff(5) == R_eff(0) == R_plan for BOTH configurations.
+        The wind inflation term contributes exactly 0 m.
+
+CONFIRMED IN THE PUBLISHED ARTIFACTS (not just re-computed):
+    runs/artifacts/HV4SITL16/plan/A1.param:  RTL_RADIUS,200   WP_LOITER_RAD,200
+    runs/artifacts/HV4SITL16/plan/B2.param:  RTL_RADIUS,120   WP_LOITER_RAD,120
+    runs/artifacts/HV4SITL16/plan/B3.param:  RTL_RADIUS,120   WP_LOITER_RAD,120
+    (the exporter comment on those lines literally says "RTL_RADIUS: RTL loiter radius = R_eff [m]")
+    => the R_eff the paper flew with is 200 / 120 m = the still-air planning radii.
+
+Span coefficient at s = 97.0 m (probe_costfn.out.txt section 2):
+    W = 0.0 -> A k=5, B k=3        W = 5.0 -> A k=5, B k=3     (the paper's "Pioneer 5, HERO 3")
+    W = 8.0 -> A k=6, B k=4        W = 10.0 -> A k=6, B k=4
+    => the published k values are the still-air values; wind first changes them at W > W*.
+
+ASYMMETRY (answers "is the wind assumption applied consistently to both?"):
+    time cost : wind VECTOR at the leg altitude, direction-dependent, both components.
+    R_eff     : wind SPEED only (a scalar max over the layer band), direction-independent,
+                then clamped from below by R_plan.
+    Same WindField object, two different reductions.  Both are deliberate (R_eff is a
+    worst-case bound, the time cost is a per-leg estimate) but the paper currently reads as
+    if one wind model produced both.
+
+===============================================================================
+3. WHAT IS COMMANDED TO THE FLIGHT CONTROLLER, AND WHAT THE SITL FLEW
+===============================================================================
+
+3a. The HARVEST exporter is CORRECT -- it commands AIRSPEED.
+
+hv_dccpp/ardupilot.py:653
+    items.append(_item(0, MAV_CMD_DO_CHANGE_SPEED, MAV_FRAME_GLOBAL_RELATIVE_ALT,
+                       (0.0, float(p.v_air), -1.0, 0.0)))
+                        ^^^ param1 = 0.0 = SPEED_TYPE_AIRSPEED
+
+Verified in the paper's own evidence (probe_costfn.out.txt section 6) --
+every exported mission carries exactly one speed command, at cruise airspeed:
+    HV4SITL16/plan/A1.waypoints  seq3 cmd178 param1=0 param2=21.5
+    HV4SITL16/plan/B2.waypoints  seq3 cmd178 param1=0 param2=19
+    HV4SITL16/plan/B3.waypoints  seq3 cmd178 param1=0 param2=19
+    (same in HV4SITL15, HV4SITL13, HV4SITL11)
+    runs/artifacts/HV4SITL16/plan/A1.param: AIRSPEED_CRUISE,21.5  AIRSPEED_MIN,18  AIRSPEED_MAX,35
+Only one command per sortie => v_air_star never moved off cruise: the sensor ground-speed
+cap never bound in this scenario.
+
+3b. The LEGACY GUI exporter still has the groundspeed defect -- in the MAIN checkout.
+
+mission/vtol_mission_exporter.py:130-136  (working tree, today)
+        # ── (1) DO_CHANGE_SPEED — 設定巡航空速 ─────────────────
+        #   param1=1.0 (空速), param2=速度(m/s), param3=-1(油門不變)      <-- comment is WRONG
+        lines.append(create_waypoint_line(
+            seq=seq, command=_CMD_DO_CHANGE_SPEED,
+            frame=_FRAME_MISSION,
+            param1=1.0, param2=self.cruise_speed_ms, param3=-1.0,          <-- 1 = GROUNDSPEED
+            current=0, autocontinue=1,
+        ))
+The same file's own constant comment at line 39 states the correct enum
+("param1=速度類型(0=AS,1=GS)"), so the file contradicts itself.
+
+The fix EXISTS but only in a worktree, not on quad_swarm:
+    .claude/worktrees/suspicious-haibt-083b38/mission/vtol_mission_exporter.py:43-48,118-124
+        _SPEED_TYPE_AIRSPEED    = 0
+        _SPEED_TYPE_GROUNDSPEED = 1
+        ...  param1=float(_SPEED_TYPE_AIRSPEED),
+      plus a lock test .../tests/test_vtol_exporter_speed_type.py  (absent from the main tree)
+      and a measured note: "2026-09-17 run9 SimOnHW 實測：param1=1、20 m/s 把 Hero 的
+      MIN_GROUNDSPEED 0->20，空速目標被抬離 AIRSPEED_CRUISE 18."
+
+Callers of the defective exporter: ui/main_window.py:6224 and :7830 (the GUI mission download
+and the Cesium preview).  NOT used by scripts/hv_sitl_run.py, which calls hv_dccpp.export_all /
+ap.plan_to_mission_items (scripts/hv_sitl_run.py:287, :557).
+
+=> The paper's SITL results are NOT contaminated by this bug.  But the paper claims
+   "匯出至 ArduPilot QuadPlane" as a system capability, and the GUI path of that capability
+   still commands groundspeed today.
+
+3c. What the SITL actually flew: airspeed held, zero wind.
+
+probe_flown.out.txt, cruise samples (AUTO, rel_alt >= 90 m, airspeed >= 12 m/s):
+                 n     airspeed mean      groundspeed mean    Vg - Va mean
+    A1          457    21.3319 (cmd 21.5)   21.7603            +0.4284  (sd 0.1064)
+    B2          376    18.8516 (cmd 19.0)   19.2259            +0.3743  (sd 0.0955)
+    B3          617    18.9072 (cmd 19.0)   19.2946            +0.3874  (sd 0.0739)
+East-vs-west mean groundspeed difference (90-deg sectors):
+    A1 0.4526 m/s,  B2 0.3694 m/s,  B3 0.2265 m/s
+A real 5 m/s west wind would have produced an east-west difference of 10.0 m/s
+(A 26.5 vs 16.5;  B 24.0 vs 14.0).
+The constant +0.37..+0.43 m/s Vg-Va offset is a density/EAS-vs-TAS artefact at ~120 m, not wind.
+NOTE: docs/hv_dccpp/AASRC2026_abstract/cowork_brief.md:276 states "東西向地速差 0.008 m/s".
+That number does not reproduce with this sector method (0.23-0.45 m/s).  Either figure still
+falsifies "the wind triangle was exercised"; the 0.008 value should be re-derived before it
+goes in the paper.
+
+===============================================================================
+4. HOW BIG THE WIND ASSUMPTION ACTUALLY IS  (why the "agreement" is not evidence)
+===============================================================================
+
+probe_legs.out.txt -- reconstructing every cruise leg from the exported waypoints and
+evaluating the SAME ground_speed() the planner used:
+
+    aircraft  legs   polyline length   t @ 5 m/s W wind   t calm       delta     t @ 8 m/s W
+    A1         73        10341.5 m         506.24 s       481.00 s    +5.25%     551.85 s (+14.73%)
+    B2         45         7957.3 m         448.26 s       418.81 s    +7.03%     504.00 s (+20.34%)
+    B3         73        12498.6 m         704.11 s       657.82 s    +7.04%     791.72 s (+20.35%)
+    fleet               30797.4 m        1658.63 s      1557.63 s    +6.48%    1847.55 s (+18.61%)
+(planner's own distances, plan/mission_summary.json: A1 10292.997 m -- my polyline is +0.5%
+ because it chords the Dubins arcs; times above are leg-sums only, no VTOL/transition/hold.)
+
+Length-weighted track histogram -- the strips run EAST-WEST, i.e. ALONG the assumed wind:
+    A1  E 4051 m + W 3764 m = 7815 m (75.6% of length);  N+S only 797 m (7.7%)
+    B2  E 3303 m + W 3231 m = 6534 m (82.1%);            N+S 409 m (5.1%)
+    B3  E 5104 m + W 5064 m = 10168 m (81.4%);           N+S 728 m (5.8%)
+Single E leg is -18.87% (A) / -20.83% (B) and the paired W leg +30.30% / +35.71%; the pair
+nets +5.718% (A) / +7.440% (B).  The cancellation the table note admits to is REAL but
+INCOMPLETE -- the residual is the Jensen term 2V_a/(V_a^2-W^2) > 2/V_a.
+
+Against Table 2:
+    planned makespan 1260.4 s, SITL 1268.0 s  -> gap +7.6 s (+0.60%)
+    A1 t_takeoff 656.0 s, t_land 1260.4 s (release_schedule.json) -> A1 sortie 604.4 s
+    A1's wind budget alone is 25.24 s = 3.3x the entire reported plan-vs-SITL gap.
+=> The "makespan matched to 7.6 s" result cannot be read as validating the wind cost model.
+   [The inference that ~25 s of un-modelled SITL-side cost cancelled it is an ESTIMATE;
+    only the 25.24 s and the 7.6 s are measured.]
+
+Reference numbers for a wind re-run (probe_costfn.out.txt sections 4-5):
+    5 m/s W: A E 26.500 / W 16.500 / N 20.911 ;  B E 24.000 / W 14.000 / N 18.330
+    8 m/s W: A E 29.500 / W 13.500 / N 19.956 ;  B E 27.000 / W 11.000 / N 17.234
+    8 m/s W also lifts R_eff off the floor: A 244.74 m, B 151.45 m  (and k 5->6, 3->4)
+    circle_time_factor: W=5 A 1.042733 B 1.055555 ; W=8 A 1.119419 B 1.159679
+Safety check for the re-run: at 8 m/s headwind airspeed stays 21.5/19.0 (TECS holds airspeed),
+so AIRSPEED_MIN 18/16 and Q_ASSIST_SPEED 17 are not approached.  Groundspeed does drop to
+11.0 m/s for HERO upwind, which lengthens every upwind leg by 1/(1-8/19) = 1.73x.
+
+===============================================================================
+5. WHERE THE PAPER TEXT STANDS TODAY
+===============================================================================
+
+The in-repo draft docs/hv_dccpp/AASRC2026_abstract/cowork_brief.md ALREADY has the right
+formula and the right abstract noun:
+    line  81 (abstract): "HARVEST 結合含風時間成本、..."           <- "含風時間成本", not "迎風"
+    line 131 (body):     "時間成本採含風地速[5]與有效半徑 R_eff 之 Dubins 路徑[6]"
+    line 137 (eq. 3):    V_g(theta)=sqrt(V_a^2-W_perp^2)+W_par, t = sum L/V_g + sum R_eff*delta/V_g
+    line 140:            "W_par、W_perp 為風速之航跡切向與法向分量，delta 為弧段步長（<=5 度）"
+    line  93 (intro):    "(i) 以各構型含風有效轉彎半徑計算作業時間"
+
+grep for "迎風" across docs/, runs/, scratchpad/ returns ZERO hits.  The advisor's quoted
+abstract sentence ("HARVEST 之成本函數採迎風飛行時間") is not in the repository.
+docs/hv_dccpp/AASRC2026_abstract/AASRC2026-投稿格式_加長型摘要_.doc is the BLANK CONFERENCE
+TEMPLATE -- `file` reports 287 words / 2 pages, Title "2019|NQ|", Author "Chien-Chun Hung",
+created 2026-05-12.  The submitted Word draft is therefore NOT under version control and has
+drifted from cowork_brief.md.  That drift is itself the root cause of C7 and probably of C1
+and C4 as well.
+
+Remaining text defects that ARE in the repo:
+  (a) intro line 93 "(i) 以各構型含風有效轉彎半徑計算作業時間" collapses two different things
+      (the per-leg wind triangle and the worst-case R_eff bound) into one clause, and claims
+      a wind effect on R_eff that is exactly zero at the operating point.
+  (b) eq. (3) writes the arc term with R_eff but the text never defines R_eff (this is C6).
+  (c) "（公式值：Pioneer 5、HERO 3）" is presented right after the wind discussion, but those
+      k values are the still-air values.

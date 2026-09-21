@@ -1,0 +1,491 @@
+{
+ "trial": "HV4W55",
+ "dir": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\HV4W55",
+ "gates": {
+  "G1_params": {
+   "n_rows": 102,
+   "n_ok": 102,
+   "expected_rows": 102,
+   "bad": [],
+   "pass": true
+  },
+  "G2_wind_readback": {
+   "n_rows": 15,
+   "n_ok": 15,
+   "expected_rows": 15,
+   "bad": [],
+   "mismatched": [],
+   "commanded": {
+    "SIM_WIND_SPD": 5.0,
+    "SIM_WIND_DIR": 270.0,
+    "SIM_WIND_TURB": 0.0,
+    "SIM_WIND_T": 1.0,
+    "MIN_GROUNDSPEED": 0.0
+   },
+   "plan_wind": [
+    5.0,
+    270.0
+   ],
+   "min_groundspeed_actuals": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "min_groundspeed_all_zero": true,
+   "rows": [
+    {
+     "uav": "A1",
+     "param": "SIM_WIND_SPD",
+     "expected": 5.0,
+     "actual": 5.0,
+     "ok": true
+    },
+    {
+     "uav": "A1",
+     "param": "SIM_WIND_DIR",
+     "expected": 270.0,
+     "actual": 270.0,
+     "ok": true
+    },
+    {
+     "uav": "A1",
+     "param": "SIM_WIND_TURB",
+     "expected": 0.0,
+     "actual": 0.0,
+     "ok": true
+    },
+    {
+     "uav": "A1",
+     "param": "SIM_WIND_T",
+     "expected": 1.0,
+     "actual": 1.0,
+     "ok": true
+    },
+    {
+     "uav": "A1",
+     "param": "MIN_GROUNDSPEED",
+     "expected": 0.0,
+     "actual": 0.0,
+     "ok": true
+    },
+    {
+     "uav": "B2",
+     "param": "SIM_WIND_SPD",
+     "expected": 5.0,
+     "actual": 5.0,
+     "ok": true
+    },
+    {
+     "uav": "B2",
+     "param": "SIM_WIND_DIR",
+     "expected": 270.0,
+     "actual": 270.0,
+     "ok": true
+    },
+    {
+     "uav": "B2",
+     "param": "SIM_WIND_TURB",
+     "expected": 0.0,
+     "actual": 0.0,
+     "ok": true
+    },
+    {
+     "uav": "B2",
+     "param": "SIM_WIND_T",
+     "expected": 1.0,
+     "actual": 1.0,
+     "ok": true
+    },
+    {
+     "uav": "B2",
+     "param": "MIN_GROUNDSPEED",
+     "expected": 0.0,
+     "actual": 0.0,
+     "ok": true
+    },
+    {
+     "uav": "B3",
+     "param": "SIM_WIND_SPD",
+     "expected": 5.0,
+     "actual": 5.0,
+     "ok": true
+    },
+    {
+     "uav": "B3",
+     "param": "SIM_WIND_DIR",
+     "expected": 270.0,
+     "actual": 270.0,
+     "ok": true
+    },
+    {
+     "uav": "B3",
+     "param": "SIM_WIND_TURB",
+     "expected": 0.0,
+     "actual": 0.0,
+     "ok": true
+    },
+    {
+     "uav": "B3",
+     "param": "SIM_WIND_T",
+     "expected": 1.0,
+     "actual": 1.0,
+     "ok": true
+    },
+    {
+     "uav": "B3",
+     "param": "MIN_GROUNDSPEED",
+     "expected": 0.0,
+     "actual": 0.0,
+     "ok": true
+    }
+   ],
+   "pass": true
+  },
+  "G3_spawn": {
+   "max_err_m": 0.21,
+   "n": 3,
+   "all_ok": true,
+   "pass": true
+  },
+  "G4_mission_items": {
+   "sent": {
+    "A1": 82,
+    "B2": 53,
+    "B3": 84
+   },
+   "read_back": {
+    "A1": 82,
+    "B2": 53,
+    "B3": 84
+   },
+   "expected": {
+    "A1": 82,
+    "B2": 53,
+    "B3": 84
+   },
+   "all_ok": true,
+   "pass": true
+  },
+  "G5_landed": {
+   "report_status": "GO_WITH_WARNINGS",
+   "report_errors": [],
+   "mode_change_rejected": [],
+   "link_lost": [],
+   "final_state": {
+    "A1": {
+     "final_alt_m": -0.07,
+     "final_armed": false
+    },
+    "B2": {
+     "final_alt_m": 0.14,
+     "final_armed": false
+    },
+    "B3": {
+     "final_alt_m": -0.01,
+     "final_armed": false
+    }
+   },
+   "pass": true
+  },
+  "H3_rtl_radius": {
+   "values": {
+    "A1": 200.0,
+    "B2": 120.0,
+    "B3": 120.0
+   },
+   "pass": true
+  },
+  "H2_below_120": {
+   "max_over_fleet_m": 119.67,
+   "per_uav": {
+    "A1": 119.6,
+    "B2": 119.64,
+    "B3": 119.67
+   },
+   "pass": true,
+   "note": "flight.csv is ~1 Hz; the dataflash figure in *_binalt.json is the authoritative one"
+  },
+  "G6_sampling": {
+   "per_uav": {
+    "A1": {
+     "median_dt_s": 1.0,
+     "p95_dt_s": 1.0
+    },
+    "B2": {
+     "median_dt_s": 1.0,
+     "p95_dt_s": 1.0
+    },
+    "B3": {
+     "median_dt_s": 1.0,
+     "p95_dt_s": 1.0
+    }
+   },
+   "pass": true
+  },
+  "H1_planned_makespan": {
+   "expected_s": 1260.45,
+   "actual_s": 1260.453960577981,
+   "delta_s": 0.004,
+   "pass": true
+  },
+  "S_separation": {
+   "flown_min_h_m": 103.8,
+   "d_v_at_min_m": 28.4,
+   "pair": [
+    "B2",
+    "B3"
+   ],
+   "n_violations": 0,
+   "step_s": 2.0,
+   "planned_min_sep_h_m": 105.69924202560053,
+   "planned_minus_flown_m": 1.899,
+   "min_sep_v_m_planned": Infinity,
+   "pass": true,
+   "caveat": "step_s=2.0 with linear interpolation makes the horizontal distance an UPPER bound"
+  }
+ },
+ "measured": {
+  "fence_alt_max": "150.0",
+  "H1_exported_max_rel_alt_m": {
+   "A1": {
+    "n_rel_items": 81,
+    "max_rel_alt_m": 119.552629,
+    "n_items_above_120": 0
+   },
+   "B2": {
+    "n_rel_items": 52,
+    "max_rel_alt_m": 119.53317,
+    "n_items_above_120": 0
+   },
+   "B3": {
+    "n_rel_items": 83,
+    "max_rel_alt_m": 119.533146,
+    "n_items_above_120": 0
+   }
+  },
+  "H2_flown_max_rel_alt_m_flightcsv": {
+   "A1": {
+    "max_rel_alt_m": 119.6,
+    "flown_km": 10.6826,
+    "t_first_s": 73.04,
+    "t_last_s": 1367.04,
+    "n_samples": 1341
+   },
+   "B2": {
+    "max_rel_alt_m": 119.64,
+    "flown_km": 8.2914,
+    "t_first_s": 73.04,
+    "t_last_s": 1367.04,
+    "n_samples": 1341
+   },
+   "B3": {
+    "max_rel_alt_m": 119.67,
+    "flown_km": 12.8977,
+    "t_first_s": 73.04,
+    "t_last_s": 1366.04,
+    "n_samples": 1341
+   }
+  },
+  "wind_probe": {
+   "A1": {
+    "n_cruise_samples": 483,
+    "median_gs_minus_as_all": -3.74,
+    "eastbound_45_135": {
+     "n": 165,
+     "median_gs_minus_as": 5.43
+    },
+    "westbound_225_315": {
+     "n": 254,
+     "median_gs_minus_as": -4.55
+    },
+    "northbound_315_45": {
+     "n": 37,
+     "median_gs_minus_as": -1.83
+    },
+    "southbound_135_225": {
+     "n": 27,
+     "median_gs_minus_as": -1.26
+    },
+    "east_minus_west": 9.98,
+    "implied_wind_along_EW_mps": 4.99,
+    "south_minus_north": 0.57,
+    "implied_wind_along_NS_mps": 0.285,
+    "fc_wind_est_median_mps": 4.886,
+    "fc_wind_dir_from_median_deg": 270.1,
+    "n_fc_wind_samples": 599
+   },
+   "B2": {
+    "n_cruise_samples": 430,
+    "median_gs_minus_as_all": -4.525,
+    "eastbound_45_135": {
+     "n": 144,
+     "median_gs_minus_as": 5.35
+    },
+    "westbound_225_315": {
+     "n": 250,
+     "median_gs_minus_as": -4.61
+    },
+    "northbound_315_45": {
+     "n": 13,
+     "median_gs_minus_as": -1.15
+    },
+    "southbound_135_225": {
+     "n": 23,
+     "median_gs_minus_as": 0.1
+    },
+    "east_minus_west": 9.96,
+    "implied_wind_along_EW_mps": 4.98,
+    "south_minus_north": 1.25,
+    "implied_wind_along_NS_mps": 0.625,
+    "fc_wind_est_median_mps": 4.892,
+    "fc_wind_dir_from_median_deg": 270.1,
+    "n_fc_wind_samples": 536
+   },
+   "B3": {
+    "n_cruise_samples": 668,
+    "median_gs_minus_as_all": -4.485,
+    "eastbound_45_135": {
+     "n": 226,
+     "median_gs_minus_as": 5.37
+    },
+    "westbound_225_315": {
+     "n": 384,
+     "median_gs_minus_as": -4.6
+    },
+    "northbound_315_45": {
+     "n": 29,
+     "median_gs_minus_as": -0.46
+    },
+    "southbound_135_225": {
+     "n": 29,
+     "median_gs_minus_as": 0.06
+    },
+    "east_minus_west": 9.97,
+    "implied_wind_along_EW_mps": 4.985,
+    "south_minus_north": 0.52,
+    "implied_wind_along_NS_mps": 0.26,
+    "fc_wind_est_median_mps": 4.89,
+    "fc_wind_dir_from_median_deg": 270.1,
+    "n_fc_wind_samples": 800
+   }
+  },
+  "planned": {
+   "makespan_s": 1260.453960577981,
+   "t_land_s": {
+    "A1": 1260.453960577981,
+    "B2": 533.8896541827914,
+    "B3": 894.4910956272638
+   },
+   "t_takeoff_s": {
+    "A1": 656.0,
+    "B2": 0.0,
+    "B3": 106.0
+   },
+   "distance_km": {
+    "A1": 10.2936,
+    "B2": 7.9265,
+    "B3": 12.4406
+   },
+   "total_km": 30.6607,
+   "n_items": {
+    "A1": 82,
+    "B2": 53,
+    "B3": 84
+   },
+   "strips": {
+    "A1": 3,
+    "B2": 2,
+    "B3": 4
+   }
+  },
+  "flight_summary": [
+   {
+    "uav": "A1",
+    "class": "Pioneer",
+    "clock_offset_s": 73.0,
+    "flown_t_takeoff_s": 660.0,
+    "plan_t_takeoff_s": 656.0,
+    "plan_t_land_s": 1260.5,
+    "flown_t_land_s": 1294.0,
+    "plan_km": 10.29,
+    "flown_km": 10.68,
+    "peak_alt_m": 119.6,
+    "err_pct": 3.8
+   },
+   {
+    "uav": "B2",
+    "class": "HERO",
+    "clock_offset_s": 73.0,
+    "flown_t_takeoff_s": 6.0,
+    "plan_t_takeoff_s": 0.0,
+    "plan_t_land_s": 533.9,
+    "flown_t_land_s": 570.0,
+    "plan_km": 7.93,
+    "flown_km": 8.29,
+    "peak_alt_m": 119.6,
+    "err_pct": 4.6
+   },
+   {
+    "uav": "B3",
+    "class": "HERO",
+    "clock_offset_s": 73.0,
+    "flown_t_takeoff_s": 109.0,
+    "plan_t_takeoff_s": 106.0,
+    "plan_t_land_s": 894.5,
+    "flown_t_land_s": 929.0,
+    "plan_km": 12.44,
+    "flown_km": 12.9,
+    "peak_alt_m": 119.7,
+    "err_pct": 3.7
+   }
+  ],
+  "flown": {
+   "makespan_s": 1294.0,
+   "t_land_s": {
+    "A1": 1294.0,
+    "B2": 570.0,
+    "B3": 929.0
+   },
+   "t_takeoff_s": {
+    "A1": 660.0,
+    "B2": 6.0,
+    "B3": 109.0
+   },
+   "clock_offset_s": 73.0,
+   "flown_km_report": {
+    "A1": 10.68,
+    "B2": 8.29,
+    "B3": 12.9
+   },
+   "err_pct_report": {
+    "A1": 3.8,
+    "B2": 4.6,
+    "B3": 3.7
+   },
+   "makespan_vs_planned_s": 33.55,
+   "makespan_err_pct": 2.661,
+   "total_km_vs_planned": {
+    "flown": 31.8717,
+    "planned": 30.6607
+   }
+  },
+  "scenario": {
+   "sim_wind": {
+    "spd_mps": 5.0,
+    "dir_from_deg": 270.0,
+    "turb": 0.0,
+    "profile_type": 1.0
+   },
+   "wind": [
+    5.0,
+    270.0
+   ],
+   "altitude_m": 119.5,
+   "h_ceil_m": 119.5,
+   "waiver_max_agl_m": 119.5,
+   "trial": null,
+   "key": "gui_legal_120_1a2b"
+  }
+ },
+ "all_gates_pass": true
+}

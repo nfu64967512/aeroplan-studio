@@ -1,0 +1,9 @@
+S1/n=2 : lambda per cell vs kappa_load  (2 cells x 18 strips, 2 aircraft)
+  kappa=default 0.85  cov=0.5277  lambda={'Z2_1': ['A', 2], 'Z3_1': ['A', 0]}  infeasible={}  J={'Z2_1': 0.5, 'Z3_1': 0.5}
+                        uncovered=[['Z3_1', 'no_feasible_insertion']]
+  kappa=         1.0  cov=0.5277  lambda={'Z2_1': ['A', 2], 'Z3_1': ['A', 0]}  infeasible={}  J={'Z2_1': 0.5, 'Z3_1': 0.5}
+                        uncovered=[['Z3_1', 'no_feasible_insertion']]
+  kappa=         1.2  cov=0.5277  lambda={'Z2_1': ['A', 2], 'Z3_1': ['A', 0]}  infeasible={}  J={'Z2_1': 0.5, 'Z3_1': 0.5}
+                        uncovered=[['Z3_1', 'no_feasible_insertion']]
+  kappa=         1.5  cov=0.0  lambda={'Z2_1': ['A', 1], 'Z3_1': ['A', 1]}  infeasible={}  J={'Z2_1': 0.5, 'Z3_1': 0.5}
+                        uncovered=[['Z2_1', 'no_feasible_insertion'], ['Z3_1', 'no_feasible_insertion']]

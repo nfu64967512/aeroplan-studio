@@ -1,0 +1,26 @@
+{
+ "corrected_by_label": "update_paper",
+ "corrections": {
+  "K6": {
+   "recomputed": {
+    "cost_s": 0.027894,
+    "makespan_119_5_s": 1260.453960577981,
+    "makespan_120_0_s": 1260.4260664854269,
+    "verdict": "+0.0279 s, not +0.02 s"
+   },
+   "replacement": "寫 +0.0279 s，或兩個四位小數值 1 260.4261 → 1 260.4540。",
+   "why_wrong": "四捨五入假影。",
+   "wrong": "「代價只有 +0.02 s 完工時間」"
+  }
+ },
+ "final_text_lives_in": [
+  "runs/artifacts/PAPERPLAN1/update_paper/TABLES_ZH.md",
+  "runs/artifacts/PAPERPLAN1/update_paper/PAPER_TEXT_ZH.md"
+ ],
+ "original": "runs/artifacts/PAPERPLAN1/prep_text/C1_C2_placeholders.md",
+ "original_bytes": 12593,
+ "original_is_unmodified": true,
+ "original_sha256_at_correction_time": "0e393deef7e66c15c7d9af5b9556409bab0ef80acba7addc14f984077163c5d7",
+ "recomputation_scripts": "runs/artifacts/PAPERPLAN1/update_paper/scripts/up_*.py",
+ "what_in_this_file_is_wrong": ":20 與 :33 的 makespan +0.02 s"
+}

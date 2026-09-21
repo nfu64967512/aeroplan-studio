@@ -1,0 +1,23 @@
+PlannerConfig defaults that matter here:
+  multi_sortie = False
+  kappa_load = 0.85
+  t_swap_s = 600.0
+
+--- HARVEST S1/n=2 multi_sortie=False ---
+    coverage=0.5277 max_km=59.06 uncovered=1 validate=False plans=['A1', 'A2']
+    cruise_equiv_km={'A1': 76.27, 'A2': 76.4}
+    strips={'A1': 9, 'A2': 9}  makespan=3224.8 s  (2.2 s to plan)
+--- HARVEST S1/n=2 multi_sortie=True ---
+    coverage=0.5277 max_km=59.06 uncovered=1 validate=False plans=['A1', 'A2']
+    cruise_equiv_km={'A1': 76.27, 'A2': 76.4}
+    strips={'A1': 9, 'A2': 9}  makespan=3224.8 s  (2.2 s to plan)
+--- HARVEST S5/n=8 multi_sortie=False ---
+    coverage=0.617 max_km=67.01 uncovered=4 validate=False plans=['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'A8']
+    cruise_equiv_km={'A1': 84.8, 'A2': 74.79, 'A3': 84.77, 'A4': 74.77, 'A5': 83.9, 'A6': 73.98, 'A7': 83.88, 'A8': 73.96}
+    strips={'A1': 5, 'A2': 4, 'A3': 5, 'A4': 4, 'A5': 5, 'A6': 4, 'A7': 5, 'A8': 4}  makespan=4630.0 s  (49.8 s to plan)
+--- HARVEST S5/n=8 multi_sortie=True ---
+    coverage=0.617 max_km=67.01 uncovered=4 validate=False plans=['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'A8']
+    cruise_equiv_km={'A1': 84.8, 'A2': 74.79, 'A3': 84.77, 'A4': 74.77, 'A5': 83.9, 'A6': 73.98, 'A7': 83.88, 'A8': 73.96}
+    strips={'A1': 5, 'A2': 4, 'A3': 5, 'A4': 4, 'A5': 5, 'A6': 4, 'A7': 5, 'A8': 4}  makespan=4630.0 s  (50.3 s to plan)
+
+wrote C:\Users\joy46\Documents\Projects\aeroplan-studio\runs\artifacts\PAPERPLAN1\prep_baseline_control\out\stepH_multisortie_probe.json

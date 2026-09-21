@@ -1,0 +1,207 @@
+[
+ {
+  "trial": "HV4SITL16",
+  "per_uav": {
+   "A1": {
+    "n_cruise_samples": 458,
+    "median_gs_minus_as_all": 0.44,
+    "max_abs_gs_minus_as": 1.38,
+    "median_airspeed": 21.5,
+    "median_groundspeed": 21.94,
+    "eastbound_45_135": {
+     "n": 194,
+     "median_gs_minus_as": 0.44
+    },
+    "westbound_225_315": {
+     "n": 189,
+     "median_gs_minus_as": 0.42
+    },
+    "east_minus_west": 0.02,
+    "implied_wind_along_EW_mps": 0.01,
+    "fc_wind_est_median_mps": null,
+    "fc_wind_dir_from_median_deg": null
+   },
+   "B2": {
+    "n_cruise_samples": 396,
+    "median_gs_minus_as_all": 0.37,
+    "max_abs_gs_minus_as": 1.39,
+    "median_airspeed": 18.99,
+    "median_groundspeed": 19.39,
+    "eastbound_45_135": {
+     "n": 177,
+     "median_gs_minus_as": 0.38
+    },
+    "westbound_225_315": {
+     "n": 177,
+     "median_gs_minus_as": 0.37
+    },
+    "east_minus_west": 0.01,
+    "implied_wind_along_EW_mps": 0.005,
+    "fc_wind_est_median_mps": null,
+    "fc_wind_dir_from_median_deg": null
+   },
+   "B3": {
+    "n_cruise_samples": 625,
+    "median_gs_minus_as_all": 0.39,
+    "max_abs_gs_minus_as": 1.28,
+    "median_airspeed": 19.0,
+    "median_groundspeed": 19.4,
+    "eastbound_45_135": {
+     "n": 280,
+     "median_gs_minus_as": 0.39
+    },
+    "westbound_225_315": {
+     "n": 282,
+     "median_gs_minus_as": 0.39
+    },
+    "east_minus_west": 0.0,
+    "implied_wind_along_EW_mps": 0.0,
+    "fc_wind_est_median_mps": null,
+    "fc_wind_dir_from_median_deg": null
+   }
+  }
+ },
+ {
+  "trial": "HV4SITL15",
+  "per_uav": {
+   "A1": {
+    "n_cruise_samples": 457,
+    "median_gs_minus_as_all": 0.44,
+    "max_abs_gs_minus_as": 1.52,
+    "median_airspeed": 21.5,
+    "median_groundspeed": 21.94,
+    "eastbound_45_135": {
+     "n": 193,
+     "median_gs_minus_as": 0.44
+    },
+    "westbound_225_315": {
+     "n": 189,
+     "median_gs_minus_as": 0.43
+    },
+    "east_minus_west": 0.01,
+    "implied_wind_along_EW_mps": 0.005,
+    "fc_wind_est_median_mps": null,
+    "fc_wind_dir_from_median_deg": null
+   },
+   "B2": {
+    "n_cruise_samples": 398,
+    "median_gs_minus_as_all": 0.38,
+    "max_abs_gs_minus_as": 1.39,
+    "median_airspeed": 19.0,
+    "median_groundspeed": 19.39,
+    "eastbound_45_135": {
+     "n": 178,
+     "median_gs_minus_as": 0.38
+    },
+    "westbound_225_315": {
+     "n": 177,
+     "median_gs_minus_as": 0.38
+    },
+    "east_minus_west": 0.0,
+    "implied_wind_along_EW_mps": 0.0,
+    "fc_wind_est_median_mps": null,
+    "fc_wind_dir_from_median_deg": null
+   },
+   "B3": {
+    "n_cruise_samples": 625,
+    "median_gs_minus_as_all": 0.39,
+    "max_abs_gs_minus_as": 1.33,
+    "median_airspeed": 19.0,
+    "median_groundspeed": 19.4,
+    "eastbound_45_135": {
+     "n": 279,
+     "median_gs_minus_as": 0.39
+    },
+    "westbound_225_315": {
+     "n": 282,
+     "median_gs_minus_as": 0.39
+    },
+    "east_minus_west": 0.0,
+    "implied_wind_along_EW_mps": 0.0,
+    "fc_wind_est_median_mps": null,
+    "fc_wind_dir_from_median_deg": null
+   }
+  }
+ },
+ {
+  "trial": "HV4SITL13",
+  "per_uav": {
+   "A1": {
+    "n_cruise_samples": 75,
+    "median_gs_minus_as_all": 0.43,
+    "max_abs_gs_minus_as": 0.73,
+    "median_airspeed": 21.5,
+    "median_groundspeed": 21.94,
+    "eastbound_45_135": {
+     "n": 32,
+     "median_gs_minus_as": 0.44
+    },
+    "westbound_225_315": {
+     "n": 33,
+     "median_gs_minus_as": 0.42
+    },
+    "east_minus_west": 0.02,
+    "implied_wind_along_EW_mps": 0.01,
+    "fc_wind_est_median_mps": null,
+    "fc_wind_dir_from_median_deg": null
+   },
+   "B2": {
+    "n_cruise_samples": 74,
+    "median_gs_minus_as_all": 0.375,
+    "max_abs_gs_minus_as": 0.55,
+    "median_airspeed": 19.0,
+    "median_groundspeed": 19.38,
+    "eastbound_45_135": {
+     "n": 33,
+     "median_gs_minus_as": 0.38
+    },
+    "westbound_225_315": {
+     "n": 33,
+     "median_gs_minus_as": 0.37
+    },
+    "east_minus_west": 0.01,
+    "implied_wind_along_EW_mps": 0.005,
+    "fc_wind_est_median_mps": null,
+    "fc_wind_dir_from_median_deg": null
+   },
+   "B3": {
+    "n_cruise_samples": 75,
+    "median_gs_minus_as_all": 0.38,
+    "max_abs_gs_minus_as": 0.7,
+    "median_airspeed": 18.99,
+    "median_groundspeed": 19.38,
+    "eastbound_45_135": {
+     "n": 34,
+     "median_gs_minus_as": 0.385
+    },
+    "westbound_225_315": {
+     "n": 34,
+     "median_gs_minus_as": 0.385
+    },
+    "east_minus_west": 0.0,
+    "implied_wind_along_EW_mps": 0.0,
+    "fc_wind_est_median_mps": null,
+    "fc_wind_dir_from_median_deg": null
+   },
+   "B4": {
+    "n_cruise_samples": 75,
+    "median_gs_minus_as_all": 0.37,
+    "max_abs_gs_minus_as": 0.52,
+    "median_airspeed": 19.0,
+    "median_groundspeed": 19.38,
+    "eastbound_45_135": {
+     "n": 33,
+     "median_gs_minus_as": 0.38
+    },
+    "westbound_225_315": {
+     "n": 33,
+     "median_gs_minus_as": 0.37
+    },
+    "east_minus_west": 0.01,
+    "implied_wind_along_EW_mps": 0.005,
+    "fc_wind_est_median_mps": null,
+    "fc_wind_dir_from_median_deg": null
+   }
+  }
+ }
+]

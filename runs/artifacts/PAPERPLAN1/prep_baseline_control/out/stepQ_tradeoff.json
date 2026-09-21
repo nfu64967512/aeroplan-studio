@@ -1,0 +1,92 @@
+[
+  {
+    "cell": "S1/4",
+    "takeoff_spread_s": 674.0,
+    "last_land_s": 3661.3,
+    "plan_s_dccpp": 0.1,
+    "plan_s_harvest": 34.7,
+    "max_km": 58.92,
+    "max_agl_m": 170.2
+  },
+  {
+    "cell": "S1/8",
+    "takeoff_spread_s": 3242.0,
+    "last_land_s": 5107.9,
+    "plan_s_dccpp": 0.0,
+    "plan_s_harvest": 61.5,
+    "max_km": 36.79,
+    "max_agl_m": 170.21
+  },
+  {
+    "cell": "S1/16",
+    "takeoff_spread_s": 5966.0,
+    "last_land_s": 7258.9,
+    "plan_s_dccpp": 0.0,
+    "plan_s_harvest": 322.8,
+    "max_km": 25.25,
+    "max_agl_m": 170.22
+  },
+  {
+    "cell": "S2/4",
+    "takeoff_spread_s": 548.0,
+    "last_land_s": 3665.3,
+    "plan_s_dccpp": 0.4,
+    "plan_s_harvest": 45.9,
+    "max_km": 63.2,
+    "max_agl_m": 170.21
+  },
+  {
+    "cell": "S2/8",
+    "takeoff_spread_s": 2944.0,
+    "last_land_s": 4940.2,
+    "plan_s_dccpp": 0.0,
+    "plan_s_harvest": 65.6,
+    "max_km": 40.58,
+    "max_agl_m": 170.22
+  },
+  {
+    "cell": "S3/4",
+    "takeoff_spread_s": 694.0,
+    "last_land_s": 2576.7,
+    "plan_s_dccpp": 0.0,
+    "plan_s_harvest": 32.9,
+    "max_km": 36.35,
+    "max_agl_m": 170.2
+  },
+  {
+    "cell": "S3/8",
+    "takeoff_spread_s": 1842.0,
+    "last_land_s": 3358.3,
+    "plan_s_dccpp": 0.0,
+    "plan_s_harvest": 178.8,
+    "max_km": 28.88,
+    "max_agl_m": 170.24
+  },
+  {
+    "cell": "S4/4",
+    "takeoff_spread_s": 330.0,
+    "last_land_s": 2834.4,
+    "plan_s_dccpp": 0.1,
+    "plan_s_harvest": 10.2,
+    "max_km": 51.21,
+    "max_agl_m": 170.21
+  },
+  {
+    "cell": "S4/8",
+    "takeoff_spread_s": 2980.0,
+    "last_land_s": 4273.8,
+    "plan_s_dccpp": 0.0,
+    "plan_s_harvest": 58.9,
+    "max_km": 32.5,
+    "max_agl_m": 170.21
+  },
+  {
+    "cell": "S5/16",
+    "takeoff_spread_s": 6460.0,
+    "last_land_s": 9851.3,
+    "plan_s_dccpp": 0.0,
+    "plan_s_harvest": 562.4,
+    "max_km": 68.18,
+    "max_agl_m": 170.21
+  }
+]

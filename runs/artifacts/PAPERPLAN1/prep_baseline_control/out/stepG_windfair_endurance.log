@@ -1,0 +1,43 @@
+================================================================================================
+G1. VERIFY THE VERIFIER -- my wind ruler vs HARVEST's own cruise_equiv_km
+================================================================================================
+
+  HARVEST S1/n=4  (planned in 35.3s, coverage 1.0)
+    uav  mine D_ceq  HARVEST self   ratio  still-air km
+     A1      62.145        76.242   0.815        58.915
+     A2      62.146        76.231   0.815        58.915
+     A3      61.773        75.866   0.814        58.544
+     A4      61.773        75.862   0.814        58.544
+
+  HARVEST S3/n=4  (planned in 34.0s, coverage 1.0)
+    uav  mine D_ceq  HARVEST self   ratio  still-air km
+     A1      38.366        52.492   0.731        36.332
+     A2      38.365        52.491   0.731        36.332
+     A3      38.380        52.506   0.731        36.347
+     A4      38.380        52.505   0.731        36.346
+
+  ratio mine/HARVEST-self over 8 aircraft: min 0.731 max 0.815 mean 0.773
+  NOTE: my ruler charges the CRUISE leg only. HARVEST's own number comes from
+  energy_used_wh, which also carries climb/descent/orbit power, so mine is
+  expected to sit BELOW HARVEST's. A ratio < 1 means my ruler is the LENIENT
+  one, i.e. any overrun it reports for the baseline is a lower bound.
+
+================================================================================================
+G2. THE SAME RULER ON THE DCCPP BASELINE (homogeneous class-A fleet)
+================================================================================================
+    cell | still-air max  D_ceq max  D_use   frac  over/N    cov
+----------------------------------------------------------------
+    S1/2 |        104.25     109.92    133  0.827     0/2    1.0
+    S1/4 |         55.12      58.10    133  0.437     0/4    1.0
+    S1/8 |         32.25      34.01    133  0.256     0/8    1.0
+   S1/16 |         21.47      22.63    133  0.170    0/16    1.0
+    S2/4 |         62.63      64.77    133  0.487     0/4    1.0
+    S2/8 |         34.93      36.18    133  0.272     0/8    1.0
+    S3/4 |         32.36      34.20    133  0.257     0/4    1.0
+    S3/8 |         24.15      25.53    133  0.192     0/8    1.0
+    S4/4 |         44.79      47.19    133  0.355     0/4    1.0
+    S4/8 |         26.45      27.86    133  0.209     0/8    1.0
+    S5/8 |        105.99     111.83    133  0.841     0/8    1.0
+   S5/16 |         63.64      67.12    133  0.505    0/16    1.0
+
+wrote C:\Users\joy46\Documents\Projects\aeroplan-studio\runs\artifacts\PAPERPLAN1\prep_baseline_control\out\stepG_windfair_endurance.json

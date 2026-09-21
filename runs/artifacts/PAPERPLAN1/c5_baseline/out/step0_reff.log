@@ -1,0 +1,19 @@
+ W m/s |   A R_eff    A raw clamped |   B R_eff    B raw clamped
+  0.00 |     200.0    130.0     YES |     120.0     75.0     YES
+  2.00 |     200.0    155.3     YES |     120.0     91.6     YES
+  4.00 |     200.0    182.9     YES |     120.0    109.9     YES
+  5.00 |     200.0    197.5     YES |     120.0    119.7     YES
+  5.03 |     200.0    197.9     YES |     120.0    120.0     YES
+  5.17 |     200.0    200.0      no |     121.4    121.4      no
+  6.00 |     212.7    212.7      no |     129.8    129.8      no
+  8.00 |     244.7    244.7      no |     151.5    151.5      no
+ 10.00 |     279.1    279.1      no |     174.7    174.7      no
+ 12.00 |     315.6    315.6      no |     199.7    199.7      no
+
+W* Pioneer = 5.167 m/s   (R_plan 200.0, R_theo 130.0, Va 21.5)
+W* HERO    = 5.033 m/s   (R_plan 120.0, R_theo 75.0, Va 19.0)
+
+=> at W = 5 m/s (the paper's planning wind) R_eff == R_plan for BOTH classes:
+   A: R_eff(5)=200.0 == R_plan 200.0  (raw 197.5)
+   B: R_eff(5)=120.0 == R_plan 120.0  (raw 119.7)
+   A: R_eff(8)=244.7   B: R_eff(8)=151.5  <- 8 m/s DOES move it

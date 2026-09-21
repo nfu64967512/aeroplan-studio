@@ -1,0 +1,38 @@
+--- runs/artifacts/PAPERPLAN1/prep_beamidp/hv_sitl_scenarios.py.before	2026-09-21 01:22:25.694446200 +0800
++++ scripts/hv_sitl_scenarios.py	2026-09-21 01:22:44.927967500 +0800
+@@ -306,3 +306,35 @@
+     target_gsd=0.05,
+     note="1 Pioneer + 3 HERO，禁航區 + 法規 120 m AGL 無豁免。"
+          "與 HV4SITL7 同幾何同禁航區，只差空域 ⇒ 可直接對照"))
++
++
++# ── Beam-IDP 跳帶排序「真的觸發」的情境（論文 C3 用）───────────────────
++#   ⚠ 為什麼要新開一個情境：跳帶序 `_skip_sequence(n,k)` 在 **k >= n** 時
++#     逐位元等於順序來回掃描（decompose.py:689-693），所以觸發門檻是 **n > k**，
++#     不是論文原本寫的「n >= 3」。gui_legal_120_1a2b 切完之後 A 胞 n=1、
++#     B 胞 n=2，兩邊都 <= k（5 與 3）⇒ 那一趟**從來沒有觸發過**跳帶排序。
++#   這一組把每個胞撐到 n > k：實測 A 胞 n=6/7（k=5）、B 胞 n=6/7/13（k=3）。
++#
++#   與 gui_legal_120_1a2b 的差別**只有幾何**（機隊、風、起降點間距、
++#   min_fw、高度帶、GSD 全部相同），高度上限則依 C1 的結論降到 119.5 m
++#   （coverage_altitude_m 與 waiver_max_agl_m 一起給 ⇒ h_ceil=119.5，
++#    匯出的最高點 119.55 m、實飛預估 < 120 m）。
++#   ⚠ 幾何必須是「三塊各 1600 x 1200 m」而不是一塊大區：
++#     split_area_for_fleet 沿掃描步進軸把母區切成 n_uav 塊，子區再依構型切，
++#     A 大約只拿到該子區的一半條帶 ⇒ 單一大區要 A 胞 n>=6 得 3000 x 3000 m
++#     (9.00 km²、makespan 3842.6 s)；切成三塊只要 5.76 km²、makespan 2348.0 s。
++#     實測淘汰過：三塊 1560x800（A 胞 n=3,3,4）、三塊 1200x1000（A 胞 n=5,5）。
++#   ⚠ trial 故意不取 HV4SITL17，避免與 C1「降上限重飛」那一趟搶編號。
++_add(Scenario(
++    key="beamidp_1a2b_1195", trial="BEAMIDP1", path="gui", n_a=1, n_b=2,
++    areas=[{"area_id": i + 1, "priority": 1.0,
++            "polygon": rect(-2100.0 + i * 2100.0, 0.0, 800.0, 600.0)}
++           for i in range(3)],
++    coverage_altitude_m=119.5, coverage_width_m=150.0, overlap_rate=0.30,
++    waiver_max_agl_m=119.5,
++    min_fw_agl_m={"A": 100.0, "B": 100.0},
++    dh_band_min_m=15.0,
++    target_gsd=0.05,
++    spawn_spread_m=10.0,
++    note="Beam-IDP 跳帶排序觸發情境：三塊 1600x1200 m（5.76 km²）、1 Pioneer + 2 HERO、"
++         "上限 119.5 m。每胞 n > k（A 6/7 > 5、B 6/7/13 > 3）⇒ 跳帶排序真的作用"))

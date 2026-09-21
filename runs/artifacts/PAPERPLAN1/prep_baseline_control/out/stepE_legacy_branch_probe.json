@@ -1,0 +1,431 @@
+{
+  "probe_cells": [
+    [
+      "S1",
+      4
+    ],
+    [
+      "S1",
+      8
+    ],
+    [
+      "S1",
+      16
+    ],
+    [
+      "S3",
+      8
+    ],
+    [
+      "S4",
+      8
+    ]
+  ],
+  "coord_call_totals": {
+    "init": 10,
+    "synchronize": 5,
+    "insert_holding": 36
+  },
+  "rows": [
+    {
+      "scenario": "S1",
+      "n": 4,
+      "mode": "uncoordinated",
+      "branch": "v2",
+      "sec": 0.1,
+      "coverage": 1.0,
+      "max_km": 55.12,
+      "total_km": 217.88,
+      "makespan_s": 2524.138086119796,
+      "n_wp_total": 168,
+      "n_plans": 4,
+      "sep_conflicts": 0,
+      "pad_conflicts": 12,
+      "coord_calls": {
+        "init": 0,
+        "synchronize": 0,
+        "insert_holding": 0
+      }
+    },
+    {
+      "scenario": "S1",
+      "n": 4,
+      "mode": "coordinated",
+      "branch": "v2",
+      "sec": 0.1,
+      "coverage": 1.0,
+      "max_km": 55.12,
+      "total_km": 217.88,
+      "makespan_s": 2524.138086119796,
+      "n_wp_total": 168,
+      "n_plans": 4,
+      "sep_conflicts": 0,
+      "pad_conflicts": 12,
+      "coord_calls": {
+        "init": 1,
+        "synchronize": 0,
+        "insert_holding": 0
+      }
+    },
+    {
+      "scenario": "S1",
+      "n": 4,
+      "mode": "uncoordinated",
+      "branch": "legacy",
+      "sec": 0.1,
+      "coverage": 0.9966,
+      "max_km": 94.05,
+      "total_km": 364.52,
+      "makespan_s": 2293.489376217878,
+      "n_wp_total": 19107,
+      "n_plans": 4,
+      "sep_conflicts": 51,
+      "pad_conflicts": 9,
+      "coord_calls": {
+        "init": 0,
+        "synchronize": 0,
+        "insert_holding": 0
+      }
+    },
+    {
+      "scenario": "S1",
+      "n": 4,
+      "mode": "coordinated",
+      "branch": "legacy",
+      "sec": 0.1,
+      "coverage": 0.9966,
+      "max_km": 95.02,
+      "total_km": 366.46,
+      "makespan_s": 2293.489376217878,
+      "n_wp_total": 19131,
+      "n_plans": 4,
+      "sep_conflicts": 50,
+      "pad_conflicts": 9,
+      "coord_calls": {
+        "init": 1,
+        "synchronize": 1,
+        "insert_holding": 2
+      }
+    },
+    {
+      "scenario": "S1",
+      "n": 8,
+      "mode": "uncoordinated",
+      "branch": "v2",
+      "sec": 0.0,
+      "coverage": 1.0,
+      "max_km": 32.25,
+      "total_km": 232.04,
+      "makespan_s": 1641.5718211528688,
+      "n_wp_total": 228,
+      "n_plans": 8,
+      "sep_conflicts": 5,
+      "pad_conflicts": 40,
+      "coord_calls": {
+        "init": 0,
+        "synchronize": 0,
+        "insert_holding": 0
+      }
+    },
+    {
+      "scenario": "S1",
+      "n": 8,
+      "mode": "coordinated",
+      "branch": "v2",
+      "sec": 0.0,
+      "coverage": 1.0,
+      "max_km": 32.25,
+      "total_km": 232.04,
+      "makespan_s": 1641.5718211528688,
+      "n_wp_total": 228,
+      "n_plans": 8,
+      "sep_conflicts": 5,
+      "pad_conflicts": 40,
+      "coord_calls": {
+        "init": 1,
+        "synchronize": 0,
+        "insert_holding": 0
+      }
+    },
+    {
+      "scenario": "S1",
+      "n": 8,
+      "mode": "uncoordinated",
+      "branch": "legacy",
+      "sec": 0.1,
+      "coverage": 0.9965,
+      "max_km": 47.83,
+      "total_km": 330.59,
+      "makespan_s": 1365.640624458715,
+      "n_wp_total": 15714,
+      "n_plans": 8,
+      "sep_conflicts": 102,
+      "pad_conflicts": 41,
+      "coord_calls": {
+        "init": 0,
+        "synchronize": 0,
+        "insert_holding": 0
+      }
+    },
+    {
+      "scenario": "S1",
+      "n": 8,
+      "mode": "coordinated",
+      "branch": "legacy",
+      "sec": 0.2,
+      "coverage": 0.9965,
+      "max_km": 48.8,
+      "total_km": 337.4,
+      "makespan_s": 1365.640624458715,
+      "n_wp_total": 15798,
+      "n_plans": 8,
+      "sep_conflicts": 109,
+      "pad_conflicts": 41,
+      "coord_calls": {
+        "init": 1,
+        "synchronize": 1,
+        "insert_holding": 7
+      }
+    },
+    {
+      "scenario": "S1",
+      "n": 16,
+      "mode": "uncoordinated",
+      "branch": "v2",
+      "sec": 0.0,
+      "coverage": 1.0,
+      "max_km": 21.47,
+      "total_km": 270.19,
+      "makespan_s": 1062.6662841342263,
+      "n_wp_total": 348,
+      "n_plans": 16,
+      "sep_conflicts": 36,
+      "pad_conflicts": 192,
+      "coord_calls": {
+        "init": 0,
+        "synchronize": 0,
+        "insert_holding": 0
+      }
+    },
+    {
+      "scenario": "S1",
+      "n": 16,
+      "mode": "coordinated",
+      "branch": "v2",
+      "sec": 0.0,
+      "coverage": 1.0,
+      "max_km": 21.47,
+      "total_km": 270.19,
+      "makespan_s": 1062.6662841342263,
+      "n_wp_total": 348,
+      "n_plans": 16,
+      "sep_conflicts": 36,
+      "pad_conflicts": 192,
+      "coord_calls": {
+        "init": 1,
+        "synchronize": 0,
+        "insert_holding": 0
+      }
+    },
+    {
+      "scenario": "S1",
+      "n": 16,
+      "mode": "uncoordinated",
+      "branch": "legacy",
+      "sec": 0.1,
+      "coverage": 0.9965,
+      "max_km": 26.08,
+      "total_km": 267.82,
+      "makespan_s": 901.7162485791331,
+      "n_wp_total": 9430,
+      "n_plans": 16,
+      "sep_conflicts": 258,
+      "pad_conflicts": 201,
+      "coord_calls": {
+        "init": 0,
+        "synchronize": 0,
+        "insert_holding": 0
+      }
+    },
+    {
+      "scenario": "S1",
+      "n": 16,
+      "mode": "coordinated",
+      "branch": "legacy",
+      "sec": 0.1,
+      "coverage": 0.9965,
+      "max_km": 27.06,
+      "total_km": 280.47,
+      "makespan_s": 901.7162485791331,
+      "n_wp_total": 9586,
+      "n_plans": 16,
+      "sep_conflicts": 266,
+      "pad_conflicts": 201,
+      "coord_calls": {
+        "init": 1,
+        "synchronize": 1,
+        "insert_holding": 13
+      }
+    },
+    {
+      "scenario": "S3",
+      "n": 8,
+      "mode": "uncoordinated",
+      "branch": "v2",
+      "sec": 0.0,
+      "coverage": 1.0,
+      "max_km": 24.15,
+      "total_km": 136.27,
+      "makespan_s": 1055.9269080267115,
+      "n_wp_total": 147,
+      "n_plans": 8,
+      "sep_conflicts": 34,
+      "pad_conflicts": 49,
+      "coord_calls": {
+        "init": 0,
+        "synchronize": 0,
+        "insert_holding": 0
+      }
+    },
+    {
+      "scenario": "S3",
+      "n": 8,
+      "mode": "coordinated",
+      "branch": "v2",
+      "sec": 0.0,
+      "coverage": 1.0,
+      "max_km": 24.15,
+      "total_km": 136.27,
+      "makespan_s": 1055.9269080267115,
+      "n_wp_total": 147,
+      "n_plans": 8,
+      "sep_conflicts": 34,
+      "pad_conflicts": 49,
+      "coord_calls": {
+        "init": 1,
+        "synchronize": 0,
+        "insert_holding": 0
+      }
+    },
+    {
+      "scenario": "S3",
+      "n": 8,
+      "mode": "uncoordinated",
+      "branch": "legacy",
+      "sec": 0.0,
+      "coverage": 1.0,
+      "max_km": 22.72,
+      "total_km": 110.73,
+      "makespan_s": 934.0780468505972,
+      "n_wp_total": 3911,
+      "n_plans": 8,
+      "sep_conflicts": 39,
+      "pad_conflicts": 49,
+      "coord_calls": {
+        "init": 0,
+        "synchronize": 0,
+        "insert_holding": 0
+      }
+    },
+    {
+      "scenario": "S3",
+      "n": 8,
+      "mode": "coordinated",
+      "branch": "legacy",
+      "sec": 0.0,
+      "coverage": 1.0,
+      "max_km": 23.69,
+      "total_km": 117.54,
+      "makespan_s": 934.0780468505972,
+      "n_wp_total": 3995,
+      "n_plans": 8,
+      "sep_conflicts": 39,
+      "pad_conflicts": 49,
+      "coord_calls": {
+        "init": 1,
+        "synchronize": 1,
+        "insert_holding": 7
+      }
+    },
+    {
+      "scenario": "S4",
+      "n": 8,
+      "mode": "uncoordinated",
+      "branch": "v2",
+      "sec": 0.0,
+      "coverage": 1.0,
+      "max_km": 26.45,
+      "total_km": 164.45,
+      "makespan_s": 1390.356009134191,
+      "n_wp_total": 228,
+      "n_plans": 8,
+      "sep_conflicts": 5,
+      "pad_conflicts": 37,
+      "coord_calls": {
+        "init": 0,
+        "synchronize": 0,
+        "insert_holding": 0
+      }
+    },
+    {
+      "scenario": "S4",
+      "n": 8,
+      "mode": "coordinated",
+      "branch": "v2",
+      "sec": 0.0,
+      "coverage": 1.0,
+      "max_km": 26.45,
+      "total_km": 164.45,
+      "makespan_s": 1390.356009134191,
+      "n_wp_total": 228,
+      "n_plans": 8,
+      "sep_conflicts": 5,
+      "pad_conflicts": 37,
+      "coord_calls": {
+        "init": 1,
+        "synchronize": 0,
+        "insert_holding": 0
+      }
+    },
+    {
+      "scenario": "S4",
+      "n": 8,
+      "mode": "uncoordinated",
+      "branch": "legacy",
+      "sec": 0.1,
+      "coverage": 0.9958,
+      "max_km": 29.73,
+      "total_km": 187.27,
+      "makespan_s": 960.8934635485203,
+      "n_wp_total": 8479,
+      "n_plans": 8,
+      "sep_conflicts": 99,
+      "pad_conflicts": 39,
+      "coord_calls": {
+        "init": 0,
+        "synchronize": 0,
+        "insert_holding": 0
+      }
+    },
+    {
+      "scenario": "S4",
+      "n": 8,
+      "mode": "coordinated",
+      "branch": "legacy",
+      "sec": 0.1,
+      "coverage": 0.9958,
+      "max_km": 30.71,
+      "total_km": 194.08,
+      "makespan_s": 960.8934635485203,
+      "n_wp_total": 8563,
+      "n_plans": 8,
+      "sep_conflicts": 116,
+      "pad_conflicts": 39,
+      "coord_calls": {
+        "init": 1,
+        "synchronize": 1,
+        "insert_holding": 7
+      }
+    }
+  ]
+}

@@ -1,0 +1,146 @@
+{
+ "files": {
+  "runs/artifacts/PAPERPLAN1/update_paper/COMMIT_PLAN_ADDENDUM.md": {
+   "bytes": 8247,
+   "sha256": "b8dd5fa66d83fa8086a7865864f51b124c9c2e3eb7712fc43f1f3aa62717a227"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/CORRECTIONS_K1_K9.md": {
+   "bytes": 15254,
+   "sha256": "d1398e8b87ec5da219c4214eb90bddbea15106f9468c79e6e0e8e488fa3f6ded"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/PAPER_TEXT_ZH.md": {
+   "bytes": 56282,
+   "sha256": "832de49fc74121e0aef948d9986619a5f618bb891f111b305295343454435c1a"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/README.md": {
+   "bytes": 10893,
+   "sha256": "208d54df925455730e8e9fd4d0c4bb5d53e7ed2da4b215ff7fb7e1eecbccac50"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/TABLES_ZH.md": {
+   "bytes": 30621,
+   "sha256": "f06afe1fdcb75a905c4c625b014e47037c3a061bf5989971100b8b95ec250251"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/corrected/INDEX.md": {
+   "bytes": 2116,
+   "sha256": "ff566487e164120df090cf6c2765914ef22a2e84cc69ff9ba55bd47ecc3e4fe9"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/corrected/paper_text__PAPER_TEXT_ZH.CORRECTION.json": {
+   "bytes": 4097,
+   "sha256": "734b280d27816eb70f652f3a6db1b1878361bd45dacc8115ede77d4bfa33e020"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/corrected/paper_text__README.CORRECTION.json": {
+   "bytes": 4864,
+   "sha256": "974554d570660860668e5e4ce350618785149bfc52c67440ff896da3c215672c"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/corrected/paper_text__TABLES_ZH.CORRECTION.json": {
+   "bytes": 17246,
+   "sha256": "9ed0f522a60ea80194787a38d558be84530f0d8724950a65fe174c12e14beb2b"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/corrected/paper_text__out_NUMBERS.CORRECTION.json": {
+   "bytes": 2820,
+   "sha256": "9c8a602c8bb0d09f02d65ad5bc33f9c059fc7e5189624ef6eefb4c0be1f51a77"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/corrected/prep_text__C1_C2_placeholders.CORRECTION.json": {
+   "bytes": 1002,
+   "sha256": "86757aa4542a4c0268f849389a809d1a52d4453ba7c8efd45db049f95d85eb3b"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/corrected/prep_text__C4_params.CORRECTION.json": {
+   "bytes": 2803,
+   "sha256": "48783e4bd329d7ad48f3ba724f4d8285208bee52f4f3ca21525fe2a9219e189c"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/corrected/prep_text__Table2_skeleton.CORRECTION.json": {
+   "bytes": 2800,
+   "sha256": "1087ce1ab90b2d76b6dfee872737b59322625d6e508a08c16836cc0ab41451eb"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/corrected/sorties2__HV4W55S_windaxis.RECONCILIATION.json": {
+   "bytes": 1748,
+   "sha256": "2ea34982141ec74833f9f23062a84fb106998671a7d33763c180b9064b10971d"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/corrected/sorties__sortie_results.CORRECTION.json": {
+   "bytes": 8846,
+   "sha256": "4b29c8da15265d1998b9e8008d545dd5438f67f97d9f8d5f3acf22e85dd757b4"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/corrected/workflow__sortie_workflow_result.CORRECTION.json": {
+   "bytes": 4528,
+   "sha256": "e690b040d77682452badffff7d1dd7a518e162b3bfa40410a090d9d1565f0b26"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/out/NUMBERS.json": {
+   "bytes": 57166,
+   "sha256": "0c1a6f47aaf05f6c65613d02e70dd93550ae74d92bbd15150883bf62d47676ed"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/out/corrections.json": {
+   "bytes": 25086,
+   "sha256": "1cb91537a68d200d1a8a2bd964bc069b495f9339f1378e99e290aaa93ab10409"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/out/extract_index.json": {
+   "bytes": 16405,
+   "sha256": "76ce55314a0f528f5813fbfb034d719523dc9f85f8849d942f4834b146cd16da"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/out/metrics.json": {
+   "bytes": 74296,
+   "sha256": "9ec87ece600e3884d5d9d212228ab00c02b094ada8fc085766f345c61d6fdc87"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/out/spawn_verification.json": {
+   "bytes": 5316,
+   "sha256": "a057c81182d8e20b93d63ed5c442e1f4b6495bef3265af3cea13ea76c43e1fa2"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/out/wind.json": {
+   "bytes": 34090,
+   "sha256": "5ad0c8ddc1c4c8bbcf21fbe514cac3d33ea936e1b4078f378606793460d625cb"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/scripts/up_corrected_copies.py": {
+   "bytes": 15229,
+   "sha256": "ed6212ad7bb0a06ba1de8fc59bae4f88c02e30b0a11570c278cd8a5fec5784d7"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/scripts/up_corrections.py": {
+   "bytes": 23104,
+   "sha256": "8bc6bcf9f8592cef73890ac40bfdf9892f60dafd6fd36dff2c018f9045515751"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/scripts/up_extract.py": {
+   "bytes": 5483,
+   "sha256": "9c3cb04a7c82f2c160349d53472bb8459dff02dce99ecbde68ba404d4da02685"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/scripts/up_index.py": {
+   "bytes": 1949,
+   "sha256": "1ec01f088285a50c7392dc836950a1bdfa06ef506d5a59e7a91840f8ea1a3a35"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/scripts/up_lib.py": {
+   "bytes": 5641,
+   "sha256": "1e0fe7c32fec401794c5d75059a89adc24baaa150b24e526d1135995e477ea04"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/scripts/up_metrics.py": {
+   "bytes": 17142,
+   "sha256": "04fbad3b40900c7a7c0250cb9056bd3ab549354e91e13b8e8f1a6ea034d50565"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/scripts/up_numbers.py": {
+   "bytes": 8045,
+   "sha256": "a8f224975ea318e68c3b6ca68a28ad55d0a89c0549c4cb1e575250de4a172e40"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/scripts/up_selfcheck.py": {
+   "bytes": 7762,
+   "sha256": "737b441529ab6d6c0a67b7e925e8b217eb48008493e1cfe3311bf3a8ef3eddc5"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/scripts/up_spawn.py": {
+   "bytes": 6331,
+   "sha256": "59f7bb13ef295e7c6480ec522b3634bb93282d99a386c44f2668caf184d45495"
+  },
+  "runs/artifacts/PAPERPLAN1/update_paper/scripts/up_wind.py": {
+   "bytes": 6004,
+   "sha256": "f9a312605089e62295acd481e10095c52d0d77377957b5fff2650cffc660880e"
+  }
+ },
+ "label": "update_paper",
+ "n_files": 32,
+ "note": "cache/*.npz are excluded: regenerable from the .BIN files with scripts/up_extract.py, and already matched by .gitignore's `*.npz`.",
+ "reproduce": [
+  "python scripts/up_extract.py",
+  "python scripts/up_metrics.py",
+  "python scripts/up_wind.py",
+  "python scripts/up_spawn.py",
+  "python scripts/up_corrections.py",
+  "python scripts/up_numbers.py",
+  "python scripts/up_corrected_copies.py",
+  "python scripts/up_index.py"
+ ],
+ "total_bytes": 483216
+}

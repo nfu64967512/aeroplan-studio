@@ -1,0 +1,229 @@
+prep_beamidp -- Beam-IDP / strip-interlacing experiment at planner level (2026-09-21)
+=====================================================================================
+Branch quad_swarm.  NO SITL / ArduPilot / MAVProxy process was started.  No git
+commit/add/push.  No WSL tree or COM port touched.  Every number below comes from
+a pure-Python planner run or from a file that run wrote.
+
+SOURCE EDIT (the only one, additive, reversible)
+------------------------------------------------
+  scripts/hv_sitl_scenarios.py   +32 lines appended at EOF, one new SCENARIOS key
+                                 "beamidp_1a2b_1195", trial "BEAMIDP1".
+  before copy : hv_sitl_scenarios.py.before
+  diff        : hv_sitl_scenarios.py.diff
+  py_compile  : clean
+  VERIFIED ADDITIVE: gui_legal_120_1a2b still trial=HV4SITL15, alt=120.0,
+  waiver=None, 1 area.  No existing key was touched.
+  Trial name is deliberately NOT HV4SITL17, so it cannot race the C1 "lower the
+  ceiling and re-fly" sortie for that number.
+
+SCRIPTS (all under scripts/ in this folder)
+-------------------------------------------
+  sweep_geometry.py   geometry search for a 1P+2H layout whose cells exceed the
+                      skip-k threshold                       -> sweep_geometry.json
+  beamidp_table.py    THE SEQUENTIAL-SCAN BASELINE DRIVER + the per-cell
+                      comparison table for the new and the paper scenario
+                                                             -> beamidp_table.json
+  fly_ready.py        exported-altitude / param-gate / tour-contiguity checks
+                                                             -> fly_ready.json
+  make_tables.py      markdown tables + per-aircraft makespan estimate
+                                       -> tables.json, table_new_en.md,
+                                          table_new_zh.md, table_paper.md
+
+1. THE NEW SCENARIO
+-------------------
+  key           beamidp_1a2b_1195      trial BEAMIDP1      path gui
+  fleet         1 Pioneer + 2 HERO (the real fleet), spawn_spread_m = 10 m
+  site/home     HOME (23.95, 120.90), identical to gui_legal_120_1a2b
+  airspace      identical to the paper scenario EXCEPT the ceiling:
+                coverage_altitude_m = waiver_max_agl_m = 119.5 m  (h_ceil 119.5)
+                min_fw_agl_m A/B = 100/100, dh_band_min_m = 15, target_gsd = 0.05
+                wind (5.0 m/s, 270 deg)  -- unchanged from the paper scenario
+  geometry      three rectangles 1600 x 1200 m, centres at east -2100 / 0 / +2100 m
+                total 5.76 km2
+  spacing       96.59 m (vs 96.99 m at the 120 m cap; k is unchanged: 5 and 3)
+
+  WHY THREE RECTANGLES AND NOT ONE BIG AREA
+  split_area_for_fleet cuts the parent area into n_uav pieces along the sweep-
+  stepping axis, and the class split then gives Pioneer roughly half of each
+  piece's strips.  Measured and rejected (all at the 119.5 m cap, 1P+2H):
+      three 1560 x 800  (3.74 km2)  Pioneer cells n = 3, 3, 4   -> no trigger
+      three 1200 x 1000 (3.60 km2)  Pioneer cells n = 5, 5      -> no trigger
+      three 1600 x 1200 (5.76 km2)  Pioneer cells n = 6, 7      -> TRIGGERS
+      three 1600 x 1400 (6.72 km2)  Pioneer cells n = 7, 8      -> triggers, slower
+      three 1400 x 1300 (5.46 km2)  Pioneer cells n = 6, 7      -> triggers, slower
+      one 3000 x 3000   (9.00 km2)  Pioneer cell  n = 6         -> triggers (c3)
+  1600 x 1200 x 3 is the cheapest layout found that triggers both classes.
+
+  PER-CELL STRIP CENSUS (measured, sweep_geometry.json / beamidp_table.json)
+      cell          class    uav   n    k   n > k
+      Z1_1          HERO     B3    13   3   yes
+      Z2_1          Pioneer  A1     6   5   yes
+      Z2_1_B_k6     HERO     B2     7   3   yes
+      Z3_1          Pioneer  A1     7   5   yes
+      Z3_1_B_k7     HERO     B2     6   3   yes
+  Task target was Pioneer n >= 6 and HERO n >= 4: met on every cell.
+
+2. THE SEQUENTIAL BASELINE DRIVER (beamidp_table.py)
+----------------------------------------------------
+  No PlannerConfig can produce a sequential scan.  planner.py:604-605 ranks the
+  K-nearest candidates by t_add (transition + operate TIME):
+        Kn  = int(min(K, m.size))
+        sel = np.argsort(t_add, kind="stable")[:Kn]
+  so K=1 only makes the search greedier about SKIPPING; legacy_mode only sets the
+  ESTIMATOR's sweep_sequence="fixed".  The sequential arm is therefore EVALUATED,
+  not planned.
+
+  cell_ruler() re-implements hv_dccpp/decompose.py exact_time() verbatim up to the
+  point where exact_time calls _best_sequence, then forces the order.
+
+  HELD FIXED (bit-identical across all four arms)
+    strip set          the Strip objects the planner itself built for that cell
+    R_eff              decompose.r_eff_for_class(ctx, cls, z_top_m=z_op)
+                       Pioneer 200 m, HERO 120 m at W=5 m/s (unchanged by wind:
+                       W* = 5.1675 / 5.0333, see C6)
+    wind               ctx.wind.wind_vec(z_op) -- the same vector, full wind triangle
+    airspeed           ctx.specs[cls].cruise_airspeed_mps (21.5 / 19.0)
+    Dubins integration cfg.dtheta_int_rad
+    entry/exit         Strip.end_state(-1|+1) -> Strip.start_state(+1|-1) with the
+                       planner's own 0.5/0.5 direction average (1.0 for strips that
+                       are one-way feasible).  one_way count was 0 in every cell.
+    operate time       decompose._op_times(); order-independent, so it cancels in
+                       every delta, and is still shown in "cell mission time"
+    energy             EnergyModel.transfer_wh(t, dz = 0) -- the planner's own
+                       k_unc * P_cruise * t.  All strips in a cell share z_op, so
+                       dz = 0 and this is exact, not an approximation.
+                       P_cruise * k_unc : Pioneer 617.5 W, HERO 223.7 W.
+
+  WHAT IT CANNOT CONTROL (stated, not hidden)
+    * inter-cell transit, takeoff/entry and RTB legs are re-scheduled by the
+      planner.  A truly flown sequential arm would get different ones => every
+      makespan figure for the sequential arm is an ESTIMATE.
+    * 4-D deconfliction and corridor queueing can insert holds this cost model
+      does not see.
+    * the direction each strip is actually flown.  The 0.5/0.5 average is the
+      planner's estimator convention, so the "Beam-IDP as planned" row is scored
+      under the estimator's ruler, not under its own committed directions.
+    * takeoff / landing / climb energy: excluded; only in-cell segments compared.
+    * CONFIRMED NOT A PROBLEM HERE: every aircraft's tour is cell-contiguous
+      (fly_ready.json "contiguous_per_cell": true for A1, B2, B3), so the
+      within-cell Beam-IDP sub-tour really is a contiguous chain of n-1
+      transitions -- no cross-cell contamination in this table, unlike the
+      c3 per-aircraft mixed-fleet numbers.
+
+3. RESULT -- NEW SCENARIO (table_new_en.md, beamidp_table.json)
+---------------------------------------------------------------
+  turning distance / turning time / turning energy, per cell, vs sequential:
+    HERO    Z1_1      n=13 k=3   9095.5 m 508.2 s 31.59 Wh -> Beam-IDP 5961.4 m
+                                 330.1 s 20.52 Wh   (-34.5% / -35.0%)
+    Pioneer Z2_1      n=6  k=5   6746.1 m 328.5 s 56.35 Wh -> 4829.8 m 234.9 s
+                                 40.29 Wh           (-28.4% / -28.5%)
+    HERO    Z2_1_B_k6 n=7  k=3   4547.7 m 254.1 s 15.79 Wh -> 2753.8 m 152.5 s
+                                 9.48 Wh            (-39.5% / -40.0%)
+    Pioneer Z3_1      n=7  k=5   8095.3 m 394.2 s 67.62 Wh -> 5541.1 m 269.3 s
+                                 46.20 Wh           (-31.6% / -31.7%)
+    HERO    Z3_1_B_k7 n=6  k=3   3789.8 m 211.8 s 13.16 Wh -> 2327.0 m 128.8 s
+                                 8.01 Wh            (-38.6% / -39.2%)
+
+  FLEET totals (sum over the five cells)
+    turning distance 32 274.3 -> 21 413.1 m   (-33.65%)
+    turning time      1 696.9 ->  1 115.7 s   (-34.25%)
+    turning energy      184.51 ->   124.49 Wh (-32.53%)
+    fixed skip-k for reference: 22 965.3 m / 1 196.5 s
+    Held-Karp optimum:          20 328.1 m / 1 060.2 s
+
+  BEAM-IDP IS NOT OPTIMAL HERE.  It beats the fixed skip-k sequence in all five
+  cells (the c3 solo probe had HERO slightly worse), but it is 5.2% above the
+  Held-Karp open-path optimum on fleet turning time (1115.7 vs 1060.2 s), and up
+  to 9.1% above it in a single cell (Z1_1: 330.1 vs 302.6 s).  The "within 0.01%
+  of Held-Karp" figure in the c3 record was for the single-aircraft n=9 probe and
+  does NOT generalise to these cells -- do not reuse it for this table.
+
+  MAKESPAN.  Planned 2348.0 s.  Sequential ESTIMATE 2532.5 s (+7.86%), computed
+  per aircraft as t_land + that aircraft's own cells' turn-time delta:
+    A1 2217.6 + 218.48 = 2436.1 ; B2 2348.0 + 184.54 = 2532.5 ;
+    B3 1992.7 + 178.13 = 2170.8  ->  max 2532.5 s.
+  ESTIMATE: entry/RTB legs and 4-D deconfliction are NOT re-planned.
+
+4. RESULT -- THE PAPER'S OWN SCENARIO (gui_legal_120_1a2b = HV4SITL15/16)
+-------------------------------------------------------------------------
+  Reproduced makespan 1260.43 s, matching runs/artifacts/HV4SITL16.
+    cell          class    n   k   n > k
+    Z2_1          Pioneer  1   5   no
+    Z2_1_B_k1     HERO     2   3   no
+    Z3_1          Pioneer  1   5   no
+    Z3_1_B_k1     HERO     2   3   no
+    Z4_1          Pioneer  1   5   no
+    Z4_1_B_k1     HERO     2   3   no
+  All four arms (sequential / fixed skip-k / Beam-IDP / Held-Karp) are IDENTICAL
+  in every cell: fleet turning 127.0 s / 2272.2 m for all of them, delta +0.00%.
+  Re-run at the 119.5 m cap: same picture (127.0 s / 2273.9 m, makespan 1260.45 s).
+  So in the validated scenario the mechanism is provably inactive, not merely
+  "not measured".
+
+  WHY: _skip_sequence(n, k) == list(range(n)) whenever k >= n.  Verified:
+    k=5 identical to sequential for n=1..5, first differs at n=6 -> [0,5,1,2,3,4]
+    k=3 identical to sequential for n=1..3, first differs at n=4 -> [0,3,1,2]
+  The correct trigger threshold is n > k, i.e. Pioneer n >= 6 and HERO n >= 4 --
+  the paper's "fewer than 3 strips per cell" sentence states the wrong threshold.
+
+5. FLY-READINESS OF THE NEW SCENARIO (fly_ready.json)
+------------------------------------------------------
+  Produced by the REAL runner:
+      python scripts/hv_sitl_run.py plan beamidp_1a2b_1195
+  which wrote runs/artifacts/BEAMIDP1/{plan/, report.json, scenario.json,
+  validation.json}.  That run also passes the runner's own gate that every
+  aircraft has work (13 / 13 / 13 strips).
+
+  status            GO_WITH_WARNINGS   (same warning set as HV4SITL15:
+                    min_fw_lowered, dh_band_min_relaxed, recovery_auto_applied)
+  validate          passed = True, conflicts = 0, uncovered = 0
+  min separation    horizontal 180.6 m   vertical inf (single altitude band)
+  makespan          2348.0 s  ->  7.8 min wall clock at HV_SPEEDUP=5
+  per aircraft      A1 13 strips 41.74 km  E 459/441 Wh  t_off  74 s  t_land 2218 s
+                    B2 13 strips 37.17 km  E 165/ 89 Wh  t_off 172 s  t_land 2348 s
+                    B3 13 strips 33.81 km  E 154/100 Wh  t_off   0 s  t_land 1993 s
+                    takeoff sites TO_A1 / TO_B2 / TO_B3 (spawn_spread_m = 10 m)
+  exported items    A1 263, B2 165, B3 175
+  ALTITUDE (C1's metric, read from the exported .waypoints, frame 3 = rel-to-home)
+                    A1 119.6703 m   B2 119.5136 m   B3 119.5540 m
+                    items above 120.000 m: 0 / 0 / 0
+                    worst case is 0.330 m below 120 m.  C1 measured flown tracking
+                    adding at most +0.127 m, so the flown maximum should stay under
+                    120 m -- but see RISKS: the export excess here (+0.170 m on A1)
+                    is 3.2x the +0.053 m seen on the paper's 1560 x 800 geometry,
+                    because the arc-interpolation defect grows with distance from
+                    the local ENU origin and this area spans +/-2900 m east.
+  PARAMETER GATE    expected_params() ran clean for all three aircraft:
+                    32 exported + 2 fallback (ARMING_REQUIRE, SCHED_LOOP_RATE)
+                    = 34 per aircraft = 102 total, with Q_RTL_MODE the one declared
+                    FIRMWARE_OVERRIDE.  Identical structure to C4's finding, so the
+                    34 x 3 gate needs no change for this sortie.
+
+  FLY COMMAND (for later, when the machine is free)
+      cd C:/Users/joy46/Documents/Projects/aeroplan-studio
+      python scripts/hv_sitl_run.py fly beamidp_1a2b_1195
+  Optional env: HV_SPEEDUP (default 5), HV_TRIAL (overrides the BEAMIDP1 folder),
+  and, since the C2 wind patch is already in the working tree,
+  HV_SIM_WIND_SPD / HV_SIM_WIND_DIR (default 0 -- i.e. still no SITL wind unless
+  the C2 runs set it).  The sortie writes to runs/artifacts/BEAMIDP1 and cannot
+  touch HV4SITL15 / HV4SITL16.
+
+RISKS AND LIMITS
+----------------
+  * Every number in section 3 is the PLANNER's cost model (Dubins in a wind
+    triangle), not flown telemetry.  SITL has never had wind (C2), so this table
+    must never be captioned as a measured in-flight saving.
+  * The sequential arm cannot be flown without a driver; only the Beam-IDP arm is
+    flyable today.  A flown sortie proves executability, not the saving.
+  * The makespan delta (+7.86%) is an estimate; entry/RTB legs are not re-planned.
+  * The new scenario changes the GEOMETRY relative to the paper scenario (that is
+    the point), so the comparison is "mechanism inactive here / active there", not
+    "the flown sortie could have been 34% cheaper".
+  * The Pioneer trigger is fragile: it needs a subregion of about 11+ strips.  If
+    the fleet ratio or the split strategy changes, this scenario can silently stop
+    triggering -- that is why the per-cell n and k are recorded here and not just
+    the makespan.
+  * skip_k uses the MEAN spacing (decompose.py:825 s_mean); with a single uniform
+    camera every strip has the same spacing, so this is invisible here.
+  * B2's energy margin is the tightest at 88.7 Wh; it was 89 Wh in the export too.
+    Worth watching if the sortie is later flown with wind switched on.

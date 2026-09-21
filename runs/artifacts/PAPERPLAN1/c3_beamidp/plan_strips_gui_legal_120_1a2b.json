@@ -1,0 +1,113 @@
+[
+ {
+  "key": "gui_legal_120_1a2b",
+  "plan_s": 12.43,
+  "status": "GO_WITH_WARNINGS",
+  "makespan_s": 1260.4,
+  "uncovered": 0,
+  "cells": {
+   "Z2_1|A": {
+    "n_strips": 1,
+    "spacing_m": 96.99,
+    "length_m": 1695.4,
+    "width_m": 138.6,
+    "h_op_m": 120.0,
+    "R_eff_m": 200.0,
+    "k": 5,
+    "skip_k_differs_from_sequential": false
+   },
+   "Z2_1_B_k1|B": {
+    "n_strips": 2,
+    "spacing_m": 96.99,
+    "length_m": 1685.6,
+    "width_m": 138.6,
+    "h_op_m": 120.0,
+    "R_eff_m": 120.0,
+    "k": 3,
+    "skip_k_differs_from_sequential": false
+   },
+   "Z3_1|A": {
+    "n_strips": 1,
+    "spacing_m": 96.99,
+    "length_m": 1695.4,
+    "width_m": 138.6,
+    "h_op_m": 120.0,
+    "R_eff_m": 200.0,
+    "k": 5,
+    "skip_k_differs_from_sequential": false
+   },
+   "Z3_1_B_k1|B": {
+    "n_strips": 2,
+    "spacing_m": 96.99,
+    "length_m": 1685.5,
+    "width_m": 138.6,
+    "h_op_m": 120.0,
+    "R_eff_m": 120.0,
+    "k": 3,
+    "skip_k_differs_from_sequential": false
+   },
+   "Z4_1|A": {
+    "n_strips": 1,
+    "spacing_m": 96.99,
+    "length_m": 1695.5,
+    "width_m": 138.6,
+    "h_op_m": 120.0,
+    "R_eff_m": 200.0,
+    "k": 5,
+    "skip_k_differs_from_sequential": false
+   },
+   "Z4_1_B_k1|B": {
+    "n_strips": 2,
+    "spacing_m": 96.99,
+    "length_m": 1685.4,
+    "width_m": 138.6,
+    "h_op_m": 120.0,
+    "R_eff_m": 120.0,
+    "k": 3,
+    "skip_k_differs_from_sequential": false
+   }
+  },
+  "uavs": {
+   "A1": {
+    "cls": "A",
+    "n_strips": 3,
+    "strip_ids": [
+     "Z4_1_A_1",
+     "Z2_1_A_1",
+     "Z3_1_A_1"
+    ],
+    "distance_km": 10.293,
+    "t_takeoff_s": 656.0,
+    "t_land_s": 1260.4
+   },
+   "B2": {
+    "cls": "B",
+    "n_strips": 2,
+    "strip_ids": [
+     "Z2_1_B_k1_B_2",
+     "Z2_1_B_k1_B_1"
+    ],
+    "distance_km": 7.926,
+    "t_takeoff_s": 0.0,
+    "t_land_s": 533.9
+   },
+   "B3": {
+    "cls": "B",
+    "n_strips": 4,
+    "strip_ids": [
+     "Z3_1_B_k1_B_1",
+     "Z3_1_B_k1_B_2",
+     "Z4_1_B_k1_B_2",
+     "Z4_1_B_k1_B_1"
+    ],
+    "distance_km": 12.439,
+    "t_takeoff_s": 106.0,
+    "t_land_s": 894.4
+   }
+  },
+  "R_eff_m": {
+   "A": 200.0,
+   "B": 120.0
+  }
+ }
+]

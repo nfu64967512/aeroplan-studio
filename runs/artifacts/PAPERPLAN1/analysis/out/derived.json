@@ -1,0 +1,50 @@
+{
+ "beam": {
+  "beam_captures_pct_of_available_saving": 91.27,
+  "bid_t": 1115.73,
+  "hk_t": 1060.15,
+  "seq_t": 1696.88,
+  "skip_t": 1196.48
+ },
+ "wind_cost": {
+  "A_cost_of_the_air_same_plan_HV4W05_minus_HV4W00": {
+   "d_flown_fleet_km": 0.5324,
+   "d_flown_makespan_pct": 2.227,
+   "d_flown_makespan_s": 26.899,
+   "d_flown_makespan_s_disarm_def": 27.165,
+   "note": "identical mission files (9 plan files bit-identical per prep_check); only SIM_WIND differs, so this isolates the air",
+   "prediction_error_in_wind_pct": 2.428,
+   "prediction_error_still_air_pct": 0.197
+  },
+  "B_cost_of_ignoring_the_wind_model_same_air_HV4W05_vs_HV4W55": {
+   "d_flown_fleet_km": -0.2185,
+   "d_flown_makespan_pct": -3.676,
+   "d_flown_makespan_s": -47.126,
+   "d_planned_makespan_s": -54.944,
+   "makespan_decomposition": {
+    "A1_flown_airborne_duration_wind_aware_s": 623.404,
+    "A1_flown_airborne_duration_wind_ignorant_s": 620.174,
+    "A1_release_delay_added_by_wind_aware_plan_s": 44.0,
+    "d_airborne_duration_s": 3.23,
+    "reading": "the 47 s by which the wind-aware fleet finishes later is almost entirely a 44 s later scheduled release of A1, not a slower flight"
+   },
+   "note": "both flown in 5 m/s from 270; HV4W55's plan knows about it, HV4W05's does not",
+   "per_aircraft_prediction_error_pct": {
+    "A1": {
+     "wind_aware": 1.702,
+     "wind_ignorant": 2.428
+    },
+    "B2": {
+     "wind_aware": 4.901,
+     "wind_ignorant": 7.078
+    },
+    "B3": {
+     "wind_aware": 2.876,
+     "wind_ignorant": 6.219
+    }
+   },
+   "prediction_error_wind_aware_pct": 1.702,
+   "prediction_error_wind_ignorant_pct": 2.428
+  }
+ }
+}

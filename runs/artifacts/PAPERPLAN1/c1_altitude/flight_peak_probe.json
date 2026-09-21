@@ -1,0 +1,38 @@
+{
+ "A1": {
+  "peak": 120.1,
+  "peak_t": 1170.04,
+  "peak_d": 1199.4743929350202,
+  "plan_max": 120.0526,
+  "excess_over_cap": 0.1,
+  "excess_over_plan": 0.0474,
+  "n_over_120": 124,
+  "n_band": 406,
+  "p95_band": 120.06,
+  "p99_band": 120.08
+ },
+ "B2": {
+  "peak": 120.12,
+  "peak_t": 324.04,
+  "peak_d": 1011.4688406658274,
+  "plan_max": 120.0331,
+  "excess_over_cap": 0.12,
+  "excess_over_plan": 0.0869,
+  "n_over_120": 50,
+  "n_band": 243,
+  "p95_band": 120.06,
+  "p99_band": 120.09
+ },
+ "B3": {
+  "peak": 120.16,
+  "peak_t": 557.04,
+  "peak_d": 924.3529576666457,
+  "plan_max": 120.0331,
+  "excess_over_cap": 0.16,
+  "excess_over_plan": 0.1269,
+  "n_over_120": 96,
+  "n_band": 482,
+  "p95_band": 120.06,
+  "p99_band": 120.11
+ }
+}

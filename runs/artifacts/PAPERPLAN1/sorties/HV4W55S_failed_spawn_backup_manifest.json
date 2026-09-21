@@ -1,0 +1,90 @@
+{
+ "plan/A1.param": [
+  4715,
+  "8a62136067b60b2b48eff7ab92b152bd05f52f3247b25bc597bdea9dc95c46db"
+ ],
+ "plan/A1.plan": [
+  39394,
+  "da5092166102564529eee8fbac08a52e55d9619aa615e0dd8e042f3063699360"
+ ],
+ "plan/A1.waypoints": [
+  4815,
+  "2e89917bc76ff2d39187417a0a799e8357c172ce5ae6281b026a4c3543b0c19c"
+ ],
+ "plan/A1_fence.txt": [
+  2531,
+  "0d847185d387672fee6674355e86b933953890a39378c51e657af4d95a1f032d"
+ ],
+ "plan/A1_rally.txt": [
+  287,
+  "8d8fba5dfe3a389bf4bcb8efe41f9e629638b790f053d6f2a75ea222ddc26fd1"
+ ],
+ "plan/B2.param": [
+  4713,
+  "810789970d32cf371fff180788e928c25f52f5af340ab265636e8c53d921eb80"
+ ],
+ "plan/B2.plan": [
+  26197,
+  "c7a671e8ab54a5675a11ad891da5270a5b09d0400435d2cd9f8ccdf9fb21ea23"
+ ],
+ "plan/B2.waypoints": [
+  3151,
+  "50c877f2eed4295ee77aac17111c25aa5ef28970eb68f2b2d995a295bf4f3b58"
+ ],
+ "plan/B2_fence.txt": [
+  2256,
+  "6fca78bd78f0f5c667214df54bb386ede1104b88e9d8f0f39e02aa5650f82c50"
+ ],
+ "plan/B2_rally.txt": [
+  287,
+  "8d8fba5dfe3a389bf4bcb8efe41f9e629638b790f053d6f2a75ea222ddc26fd1"
+ ],
+ "plan/B3.param": [
+  4713,
+  "29875b7e826b3c7e41640cb56c044c648fce556639e0ce46abde32d83ac9e9bc"
+ ],
+ "plan/B3.plan": [
+  36253,
+  "578c56dc69207eff5cd150dabef9a598e1900b2297b492ff5d1de7c4a0500b73"
+ ],
+ "plan/B3.waypoints": [
+  4468,
+  "116ac15ecae3b2cfb0a42d3284252c26e00b0220496b281752484d9e677df90b"
+ ],
+ "plan/B3_fence.txt": [
+  2256,
+  "6fca78bd78f0f5c667214df54bb386ede1104b88e9d8f0f39e02aa5650f82c50"
+ ],
+ "plan/B3_rally.txt": [
+  287,
+  "8d8fba5dfe3a389bf4bcb8efe41f9e629638b790f053d6f2a75ea222ddc26fd1"
+ ],
+ "plan/mission_summary.json": [
+  8652,
+  "12ca9005fe09670dc6b156b34c33c0441caca38d24897ba870d42fa2d9b4c8a3"
+ ],
+ "report.json": [
+  5468,
+  "e8a250f57f82c1ed52e212a5e89eec2b8de7eb96cdb88d1098136d2d88116f96"
+ ],
+ "scenario.json": [
+  1104,
+  "fe9581b5ae934681be0e46e4804d9abd51f33823cc0584d1f09ecd5abeed03cb"
+ ],
+ "sitl_cmdlines.txt": [
+  2319,
+  "cb80f3e7716121ffcb97ee28105b2faf21852b3651edbc9df35adfeb47acd2e7"
+ ],
+ "spawn_readback.json": [
+  769,
+  "509033866cf3c0f32a8531629345c11b8e8863702a328bd1fc2bc4cd09dbdc49"
+ ],
+ "validation.json": [
+  147,
+  "3942d671a6a32ce78de4f2811f5f2c89104cf702cf9e93c910fbde9f498b7b32"
+ ],
+ "wind_readback.json": [
+  2010,
+  "0639bc346e6d833dc736d7f4e167fa557609e70fd67d4d19de3bd2a0bd88ce66"
+ ]
+}

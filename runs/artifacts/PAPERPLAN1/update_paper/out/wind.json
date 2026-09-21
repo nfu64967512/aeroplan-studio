@@ -1,0 +1,1680 @@
+{
+ "crosstrack_180": {
+  "A1": {
+   "measured_airspeed_mps": 21.4921,
+   "measured_ew_half_sum": -0.1104,
+   "n_east": 264,
+   "n_west": 213,
+   "no_wind_ew_half_sum": 0.4383,
+   "predicted_ew_half_sum": -0.1514,
+   "pure_crab_deficit_mps": -0.5897,
+   "residual_mps": 0.041
+  },
+  "B2": {
+   "measured_airspeed_mps": 19.0064,
+   "measured_ew_half_sum": -0.2601,
+   "n_east": 107,
+   "n_west": 92,
+   "no_wind_ew_half_sum": 0.4033,
+   "predicted_ew_half_sum": -0.2662,
+   "pure_crab_deficit_mps": -0.6695,
+   "residual_mps": 0.0061
+  },
+  "B3": {
+   "measured_airspeed_mps": 19.0116,
+   "measured_ew_half_sum": -0.2503,
+   "n_east": 193,
+   "n_west": 175,
+   "no_wind_ew_half_sum": 0.3944,
+   "predicted_ew_half_sum": -0.2749,
+   "pure_crab_deficit_mps": -0.6693,
+   "residual_mps": 0.0246
+  }
+ },
+ "ekf": {
+  "BEAMIDP1": {
+   "A1": {
+    "from_deg": 180.0,
+    "n": 12647,
+    "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+    "spd_mps": 0.01
+   },
+   "B2": {
+    "from_deg": 333.43,
+    "n": 12556,
+    "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+    "spd_mps": 0.0224
+   },
+   "B3": {
+    "from_deg": 0.0,
+    "n": 10649,
+    "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+    "spd_mps": 0.01
+   }
+  },
+  "HV4SITL15": {
+   "A1": {
+    "from_deg": 251.57,
+    "n": 3129,
+    "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+    "spd_mps": 0.0316
+   },
+   "B2": {
+    "from_deg": 277.13,
+    "n": 2140,
+    "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+    "spd_mps": 0.0806
+   },
+   "B3": {
+    "from_deg": 270.0,
+    "n": 3953,
+    "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+    "spd_mps": 0.02
+   }
+  },
+  "HV4SITL16": {
+   "A1": {
+    "from_deg": 251.57,
+    "n": 3064,
+    "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+    "spd_mps": 0.0316
+   },
+   "B2": {
+    "from_deg": 270.0,
+    "n": 2112,
+    "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+    "spd_mps": 0.08
+   },
+   "B3": {
+    "from_deg": 251.57,
+    "n": 3620,
+    "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+    "spd_mps": 0.0316
+   }
+  },
+  "HV4W00": {
+   "A1": {
+    "from_deg": 255.96,
+    "n": 2933,
+    "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+    "spd_mps": 0.0412
+   },
+   "B2": {
+    "from_deg": 270.0,
+    "n": 2043,
+    "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+    "spd_mps": 0.07
+   },
+   "B3": {
+    "from_deg": 251.57,
+    "n": 3585,
+    "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+    "spd_mps": 0.0316
+   }
+  },
+  "HV4W05": {
+   "A1": {
+    "from_deg": 270.0,
+    "n": 3139,
+    "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+    "spd_mps": 4.94
+   },
+   "B2": {
+    "from_deg": 270.46,
+    "n": 2141,
+    "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+    "spd_mps": 4.9602
+   },
+   "B3": {
+    "from_deg": 270.0,
+    "n": 3860,
+    "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+    "spd_mps": 4.93
+   }
+  },
+  "HV4W55": {
+   "A1": {
+    "from_deg": 270.0,
+    "n": 3167,
+    "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+    "spd_mps": 4.94
+   },
+   "B2": {
+    "from_deg": 270.46,
+    "n": 2176,
+    "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+    "spd_mps": 4.9602
+   },
+   "B3": {
+    "from_deg": 270.0,
+    "n": 3916,
+    "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+    "spd_mps": 4.93
+   }
+  },
+  "HV4W55R": {
+   "A1": {
+    "from_deg": 270.12,
+    "n": 3261,
+    "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+    "spd_mps": 4.95
+   },
+   "B2": {
+    "from_deg": 270.46,
+    "n": 2277,
+    "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+    "spd_mps": 4.9702
+   },
+   "B3": {
+    "from_deg": 270.0,
+    "n": 3996,
+    "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+    "spd_mps": 4.93
+   }
+  },
+  "HV4W55S": {
+   "A1": {
+    "from_deg": 180.23,
+    "n": 3986,
+    "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+    "spd_mps": 4.97
+   },
+   "B2": {
+    "from_deg": 180.35,
+    "n": 1946,
+    "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+    "spd_mps": 4.8901
+   },
+   "B3": {
+    "from_deg": 180.12,
+    "n": 3404,
+    "note": "median of the N/E components, NOT a mean of the wrapping bearing",
+    "spd_mps": 4.89
+   }
+  }
+ },
+ "floors": {
+  "100m": {
+   "BEAMIDP1": {
+    "A1": {
+     "bins": {
+      "E": {
+       "median": 0.4485,
+       "n": 1070,
+       "usable": true
+      },
+      "N": {
+       "median": 0.4349,
+       "n": 306,
+       "usable": true
+      },
+      "S": {
+       "median": 0.454,
+       "n": 135,
+       "usable": true
+      },
+      "W": {
+       "median": 0.4399,
+       "n": 1023,
+       "usable": true
+      }
+     },
+     "east_minus_west": 0.0086,
+     "ew_half_sum": 0.4442,
+     "median_airspeed_mps": 21.4989,
+     "n_total": 2534,
+     "north_minus_south": -0.0191,
+     "ns_half_sum": 0.4445
+    },
+    "B2": {
+     "bins": {
+      "E": {
+       "median": 0.401,
+       "n": 673,
+       "usable": true
+      },
+      "N": {
+       "median": 0.4056,
+       "n": 148,
+       "usable": true
+      },
+      "S": {
+       "median": 0.3905,
+       "n": 161,
+       "usable": true
+      },
+      "W": {
+       "median": 0.3965,
+       "n": 586,
+       "usable": true
+      }
+     },
+     "east_minus_west": 0.0045,
+     "ew_half_sum": 0.3988,
+     "median_airspeed_mps": 19.0036,
+     "n_total": 1568,
+     "north_minus_south": 0.0151,
+     "ns_half_sum": 0.3981
+    },
+    "B3": {
+     "bins": {
+      "E": {
+       "median": 0.4049,
+       "n": 840,
+       "usable": true
+      },
+      "N": {
+       "median": 0.4057,
+       "n": 105,
+       "usable": true
+      },
+      "S": {
+       "median": 0.3995,
+       "n": 102,
+       "usable": true
+      },
+      "W": {
+       "median": 0.4011,
+       "n": 836,
+       "usable": true
+      }
+     },
+     "east_minus_west": 0.0038,
+     "ew_half_sum": 0.403,
+     "median_airspeed_mps": 19.0001,
+     "n_total": 1883,
+     "north_minus_south": 0.0062,
+     "ns_half_sum": 0.4026
+    }
+   },
+   "HV4SITL15": {
+    "A1": {
+     "bins": {
+      "E": {
+       "median": 0.4435,
+       "n": 292,
+       "usable": true
+      },
+      "N": {
+       "median": 0.4405,
+       "n": 62,
+       "usable": true
+      },
+      "S": {
+       "median": 0.4458,
+       "n": 41,
+       "usable": true
+      },
+      "W": {
+       "median": 0.4442,
+       "n": 224,
+       "usable": true
+      }
+     },
+     "east_minus_west": -0.0007,
+     "ew_half_sum": 0.4438,
+     "median_airspeed_mps": 21.4987,
+     "n_total": 619,
+     "north_minus_south": -0.0053,
+     "ns_half_sum": 0.4431
+    },
+    "B2": {
+     "bins": {
+      "E": {
+       "median": 0.3857,
+       "n": 238,
+       "usable": true
+      },
+      "N": {
+       "median": 0.3789,
+       "n": 32,
+       "usable": true
+      },
+      "S": {
+       "median": 0.4056,
+       "n": 15,
+       "usable": true
+      },
+      "W": {
+       "median": 0.4037,
+       "n": 154,
+       "usable": true
+      }
+     },
+     "east_minus_west": -0.018,
+     "ew_half_sum": 0.3947,
+     "median_airspeed_mps": 19.0091,
+     "n_total": 439,
+     "north_minus_south": -0.0267,
+     "ns_half_sum": 0.3922
+    },
+    "B3": {
+     "bins": {
+      "E": {
+       "median": 0.4017,
+       "n": 265,
+       "usable": true
+      },
+      "N": {
+       "median": 0.3749,
+       "n": 31,
+       "usable": true
+      },
+      "S": {
+       "median": 0.3823,
+       "n": 22,
+       "usable": true
+      },
+      "W": {
+       "median": 0.3991,
+       "n": 226,
+       "usable": true
+      }
+     },
+     "east_minus_west": 0.0026,
+     "ew_half_sum": 0.4004,
+     "median_airspeed_mps": 19.0008,
+     "n_total": 544,
+     "north_minus_south": -0.0074,
+     "ns_half_sum": 0.3786
+    }
+   },
+   "HV4SITL16": {
+    "A1": {
+     "bins": {
+      "E": {
+       "median": 0.443,
+       "n": 295,
+       "usable": true
+      },
+      "N": {
+       "median": 0.4322,
+       "n": 60,
+       "usable": true
+      },
+      "S": {
+       "median": 0.4285,
+       "n": 60,
+       "usable": true
+      },
+      "W": {
+       "median": 0.4377,
+       "n": 229,
+       "usable": true
+      }
+     },
+     "east_minus_west": 0.0053,
+     "ew_half_sum": 0.4404,
+     "median_airspeed_mps": 21.4934,
+     "n_total": 644,
+     "north_minus_south": 0.0037,
+     "ns_half_sum": 0.4304
+    },
+    "B2": {
+     "bins": {
+      "E": {
+       "median": 0.3892,
+       "n": 145,
+       "usable": true
+      },
+      "N": {
+       "median": 0.3873,
+       "n": 16,
+       "usable": true
+      },
+      "S": {
+       "median": 0.3377,
+       "n": 9,
+       "usable": false
+      },
+      "W": {
+       "median": 0.3912,
+       "n": 103,
+       "usable": true
+      }
+     },
+     "east_minus_west": -0.002,
+     "ew_half_sum": 0.3902,
+     "median_airspeed_mps": 19.0058,
+     "n_total": 273,
+     "north_minus_south": null,
+     "ns_half_sum": null
+    },
+    "B3": {
+     "bins": {
+      "E": {
+       "median": 0.3973,
+       "n": 301,
+       "usable": true
+      },
+      "N": {
+       "median": 0.389,
+       "n": 35,
+       "usable": true
+      },
+      "S": {
+       "median": 0.3958,
+       "n": 25,
+       "usable": true
+      },
+      "W": {
+       "median": 0.4165,
+       "n": 249,
+       "usable": true
+      }
+     },
+     "east_minus_west": -0.0192,
+     "ew_half_sum": 0.4069,
+     "median_airspeed_mps": 18.9995,
+     "n_total": 610,
+     "north_minus_south": -0.0068,
+     "ns_half_sum": 0.3924
+    }
+   },
+   "HV4W00": {
+    "A1": {
+     "bins": {
+      "E": {
+       "median": 0.4426,
+       "n": 258,
+       "usable": true
+      },
+      "N": {
+       "median": 0.4123,
+       "n": 58,
+       "usable": true
+      },
+      "S": {
+       "median": 0.4461,
+       "n": 47,
+       "usable": true
+      },
+      "W": {
+       "median": 0.434,
+       "n": 219,
+       "usable": true
+      }
+     },
+     "east_minus_west": 0.0086,
+     "ew_half_sum": 0.4383,
+     "median_airspeed_mps": 21.4935,
+     "n_total": 582,
+     "north_minus_south": -0.0338,
+     "ns_half_sum": 0.4292
+    },
+    "B2": {
+     "bins": {
+      "E": {
+       "median": 0.4043,
+       "n": 142,
+       "usable": true
+      },
+      "N": {
+       "median": 0.3943,
+       "n": 12,
+       "usable": true
+      },
+      "S": {
+       "median": 0.3715,
+       "n": 8,
+       "usable": false
+      },
+      "W": {
+       "median": 0.4023,
+       "n": 96,
+       "usable": true
+      }
+     },
+     "east_minus_west": 0.002,
+     "ew_half_sum": 0.4033,
+     "median_airspeed_mps": 18.9961,
+     "n_total": 258,
+     "north_minus_south": null,
+     "ns_half_sum": null
+    },
+    "B3": {
+     "bins": {
+      "E": {
+       "median": 0.3902,
+       "n": 348,
+       "usable": true
+      },
+      "N": {
+       "median": 0.3807,
+       "n": 44,
+       "usable": true
+      },
+      "S": {
+       "median": 0.3811,
+       "n": 27,
+       "usable": true
+      },
+      "W": {
+       "median": 0.3987,
+       "n": 293,
+       "usable": true
+      }
+     },
+     "east_minus_west": -0.0085,
+     "ew_half_sum": 0.3944,
+     "median_airspeed_mps": 19.0042,
+     "n_total": 712,
+     "north_minus_south": -0.0004,
+     "ns_half_sum": 0.3809
+    }
+   },
+   "HV4W05": {
+    "A1": {
+     "bins": {
+      "E": {
+       "median": 5.4296,
+       "n": 186,
+       "usable": true
+      },
+      "N": {
+       "median": -1.2476,
+       "n": 55,
+       "usable": true
+      },
+      "S": {
+       "median": -1.1938,
+       "n": 34,
+       "usable": true
+      },
+      "W": {
+       "median": -4.539,
+       "n": 261,
+       "usable": true
+      }
+     },
+     "east_minus_west": 9.9686,
+     "ew_half_sum": 0.4453,
+     "median_airspeed_mps": 21.4933,
+     "n_total": 536,
+     "north_minus_south": -0.0538,
+     "ns_half_sum": -1.2207
+    },
+    "B2": {
+     "bins": {
+      "E": {
+       "median": 5.3579,
+       "n": 189,
+       "usable": true
+      },
+      "N": {
+       "median": -0.3485,
+       "n": 28,
+       "usable": true
+      },
+      "S": {
+       "median": -0.3241,
+       "n": 16,
+       "usable": true
+      },
+      "W": {
+       "median": -4.557,
+       "n": 223,
+       "usable": true
+      }
+     },
+     "east_minus_west": 9.9149,
+     "ew_half_sum": 0.4004,
+     "median_airspeed_mps": 18.9923,
+     "n_total": 456,
+     "north_minus_south": -0.0244,
+     "ns_half_sum": -0.3363
+    },
+    "B3": {
+     "bins": {
+      "E": {
+       "median": 5.3619,
+       "n": 202,
+       "usable": true
+      },
+      "N": {
+       "median": -1.1082,
+       "n": 26,
+       "usable": true
+      },
+      "S": {
+       "median": -0.1067,
+       "n": 19,
+       "usable": true
+      },
+      "W": {
+       "median": -4.5798,
+       "n": 259,
+       "usable": true
+      }
+     },
+     "east_minus_west": 9.9417,
+     "ew_half_sum": 0.3911,
+     "median_airspeed_mps": 19.0016,
+     "n_total": 506,
+     "north_minus_south": -1.0015,
+     "ns_half_sum": -0.6075
+    }
+   },
+   "HV4W55": {
+    "A1": {
+     "bins": {
+      "E": {
+       "median": 5.4189,
+       "n": 191,
+       "usable": true
+      },
+      "N": {
+       "median": -1.6659,
+       "n": 48,
+       "usable": true
+      },
+      "S": {
+       "median": -0.9575,
+       "n": 34,
+       "usable": true
+      },
+      "W": {
+       "median": -4.5337,
+       "n": 267,
+       "usable": true
+      }
+     },
+     "east_minus_west": 9.9526,
+     "ew_half_sum": 0.4426,
+     "median_airspeed_mps": 21.4986,
+     "n_total": 540,
+     "north_minus_south": -0.7084,
+     "ns_half_sum": -1.3117
+    },
+    "B2": {
+     "bins": {
+      "E": {
+       "median": 5.3601,
+       "n": 120,
+       "usable": true
+      },
+      "N": {
+       "median": -0.3576,
+       "n": 15,
+       "usable": true
+      },
+      "S": {
+       "median": -0.5785,
+       "n": 9,
+       "usable": false
+      },
+      "W": {
+       "median": -4.5713,
+       "n": 131,
+       "usable": true
+      }
+     },
+     "east_minus_west": 9.9314,
+     "ew_half_sum": 0.3944,
+     "median_airspeed_mps": 19.0026,
+     "n_total": 275,
+     "north_minus_south": null,
+     "ns_half_sum": null
+    },
+    "B3": {
+     "bins": {
+      "E": {
+       "median": 5.3742,
+       "n": 211,
+       "usable": true
+      },
+      "N": {
+       "median": -0.3809,
+       "n": 31,
+       "usable": true
+      },
+      "S": {
+       "median": -0.1166,
+       "n": 19,
+       "usable": true
+      },
+      "W": {
+       "median": -4.5833,
+       "n": 257,
+       "usable": true
+      }
+     },
+     "east_minus_west": 9.9575,
+     "ew_half_sum": 0.3954,
+     "median_airspeed_mps": 19.0011,
+     "n_total": 518,
+     "north_minus_south": -0.2643,
+     "ns_half_sum": -0.2487
+    }
+   },
+   "HV4W55R": {
+    "A1": {
+     "bins": {
+      "E": {
+       "median": 5.4163,
+       "n": 168,
+       "usable": true
+      },
+      "N": {
+       "median": -0.9586,
+       "n": 37,
+       "usable": true
+      },
+      "S": {
+       "median": -1.0387,
+       "n": 31,
+       "usable": true
+      },
+      "W": {
+       "median": -4.5303,
+       "n": 184,
+       "usable": true
+      }
+     },
+     "east_minus_west": 9.9466,
+     "ew_half_sum": 0.443,
+     "median_airspeed_mps": 21.5006,
+     "n_total": 420,
+     "north_minus_south": 0.0801,
+     "ns_half_sum": -0.9987
+    },
+    "B2": {
+     "bins": {
+      "E": {
+       "median": 5.3535,
+       "n": 194,
+       "usable": true
+      },
+      "N": {
+       "median": -0.5278,
+       "n": 32,
+       "usable": true
+      },
+      "S": {
+       "median": 2.5431,
+       "n": 12,
+       "usable": true
+      },
+      "W": {
+       "median": -4.5807,
+       "n": 208,
+       "usable": true
+      }
+     },
+     "east_minus_west": 9.9342,
+     "ew_half_sum": 0.3864,
+     "median_airspeed_mps": 19.0009,
+     "n_total": 446,
+     "north_minus_south": -3.0709,
+     "ns_half_sum": 1.0076
+    },
+    "B3": {
+     "bins": {
+      "E": {
+       "median": 5.3688,
+       "n": 320,
+       "usable": true
+      },
+      "N": {
+       "median": -0.6408,
+       "n": 60,
+       "usable": true
+      },
+      "S": {
+       "median": 0.4644,
+       "n": 31,
+       "usable": true
+      },
+      "W": {
+       "median": -4.5915,
+       "n": 428,
+       "usable": true
+      }
+     },
+     "east_minus_west": 9.9603,
+     "ew_half_sum": 0.3887,
+     "median_airspeed_mps": 19.0114,
+     "n_total": 839,
+     "north_minus_south": -1.1052,
+     "ns_half_sum": -0.0882
+    }
+   },
+   "HV4W55S": {
+    "A1": {
+     "bins": {
+      "E": {
+       "median": -0.1265,
+       "n": 264,
+       "usable": true
+      },
+      "N": {
+       "median": 5.2701,
+       "n": 216,
+       "usable": true
+      },
+      "S": {
+       "median": -4.5378,
+       "n": 120,
+       "usable": true
+      },
+      "W": {
+       "median": -0.0942,
+       "n": 213,
+       "usable": true
+      }
+     },
+     "east_minus_west": -0.0323,
+     "ew_half_sum": -0.1104,
+     "median_airspeed_mps": 21.4921,
+     "n_total": 813,
+     "north_minus_south": 9.8079,
+     "ns_half_sum": 0.3662
+    },
+    "B2": {
+     "bins": {
+      "E": {
+       "median": -0.2557,
+       "n": 107,
+       "usable": true
+      },
+      "N": {
+       "median": 4.819,
+       "n": 24,
+       "usable": true
+      },
+      "S": {
+       "median": -3.4847,
+       "n": 1,
+       "usable": false
+      },
+      "W": {
+       "median": -0.2646,
+       "n": 92,
+       "usable": true
+      }
+     },
+     "east_minus_west": 0.0089,
+     "ew_half_sum": -0.2601,
+     "median_airspeed_mps": 19.0064,
+     "n_total": 224,
+     "north_minus_south": null,
+     "ns_half_sum": null
+    },
+    "B3": {
+     "bins": {
+      "E": {
+       "median": -0.235,
+       "n": 193,
+       "usable": true
+      },
+      "N": {
+       "median": 4.9478,
+       "n": 32,
+       "usable": true
+      },
+      "S": {
+       "median": -4.3907,
+       "n": 16,
+       "usable": true
+      },
+      "W": {
+       "median": -0.2656,
+       "n": 175,
+       "usable": true
+      }
+     },
+     "east_minus_west": 0.0306,
+     "ew_half_sum": -0.2503,
+     "median_airspeed_mps": 19.0116,
+     "n_total": 416,
+     "north_minus_south": 9.3385,
+     "ns_half_sum": 0.2786
+    }
+   }
+  },
+  "30m": {
+   "BEAMIDP1": {
+    "A1": {
+     "bins": {
+      "E": {
+       "median": 0.4485,
+       "n": 1070,
+       "usable": true
+      },
+      "N": {
+       "median": 0.4349,
+       "n": 309,
+       "usable": true
+      },
+      "S": {
+       "median": 0.454,
+       "n": 135,
+       "usable": true
+      },
+      "W": {
+       "median": 0.4358,
+       "n": 1077,
+       "usable": true
+      }
+     },
+     "east_minus_west": 0.0127,
+     "ew_half_sum": 0.4422,
+     "median_airspeed_mps": 21.4992,
+     "n_total": 2591,
+     "north_minus_south": -0.0191,
+     "ns_half_sum": 0.4445
+    },
+    "B2": {
+     "bins": {
+      "E": {
+       "median": 0.401,
+       "n": 673,
+       "usable": true
+      },
+      "N": {
+       "median": 0.4056,
+       "n": 148,
+       "usable": true
+      },
+      "S": {
+       "median": 0.3902,
+       "n": 167,
+       "usable": true
+      },
+      "W": {
+       "median": 0.3927,
+       "n": 646,
+       "usable": true
+      }
+     },
+     "east_minus_west": 0.0083,
+     "ew_half_sum": 0.3969,
+     "median_airspeed_mps": 19.0027,
+     "n_total": 1634,
+     "north_minus_south": 0.0154,
+     "ns_half_sum": 0.3979
+    },
+    "B3": {
+     "bins": {
+      "E": {
+       "median": 0.4033,
+       "n": 914,
+       "usable": true
+      },
+      "N": {
+       "median": 0.4034,
+       "n": 108,
+       "usable": true
+      },
+      "S": {
+       "median": 0.3952,
+       "n": 118,
+       "usable": true
+      },
+      "W": {
+       "median": 0.3888,
+       "n": 941,
+       "usable": true
+      }
+     },
+     "east_minus_west": 0.0145,
+     "ew_half_sum": 0.3961,
+     "median_airspeed_mps": 18.9969,
+     "n_total": 2081,
+     "north_minus_south": 0.0082,
+     "ns_half_sum": 0.3993
+    }
+   },
+   "HV4SITL15": {
+    "A1": {
+     "bins": {
+      "E": {
+       "median": 0.4435,
+       "n": 292,
+       "usable": true
+      },
+      "N": {
+       "median": 0.4362,
+       "n": 65,
+       "usable": true
+      },
+      "S": {
+       "median": 0.4458,
+       "n": 41,
+       "usable": true
+      },
+      "W": {
+       "median": 0.4252,
+       "n": 278,
+       "usable": true
+      }
+     },
+     "east_minus_west": 0.0183,
+     "ew_half_sum": 0.4344,
+     "median_airspeed_mps": 21.5035,
+     "n_total": 676,
+     "north_minus_south": -0.0096,
+     "ns_half_sum": 0.441
+    },
+    "B2": {
+     "bins": {
+      "E": {
+       "median": 0.3792,
+       "n": 264,
+       "usable": true
+      },
+      "N": {
+       "median": 0.3782,
+       "n": 33,
+       "usable": true
+      },
+      "S": {
+       "median": 0.3429,
+       "n": 30,
+       "usable": true
+      },
+      "W": {
+       "median": 0.3794,
+       "n": 262,
+       "usable": true
+      }
+     },
+     "east_minus_west": -0.0002,
+     "ew_half_sum": 0.3793,
+     "median_airspeed_mps": 18.9948,
+     "n_total": 589,
+     "north_minus_south": 0.0353,
+     "ns_half_sum": 0.3605
+    },
+    "B3": {
+     "bins": {
+      "E": {
+       "median": 0.3976,
+       "n": 285,
+       "usable": true
+      },
+      "N": {
+       "median": 0.3715,
+       "n": 32,
+       "usable": true
+      },
+      "S": {
+       "median": 0.3431,
+       "n": 35,
+       "usable": true
+      },
+      "W": {
+       "median": 0.3848,
+       "n": 304,
+       "usable": true
+      }
+     },
+     "east_minus_west": 0.0128,
+     "ew_half_sum": 0.3912,
+     "median_airspeed_mps": 18.9905,
+     "n_total": 656,
+     "north_minus_south": 0.0284,
+     "ns_half_sum": 0.3573
+    }
+   },
+   "HV4SITL16": {
+    "A1": {
+     "bins": {
+      "E": {
+       "median": 0.443,
+       "n": 295,
+       "usable": true
+      },
+      "N": {
+       "median": 0.4283,
+       "n": 63,
+       "usable": true
+      },
+      "S": {
+       "median": 0.4285,
+       "n": 60,
+       "usable": true
+      },
+      "W": {
+       "median": 0.422,
+       "n": 280,
+       "usable": true
+      }
+     },
+     "east_minus_west": 0.021,
+     "ew_half_sum": 0.4325,
+     "median_airspeed_mps": 21.4965,
+     "n_total": 698,
+     "north_minus_south": -0.0002,
+     "ns_half_sum": 0.4284
+    },
+    "B2": {
+     "bins": {
+      "E": {
+       "median": 0.3847,
+       "n": 165,
+       "usable": true
+      },
+      "N": {
+       "median": 0.3871,
+       "n": 17,
+       "usable": true
+      },
+      "S": {
+       "median": 0.3273,
+       "n": 19,
+       "usable": true
+      },
+      "W": {
+       "median": 0.3669,
+       "n": 162,
+       "usable": true
+      }
+     },
+     "east_minus_west": 0.0178,
+     "ew_half_sum": 0.3758,
+     "median_airspeed_mps": 18.9938,
+     "n_total": 363,
+     "north_minus_south": 0.0598,
+     "ns_half_sum": 0.3572
+    },
+    "B3": {
+     "bins": {
+      "E": {
+       "median": 0.3929,
+       "n": 326,
+       "usable": true
+      },
+      "N": {
+       "median": 0.3867,
+       "n": 36,
+       "usable": true
+      },
+      "S": {
+       "median": 0.3631,
+       "n": 37,
+       "usable": true
+      },
+      "W": {
+       "median": 0.3956,
+       "n": 330,
+       "usable": true
+      }
+     },
+     "east_minus_west": -0.0027,
+     "ew_half_sum": 0.3942,
+     "median_airspeed_mps": 18.9921,
+     "n_total": 729,
+     "north_minus_south": 0.0236,
+     "ns_half_sum": 0.3749
+    }
+   },
+   "HV4W00": {
+    "A1": {
+     "bins": {
+      "E": {
+       "median": 0.4426,
+       "n": 258,
+       "usable": true
+      },
+      "N": {
+       "median": 0.4121,
+       "n": 61,
+       "usable": true
+      },
+      "S": {
+       "median": 0.4461,
+       "n": 47,
+       "usable": true
+      },
+      "W": {
+       "median": 0.4187,
+       "n": 269,
+       "usable": true
+      }
+     },
+     "east_minus_west": 0.0239,
+     "ew_half_sum": 0.4306,
+     "median_airspeed_mps": 21.4977,
+     "n_total": 635,
+     "north_minus_south": -0.034,
+     "ns_half_sum": 0.4291
+    },
+    "B2": {
+     "bins": {
+      "E": {
+       "median": 0.3955,
+       "n": 160,
+       "usable": true
+      },
+      "N": {
+       "median": 0.391,
+       "n": 13,
+       "usable": true
+      },
+      "S": {
+       "median": 0.3444,
+       "n": 18,
+       "usable": true
+      },
+      "W": {
+       "median": 0.3796,
+       "n": 153,
+       "usable": true
+      }
+     },
+     "east_minus_west": 0.0159,
+     "ew_half_sum": 0.3876,
+     "median_airspeed_mps": 18.9813,
+     "n_total": 344,
+     "north_minus_south": 0.0466,
+     "ns_half_sum": 0.3677
+    },
+    "B3": {
+     "bins": {
+      "E": {
+       "median": 0.3862,
+       "n": 374,
+       "usable": true
+      },
+      "N": {
+       "median": 0.3762,
+       "n": 47,
+       "usable": true
+      },
+      "S": {
+       "median": 0.3592,
+       "n": 40,
+       "usable": true
+      },
+      "W": {
+       "median": 0.3858,
+       "n": 396,
+       "usable": true
+      }
+     },
+     "east_minus_west": 0.0004,
+     "ew_half_sum": 0.386,
+     "median_airspeed_mps": 18.9988,
+     "n_total": 857,
+     "north_minus_south": 0.017,
+     "ns_half_sum": 0.3677
+    }
+   },
+   "HV4W05": {
+    "A1": {
+     "bins": {
+      "E": {
+       "median": 5.4296,
+       "n": 186,
+       "usable": true
+      },
+      "N": {
+       "median": -1.2476,
+       "n": 55,
+       "usable": true
+      },
+      "S": {
+       "median": -1.1938,
+       "n": 34,
+       "usable": true
+      },
+      "W": {
+       "median": -4.5507,
+       "n": 302,
+       "usable": true
+      }
+     },
+     "east_minus_west": 9.9803,
+     "ew_half_sum": 0.4394,
+     "median_airspeed_mps": 21.4923,
+     "n_total": 577,
+     "north_minus_south": -0.0538,
+     "ns_half_sum": -1.2207
+    },
+    "B2": {
+     "bins": {
+      "E": {
+       "median": 5.3492,
+       "n": 200,
+       "usable": true
+      },
+      "N": {
+       "median": -0.3485,
+       "n": 28,
+       "usable": true
+      },
+      "S": {
+       "median": -0.562,
+       "n": 31,
+       "usable": true
+      },
+      "W": {
+       "median": -4.5996,
+       "n": 358,
+       "usable": true
+      }
+     },
+     "east_minus_west": 9.9488,
+     "ew_half_sum": 0.3748,
+     "median_airspeed_mps": 18.9866,
+     "n_total": 617,
+     "north_minus_south": 0.2135,
+     "ns_half_sum": -0.4553
+    },
+    "B3": {
+     "bins": {
+      "E": {
+       "median": 5.3607,
+       "n": 208,
+       "usable": true
+      },
+      "N": {
+       "median": -1.1082,
+       "n": 26,
+       "usable": true
+      },
+      "S": {
+       "median": -0.1067,
+       "n": 29,
+       "usable": true
+      },
+      "W": {
+       "median": -4.6008,
+       "n": 350,
+       "usable": true
+      }
+     },
+     "east_minus_west": 9.9615,
+     "ew_half_sum": 0.38,
+     "median_airspeed_mps": 18.9959,
+     "n_total": 613,
+     "north_minus_south": -1.0015,
+     "ns_half_sum": -0.6075
+    }
+   },
+   "HV4W55": {
+    "A1": {
+     "bins": {
+      "E": {
+       "median": 5.4189,
+       "n": 191,
+       "usable": true
+      },
+      "N": {
+       "median": -1.6659,
+       "n": 48,
+       "usable": true
+      },
+      "S": {
+       "median": -0.9575,
+       "n": 34,
+       "usable": true
+      },
+      "W": {
+       "median": -4.5424,
+       "n": 306,
+       "usable": true
+      }
+     },
+     "east_minus_west": 9.9613,
+     "ew_half_sum": 0.4383,
+     "median_airspeed_mps": 21.496,
+     "n_total": 579,
+     "north_minus_south": -0.7084,
+     "ns_half_sum": -1.3117
+    },
+    "B2": {
+     "bins": {
+      "E": {
+       "median": 5.353,
+       "n": 127,
+       "usable": true
+      },
+      "N": {
+       "median": -0.3576,
+       "n": 15,
+       "usable": true
+      },
+      "S": {
+       "median": 0.9351,
+       "n": 16,
+       "usable": true
+      },
+      "W": {
+       "median": -4.5955,
+       "n": 209,
+       "usable": true
+      }
+     },
+     "east_minus_west": 9.9485,
+     "ew_half_sum": 0.3787,
+     "median_airspeed_mps": 18.9963,
+     "n_total": 367,
+     "north_minus_south": -1.2927,
+     "ns_half_sum": 0.2888
+    },
+    "B3": {
+     "bins": {
+      "E": {
+       "median": 5.3701,
+       "n": 221,
+       "usable": true
+      },
+      "N": {
+       "median": -0.3809,
+       "n": 31,
+       "usable": true
+      },
+      "S": {
+       "median": -0.0048,
+       "n": 30,
+       "usable": true
+      },
+      "W": {
+       "median": -4.6012,
+       "n": 352,
+       "usable": true
+      }
+     },
+     "east_minus_west": 9.9713,
+     "ew_half_sum": 0.3844,
+     "median_airspeed_mps": 18.9955,
+     "n_total": 634,
+     "north_minus_south": -0.3761,
+     "ns_half_sum": -0.1929
+    }
+   },
+   "HV4W55R": {
+    "A1": {
+     "bins": {
+      "E": {
+       "median": 5.4163,
+       "n": 168,
+       "usable": true
+      },
+      "N": {
+       "median": -0.9586,
+       "n": 37,
+       "usable": true
+      },
+      "S": {
+       "median": -1.0387,
+       "n": 31,
+       "usable": true
+      },
+      "W": {
+       "median": -4.55,
+       "n": 218,
+       "usable": true
+      }
+     },
+     "east_minus_west": 9.9663,
+     "ew_half_sum": 0.4331,
+     "median_airspeed_mps": 21.4958,
+     "n_total": 454,
+     "north_minus_south": 0.0801,
+     "ns_half_sum": -0.9987
+    },
+    "B2": {
+     "bins": {
+      "E": {
+       "median": 5.3434,
+       "n": 209,
+       "usable": true
+      },
+      "N": {
+       "median": -0.5278,
+       "n": 32,
+       "usable": true
+      },
+      "S": {
+       "median": -0.476,
+       "n": 31,
+       "usable": true
+      },
+      "W": {
+       "median": -4.6123,
+       "n": 347,
+       "usable": true
+      }
+     },
+     "east_minus_west": 9.9557,
+     "ew_half_sum": 0.3655,
+     "median_airspeed_mps": 18.9881,
+     "n_total": 619,
+     "north_minus_south": -0.0518,
+     "ns_half_sum": -0.5019
+    },
+    "B3": {
+     "bins": {
+      "E": {
+       "median": 5.3673,
+       "n": 331,
+       "usable": true
+      },
+      "N": {
+       "median": -0.6408,
+       "n": 60,
+       "usable": true
+      },
+      "S": {
+       "median": 0.1181,
+       "n": 51,
+       "usable": true
+      },
+      "W": {
+       "median": -4.6097,
+       "n": 594,
+       "usable": true
+      }
+     },
+     "east_minus_west": 9.977,
+     "ew_half_sum": 0.3788,
+     "median_airspeed_mps": 19.0074,
+     "n_total": 1036,
+     "north_minus_south": -0.7589,
+     "ns_half_sum": -0.2614
+    }
+   },
+   "HV4W55S": {
+    "A1": {
+     "bins": {
+      "E": {
+       "median": -0.1265,
+       "n": 264,
+       "usable": true
+      },
+      "N": {
+       "median": 5.2701,
+       "n": 216,
+       "usable": true
+      },
+      "S": {
+       "median": -4.5825,
+       "n": 177,
+       "usable": true
+      },
+      "W": {
+       "median": -0.0942,
+       "n": 213,
+       "usable": true
+      }
+     },
+     "east_minus_west": -0.0323,
+     "ew_half_sum": -0.1104,
+     "median_airspeed_mps": 21.4885,
+     "n_total": 870,
+     "north_minus_south": 9.8526,
+     "ns_half_sum": 0.3438
+    },
+    "B2": {
+     "bins": {
+      "E": {
+       "median": -0.2525,
+       "n": 123,
+       "usable": true
+      },
+      "N": {
+       "median": 4.819,
+       "n": 24,
+       "usable": true
+      },
+      "S": {
+       "median": -4.6925,
+       "n": 70,
+       "usable": true
+      },
+      "W": {
+       "median": -0.2065,
+       "n": 144,
+       "usable": true
+      }
+     },
+     "east_minus_west": -0.046,
+     "ew_half_sum": -0.2295,
+     "median_airspeed_mps": 18.9947,
+     "n_total": 361,
+     "north_minus_south": 9.5115,
+     "ns_half_sum": 0.0633
+    },
+    "B3": {
+     "bins": {
+      "E": {
+       "median": -0.2309,
+       "n": 208,
+       "usable": true
+      },
+      "N": {
+       "median": 4.9478,
+       "n": 32,
+       "usable": true
+      },
+      "S": {
+       "median": -4.6498,
+       "n": 79,
+       "usable": true
+      },
+      "W": {
+       "median": -0.2448,
+       "n": 212,
+       "usable": true
+      }
+     },
+     "east_minus_west": 0.0139,
+     "ew_half_sum": -0.2379,
+     "median_airspeed_mps": 19.0038,
+     "n_total": 531,
+     "north_minus_south": 9.5976,
+     "ns_half_sum": 0.149
+    }
+   }
+  }
+ },
+ "method": {
+  "bins": "90 deg wide, centred on E/W/N/S, GPS.GCrs",
+  "filters": "rel alt > floor, airspeed > 10, groundspeed > 10",
+  "metric": "GPS.Spd - interpolated ARSP.Airspeed (I=0)",
+  "min_n_for_a_quoted_median": 10
+ }
+}

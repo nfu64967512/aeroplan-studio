@@ -1,0 +1,33 @@
+{
+  "scenario": "S4",
+  "n": 4,
+  "bench_coverage_altitude_m": 140.0,
+  "runs": [
+    {
+      "waiver_max_agl_m": 200.0,
+      "makespan_s": 2834.444635524045,
+      "max_km": 51.21,
+      "coverage": 1.0,
+      "n_aircraft_with_route": 4,
+      "uncovered": 0,
+      "operate_agl_min_m": 140.0,
+      "operate_agl_max_m": 147.0,
+      "validate_passed": true,
+      "agl_ok": true,
+      "airspace_ok": true,
+      "coverage_ok": true,
+      "feasibility_status": "GO_WITH_WARNINGS",
+      "feasibility_errors": [],
+      "feasibility_warnings": [
+        "provisional_params",
+        "wind: wind_layer[0]: agl [0,3000] -> ENU z [0.0,3000.0] using home ground z=0.0 (assumption: AGL referenced to home ground)",
+        "wind: wind layer bounds converted MSL->ENU z at home only; the curvature term (~196 m at 50 km) is not applied per position (known approximation)",
+        "reference_battery_assumed(A1)"
+      ]
+    },
+    {
+      "waiver_max_agl_m": 120.0,
+      "error": "AeroPlanAdapterError: HV-DCCPP preflight NO_GO：no_coverable_area: 所有區域皆無可行構型（感測相容／高度帶／鏈路／方向）"
+    }
+  ]
+}

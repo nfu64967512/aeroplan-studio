@@ -1,0 +1,13 @@
+telemetry 時基偏移 73.0 s（已從所有實飛時刻扣掉）
+HV4W55  3 架  規劃 30.66 km  實飛 31.87 km  (+3.9%)
+  A1  Pioneer  落地 規劃  1260.5 / 實飛  1294.0 s ( +33.5)   航程  10.29 /  10.68 km (+3.8%)   最高  119.6 m
+  B2  HERO     落地 規劃   533.9 / 實飛   570.0 s ( +36.1)   航程   7.93 /   8.29 km (+4.6%)   最高  119.6 m
+  B3  HERO     落地 規劃   894.5 / 實飛   929.0 s ( +34.5)   航程  12.44 /  12.90 km (+3.7%)   最高  119.7 m
+
+實飛最小水平間距 103.8 m（垂直 28.4 m）　('B2', 'B3') 於 t=464s；規劃值 105.7 m
+  ✅ 違規 0 筆／356 個空中樣本（門檻 水平<100 且 垂直<50）
+  逐對: {'A1-B2': {'min_h_m': None, 'd_v_at_min_m': None, 'n_violations': 0}, 'A1-B3': {'min_h_m': 169.4, 'd_v_at_min_m': 116.8, 'n_violations': 0}, 'B2-B3': {'min_h_m': 103.8, 'd_v_at_min_m': 28.4, 'n_violations': 0}}
+
+實飛航跡覆蓋率（刈幅 138.0 m 緩衝；上界）:
+  Z1   99.97%  (124.76 / 124.80 公頃)
+寫出 C:\Users\joy46\Documents\Projects\aeroplan-studio\runs\artifacts\HV4W55\compare.png

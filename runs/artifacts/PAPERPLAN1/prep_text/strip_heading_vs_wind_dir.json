@@ -1,0 +1,125 @@
+[
+ {
+  "wind_mps_dir_from_deg": [
+   5.0,
+   270.0
+  ],
+  "plan_wall_s": 12.66,
+  "status": "GO_WITH_WARNINGS",
+  "makespan_s": 1260.43,
+  "total_km": 30.658,
+  "per_uav_km": {
+   "A1": 10.293,
+   "B2": 7.926,
+   "B3": 12.439
+  },
+  "operate_leg_headings": {
+   "A1": {
+    "n_legs": 21,
+    "total_len_m": 4712.4,
+    "len_weighted_heading_mod180_deg": 90.0,
+    "headings": [
+     90.0
+    ]
+   },
+   "B2": {
+    "n_legs": 13,
+    "total_len_m": 2900.3,
+    "len_weighted_heading_mod180_deg": 90.0,
+    "headings": [
+     90.0
+    ]
+   },
+   "B3": {
+    "n_legs": 28,
+    "total_len_m": 6246.8,
+    "len_weighted_heading_mod180_deg": 90.0,
+    "headings": [
+     90.0
+    ]
+   }
+  }
+ },
+ {
+  "wind_mps_dir_from_deg": [
+   5.0,
+   180.0
+  ],
+  "plan_wall_s": 6.7,
+  "status": "GO_WITH_WARNINGS",
+  "makespan_s": 966.18,
+  "total_km": 33.509,
+  "per_uav_km": {
+   "A1": 13.603,
+   "B2": 7.922,
+   "B3": 11.984
+  },
+  "operate_leg_headings": {
+   "A1": {
+    "n_legs": 21,
+    "total_len_m": 4712.4,
+    "len_weighted_heading_mod180_deg": 90.0,
+    "headings": [
+     90.0
+    ]
+   },
+   "B2": {
+    "n_legs": 13,
+    "total_len_m": 2900.3,
+    "len_weighted_heading_mod180_deg": 90.0,
+    "headings": [
+     90.0
+    ]
+   },
+   "B3": {
+    "n_legs": 27,
+    "total_len_m": 6023.7,
+    "len_weighted_heading_mod180_deg": 90.0,
+    "headings": [
+     90.0
+    ]
+   }
+  }
+ },
+ {
+  "wind_mps_dir_from_deg": [
+   0.0,
+   270.0
+  ],
+  "plan_wall_s": 11.34,
+  "status": "GO_WITH_WARNINGS",
+  "makespan_s": 1205.48,
+  "total_km": 30.435,
+  "per_uav_km": {
+   "A1": 10.229,
+   "B2": 7.866,
+   "B3": 12.339
+  },
+  "operate_leg_headings": {
+   "A1": {
+    "n_legs": 21,
+    "total_len_m": 4656.4,
+    "len_weighted_heading_mod180_deg": 90.0,
+    "headings": [
+     90.0
+    ]
+   },
+   "B2": {
+    "n_legs": 13,
+    "total_len_m": 2908.1,
+    "len_weighted_heading_mod180_deg": 90.0,
+    "headings": [
+     90.0
+    ]
+   },
+   "B3": {
+    "n_legs": 28,
+    "total_len_m": 6263.6,
+    "len_weighted_heading_mod180_deg": 90.0,
+    "headings": [
+     90.0
+    ]
+   }
+  }
+ }
+]

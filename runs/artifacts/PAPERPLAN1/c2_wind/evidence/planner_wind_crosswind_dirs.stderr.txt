@@ -1,0 +1,8 @@
+fleet_area_split(1 → 3 塊；單一大區配混編機隊會產出空計畫，所以先切）
+HARVEST: min_fw_lowered(Pioneer PNP（構型 A）120 → 100 m)。表 1 的值是規劃值不是機體極限（使用方式欄：「任務前需依地形、感測器與法規調整」），但它會寫進飛控的 Q_RTL_ALT（匯出的 .param，每條路徑都生效）⇒ QRTL 進場高度跟著降；另外 FENCE_ALT_MIN 也綁著它，但只在走 mavlink_link.upload_plan 寫參數那條路時才會送出。
+HARVEST: dh_band_min_relaxed(15 m，預設 20)。這同時放寬了 GSD 可達性判準（h_max ≥ 最低作業高度 + 15）與相機預設目標高。
+HARVEST: recovery_auto_applied({'A1': 'ALT1'}；makespan 1217.9 → 966.2 s、最小間距 169.5 → 322.2 m)
+fleet_area_split(1 → 3 塊；單一大區配混編機隊會產出空計畫，所以先切）
+HARVEST: min_fw_lowered(Pioneer PNP（構型 A）120 → 100 m)。表 1 的值是規劃值不是機體極限（使用方式欄：「任務前需依地形、感測器與法規調整」），但它會寫進飛控的 Q_RTL_ALT（匯出的 .param，每條路徑都生效）⇒ QRTL 進場高度跟著降；另外 FENCE_ALT_MIN 也綁著它，但只在走 mavlink_link.upload_plan 寫參數那條路時才會送出。
+HARVEST: dh_band_min_relaxed(15 m，預設 20)。這同時放寬了 GSD 可達性判準（h_max ≥ 最低作業高度 + 15）與相機預設目標高。
+HARVEST: recovery_auto_rejected({'A1': 'ALT1'}；最小水平間距變差（96.5 → 4.1 m））

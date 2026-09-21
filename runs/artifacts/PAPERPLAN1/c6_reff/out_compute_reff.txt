@@ -1,0 +1,57 @@
+=== R_eff table (from hv_dccpp.platform.PlatformSpec.r_eff) ===
+
+[A] Pioneer PNP  V_a=21.5 m/s  phi_max=20.0 deg
+  R_theo table=130.0 m ; Va^2/(g tan phi)=129.46 m (dev -0.41%)
+  R_plan=200.0 m ; W*=5.1675 m/s
+   W[m/s]  R_theo(1+W/Va)^2   R_eff    binding
+        0          130.00    200.00   R_plan
+        2          155.31    200.00   R_plan
+        4          182.87    200.00   R_plan
+        5          197.50    200.00   R_plan
+     5.03          197.94    200.00   R_plan
+     5.17          200.04    200.04   trochoid
+        6          212.68    212.68   trochoid
+        8          244.74    244.74   trochoid
+       10          279.05    279.05   trochoid
+       12          315.61    315.61   trochoid
+       15          374.67    374.67   trochoid
+       19          461.29    461.29   trochoid
+     21.5          520.00    520.00   trochoid
+       25          608.10    608.10   trochoid
+       40         1063.69   1063.69   trochoid
+
+[B] HERO PNP  V_a=19.0 m/s  phi_max=25.0 deg
+  R_theo table=75.0 m ; Va^2/(g tan phi)=78.92 m (dev +5.22%)
+  R_plan=120.0 m ; W*=5.0333 m/s
+   W[m/s]  R_theo(1+W/Va)^2   R_eff    binding
+        0           75.00    120.00   R_plan
+        2           91.62    120.00   R_plan
+        4          109.90    120.00   R_plan
+        5          119.67    120.00   R_plan
+     5.03          119.97    120.00   R_plan
+     5.17          121.37    121.37   trochoid
+        6          129.85    129.85   trochoid
+        8          151.45    151.45   trochoid
+       10          174.72    174.72   trochoid
+       12          199.65    199.65   trochoid
+       15          240.17    240.17   trochoid
+       19          300.00    300.00   trochoid
+     21.5          340.77    340.77   trochoid
+       25          402.22    402.22   trochoid
+       40          723.20    723.20   trochoid
+
+=== skip-k = ceil(2 R_eff / s), s = strip spacing ===
+  s=  97.00 m -> k_A(R_eff=200.0)=5, k_B(R_eff=120.0)=3
+  s= 100.00 m -> k_A(R_eff=200.0)=4, k_B(R_eff=120.0)=3
+  s= 168.05 m -> k_A(R_eff=200.0)=3, k_B(R_eff=120.0)=2
+  s= 270.00 m -> k_A(R_eff=200.0)=2, k_B(R_eff=120.0)=1
+
+=== turn lengths at s=97.0 m, W=5 (Omega vs skip-k U) ===
+  [A] R_eff=200.0  Omega(s)=1348.69 m   U(k*s=485.0)=713.32 m   min-> U(skip-k)
+  [B] R_eff=120.0  Omega(s)=757.38 m   U(k*s=291.0)=427.99 m   min-> U(skip-k)
+
+=== cross-check vs 2026-09-05 FLYBOTH measured turn radius (source: memory note, not recomputed here) ===
+  [A] R_eff(W=5)=200 m ; R_theo=130 m ; measured=112 m ; R_eff/measured=1.79x ; measured/R_theo=0.862
+  [B] R_eff(W=5)=120 m ; R_theo=75 m ; measured=68 m ; R_eff/measured=1.76x ; measured/R_theo=0.907
+
+wrote reff_numbers.json

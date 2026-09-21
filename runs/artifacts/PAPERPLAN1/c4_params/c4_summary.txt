@@ -1,0 +1,60 @@
+== 1. export file vs comparison set ==
+HV4SITL15: 3 aircraft; export total 96; compared total 102
+   A1: exported 32 -> compared 34
+   B2: exported 32 -> compared 34
+   B3: exported 32 -> compared 34
+HV4SITL16: 3 aircraft; export total 96; compared total 102
+   A1: exported 32 -> compared 34
+   B2: exported 32 -> compared 34
+   B3: exported 32 -> compared 34
+
+== 2. params_readback.csv per sortie ==
+HV4SITL1   68/68  17 params x 4 ac ['A1', 'B2', 'B3', 'B4']  source {'(no source column)': 68}
+           int-truncated: ['B2.AIRSPEED_MAX(26.6->26.0)', 'B3.AIRSPEED_MAX(26.6->26.0)', 'B4.AIRSPEED_MAX(26.6->26.0)']
+HV4SITL10  68/68  17 params x 4 ac ['A1', 'B2', 'B3', 'B4']  source {'(no source column)': 68}
+           int-truncated: ['B2.AIRSPEED_MAX(26.6->26.0)', 'B3.AIRSPEED_MAX(26.6->26.0)', 'B4.AIRSPEED_MAX(26.6->26.0)']
+HV4SITL11  68/68  17 params x 4 ac ['A1', 'B2', 'B3', 'B4']  source {'(no source column)': 68}
+           int-truncated: ['B2.AIRSPEED_MAX(26.6->26.0)', 'B3.AIRSPEED_MAX(26.6->26.0)', 'B4.AIRSPEED_MAX(26.6->26.0)']
+HV4SITL12  68/68  17 params x 4 ac ['A1', 'B2', 'B3', 'B4']  source {'(no source column)': 68}
+           int-truncated: ['B2.AIRSPEED_MAX(26.6->26.0)', 'B3.AIRSPEED_MAX(26.6->26.0)', 'B4.AIRSPEED_MAX(26.6->26.0)']
+HV4SITL13  68/68  17 params x 4 ac ['A1', 'B2', 'B3', 'B4']  source {'(no source column)': 68}
+           int-truncated: ['B2.AIRSPEED_MAX(26.6->26.0)', 'B3.AIRSPEED_MAX(26.6->26.0)', 'B4.AIRSPEED_MAX(26.6->26.0)']
+HV4SITL15  51/51  17 params x 3 ac ['A1', 'B2', 'B3']  source {'(no source column)': 51}
+           int-truncated: ['B2.AIRSPEED_MAX(26.6->26.0)', 'B3.AIRSPEED_MAX(26.6->26.0)']
+HV4SITL16  102/102  34 params x 3 ac ['A1', 'B2', 'B3']  source {'匯出檔': 93, 'EXPECT_FALLBACK': 6, 'FIRMWARE_OVERRIDE': 3}
+           int-truncated: ['B2.AIRSPEED_MAX(26.6->26.0)', 'B3.AIRSPEED_MAX(26.6->26.0)']
+           fw-override:   ['A1.Q_RTL_MODE', 'B2.Q_RTL_MODE', 'B3.Q_RTL_MODE']
+HV4SITL2   68/68  17 params x 4 ac ['A1', 'B2', 'B3', 'B4']  source {'(no source column)': 68}
+           int-truncated: ['B2.AIRSPEED_MAX(26.6->26.0)', 'B3.AIRSPEED_MAX(26.6->26.0)', 'B4.AIRSPEED_MAX(26.6->26.0)']
+HV4SITL3   68/68  17 params x 4 ac ['A1', 'B2', 'B3', 'B4']  source {'(no source column)': 68}
+           int-truncated: ['B2.AIRSPEED_MAX(26.6->26.0)', 'B3.AIRSPEED_MAX(26.6->26.0)', 'B4.AIRSPEED_MAX(26.6->26.0)']
+HV4SITL4   68/68  17 params x 4 ac ['A1', 'A2', 'B3', 'B4']  source {'(no source column)': 68}
+           int-truncated: ['B3.AIRSPEED_MAX(26.6->26.0)', 'B4.AIRSPEED_MAX(26.6->26.0)']
+HV4SITL5   68/68  17 params x 4 ac ['A1', 'A2', 'A3', 'B4']  source {'(no source column)': 68}
+           int-truncated: ['B4.AIRSPEED_MAX(26.6->26.0)']
+HV4SITL6   68/68  17 params x 4 ac ['A1', 'B2', 'B3', 'B4']  source {'(no source column)': 68}
+           int-truncated: ['B2.AIRSPEED_MAX(26.6->26.0)', 'B3.AIRSPEED_MAX(26.6->26.0)', 'B4.AIRSPEED_MAX(26.6->26.0)']
+HV4SITL7   68/68  17 params x 4 ac ['A1', 'B2', 'B3', 'B4']  source {'(no source column)': 68}
+           int-truncated: ['B2.AIRSPEED_MAX(26.6->26.0)', 'B3.AIRSPEED_MAX(26.6->26.0)', 'B4.AIRSPEED_MAX(26.6->26.0)']
+HV4SITL8   68/68  17 params x 4 ac ['A1', 'B2', 'B3', 'B4']  source {'(no source column)': 68}
+           int-truncated: ['B2.AIRSPEED_MAX(26.6->26.0)', 'B3.AIRSPEED_MAX(26.6->26.0)', 'B4.AIRSPEED_MAX(26.6->26.0)']
+HV4SITL9   68/68  17 params x 4 ac ['A1', 'B2', 'B3', 'B4']  source {'(no source column)': 68}
+           int-truncated: ['B2.AIRSPEED_MAX(26.6->26.0)', 'B3.AIRSPEED_MAX(26.6->26.0)', 'B4.AIRSPEED_MAX(26.6->26.0)']
+
+== 3. method self-check on HV4SITL15 (vs its stored flight_summary.json) ==
+  A1: stored={'flown_km': 10.53, 'peak_alt_m': 120.1, 'err_pct': 2.3, 'flown_t_land_s': 1267.5}  recomputed={'flown_km': 10.53, 'peak_alt_m': 120.1, 'err_pct': 2.3, 'flown_t_land_s': 1267.5}  match=True
+  B2: stored={'flown_km': 8.13, 'peak_alt_m': 120.1, 'err_pct': 2.5, 'flown_t_land_s': 534.5}  recomputed={'flown_km': 8.13, 'peak_alt_m': 120.1, 'err_pct': 2.5, 'flown_t_land_s': 534.5}  match=True
+  B3: stored={'flown_km': 12.71, 'peak_alt_m': 120.2, 'err_pct': 2.2, 'flown_t_land_s': 877.5}  recomputed={'flown_km': 12.71, 'peak_alt_m': 120.2, 'err_pct': 2.2, 'flown_t_land_s': 877.5}  match=True
+  separation: {'stored_min_h_m': 104.2, 'recomputed_min_h_m': 104.2, 'match': True}
+
+== 4. HV4SITL16 (has the 102/102 gate + flight.csv, never reported) recomputed ==
+  HV4SITL15: plan 30.66 km / flown 31.37 km (+2.32%)  min-h 104.2 m (dv 29.0 m, ('B2', 'B3')), violations 0
+     A1: plan 10.29 / flown 10.53 km (+2.3%)  peak 120.11 m  land 1267.5 (plan 1260.4)  n=1282
+     B2: plan 7.93 / flown 8.13 km (+2.5%)  peak 120.14 m  land 534.5 (plan 533.9)  n=1282
+     B3: plan 12.44 / flown 12.71 km (+2.2%)  peak 120.15 m  land 877.5 (plan 894.4)  n=1282
+     per-pair: {'A1-B2': {'min_h_m': None, 'd_v_at_min_m': None, 'n_violations': 0}, 'A1-B3': {'min_h_m': 262.9, 'd_v_at_min_m': 76.3, 'n_violations': 0}, 'B2-B3': {'min_h_m': 104.2, 'd_v_at_min_m': 29.0, 'n_violations': 0}}
+  HV4SITL16: plan 30.66 km / flown 31.36 km (+2.28%)  min-h 101.0 m (dv 29.0 m, ('B2', 'B3')), violations 0
+     A1: plan 10.29 / flown 10.52 km (+2.2%)  peak 120.1 m  land 1268.0 (plan 1260.4)  n=1291
+     B2: plan 7.93 / flown 8.13 km (+2.5%)  peak 120.12 m  land 533.0 (plan 533.9)  n=1291
+     B3: plan 12.44 / flown 12.71 km (+2.2%)  peak 120.16 m  land 876.0 (plan 894.4)  n=1291
+     per-pair: {'A1-B2': {'min_h_m': None, 'd_v_at_min_m': None, 'n_violations': 0}, 'A1-B3': {'min_h_m': 262.7, 'd_v_at_min_m': 80.0, 'n_violations': 0}, 'B2-B3': {'min_h_m': 101.0, 'd_v_at_min_m': 29.0, 'n_violations': 0}}

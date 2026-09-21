@@ -1,0 +1,199 @@
+{
+ "corrected_by_label": "update_paper",
+ "corrections": {
+  "K8": {
+   "recomputed": {
+    "BEAMIDP1": {
+     "A1": {
+      "enrg_tot_wh": 83.432,
+      "rows": 5029,
+      "volt_max": 12.6,
+      "volt_min": 12.6
+     },
+     "B2": {
+      "enrg_tot_wh": 71.296,
+      "rows": 5039,
+      "volt_max": 12.6,
+      "volt_min": 12.6
+     },
+     "B3": {
+      "enrg_tot_wh": 64.735,
+      "rows": 4002,
+      "volt_max": 12.6,
+      "volt_min": 12.6
+     }
+    },
+    "HV4SITL15": {
+     "A1": {
+      "enrg_tot_wh": 34.537,
+      "rows": 3292,
+      "volt_max": 12.6,
+      "volt_min": 12.6
+     },
+     "B2": {
+      "enrg_tot_wh": 28.213,
+      "rows": 1322,
+      "volt_max": 12.6,
+      "volt_min": 12.6
+     },
+     "B3": {
+      "enrg_tot_wh": 34.575,
+      "rows": 2264,
+      "volt_max": 12.6,
+      "volt_min": 12.6
+     }
+    },
+    "HV4SITL16": {
+     "A1": {
+      "enrg_tot_wh": 34.591,
+      "rows": 3294,
+      "volt_max": 12.6,
+      "volt_min": 12.6
+     },
+     "B2": {
+      "enrg_tot_wh": 28.147,
+      "rows": 1257,
+      "volt_max": 12.6,
+      "volt_min": 12.6
+     },
+     "B3": {
+      "enrg_tot_wh": 34.552,
+      "rows": 2113,
+      "volt_max": 12.6,
+      "volt_min": 12.6
+     }
+    },
+    "HV4W00": {
+     "A1": {
+      "enrg_tot_wh": 34.233,
+      "rows": 2994,
+      "volt_max": 12.6,
+      "volt_min": 12.6
+     },
+     "B2": {
+      "enrg_tot_wh": 27.98,
+      "rows": 1230,
+      "volt_max": 12.6,
+      "volt_min": 12.6
+     },
+     "B3": {
+      "enrg_tot_wh": 34.412,
+      "rows": 1945,
+      "volt_max": 12.6,
+      "volt_min": 12.6
+     }
+    },
+    "HV4W05": {
+     "A1": {
+      "enrg_tot_wh": 32.05,
+      "rows": 3055,
+      "volt_max": 12.6,
+      "volt_min": 12.6
+     },
+     "B2": {
+      "enrg_tot_wh": 26.84,
+      "rows": 1335,
+      "volt_max": 12.6,
+      "volt_min": 12.6
+     },
+     "B3": {
+      "enrg_tot_wh": 33.341,
+      "rows": 2142,
+      "volt_max": 12.6,
+      "volt_min": 12.6
+     }
+    },
+    "HV4W55": {
+     "A1": {
+      "enrg_tot_wh": 32.226,
+      "rows": 3197,
+      "volt_max": 12.6,
+      "volt_min": 12.6
+     },
+     "B2": {
+      "enrg_tot_wh": 26.967,
+      "rows": 1255,
+      "volt_max": 12.6,
+      "volt_min": 12.6
+     },
+     "B3": {
+      "enrg_tot_wh": 33.485,
+      "rows": 2284,
+      "volt_max": 12.6,
+      "volt_min": 12.6
+     }
+    },
+    "HV4W55R": {
+     "A1": {
+      "enrg_tot_wh": 32.168,
+      "rows": 3244,
+      "volt_max": 12.6,
+      "volt_min": 12.6
+     },
+     "B2": {
+      "enrg_tot_wh": 27.048,
+      "rows": 1376,
+      "volt_max": 12.6,
+      "volt_min": 12.6
+     },
+     "B3": {
+      "enrg_tot_wh": 33.508,
+      "rows": 2265,
+      "volt_max": 12.6,
+      "volt_min": 12.6
+     }
+    },
+    "HV4W55S": {
+     "A1": {
+      "enrg_tot_wh": 36.376,
+      "rows": 2279,
+      "volt_max": 12.6,
+      "volt_min": 12.6
+     },
+     "B2": {
+      "enrg_tot_wh": 26.51,
+      "rows": 2363,
+      "volt_max": 12.6,
+      "volt_min": 12.6
+     },
+     "B3": {
+      "enrg_tot_wh": 33.468,
+      "rows": 1788,
+      "volt_max": 12.6,
+      "volt_min": 12.6
+     }
+    },
+    "planner_model": {
+     "A1": {
+      "cls": "A",
+      "energy_margin_wh": 440.846,
+      "energy_used_wh": 459.154
+     },
+     "B2": {
+      "cls": "B",
+      "energy_margin_wh": 88.687,
+      "energy_used_wh": 165.313
+     },
+     "B3": {
+      "cls": "B",
+      "energy_margin_wh": 100.076,
+      "energy_used_wh": 153.924
+     }
+    }
+   },
+   "replacement": "「SITL 記錄的是通用 12.6 V 模擬電池，不是規劃器模型之 HERO 電池，故能量餘裕為規劃模型值，飛行紀錄無法佐證。」",
+   "why_wrong": "BAT 訊息存在於每趟每機（BEAMIDP1 的 B2 有 5 039 筆）。",
+   "wrong": "「這個機體模型的 dataflash 沒有電池遙測」"
+  }
+ },
+ "final_text_lives_in": [
+  "runs/artifacts/PAPERPLAN1/update_paper/TABLES_ZH.md",
+  "runs/artifacts/PAPERPLAN1/update_paper/PAPER_TEXT_ZH.md"
+ ],
+ "original": "runs/artifacts/PAPERPLAN1/sortie_workflow_result.json",
+ "original_bytes": 105606,
+ "original_is_unmodified": true,
+ "original_sha256_at_correction_time": "747ebcfb2f0464ff9a09bc128ddb4bbdaa04c4d3cd4a7f0156a72ce9fe2ba9d0",
+ "recomputation_scripts": "runs/artifacts/PAPERPLAN1/update_paper/scripts/up_*.py",
+ "what_in_this_file_is_wrong": "ana/fly 敘述中的「dataflash 沒有電池遙測」"
+}

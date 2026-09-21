@@ -1,0 +1,67 @@
+# HV-DCCPP recommended ArduPilot (ArduPlane/QuadPlane) parameters
+# Verify against the vehicle firmware version before upload (names are ArduPlane 4.5+).
+# WARNING: BATT_LOW_MAH/BATT_CRT_MAH not exported (pack voltage or energy model unknown): BATT_FS_LOW_ACT/BATT_FS_CRT_ACT have no threshold until you set BATT_LOW_MAH/BATT_CRT_MAH (or BATT_LOW_VOLT/BATT_CRT_VOLT) on the vehicle
+# AIRSPEED_CRUISE: cruise_airspeed_mps (Table 1) — TECS target airspeed in AUTO [m/s] (old TRIM_ARSPD_CM cm/s)
+AIRSPEED_CRUISE,21.5
+# AIRSPEED_MAX: max_airspeed_mps; provisional when Table 1 value is None (1.4*cruise) [m/s] (old ARSPD_FBW_MAX)
+AIRSPEED_MAX,35
+# AIRSPEED_MIN: v_min_mission (min_mission_airspeed_mps upper bound) [m/s] (old ARSPD_FBW_MIN)
+AIRSPEED_MIN,18
+# AIRSPEED_STALL: stall_airspeed_mps [m/s] (ArduPlane 4.5+)
+AIRSPEED_STALL,14
+# BATT_FS_CRT_ACT: critical battery action, ArduPlane enum: 4 = QLand (3 is Terminate — flight termination). Needs BATT_CRT_MAH (or BATT_CRT_VOLT) to trigger
+BATT_FS_CRT_ACT,4
+# BATT_FS_LOW_ACT: low battery action, ArduPLANE enum (0:None 1:RTL 2:Land 3:Terminate 4:QLand 6:Loiter to QLand — NOT the Copter enum): 1 = RTL. Needs BATT_LOW_MAH (or BATT_LOW_VOLT) to trigger
+BATT_FS_LOW_ACT,1
+# CAM1_DURATION: camera trigger pulse duration [0.1 s units]
+CAM1_DURATION,1
+# CAM1_TYPE: 1 = servo camera backend (ArduPlane 4.5+; pre-4.5 use CAM_TRIGG_TYPE=0). Without a camera backend the mission's DO_SET_CAM_TRIGG_DIST(206) items are a no-op
+CAM1_TYPE,1
+# FENCE_ACTION: 1 = RTL on breach
+FENCE_ACTION,1
+# FENCE_ALT_MAX: max altitude fence [m ABOVE HOME] (AC_Fence compares relative alt, NOT AGL): max(plan alt_msl - home_msl) + b_v, at least the airspace ceiling h_ceil
+FENCE_ALT_MAX,150
+# FENCE_ENABLE: geofence enabled
+FENCE_ENABLE,1
+# FENCE_RET_RALLY: 1 = return to the nearest rally point (this export ships a rally set) instead of the fence return point
+FENCE_RET_RALLY,1
+# FENCE_TYPE: bitmask: 1 = max alt, 4 = polygon (inclusion/exclusion)
+FENCE_TYPE,5
+# FS_LONG_ACTN: long GCS failsafe action from lost_link_policy: 0 = continue (CONTINUE_THEN_RTB), 1 = RTL (RTB/NEAREST_ALT)
+FS_LONG_ACTN,0
+# FS_LONG_TIMEOUT: long failsafe timeout = c2.t_ll_s [s]
+FS_LONG_TIMEOUT,60
+# Q_ASSIST_SPEED: VTOL assist below this airspeed [m/s]; MUST stay below AIRSPEED_MIN (else the lift motors spin up whenever TECS regulates down to its minimum) and above stall: min(v_tr, AIRSPEED_MIN - 1) floored at 1.15*AIRSPEED_STALL
+Q_ASSIST_SPEED,17
+# Q_ENABLE: QuadPlane enabled (lift-and-cruise 4+1)
+Q_ENABLE,1
+# Q_LAND_FINAL_ALT: final vertical descent phase altitude (10 m rule of hover_descent_time_s) [m]
+Q_LAND_FINAL_ALT,10
+# Q_RTL_ALT: QRTL approach altitude = min_fw_operation_agl_m [m AGL]
+Q_RTL_ALT,100
+# Q_RTL_MODE: 1 = an RTL becomes QRTL within RTL_RADIUS of home (a QuadPlane RTL otherwise ends in a fixed-wing loiter over home). Required for the RTL selected by FENCE_ACTION / FS_LONG_ACTN / BATT_FS_LOW_ACT to end in a VTOL landing
+Q_RTL_MODE,1
+# Q_TRANSITION_MS: forward transition timeout = t_tr_out_s * 1000 [ms]
+Q_TRANSITION_MS,20000
+# ROLL_LIMIT_DEG: max_bank_angle_deg [deg] (old LIM_ROLL_CD centideg)
+ROLL_LIMIT_DEG,20
+# RTL_AUTOLAND: 2 = go directly to the landing sequence at DO_LAND_START (every exported mission contains one; with the default 0 the sequence is never used on RTL and arming is refused)
+RTL_AUTOLAND,2
+# RTL_RADIUS: RTL loiter radius = R_eff [m]
+RTL_RADIUS,200
+# SERVO10_FUNCTION: 10 = CameraTrigger — the output the camera backend pulses. PLACEHOLDER channel; match the payload wiring
+SERVO10_FUNCTION,10
+# TECS_CLMB_MAX: max_fw_climb_rate_mps = Va*sin(planning_climb_angle) [m/s]
+TECS_CLMB_MAX,1.13
+# TECS_SINK_MAX: max_fw_descent_rate_mps = Va*sin(planning_descent_angle) [m/s]
+TECS_SINK_MAX,1.5
+# TECS_SINK_MIN: minimum sink rate at cruise (0.9*planning descent rate) [m/s]
+TECS_SINK_MIN,1.35
+# TERRAIN_ENABLE: 1 when waypoints use MAV_FRAME_GLOBAL_TERRAIN_ALT (alt_frame='terrain')
+TERRAIN_ENABLE,0
+# TERRAIN_FOLLOW: terrain following in auto modes (1 with terrain frame)
+TERRAIN_FOLLOW,0
+# WP_LOITER_RAD: loiter radius [m]; positive = clockwise. ArduPlane flies NAV_LOITER_TIME/TURNS at THIS radius (NAV_LOITER_TIME param3 only carries the direction sign), so it is set to the radius the planner used for the delay orbits when the mission has any, else R_eff (wind-inflated)
+WP_LOITER_RAD,200
+# WP_RADIUS: waypoint acceptance radius [m]; ArduPlane uses this for EVERY waypoint (NAV_WAYPOINT param2 is ignored), so it is kept below 0.8x the smallest consecutive NAV spacing of this mission (cap r_acc = min(R_eff/2, 30), floor 10) so a waypoint is never 'reached' together with its predecessor and its attached DO_ commands fire on position
+WP_RADIUS,19

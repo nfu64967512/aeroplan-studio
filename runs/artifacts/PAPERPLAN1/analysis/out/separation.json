@@ -1,0 +1,926 @@
+{
+ "BEAMIDP1": {
+  "frames": {
+   "ecef": {
+    "binding_pair": "A1-B2",
+    "fleet_min_h_m": 180.7735,
+    "n_violations": 0,
+    "pairs": {
+     "A1-B2": {
+      "d_h_at_min_v_m": 636.6067,
+      "d_v_at_min_h_m": 0.0412,
+      "margin_to_100m_m": 80.7735,
+      "min_h_m": 180.7735,
+      "min_h_while_v_under_50_m": 180.7735,
+      "min_v_m": 0.0,
+      "n_airborne_intervals": 22328,
+      "n_airborne_samples": 22329,
+      "n_union_samples": 24825,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473968021.683
+     },
+     "A1-B3": {
+      "d_h_at_min_v_m": 5236.692,
+      "d_v_at_min_h_m": 90.6751,
+      "margin_to_100m_m": 885.7527,
+      "min_h_m": 985.7527,
+      "min_h_while_v_under_50_m": 1445.3814,
+      "min_v_m": 0.0,
+      "n_airborne_intervals": 21377,
+      "n_airborne_samples": 21378,
+      "n_union_samples": 22539,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473967185.44
+     },
+     "B2-B3": {
+      "d_h_at_min_v_m": 2484.0644,
+      "d_v_at_min_h_m": 0.0303,
+      "margin_to_100m_m": 805.707,
+      "min_h_m": 905.707,
+      "min_h_while_v_under_50_m": 905.707,
+      "min_v_m": 0.0,
+      "n_airborne_intervals": 19527,
+      "n_airborne_samples": 19528,
+      "n_union_samples": 21933,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473967858.125
+     }
+    }
+   },
+   "planner": {
+    "binding_pair": "A1-B2",
+    "fleet_min_h_m": 180.7736,
+    "n_violations": 0,
+    "pairs": {
+     "A1-B2": {
+      "d_h_at_min_v_m": 636.6079,
+      "d_v_at_min_h_m": 0.0412,
+      "margin_to_100m_m": 80.7736,
+      "min_h_m": 180.7736,
+      "min_h_while_v_under_50_m": 180.7736,
+      "min_v_m": 0.0,
+      "n_airborne_intervals": 22328,
+      "n_airborne_samples": 22329,
+      "n_union_samples": 24825,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473968021.683
+     },
+     "A1-B3": {
+      "d_h_at_min_v_m": 5236.6036,
+      "d_v_at_min_h_m": 90.6751,
+      "margin_to_100m_m": 885.7523,
+      "min_h_m": 985.7523,
+      "min_h_while_v_under_50_m": 1445.386,
+      "min_v_m": 0.0,
+      "n_airborne_intervals": 21377,
+      "n_airborne_samples": 21378,
+      "n_union_samples": 22539,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473967185.44
+     },
+     "B2-B3": {
+      "d_h_at_min_v_m": 2484.0941,
+      "d_v_at_min_h_m": 0.0303,
+      "margin_to_100m_m": 805.7096,
+      "min_h_m": 905.7096,
+      "min_h_while_v_under_50_m": 905.7096,
+      "min_v_m": 0.0,
+      "n_airborne_intervals": 19527,
+      "n_airborne_samples": 19528,
+      "n_union_samples": 21933,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473967858.125
+     }
+    }
+   },
+   "repo": {
+    "binding_pair": "A1-B2",
+    "fleet_min_h_m": 181.383,
+    "n_violations": 0,
+    "pairs": {
+     "A1-B2": {
+      "d_h_at_min_v_m": 637.7924,
+      "d_v_at_min_h_m": 0.0412,
+      "margin_to_100m_m": 81.383,
+      "min_h_m": 181.383,
+      "min_h_while_v_under_50_m": 181.383,
+      "min_v_m": 0.0,
+      "n_airborne_intervals": 22328,
+      "n_airborne_samples": 22329,
+      "n_union_samples": 24825,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473968021.681
+     },
+     "A1-B3": {
+      "d_h_at_min_v_m": 5238.3368,
+      "d_v_at_min_h_m": 90.6751,
+      "margin_to_100m_m": 886.0275,
+      "min_h_m": 986.0275,
+      "min_h_while_v_under_50_m": 1445.8121,
+      "min_v_m": 0.0,
+      "n_airborne_intervals": 21377,
+      "n_airborne_samples": 21378,
+      "n_union_samples": 22539,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473967185.44
+     },
+     "B2-B3": {
+      "d_h_at_min_v_m": 2485.5235,
+      "d_v_at_min_h_m": 0.0303,
+      "margin_to_100m_m": 805.9885,
+      "min_h_m": 905.9885,
+      "min_h_while_v_under_50_m": 905.9885,
+      "min_v_m": 0.0,
+      "n_airborne_intervals": 19527,
+      "n_airborne_samples": 19528,
+      "n_union_samples": 21933,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473967858.125
+     }
+    }
+   }
+  },
+  "grid_cost_ecef_frame": {
+   "binding_pair": "A1-B2",
+   "by_grid": {
+    "0.2s": {
+     "overstates_by_m": 0.0157,
+     "sample_wise_min_h_m": 180.7892
+    },
+    "0.5s": {
+     "overstates_by_m": 0.27,
+     "sample_wise_min_h_m": 181.0435
+    },
+    "1s": {
+     "overstates_by_m": 0.3083,
+     "sample_wise_min_h_m": 181.0818
+    },
+    "2s": {
+     "overstates_by_m": 2.4809,
+     "sample_wise_min_h_m": 183.2544
+    },
+    "5s": {
+     "overstates_by_m": 11.8732,
+     "sample_wise_min_h_m": 192.6467
+    }
+   },
+   "exact_min_h_m": 180.7735,
+   "note": "what a fixed time grid costs on these very tracks; the planner's own min_sep_h_m uses a 2 s grid"
+  },
+  "native_sample_wise_ecef_m": 180.7801,
+  "planned_min_sep_h_m": 180.5612423172731,
+  "planned_source": "runs/artifacts/BEAMIDP1/validation.json (2 s grid, hv_dccpp/sim.py:1007-1034 + mission.py:1092)",
+  "reporter_min_h_m": 182.7,
+  "reporter_source": "runs/artifacts/BEAMIDP1/separation_from_tracks.json (2 s grid over ~1 Hz telemetry; upper bound)"
+ },
+ "HV4SITL15": {
+  "frames": {
+   "ecef": {
+    "binding_pair": "B2-B3",
+    "fleet_min_h_m": 100.6895,
+    "n_violations": 0,
+    "pairs": {
+     "A1-B2": {
+      "min_h_m": null,
+      "n_airborne_samples": 0,
+      "note": "never airborne simultaneously"
+     },
+     "A1-B3": {
+      "d_h_at_min_v_m": 1978.1172,
+      "d_v_at_min_h_m": 73.3295,
+      "margin_to_100m_m": 161.6694,
+      "min_h_m": 261.6694,
+      "min_h_while_v_under_50_m": 361.3032,
+      "min_v_m": 0.1543,
+      "n_airborne_intervals": 2379,
+      "n_airborne_samples": 2380,
+      "n_union_samples": 11464,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473384944.126
+     },
+     "B2-B3": {
+      "d_h_at_min_v_m": 1562.9982,
+      "d_v_at_min_h_m": 28.7569,
+      "margin_to_100m_m": 0.6895,
+      "min_h_m": 100.6895,
+      "min_h_while_v_under_50_m": 100.6895,
+      "min_v_m": 0.0001,
+      "n_airborne_intervals": 4818,
+      "n_airborne_samples": 4819,
+      "n_union_samples": 6543,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473384709.174
+     }
+    }
+   },
+   "planner": {
+    "binding_pair": "B2-B3",
+    "fleet_min_h_m": 100.6895,
+    "n_violations": 0,
+    "pairs": {
+     "A1-B2": {
+      "min_h_m": null,
+      "n_airborne_samples": 0,
+      "note": "never airborne simultaneously"
+     },
+     "A1-B3": {
+      "d_h_at_min_v_m": 1978.1243,
+      "d_v_at_min_h_m": 73.3294,
+      "margin_to_100m_m": 161.6694,
+      "min_h_m": 261.6694,
+      "min_h_while_v_under_50_m": 361.3032,
+      "min_v_m": 0.1543,
+      "n_airborne_intervals": 2379,
+      "n_airborne_samples": 2380,
+      "n_union_samples": 11464,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473384944.126
+     },
+     "B2-B3": {
+      "d_h_at_min_v_m": 1562.9871,
+      "d_v_at_min_h_m": 28.7569,
+      "margin_to_100m_m": 0.6895,
+      "min_h_m": 100.6895,
+      "min_h_while_v_under_50_m": 100.6895,
+      "min_v_m": 0.0001,
+      "n_airborne_intervals": 4818,
+      "n_airborne_samples": 4819,
+      "n_union_samples": 6543,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473384709.174
+     }
+    }
+   },
+   "repo": {
+    "binding_pair": "B2-B3",
+    "fleet_min_h_m": 101.0299,
+    "n_violations": 0,
+    "pairs": {
+     "A1-B2": {
+      "min_h_m": null,
+      "n_airborne_samples": 0,
+      "note": "never airborne simultaneously"
+     },
+     "A1-B3": {
+      "d_h_at_min_v_m": 1978.6781,
+      "d_v_at_min_h_m": 73.3308,
+      "margin_to_100m_m": 162.5541,
+      "min_h_m": 262.5541,
+      "min_h_while_v_under_50_m": 362.5248,
+      "min_v_m": 0.1543,
+      "n_airborne_intervals": 2379,
+      "n_airborne_samples": 2380,
+      "n_union_samples": 11464,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473384944.126
+     },
+     "B2-B3": {
+      "d_h_at_min_v_m": 1563.4935,
+      "d_v_at_min_h_m": 28.7569,
+      "margin_to_100m_m": 1.0299,
+      "min_h_m": 101.0299,
+      "min_h_while_v_under_50_m": 101.0299,
+      "min_v_m": 0.0001,
+      "n_airborne_intervals": 4818,
+      "n_airborne_samples": 4819,
+      "n_union_samples": 6543,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473384709.174
+     }
+    }
+   }
+  },
+  "grid_cost_ecef_frame": {
+   "binding_pair": "B2-B3",
+   "by_grid": {
+    "0.2s": {
+     "overstates_by_m": 0.0477,
+     "sample_wise_min_h_m": 100.7372
+    },
+    "0.5s": {
+     "overstates_by_m": 0.2213,
+     "sample_wise_min_h_m": 100.9108
+    },
+    "1s": {
+     "overstates_by_m": 0.6274,
+     "sample_wise_min_h_m": 101.3169
+    },
+    "2s": {
+     "overstates_by_m": 0.6274,
+     "sample_wise_min_h_m": 101.3169
+    },
+    "5s": {
+     "overstates_by_m": 0.6274,
+     "sample_wise_min_h_m": 101.3169
+    }
+   },
+   "exact_min_h_m": 100.6895,
+   "note": "what a fixed time grid costs on these very tracks; the planner's own min_sep_h_m uses a 2 s grid"
+  },
+  "native_sample_wise_ecef_m": 100.7032,
+  "planned_min_sep_h_m": 105.46410835682013,
+  "planned_source": "runs/artifacts/HV4SITL15/validation.json (2 s grid, hv_dccpp/sim.py:1007-1034 + mission.py:1092)",
+  "reporter_min_h_m": 104.2,
+  "reporter_source": "runs/artifacts/HV4SITL15/separation_from_tracks.json (2 s grid over ~1 Hz telemetry; upper bound)"
+ },
+ "HV4SITL16": {
+  "frames": {
+   "ecef": {
+    "binding_pair": "B2-B3",
+    "fleet_min_h_m": 100.6854,
+    "n_violations": 0,
+    "pairs": {
+     "A1-B2": {
+      "min_h_m": null,
+      "n_airborne_samples": 0,
+      "note": "never airborne simultaneously"
+     },
+     "A1-B3": {
+      "d_h_at_min_v_m": 1972.4805,
+      "d_v_at_min_h_m": 74.4412,
+      "margin_to_100m_m": 161.7089,
+      "min_h_m": 261.7089,
+      "min_h_while_v_under_50_m": 361.3027,
+      "min_v_m": 0.0747,
+      "n_airborne_intervals": 2142,
+      "n_airborne_samples": 2143,
+      "n_union_samples": 10757,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473405447.203
+     },
+     "B2-B3": {
+      "d_h_at_min_v_m": 1451.0781,
+      "d_v_at_min_h_m": 28.8111,
+      "margin_to_100m_m": 0.6854,
+      "min_h_m": 100.6854,
+      "min_h_while_v_under_50_m": 100.6854,
+      "min_v_m": 0.0,
+      "n_airborne_intervals": 4313,
+      "n_airborne_samples": 4314,
+      "n_union_samples": 5906,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473405212.408
+     }
+    }
+   },
+   "planner": {
+    "binding_pair": "B2-B3",
+    "fleet_min_h_m": 100.6854,
+    "n_violations": 0,
+    "pairs": {
+     "A1-B2": {
+      "min_h_m": null,
+      "n_airborne_samples": 0,
+      "note": "never airborne simultaneously"
+     },
+     "A1-B3": {
+      "d_h_at_min_v_m": 1972.487,
+      "d_v_at_min_h_m": 74.4412,
+      "margin_to_100m_m": 161.7089,
+      "min_h_m": 261.7089,
+      "min_h_while_v_under_50_m": 361.3027,
+      "min_v_m": 0.0747,
+      "n_airborne_intervals": 2142,
+      "n_airborne_samples": 2143,
+      "n_union_samples": 10757,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473405447.203
+     },
+     "B2-B3": {
+      "d_h_at_min_v_m": 1451.0664,
+      "d_v_at_min_h_m": 28.8111,
+      "margin_to_100m_m": 0.6854,
+      "min_h_m": 100.6854,
+      "min_h_while_v_under_50_m": 100.6854,
+      "min_v_m": 0.0,
+      "n_airborne_intervals": 4313,
+      "n_airborne_samples": 4314,
+      "n_union_samples": 5906,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473405212.408
+     }
+    }
+   },
+   "repo": {
+    "binding_pair": "B2-B3",
+    "fleet_min_h_m": 101.0258,
+    "n_violations": 0,
+    "pairs": {
+     "A1-B2": {
+      "min_h_m": null,
+      "n_airborne_samples": 0,
+      "note": "never airborne simultaneously"
+     },
+     "A1-B3": {
+      "d_h_at_min_v_m": 1973.0387,
+      "d_v_at_min_h_m": 74.4412,
+      "margin_to_100m_m": 162.5938,
+      "min_h_m": 262.5938,
+      "min_h_while_v_under_50_m": 362.5243,
+      "min_v_m": 0.0747,
+      "n_airborne_intervals": 2142,
+      "n_airborne_samples": 2143,
+      "n_union_samples": 10757,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473405447.203
+     },
+     "B2-B3": {
+      "d_h_at_min_v_m": 1451.5735,
+      "d_v_at_min_h_m": 28.8111,
+      "margin_to_100m_m": 1.0258,
+      "min_h_m": 101.0258,
+      "min_h_while_v_under_50_m": 101.0258,
+      "min_v_m": 0.0,
+      "n_airborne_intervals": 4313,
+      "n_airborne_samples": 4314,
+      "n_union_samples": 5906,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473405212.408
+     }
+    }
+   }
+  },
+  "grid_cost_ecef_frame": {
+   "binding_pair": "B2-B3",
+   "by_grid": {
+    "0.2s": {
+     "overstates_by_m": 0.0206,
+     "sample_wise_min_h_m": 100.706
+    },
+    "0.5s": {
+     "overstates_by_m": 0.1418,
+     "sample_wise_min_h_m": 100.8272
+    },
+    "1s": {
+     "overstates_by_m": 0.1418,
+     "sample_wise_min_h_m": 100.8272
+    },
+    "2s": {
+     "overstates_by_m": 0.1418,
+     "sample_wise_min_h_m": 100.8272
+    },
+    "5s": {
+     "overstates_by_m": 0.1418,
+     "sample_wise_min_h_m": 100.8272
+    }
+   },
+   "exact_min_h_m": 100.6854,
+   "note": "what a fixed time grid costs on these very tracks; the planner's own min_sep_h_m uses a 2 s grid"
+  },
+  "native_sample_wise_ecef_m": 100.6864,
+  "planned_min_sep_h_m": 105.46410835682013,
+  "planned_source": "runs/artifacts/HV4SITL16/validation.json (2 s grid, hv_dccpp/sim.py:1007-1034 + mission.py:1092)",
+  "reporter_min_h_m": null,
+  "reporter_source": "runs/artifacts/HV4SITL16/separation_from_tracks.json (2 s grid over ~1 Hz telemetry; upper bound)"
+ },
+ "HV4W00": {
+  "frames": {
+   "ecef": {
+    "binding_pair": "B2-B3",
+    "fleet_min_h_m": 100.435,
+    "n_violations": 0,
+    "pairs": {
+     "A1-B2": {
+      "min_h_m": null,
+      "n_airborne_samples": 0,
+      "note": "never airborne simultaneously"
+     },
+     "A1-B3": {
+      "d_h_at_min_v_m": 1731.8997,
+      "d_v_at_min_h_m": 49.0421,
+      "margin_to_100m_m": 88.7348,
+      "min_h_m": 188.7348,
+      "min_h_while_v_under_50_m": 188.7348,
+      "min_v_m": 0.0058,
+      "n_airborne_intervals": 2540,
+      "n_airborne_samples": 2541,
+      "n_union_samples": 10383,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473967251.713
+     },
+     "B2-B3": {
+      "d_h_at_min_v_m": 1322.2561,
+      "d_v_at_min_h_m": 28.6801,
+      "margin_to_100m_m": 0.435,
+      "min_h_m": 100.435,
+      "min_h_while_v_under_50_m": 100.435,
+      "min_v_m": 0.0002,
+      "n_airborne_intervals": 4419,
+      "n_airborne_samples": 4420,
+      "n_union_samples": 5899,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473967033.921
+     }
+    }
+   },
+   "planner": {
+    "binding_pair": "B2-B3",
+    "fleet_min_h_m": 100.435,
+    "n_violations": 0,
+    "pairs": {
+     "A1-B2": {
+      "min_h_m": null,
+      "n_airborne_samples": 0,
+      "note": "never airborne simultaneously"
+     },
+     "A1-B3": {
+      "d_h_at_min_v_m": 1731.9355,
+      "d_v_at_min_h_m": 49.0421,
+      "margin_to_100m_m": 88.7348,
+      "min_h_m": 188.7348,
+      "min_h_while_v_under_50_m": 188.7348,
+      "min_v_m": 0.0058,
+      "n_airborne_intervals": 2540,
+      "n_airborne_samples": 2541,
+      "n_union_samples": 10383,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473967251.713
+     },
+     "B2-B3": {
+      "d_h_at_min_v_m": 1322.2454,
+      "d_v_at_min_h_m": 28.6801,
+      "margin_to_100m_m": 0.435,
+      "min_h_m": 100.435,
+      "min_h_while_v_under_50_m": 100.435,
+      "min_v_m": 0.0002,
+      "n_airborne_intervals": 4419,
+      "n_airborne_samples": 4420,
+      "n_union_samples": 5899,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473967033.921
+     }
+    }
+   },
+   "repo": {
+    "binding_pair": "B2-B3",
+    "fleet_min_h_m": 100.7746,
+    "n_violations": 0,
+    "pairs": {
+     "A1-B2": {
+      "min_h_m": null,
+      "n_airborne_samples": 0,
+      "note": "never airborne simultaneously"
+     },
+     "A1-B3": {
+      "d_h_at_min_v_m": 1732.4309,
+      "d_v_at_min_h_m": 49.0451,
+      "margin_to_100m_m": 89.3625,
+      "min_h_m": 189.3625,
+      "min_h_while_v_under_50_m": 189.3625,
+      "min_v_m": 0.0058,
+      "n_airborne_intervals": 2540,
+      "n_airborne_samples": 2541,
+      "n_union_samples": 10383,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473967251.71
+     },
+     "B2-B3": {
+      "d_h_at_min_v_m": 1322.7291,
+      "d_v_at_min_h_m": 28.6801,
+      "margin_to_100m_m": 0.7746,
+      "min_h_m": 100.7746,
+      "min_h_while_v_under_50_m": 100.7746,
+      "min_v_m": 0.0002,
+      "n_airborne_intervals": 4419,
+      "n_airborne_samples": 4420,
+      "n_union_samples": 5899,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473967033.921
+     }
+    }
+   }
+  },
+  "grid_cost_ecef_frame": {
+   "binding_pair": "B2-B3",
+   "by_grid": {
+    "0.2s": {
+     "overstates_by_m": 0.0403,
+     "sample_wise_min_h_m": 100.4753
+    },
+    "0.5s": {
+     "overstates_by_m": 0.0925,
+     "sample_wise_min_h_m": 100.5275
+    },
+    "1s": {
+     "overstates_by_m": 0.0925,
+     "sample_wise_min_h_m": 100.5275
+    },
+    "2s": {
+     "overstates_by_m": 0.0925,
+     "sample_wise_min_h_m": 100.5275
+    },
+    "5s": {
+     "overstates_by_m": 4.7175,
+     "sample_wise_min_h_m": 105.1525
+    }
+   },
+   "exact_min_h_m": 100.435,
+   "note": "what a fixed time grid costs on these very tracks; the planner's own min_sep_h_m uses a 2 s grid"
+  },
+  "native_sample_wise_ecef_m": 100.4449,
+  "planned_min_sep_h_m": 104.63742703097031,
+  "planned_source": "runs/artifacts/HV4W00/validation.json (2 s grid, hv_dccpp/sim.py:1007-1034 + mission.py:1092)",
+  "reporter_min_h_m": 102.2,
+  "reporter_source": "runs/artifacts/HV4W00/separation_from_tracks.json (2 s grid over ~1 Hz telemetry; upper bound)"
+ },
+ "HV4W05": {
+  "frames": {
+   "ecef": {
+    "binding_pair": "B2-B3",
+    "fleet_min_h_m": 100.2909,
+    "n_violations": 0,
+    "pairs": {
+     "A1-B2": {
+      "min_h_m": null,
+      "n_airborne_samples": 0,
+      "note": "never airborne simultaneously"
+     },
+     "A1-B3": {
+      "d_h_at_min_v_m": 1267.5082,
+      "d_v_at_min_h_m": 79.3299,
+      "margin_to_100m_m": 68.6455,
+      "min_h_m": 168.6455,
+      "min_h_while_v_under_50_m": 248.5198,
+      "min_v_m": 0.0097,
+      "n_airborne_intervals": 2988,
+      "n_airborne_samples": 2989,
+      "n_union_samples": 10497,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473967142.94
+     },
+     "B2-B3": {
+      "d_h_at_min_v_m": 1473.1421,
+      "d_v_at_min_h_m": 28.6509,
+      "margin_to_100m_m": 0.2909,
+      "min_h_m": 100.2909,
+      "min_h_while_v_under_50_m": 100.2909,
+      "min_v_m": 0.0001,
+      "n_airborne_intervals": 4828,
+      "n_airborne_samples": 4829,
+      "n_union_samples": 6335,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473966729.745
+     }
+    }
+   },
+   "planner": {
+    "binding_pair": "B2-B3",
+    "fleet_min_h_m": 100.2909,
+    "n_violations": 0,
+    "pairs": {
+     "A1-B2": {
+      "min_h_m": null,
+      "n_airborne_samples": 0,
+      "note": "never airborne simultaneously"
+     },
+     "A1-B3": {
+      "d_h_at_min_v_m": 1267.5348,
+      "d_v_at_min_h_m": 79.3299,
+      "margin_to_100m_m": 68.6456,
+      "min_h_m": 168.6456,
+      "min_h_while_v_under_50_m": 248.5198,
+      "min_v_m": 0.0097,
+      "n_airborne_intervals": 2988,
+      "n_airborne_samples": 2989,
+      "n_union_samples": 10497,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473967142.94
+     },
+     "B2-B3": {
+      "d_h_at_min_v_m": 1473.1225,
+      "d_v_at_min_h_m": 28.6509,
+      "margin_to_100m_m": 0.2909,
+      "min_h_m": 100.2909,
+      "min_h_while_v_under_50_m": 100.2909,
+      "min_v_m": 0.0001,
+      "n_airborne_intervals": 4828,
+      "n_airborne_samples": 4829,
+      "n_union_samples": 6335,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473966729.745
+     }
+    }
+   },
+   "repo": {
+    "binding_pair": "B2-B3",
+    "fleet_min_h_m": 100.63,
+    "n_violations": 0,
+    "pairs": {
+     "A1-B2": {
+      "min_h_m": null,
+      "n_airborne_samples": 0,
+      "note": "never airborne simultaneously"
+     },
+     "A1-B3": {
+      "d_h_at_min_v_m": 1267.91,
+      "d_v_at_min_h_m": 79.3298,
+      "margin_to_100m_m": 69.2158,
+      "min_h_m": 169.2158,
+      "min_h_while_v_under_50_m": 249.3451,
+      "min_v_m": 0.0097,
+      "n_airborne_intervals": 2988,
+      "n_airborne_samples": 2989,
+      "n_union_samples": 10497,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473967142.94
+     },
+     "B2-B3": {
+      "d_h_at_min_v_m": 1473.8636,
+      "d_v_at_min_h_m": 28.6509,
+      "margin_to_100m_m": 0.63,
+      "min_h_m": 100.63,
+      "min_h_while_v_under_50_m": 100.63,
+      "min_v_m": 0.0001,
+      "n_airborne_intervals": 4828,
+      "n_airborne_samples": 4829,
+      "n_union_samples": 6335,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473966729.745
+     }
+    }
+   }
+  },
+  "grid_cost_ecef_frame": {
+   "binding_pair": "B2-B3",
+   "by_grid": {
+    "0.2s": {
+     "overstates_by_m": 0.0137,
+     "sample_wise_min_h_m": 100.3046
+    },
+    "0.5s": {
+     "overstates_by_m": 0.0137,
+     "sample_wise_min_h_m": 100.3046
+    },
+    "1s": {
+     "overstates_by_m": 0.0137,
+     "sample_wise_min_h_m": 100.3046
+    },
+    "2s": {
+     "overstates_by_m": 0.0137,
+     "sample_wise_min_h_m": 100.3046
+    },
+    "5s": {
+     "overstates_by_m": 23.6566,
+     "sample_wise_min_h_m": 123.9475
+    }
+   },
+   "exact_min_h_m": 100.2909,
+   "note": "what a fixed time grid costs on these very tracks; the planner's own min_sep_h_m uses a 2 s grid"
+  },
+  "native_sample_wise_ecef_m": 100.3197,
+  "planned_min_sep_h_m": 104.63742703097031,
+  "planned_source": "runs/artifacts/HV4W05/validation.json (2 s grid, hv_dccpp/sim.py:1007-1034 + mission.py:1092)",
+  "reporter_min_h_m": 100.8,
+  "reporter_source": "runs/artifacts/HV4W05/separation_from_tracks.json (2 s grid over ~1 Hz telemetry; upper bound)"
+ },
+ "HV4W55": {
+  "frames": {
+   "ecef": {
+    "binding_pair": "B2-B3",
+    "fleet_min_h_m": 100.4256,
+    "n_violations": 0,
+    "pairs": {
+     "A1-B2": {
+      "min_h_m": null,
+      "n_airborne_samples": 0,
+      "note": "never airborne simultaneously"
+     },
+     "A1-B3": {
+      "d_h_at_min_v_m": 1958.6898,
+      "d_v_at_min_h_m": 116.0073,
+      "margin_to_100m_m": 68.6615,
+      "min_h_m": 168.6615,
+      "min_h_while_v_under_50_m": 261.0925,
+      "min_v_m": 0.0035,
+      "n_airborne_intervals": 2594,
+      "n_airborne_samples": 2595,
+      "n_union_samples": 10838,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473966817.323
+     },
+     "B2-B3": {
+      "d_h_at_min_v_m": 1018.5207,
+      "d_v_at_min_h_m": 28.3942,
+      "margin_to_100m_m": 0.4256,
+      "min_h_m": 100.4256,
+      "min_h_while_v_under_50_m": 100.4256,
+      "min_v_m": 0.0002,
+      "n_airborne_intervals": 4713,
+      "n_airborne_samples": 4714,
+      "n_union_samples": 6192,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473966365.244
+     }
+    }
+   },
+   "planner": {
+    "binding_pair": "B2-B3",
+    "fleet_min_h_m": 100.4257,
+    "n_violations": 0,
+    "pairs": {
+     "A1-B2": {
+      "min_h_m": null,
+      "n_airborne_samples": 0,
+      "note": "never airborne simultaneously"
+     },
+     "A1-B3": {
+      "d_h_at_min_v_m": 1958.7167,
+      "d_v_at_min_h_m": 116.0073,
+      "margin_to_100m_m": 68.6615,
+      "min_h_m": 168.6615,
+      "min_h_while_v_under_50_m": 261.0925,
+      "min_v_m": 0.0035,
+      "n_airborne_intervals": 2594,
+      "n_airborne_samples": 2595,
+      "n_union_samples": 10838,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473966817.323
+     },
+     "B2-B3": {
+      "d_h_at_min_v_m": 1018.5133,
+      "d_v_at_min_h_m": 28.3942,
+      "margin_to_100m_m": 0.4257,
+      "min_h_m": 100.4257,
+      "min_h_while_v_under_50_m": 100.4257,
+      "min_v_m": 0.0002,
+      "n_airborne_intervals": 4713,
+      "n_airborne_samples": 4714,
+      "n_union_samples": 6192,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473966365.244
+     }
+    }
+   },
+   "repo": {
+    "binding_pair": "B2-B3",
+    "fleet_min_h_m": 100.7652,
+    "n_violations": 0,
+    "pairs": {
+     "A1-B2": {
+      "min_h_m": null,
+      "n_airborne_samples": 0,
+      "note": "never airborne simultaneously"
+     },
+     "A1-B3": {
+      "d_h_at_min_v_m": 1959.2796,
+      "d_v_at_min_h_m": 116.0073,
+      "margin_to_100m_m": 69.2318,
+      "min_h_m": 169.2318,
+      "min_h_while_v_under_50_m": 261.9753,
+      "min_v_m": 0.0035,
+      "n_airborne_intervals": 2594,
+      "n_airborne_samples": 2595,
+      "n_union_samples": 10838,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473966817.323
+     },
+     "B2-B3": {
+      "d_h_at_min_v_m": 1018.9181,
+      "d_v_at_min_h_m": 28.3942,
+      "margin_to_100m_m": 0.7652,
+      "min_h_m": 100.7652,
+      "min_h_while_v_under_50_m": 100.7652,
+      "min_v_m": 0.0002,
+      "n_airborne_intervals": 4713,
+      "n_airborne_samples": 4714,
+      "n_union_samples": 6192,
+      "n_violations": 0,
+      "t_gps_at_min_h_s": 1473966365.244
+     }
+    }
+   }
+  },
+  "grid_cost_ecef_frame": {
+   "binding_pair": "B2-B3",
+   "by_grid": {
+    "0.2s": {
+     "overstates_by_m": 0.0019,
+     "sample_wise_min_h_m": 100.4275
+    },
+    "0.5s": {
+     "overstates_by_m": 0.3166,
+     "sample_wise_min_h_m": 100.7422
+    },
+    "1s": {
+     "overstates_by_m": 0.3166,
+     "sample_wise_min_h_m": 100.7422
+    },
+    "2s": {
+     "overstates_by_m": 4.1855,
+     "sample_wise_min_h_m": 104.6111
+    },
+    "5s": {
+     "overstates_by_m": 0.3166,
+     "sample_wise_min_h_m": 100.7422
+    }
+   },
+   "exact_min_h_m": 100.4256,
+   "note": "what a fixed time grid costs on these very tracks; the planner's own min_sep_h_m uses a 2 s grid"
+  },
+  "native_sample_wise_ecef_m": 100.4296,
+  "planned_min_sep_h_m": 105.69924202560053,
+  "planned_source": "runs/artifacts/HV4W55/validation.json (2 s grid, hv_dccpp/sim.py:1007-1034 + mission.py:1092)",
+  "reporter_min_h_m": 103.8,
+  "reporter_source": "runs/artifacts/HV4W55/separation_from_tracks.json (2 s grid over ~1 Hz telemetry; upper bound)"
+ }
+}

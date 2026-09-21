@@ -1,0 +1,38 @@
+C1 ALTITUDE — evidence index (2026-09-21).  READ-ONLY on the repo; nothing outside
+this folder was written; no SITL / MAVProxy / ArduPilot process was started.
+
+SCRIPTS IN THIS FOLDER (all pure Python, run from Windows python)
+  analyze_alt.py        planned-waypoint and flown-telemetry altitude extraction over
+                        every runs/artifacts/HV4SITL* trial       -> alt_evidence.json
+  wp_frames.py          MAV frame / command census of HV4SITL16/plan/*.waypoints
+  curvature_check.py    first (wrong) hypothesis: pure d^2/2R     -> curvature_check.json
+  export_probe.py       re-plans gui_legal_120_1a2b and re-runs reduce_waypoints()
+                        to attribute each >120 m item             -> export_probe.json
+  flight_peak_probe.py  decomposes the flown excess               -> flight_peak_probe.json
+  binlog_alt2.py        full-rate truth from the ArduPilot dataflash logs the
+                        HV4SITL16 instances left behind           -> binlog_alt.json
+  ablation_cap.py       cost of lowering the planning ceiling     -> ablation_cap.json
+  trial_table.py        30 aircraft-sorties at the 120 m cap      -> trial_table.json
+
+HEADLINE NUMBERS
+  planner internal max AGL                     120.000000 m  (never exceeds; 3/3 aircraft)
+  exported .waypoints max rel-to-home  A1/B2/B3  120.0526 / 120.0331 / 120.0331 m
+  flown max (1 Hz flight.csv)          A1/B2/B3  120.10 / 120.12 / 120.16 m
+  flown max (5.6-6.3 Hz dataflash)     A1/B2/B3  120.1030 / 120.1291 / 120.1619 m
+  cumulative time above 120.000 m      A1/B2/B3  147.3 / 56.8 / 126.1 s
+  across 30 aircraft-sorties at the cap: flown excess +0.050 .. +0.180 m (30/30 exceed)
+     of which export artefact +0.004 .. +0.075 m, tracking +0.021 .. +0.127 m
+  legal limit 400 ft = 121.92 m  =>  worst sortie is still 1.74 m below the law
+
+ROOT CAUSE (verified, not inferred)
+  hv_dccpp/ardupilot.py:388-395  reduce_waypoints() re-discretises every arc into a
+  circumscribed polygon and gives each NEW vertex an ENU z by LINEAR interpolation
+  between the arc endpoints (line 391 `zs = z[i0] + frac * dz`), and an `agl` field by
+  the same linear interpolation (line 393).  A constant-AGL surface is a paraboloid in
+  the local tangent-plane ENU frame (z = h - d^2/2R_earth), and a strip-end U-turn
+  carries the track 195-300 m further from the frame origin than its own endpoints, so
+  the interpolated z sits above the 120 m AGL surface at the vertex's own distance.
+  100 % (38/38, 13/13, 37/37) of the >120 m exported items are such vertices; the max
+  over non-vertex items is 119.999987 m.  The `agl` field still reads 120.0000, so the
+  validator cannot see it, and hv_dccpp/sim.py:58 `_AGL_TOL_M = 1.0` would forgive it
+  anyway - and sim.py:732 checks plan.waypoints, never the exported item list.

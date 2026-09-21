@@ -1,0 +1,118 @@
+{
+  "scenario": "S1",
+  "n": 2,
+  "mix": true,
+  "wind_mps_fromdeg": [
+    5.0,
+    270.0
+  ],
+  "alt_m": 140.0,
+  "pitch_m": 113.16065276116665,
+  "n_a": 1,
+  "n_b": 1,
+  "harvest_sec": 3.8,
+  "harvest": {
+    "makespan_s": 3318.666267034538,
+    "max_km": 58.83,
+    "total_km": 115.1,
+    "coverage": 0.5238,
+    "passed": false,
+    "coverage_ok": false,
+    "energy_ok": true,
+    "curvature_ok": true,
+    "agl_ok": true,
+    "slope_ok": true,
+    "airspace_ok": true,
+    "link_ok": true,
+    "integrity_ok": false,
+    "separation_ok": true,
+    "n_conflicts": 0,
+    "min_sep_h_m": 148.1,
+    "min_sep_v_m": Infinity,
+    "total_distance_m": 114926.5,
+    "uncovered": 1,
+    "per_uav_violations": {
+      "A1": {},
+      "B2": {}
+    },
+    "max_leg_km": 58.74
+  },
+  "dccpp_sec": 31.9,
+  "dccpp_raw": {
+    "makespan_s": 5558.810390939023,
+    "n_uav": 2,
+    "total_km": 208.12,
+    "max_km": 104.25,
+    "coverage": 1.0,
+    "overhead": 1.682,
+    "redundancy": 1.015,
+    "balance": 1.002,
+    "scan_rate": 13.813,
+    "waste": 0.0423,
+    "segment_types": {
+      "TAKEOFF": 14,
+      "ENTRY": 2,
+      "OPERATION": 72,
+      "TRANSFER": 34,
+      "LANDING": 16
+    },
+    "alt_min_m": 0.0,
+    "alt_max_m": 140.0,
+    "builtwaypoint_fields": [
+      "alt",
+      "heading_compass_deg",
+      "lat",
+      "lon",
+      "segment_type"
+    ],
+    "t_land_s": {
+      "D1": 4829.5,
+      "D2": 5484.1
+    }
+  },
+  "dccpp_kinematics": {
+    "D1": {},
+    "D2": {}
+  },
+  "dccpp_kinematics_sample": {
+    "D1": [],
+    "D2": []
+  },
+  "dccpp_separation": {
+    "ran": true,
+    "n_conflicts": 0,
+    "kinds": {},
+    "sample": [],
+    "min_sep_h_m": 0.0,
+    "min_sep_v_m": 0.0,
+    "at_t_s": 0.0,
+    "pair": [
+      "D1",
+      "D2"
+    ]
+  },
+  "dccpp_pad": {
+    "ran": true,
+    "n_conflicts": 1,
+    "sample": [
+      "corridor D1-D2 t=0"
+    ]
+  },
+  "dccpp_endurance": {
+    "D1": {
+      "cls": "A",
+      "d_plan_km": 103.83,
+      "d_use_km": 133.0,
+      "over": false,
+      "frac": 0.781
+    },
+    "D2": {
+      "cls": "B",
+      "d_plan_km": 104.2,
+      "d_use_km": 79.0,
+      "over": true,
+      "frac": 1.319
+    }
+  },
+  "dccpp_endurance_n_over": 1
+}

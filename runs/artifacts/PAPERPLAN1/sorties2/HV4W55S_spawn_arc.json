@@ -1,0 +1,108 @@
+{
+ "trial": "HV4W55S",
+ "per_uav": {
+  "A1": {
+   "n_steps": 11,
+   "heading_span_deg": [
+    19.15,
+    84.25
+   ],
+   "increment_bearing_span_deg": [
+    18.74,
+    83.98
+   ],
+   "residual_vs_own_heading_deg": {
+    "median": -0.32,
+    "max_abs": 1.0
+   },
+   "net_displacement_m": 4.338,
+   "path_length_m": 4.648,
+   "creep_speed_mps_wallclock": 0.4187,
+   "steps": [
+    {
+     "t_s": 3.03,
+     "step_m": 0.411,
+     "increment_bearing_deg": 18.74,
+     "mean_heading_deg": 19.15,
+     "residual_deg": -0.41
+    },
+    {
+     "t_s": 4.04,
+     "step_m": 0.411,
+     "increment_bearing_deg": 26.63,
+     "mean_heading_deg": 27.1,
+     "residual_deg": -0.47
+    },
+    {
+     "t_s": 5.06,
+     "step_m": 0.407,
+     "increment_bearing_deg": 35.1,
+     "mean_heading_deg": 34.65,
+     "residual_deg": 0.45
+    },
+    {
+     "t_s": 6.07,
+     "step_m": 0.415,
+     "increment_bearing_deg": 41.48,
+     "mean_heading_deg": 41.8,
+     "residual_deg": -0.32
+    },
+    {
+     "t_s": 7.08,
+     "step_m": 0.413,
+     "increment_bearing_deg": 47.65,
+     "mean_heading_deg": 48.65,
+     "residual_deg": -1.0
+    },
+    {
+     "t_s": 8.08,
+     "step_m": 0.418,
+     "increment_bearing_deg": 55.93,
+     "mean_heading_deg": 55.15,
+     "residual_deg": 0.78
+    },
+    {
+     "t_s": 9.1,
+     "step_m": 0.409,
+     "increment_bearing_deg": 60.74,
+     "mean_heading_deg": 61.3,
+     "residual_deg": -0.56
+    },
+    {
+     "t_s": 10.11,
+     "step_m": 0.421,
+     "increment_bearing_deg": 66.78,
+     "mean_heading_deg": 67.2,
+     "residual_deg": -0.42
+    },
+    {
+     "t_s": 11.11,
+     "step_m": 0.425,
+     "increment_bearing_deg": 73.18,
+     "mean_heading_deg": 72.8,
+     "residual_deg": 0.38
+    },
+    {
+     "t_s": 12.12,
+     "step_m": 0.499,
+     "increment_bearing_deg": 78.44,
+     "mean_heading_deg": 78.65,
+     "residual_deg": -0.21
+    },
+    {
+     "t_s": 13.13,
+     "step_m": 0.419,
+     "increment_bearing_deg": 83.98,
+     "mean_heading_deg": 84.25,
+     "residual_deg": -0.27
+    }
+   ]
+  },
+  "B2": {
+   "n_steps": 0
+  },
+  "B3": {
+   "n_steps": 0
+  }
+ }
+}

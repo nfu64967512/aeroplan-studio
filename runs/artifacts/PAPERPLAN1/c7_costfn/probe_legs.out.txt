@@ -1,0 +1,74 @@
+== per-leg wind-triangle audit of runs/artifacts/HV4SITL16/plan/*.waypoints ==
+   wind used by the planner: 5.0 m/s FROM 270 deg -> to-vector (E,N) = (5.000, 0.000)
+   NOTE: the SITL that flew these missions had NO wind (no SIM_WIND anywhere in scripts/).
+
+  -- A1 (Va=21.5) : 73 legs, straight-line length 10341.5 m --
+     sum L/Vg  with 5 m/s W wind :    506.24 s
+     sum L/Va  calm (what SITL flew):    481.00 s   -> planner is +5.25% SLOWER than calm
+     sum L/Vg  with 8 m/s W wind :    551.85 s   -> +14.73% vs calm
+     length-weighted track histogram: N=336m  NE=336m  E=4051m  SE=328m  S=461m  SW=396m  W=3764m  NW=669m
+     E+W legs = 7815 m (75.6%), N+S legs = 797 m (7.7%)  -> cancellation applies to the E/W share
+
+  -- B2 (Va=19.0) : 45 legs, straight-line length 7957.3 m --
+     sum L/Vg  with 5 m/s W wind :    448.26 s
+     sum L/Va  calm (what SITL flew):    418.81 s   -> planner is +7.03% SLOWER than calm
+     sum L/Vg  with 8 m/s W wind :    504.00 s   -> +20.34% vs calm
+     length-weighted track histogram: N=212m  NE=212m  E=3303m  SE=295m  S=197m  SW=295m  W=3231m  NW=212m
+     E+W legs = 6534 m (82.1%), N+S legs = 409 m (5.1%)  -> cancellation applies to the E/W share
+
+  -- B3 (Va=19.0) : 73 legs, straight-line length 12498.6 m --
+     sum L/Vg  with 5 m/s W wind :    704.11 s
+     sum L/Va  calm (what SITL flew):    657.82 s   -> planner is +7.04% SLOWER than calm
+     sum L/Vg  with 8 m/s W wind :    791.72 s   -> +20.35% vs calm
+     length-weighted track histogram: N=371m  NE=347m  E=5104m  SE=407m  S=357m  SW=407m  W=5064m  NW=442m
+     E+W legs = 10168 m (81.4%), N+S legs = 728 m (5.8%)  -> cancellation applies to the E/W share
+
+== totals ==
+   fleet straight-line length  30797.4 m
+   fleet sum of leg times: 5 m/s wind 1658.6 s | calm 1557.6 s (+6.48%) | 8 m/s wind 1847.6 s (+18.61%)
+   (leg-sum only: excludes VTOL takeoff/landing, transition, loiter and 4D hold delays)
+
+== validation.json : keys with numeric/str leaves ==
+   passed = True
+   conflicts = 0
+   coverage_ok = True
+   energy_ok = True
+   min_sep_h_m = 105.46410835682013
+   min_sep_v_m = inf
+
+== report.json : keys with numeric/str leaves ==
+   status = 'GO_WITH_WARNINGS'
+   errors:
+   warnings = ['provisional_params', 'wind: wind_layer[0]: agl [0,3000] -> ENU z [0.0,3000.0] using home ground z=0.0 (assumption: AGL referenced to home ground)', 'wind: wind layer bounds converted MSL->ENU z at home only; the curvature term (~196 m at 50 km) is not applied per position (known approximation)', 'reference_battery_assumed(A1)', 'battery_temp_assumed(A1)', 'reference_battery_assumed(B2)', 'battery_temp_assumed(B2)', 'reference_battery_assumed(B3)']
+   notes = ['per_uav_takeoff_sites(3 個；最小間距 10.0 m)', 'takeoff_sites_close(最小間距 10.0 m < 50 m ⇒ 起飛與降落走廊要靠 4D 修復錯開，makespan 約 +7～26%；分離本身安全，見 vendored #8)', 'preflight:provisional_params', 'preflight:wind: wind_layer[0]: agl [0,3000] -> ENU z [0.0,3000.0] using home ground z=0.0 (assumption: AGL referenced to home ground)', 'preflight:wind: wind layer bounds converted MSL->ENU z at home only; the curvature term (~196 m at 50 km) is not applied per position (known approximation)', 'preflight:reference_battery_assumed(A1)', 'preflight:battery_temp_assumed(A1)', 'preflight:reference_battery_assumed(B2)']
+   uncovered:
+   timing_ms:
+     context = 0.001500004145782441
+     preflight = 21.507899997232016
+     decompose = 276.10830000048736
+     layering = 267.36890000029234
+     corridors = 19.73330000328133
+     cache = 141.3542999944184
+     allocate = 127.99970000196481
+     idp = 16.860199997609016
+     assemble_3d = 48.095100006321445
+     deconflict = 3339.5863999976427
+     total = 4258.622900000773
+
+== release_schedule.json : keys with numeric/str leaves ==
+   speedup = 5.0
+   planned_t_takeoff_s:
+     A1 = 656.0
+     B2 = 0.0
+     B3 = 106.0
+   release_wall_s:
+     A1 = 131.2
+     B2 = 0.0
+     B3 = 21.2
+   actual_release_wall_s:
+     B2 = 0.0
+     B3 = 21.4
+     A1 = 131.3
+   mode_change_rejected:
+   link_lost:
+

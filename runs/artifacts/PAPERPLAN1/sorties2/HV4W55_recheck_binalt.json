@@ -1,0 +1,106 @@
+{
+ "trial": "HV4W55_recheck",
+ "per_uav": {
+  "A1": {
+   "log": "sitl/vtol/i100/logs/00000015.BIN",
+   "log_bytes": 35622912,
+   "n_pos": 7919,
+   "pos_rate_hz": 6.15,
+   "max_rel_home_alt_m": 119.6221,
+   "t_at_max_s": 1162.6,
+   "excess_over_120_m": -0.3779,
+   "time_above_120_s": 0.0,
+   "p99_m": 119.573,
+   "p999_m": 119.591,
+   "log_span_s": 1287.6,
+   "ekf_wind": {
+    "n": 24963,
+    "median_speed_mps": 4.8,
+    "mean_from_dir_deg": 238.7,
+    "median_VWN_mps": 0.0,
+    "median_VWE_mps": 4.8,
+    "source": "NKF2/XKF2 VWN,VWE"
+   },
+   "msg_inventory_top": {
+    "ESC": 141834,
+    "ESCX": 137953,
+    "IMU": 125787,
+    "SIM2": 54860,
+    "NKF1": 17226,
+    "NKF2": 17200,
+    "NKF3": 17164,
+    "NKF4": 17153,
+    "NKQ": 17146,
+    "XKF4": 16841
+   }
+  },
+  "B2": {
+   "log": "sitl/vtol/i101/logs/00000015.BIN",
+   "log_bytes": 16317733,
+   "n_pos": 3093,
+   "pos_rate_hz": 5.29,
+   "max_rel_home_alt_m": 119.6356,
+   "t_at_max_s": 381.1,
+   "excess_over_120_m": -0.3644,
+   "time_above_120_s": 0.0,
+   "p99_m": 119.59,
+   "p999_m": 119.627,
+   "log_span_s": 584.6,
+   "ekf_wind": {
+    "n": 11047,
+    "median_speed_mps": 4.87,
+    "mean_from_dir_deg": 270.3,
+    "median_VWN_mps": 0.0,
+    "median_VWE_mps": 4.87,
+    "source": "NKF2/XKF2 VWN,VWE"
+   },
+   "msg_inventory_top": {
+    "ESC": 58152,
+    "ESCX": 56801,
+    "IMU": 51806,
+    "SIM2": 22139,
+    "NKF1": 7729,
+    "NKF2": 7706,
+    "NKF3": 7691,
+    "NKF4": 7672,
+    "NKQ": 7653,
+    "NKY0": 7363
+   }
+  },
+  "B3": {
+   "log": "sitl/vtol/i102/logs/00000015.BIN",
+   "log_bytes": 26262733,
+   "n_pos": 5488,
+   "pos_rate_hz": 5.81,
+   "max_rel_home_alt_m": 119.6752,
+   "t_at_max_s": 570.6,
+   "excess_over_120_m": -0.3248,
+   "time_above_120_s": 0.0,
+   "p99_m": 119.607,
+   "p999_m": 119.667,
+   "log_span_s": 944.2,
+   "ekf_wind": {
+    "n": 18278,
+    "median_speed_mps": 4.88,
+    "mean_from_dir_deg": 269.9,
+    "median_VWN_mps": 0.0,
+    "median_VWE_mps": 4.88,
+    "source": "NKF2/XKF2 VWN,VWE"
+   },
+   "msg_inventory_top": {
+    "ESC": 93922,
+    "ESCX": 91035,
+    "IMU": 86340,
+    "SIM2": 36948,
+    "NKF1": 12655,
+    "NKF2": 12618,
+    "NKF3": 12602,
+    "NKF4": 12582,
+    "NKQ": 12568,
+    "XKF4": 12277
+   }
+  }
+ },
+ "fleet_max_rel_alt_m": 119.6752,
+ "H2_below_120_pass": true
+}

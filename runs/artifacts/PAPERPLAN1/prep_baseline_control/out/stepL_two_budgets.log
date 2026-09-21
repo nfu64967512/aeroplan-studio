@@ -1,0 +1,16 @@
+class A (Pioneer)
+  reserve_fraction      = 0.3
+  E_avail               = 1350.0 Wh   E_nom = 1500.0 Wh
+  eta_T                 = 1.0  k_unc = 1.2075
+  reserve_wh            = 450.0
+  e_TO / e_LDG          = 39.18 / 81.2
+  E_use  (e_usable_wh)  = 779.63 Wh
+  D_model = cruise_equiv_km(E_use)   = 97.726 km  <-- ENERGY-MODEL budget
+  D_use   = usable_distance_cap_km() = 133.0 km  <-- TABLE-1 cap
+  ratio D_model/D_use   = 0.7348
+  T_use = E_use/(P_c*k_unc)*3600     = 4545.4 s  ( 75.8 min )
+  kappa_load*T_use (0.85)            = 3863.6 s
+
+Note: D_model is the budget the ALLOCATOR uses (allocate.py:1499-1504 builds
+T_use from e_usable_wh); D_use is the separate Table-1 cap that sim.py:913-917
+checks. They are NOT the same number.

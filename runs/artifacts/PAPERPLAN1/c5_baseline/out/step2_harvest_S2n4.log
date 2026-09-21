@@ -1,0 +1,2 @@
+@@ROW@@{"method": "HARVEST", "scenario": "S2", "n_uav_req": 4, "sec": 52.37, "self_makespan_s": 3665.3, "n_uav": 4, "total_km": 246.65, "max_km": 63.2, "coverage": 1.0, "overhead": 1.994, "redundancy": 1.072, "balance": 1.025, "scan_rate": 22.785, "waste": 0.2426, "self_uncovered": 0, "self_validate": "pass", "n_tracks": 4, "wpts": [175, 187, 181, 186]}
+wrote C:\Users\joy46\Documents\Projects\aeroplan-studio\runs\artifacts\PAPERPLAN1\c5_baseline\out\tracks\HARVEST_S2_n4.json md5 b974ec38c0729836b7e2d90afe8214f1

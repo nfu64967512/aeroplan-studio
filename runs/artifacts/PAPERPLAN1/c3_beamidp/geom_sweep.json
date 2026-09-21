@@ -1,0 +1,549 @@
+[
+ {
+  "key": "base_1560x800_1a2b",
+  "n_a": 1,
+  "n_b": 2,
+  "area_km2": 1.248,
+  "plan_s": 16.0,
+  "status": "GO_WITH_WARNINGS",
+  "makespan_s": 1260.4,
+  "uncovered": 0,
+  "R_eff_m": {
+   "A": 200.0,
+   "B": 120.0
+  },
+  "uavs": {
+   "A1": {
+    "cls": "A",
+    "n_strips": 3,
+    "km": 10.29
+   },
+   "B2": {
+    "cls": "B",
+    "n_strips": 2,
+    "km": 7.93
+   },
+   "B3": {
+    "cls": "B",
+    "n_strips": 4,
+    "km": 12.44
+   }
+  },
+  "cells": {
+   "Z2_1|A": {
+    "n": 1,
+    "s": 96.99,
+    "L": 1695.4,
+    "R_eff": 200.0,
+    "k": 5,
+    "triggers": false
+   },
+   "Z2_1_B_k1|B": {
+    "n": 2,
+    "s": 96.99,
+    "L": 1685.6,
+    "R_eff": 120.0,
+    "k": 3,
+    "triggers": false
+   },
+   "Z3_1|A": {
+    "n": 1,
+    "s": 96.99,
+    "L": 1695.4,
+    "R_eff": 200.0,
+    "k": 5,
+    "triggers": false
+   },
+   "Z3_1_B_k1|B": {
+    "n": 2,
+    "s": 96.99,
+    "L": 1685.5,
+    "R_eff": 120.0,
+    "k": 3,
+    "triggers": false
+   },
+   "Z4_1|A": {
+    "n": 1,
+    "s": 96.99,
+    "L": 1695.5,
+    "R_eff": 200.0,
+    "k": 5,
+    "triggers": false
+   },
+   "Z4_1_B_k1|B": {
+    "n": 2,
+    "s": 96.99,
+    "L": 1685.4,
+    "R_eff": 120.0,
+    "k": 3,
+    "triggers": false
+   }
+  },
+  "max_n_over_k": -1,
+  "any_trigger": false,
+  "rect_m": [
+   1560,
+   800
+  ]
+ },
+ {
+  "key": "solo_A_1560x800",
+  "n_a": 1,
+  "n_b": 0,
+  "area_km2": 1.248,
+  "plan_s": 0.6,
+  "status": "GO_WITH_WARNINGS",
+  "makespan_s": 1303.9,
+  "uncovered": 0,
+  "R_eff_m": {
+   "A": 200.0
+  },
+  "uavs": {
+   "A1": {
+    "cls": "A",
+    "n_strips": 9,
+    "km": 24.57
+   }
+  },
+  "cells": {
+   "Z1_1|A": {
+    "n": 9,
+    "s": 96.99,
+    "L": 1687.9,
+    "R_eff": 200.0,
+    "k": 5,
+    "triggers": true
+   }
+  },
+  "max_n_over_k": 4,
+  "any_trigger": true,
+  "rect_m": [
+   1560,
+   800
+  ]
+ },
+ {
+  "key": "solo_B_1560x800",
+  "n_a": 0,
+  "n_b": 1,
+  "area_km2": 1.248,
+  "plan_s": 0.5,
+  "status": "GO_WITH_WARNINGS",
+  "makespan_s": 1291.4,
+  "uncovered": 0,
+  "R_eff_m": {
+   "B": 120.0
+  },
+  "uavs": {
+   "B1": {
+    "cls": "B",
+    "n_strips": 9,
+    "km": 21.37
+   }
+  },
+  "cells": {
+   "Z1_1|B": {
+    "n": 9,
+    "s": 96.99,
+    "L": 1677.9,
+    "R_eff": 120.0,
+    "k": 3,
+    "triggers": true
+   }
+  },
+  "max_n_over_k": 6,
+  "any_trigger": true,
+  "rect_m": [
+   1560,
+   800
+  ]
+ },
+ {
+  "key": "solo_A_1560x1600",
+  "n_a": 1,
+  "n_b": 0,
+  "area_km2": 2.496,
+  "plan_s": 0.7,
+  "status": "GO_WITH_WARNINGS",
+  "makespan_s": 2242.0,
+  "uncovered": 0,
+  "R_eff_m": {
+   "A": 200.0
+  },
+  "uavs": {
+   "A1": {
+    "cls": "A",
+    "n_strips": 16,
+    "km": 44.52
+   }
+  },
+  "cells": {
+   "Z1_1|A": {
+    "n": 16,
+    "s": 96.99,
+    "L": 1724.2,
+    "R_eff": 200.0,
+    "k": 5,
+    "triggers": true
+   }
+  },
+  "max_n_over_k": 11,
+  "any_trigger": true,
+  "rect_m": [
+   1560,
+   1600
+  ]
+ },
+ {
+  "key": "solo_B_1560x1600",
+  "n_a": 0,
+  "n_b": 1,
+  "area_km2": 2.496,
+  "plan_s": 0.7,
+  "status": "GO_WITH_WARNINGS",
+  "makespan_s": 2195.1,
+  "uncovered": 0,
+  "R_eff_m": {
+   "B": 120.0
+  },
+  "uavs": {
+   "B1": {
+    "cls": "B",
+    "n_strips": 16,
+    "km": 38.42
+   }
+  },
+  "cells": {
+   "Z1_1|B": {
+    "n": 16,
+    "s": 96.99,
+    "L": 1714.2,
+    "R_eff": 120.0,
+    "k": 3,
+    "triggers": true
+   }
+  },
+  "max_n_over_k": 13,
+  "any_trigger": true,
+  "rect_m": [
+   1560,
+   1600
+  ]
+ },
+ {
+  "key": "big_1560x2400_1a2b",
+  "n_a": 1,
+  "n_b": 2,
+  "area_km2": 3.744,
+  "plan_s": 25.4,
+  "status": "GO_WITH_WARNINGS",
+  "makespan_s": 2432.9,
+  "uncovered": 0,
+  "R_eff_m": {
+   "A": 200.0,
+   "B": 120.0
+  },
+  "uavs": {
+   "A1": {
+    "cls": "A",
+    "n_strips": 6,
+    "km": 26.63
+   },
+   "B2": {
+    "cls": "B",
+    "n_strips": 6,
+    "km": 22.11
+   },
+   "B3": {
+    "cls": "B",
+    "n_strips": 6,
+    "km": 22.76
+   }
+  },
+  "cells": {
+   "Z2_1|B": {
+    "n": 6,
+    "s": 96.99,
+    "L": 2517.8,
+    "R_eff": 120.0,
+    "k": 3,
+    "triggers": true
+   },
+   "Z3_1|A": {
+    "n": 3,
+    "s": 96.99,
+    "L": 2527.9,
+    "R_eff": 200.0,
+    "k": 5,
+    "triggers": false
+   },
+   "Z3_1_B_k3|B": {
+    "n": 3,
+    "s": 96.99,
+    "L": 2517.7,
+    "R_eff": 120.0,
+    "k": 3,
+    "triggers": false
+   },
+   "Z4_1|A": {
+    "n": 3,
+    "s": 96.99,
+    "L": 2527.9,
+    "R_eff": 200.0,
+    "k": 5,
+    "triggers": false
+   },
+   "Z4_1_B_k3|B": {
+    "n": 3,
+    "s": 96.99,
+    "L": 2517.7,
+    "R_eff": 120.0,
+    "k": 3,
+    "triggers": false
+   }
+  },
+  "max_n_over_k": 3,
+  "any_trigger": true,
+  "rect_m": [
+   1560,
+   2400
+  ]
+ },
+ {
+  "key": "big_2000x3000_1a2b",
+  "n_a": 1,
+  "n_b": 2,
+  "area_km2": 6.0,
+  "plan_s": 23.7,
+  "status": "GO_WITH_WARNINGS",
+  "makespan_s": 2294.1,
+  "uncovered": 0,
+  "R_eff_m": {
+   "A": 200.0,
+   "B": 120.0
+  },
+  "uavs": {
+   "A1": {
+    "cls": "A",
+    "n_strips": 7,
+    "km": 34.96
+   },
+   "B2": {
+    "cls": "B",
+    "n_strips": 7,
+    "km": 29.74
+   },
+   "B3": {
+    "cls": "B",
+    "n_strips": 7,
+    "km": 35.05
+   }
+  },
+  "cells": {
+   "Z2_1|B": {
+    "n": 7,
+    "s": 96.99,
+    "L": 3115.8,
+    "R_eff": 120.0,
+    "k": 3,
+    "triggers": true
+   },
+   "Z3_1|A": {
+    "n": 3,
+    "s": 96.99,
+    "L": 3125.9,
+    "R_eff": 200.0,
+    "k": 5,
+    "triggers": false
+   },
+   "Z3_1_B_k3|B": {
+    "n": 4,
+    "s": 96.99,
+    "L": 3115.7,
+    "R_eff": 120.0,
+    "k": 3,
+    "triggers": true
+   },
+   "Z4_1|A": {
+    "n": 4,
+    "s": 96.99,
+    "L": 3125.8,
+    "R_eff": 200.0,
+    "k": 5,
+    "triggers": false
+   },
+   "Z4_1_B_k4|B": {
+    "n": 3,
+    "s": 96.99,
+    "L": 3115.7,
+    "R_eff": 120.0,
+    "k": 3,
+    "triggers": false
+   }
+  },
+  "max_n_over_k": 4,
+  "any_trigger": true,
+  "rect_m": [
+   2000,
+   3000
+  ]
+ },
+ {
+  "key": "big_3000x3000_1a2b",
+  "n_a": 1,
+  "n_b": 2,
+  "area_km2": 9.0,
+  "plan_s": 33.9,
+  "status": "GO_WITH_WARNINGS",
+  "makespan_s": 3842.6,
+  "uncovered": 0,
+  "R_eff_m": {
+   "A": 200.0,
+   "B": 120.0
+  },
+  "uavs": {
+   "A1": {
+    "cls": "A",
+    "n_strips": 11,
+    "km": 51.1
+   },
+   "B2": {
+    "cls": "B",
+    "n_strips": 11,
+    "km": 45.88
+   },
+   "B3": {
+    "cls": "B",
+    "n_strips": 11,
+    "km": 48.37
+   }
+  },
+  "cells": {
+   "Z2_1|B": {
+    "n": 11,
+    "s": 96.99,
+    "L": 3115.6,
+    "R_eff": 120.0,
+    "k": 3,
+    "triggers": true
+   },
+   "Z3_1|A": {
+    "n": 5,
+    "s": 96.99,
+    "L": 3125.8,
+    "R_eff": 200.0,
+    "k": 5,
+    "triggers": false
+   },
+   "Z3_1_B_k5|B": {
+    "n": 6,
+    "s": 96.99,
+    "L": 3115.5,
+    "R_eff": 120.0,
+    "k": 3,
+    "triggers": true
+   },
+   "Z4_1|A": {
+    "n": 6,
+    "s": 96.98,
+    "L": 3125.8,
+    "R_eff": 200.0,
+    "k": 5,
+    "triggers": true
+   },
+   "Z4_1_B_k6|B": {
+    "n": 5,
+    "s": 96.99,
+    "L": 3115.4,
+    "R_eff": 120.0,
+    "k": 3,
+    "triggers": true
+   }
+  },
+  "max_n_over_k": 8,
+  "any_trigger": true,
+  "rect_m": [
+   3000,
+   3000
+  ]
+ },
+ {
+  "key": "big_2600x2600_1a2b",
+  "n_a": 1,
+  "n_b": 2,
+  "area_km2": 6.76,
+  "plan_s": 24.4,
+  "status": "GO_WITH_WARNINGS",
+  "makespan_s": 2803.9,
+  "uncovered": 0,
+  "R_eff_m": {
+   "A": 200.0,
+   "B": 120.0
+  },
+  "uavs": {
+   "A1": {
+    "cls": "A",
+    "n_strips": 9,
+    "km": 39.36
+   },
+   "B2": {
+    "cls": "B",
+    "n_strips": 9,
+    "km": 33.09
+   },
+   "B3": {
+    "cls": "B",
+    "n_strips": 9,
+    "km": 37.43
+   }
+  },
+  "cells": {
+   "Z2_1|B": {
+    "n": 9,
+    "s": 96.99,
+    "L": 2717.0,
+    "R_eff": 120.0,
+    "k": 3,
+    "triggers": true
+   },
+   "Z3_1|A": {
+    "n": 4,
+    "s": 96.99,
+    "L": 2727.1,
+    "R_eff": 200.0,
+    "k": 5,
+    "triggers": false
+   },
+   "Z3_1_B_k4|B": {
+    "n": 5,
+    "s": 96.99,
+    "L": 2716.8,
+    "R_eff": 120.0,
+    "k": 3,
+    "triggers": true
+   },
+   "Z4_1|A": {
+    "n": 5,
+    "s": 96.99,
+    "L": 2727.1,
+    "R_eff": 200.0,
+    "k": 5,
+    "triggers": false
+   },
+   "Z4_1_B_k5|B": {
+    "n": 4,
+    "s": 96.99,
+    "L": 2716.8,
+    "R_eff": 120.0,
+    "k": 3,
+    "triggers": true
+   }
+  },
+  "max_n_over_k": 6,
+  "any_trigger": true,
+  "rect_m": [
+   2600,
+   2600
+  ]
+ }
+]

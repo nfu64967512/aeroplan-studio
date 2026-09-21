@@ -1,0 +1,233 @@
+{
+  "scenario": "S4",
+  "n": 8,
+  "mix": false,
+  "n_paths": 8,
+  "vtol_transition_alt_m_passed_to_planner": null,
+  "note": "plan_coverage_dccpp was called WITHOUT vtol_transition_alt_m (exactly as research/cpp_benchmark/bench.run_planner does), so the DCCPP path carries a RUNWAY takeoff/landing profile, not a vertical one.",
+  "per_uav": [
+    {
+      "uav": 1,
+      "cls": "A",
+      "n_waypoints_in": 30,
+      "segment_types": {
+        "TAKEOFF": 7,
+        "ENTRY": 1,
+        "OPERATION": 10,
+        "TRANSFER": 4,
+        "LANDING": 8
+      },
+      "export_error": null,
+      "n_mission_items": 34,
+      "cmd_histogram": {
+        "179": 1,
+        "178": 1,
+        "84": 1,
+        "3000": 2,
+        "16": 28,
+        "85": 1
+      },
+      "has_vtol_takeoff": true,
+      "has_vtol_land": true,
+      "land_approach_m": 100.0,
+      "prearm_min_m": 108.0,
+      "prearm_would_block": true
+    },
+    {
+      "uav": 2,
+      "cls": "A",
+      "n_waypoints_in": 30,
+      "segment_types": {
+        "TAKEOFF": 7,
+        "ENTRY": 1,
+        "OPERATION": 10,
+        "TRANSFER": 4,
+        "LANDING": 8
+      },
+      "export_error": null,
+      "n_mission_items": 34,
+      "cmd_histogram": {
+        "179": 1,
+        "178": 1,
+        "84": 1,
+        "3000": 2,
+        "16": 28,
+        "85": 1
+      },
+      "has_vtol_takeoff": true,
+      "has_vtol_land": true,
+      "land_approach_m": 100.0,
+      "prearm_min_m": 108.0,
+      "prearm_would_block": true
+    },
+    {
+      "uav": 3,
+      "cls": "A",
+      "n_waypoints_in": 30,
+      "segment_types": {
+        "TAKEOFF": 7,
+        "ENTRY": 1,
+        "OPERATION": 10,
+        "TRANSFER": 4,
+        "LANDING": 8
+      },
+      "export_error": null,
+      "n_mission_items": 34,
+      "cmd_histogram": {
+        "179": 1,
+        "178": 1,
+        "84": 1,
+        "3000": 2,
+        "16": 28,
+        "85": 1
+      },
+      "has_vtol_takeoff": true,
+      "has_vtol_land": true,
+      "land_approach_m": 100.0,
+      "prearm_min_m": 108.0,
+      "prearm_would_block": true
+    },
+    {
+      "uav": 4,
+      "cls": "A",
+      "n_waypoints_in": 30,
+      "segment_types": {
+        "TAKEOFF": 7,
+        "ENTRY": 1,
+        "OPERATION": 10,
+        "TRANSFER": 4,
+        "LANDING": 8
+      },
+      "export_error": null,
+      "n_mission_items": 34,
+      "cmd_histogram": {
+        "179": 1,
+        "178": 1,
+        "84": 1,
+        "3000": 2,
+        "16": 28,
+        "85": 1
+      },
+      "has_vtol_takeoff": true,
+      "has_vtol_land": true,
+      "land_approach_m": 100.0,
+      "prearm_min_m": 108.0,
+      "prearm_would_block": true
+    },
+    {
+      "uav": 5,
+      "cls": "A",
+      "n_waypoints_in": 27,
+      "segment_types": {
+        "TAKEOFF": 7,
+        "ENTRY": 1,
+        "OPERATION": 8,
+        "TRANSFER": 3,
+        "LANDING": 8
+      },
+      "export_error": null,
+      "n_mission_items": 31,
+      "cmd_histogram": {
+        "179": 1,
+        "178": 1,
+        "84": 1,
+        "3000": 2,
+        "16": 25,
+        "85": 1
+      },
+      "has_vtol_takeoff": true,
+      "has_vtol_land": true,
+      "land_approach_m": 100.0,
+      "prearm_min_m": 108.0,
+      "prearm_would_block": true
+    },
+    {
+      "uav": 6,
+      "cls": "A",
+      "n_waypoints_in": 27,
+      "segment_types": {
+        "TAKEOFF": 7,
+        "ENTRY": 1,
+        "OPERATION": 8,
+        "TRANSFER": 3,
+        "LANDING": 8
+      },
+      "export_error": null,
+      "n_mission_items": 31,
+      "cmd_histogram": {
+        "179": 1,
+        "178": 1,
+        "84": 1,
+        "3000": 2,
+        "16": 25,
+        "85": 1
+      },
+      "has_vtol_takeoff": true,
+      "has_vtol_land": true,
+      "land_approach_m": 100.0,
+      "prearm_min_m": 108.0,
+      "prearm_would_block": true
+    },
+    {
+      "uav": 7,
+      "cls": "A",
+      "n_waypoints_in": 27,
+      "segment_types": {
+        "TAKEOFF": 7,
+        "ENTRY": 1,
+        "OPERATION": 8,
+        "TRANSFER": 3,
+        "LANDING": 8
+      },
+      "export_error": null,
+      "n_mission_items": 31,
+      "cmd_histogram": {
+        "179": 1,
+        "178": 1,
+        "84": 1,
+        "3000": 2,
+        "16": 25,
+        "85": 1
+      },
+      "has_vtol_takeoff": true,
+      "has_vtol_land": true,
+      "land_approach_m": 100.0,
+      "prearm_min_m": 108.0,
+      "prearm_would_block": true
+    },
+    {
+      "uav": 8,
+      "cls": "A",
+      "n_waypoints_in": 27,
+      "segment_types": {
+        "TAKEOFF": 7,
+        "ENTRY": 1,
+        "OPERATION": 8,
+        "TRANSFER": 3,
+        "LANDING": 8
+      },
+      "export_error": null,
+      "n_mission_items": 31,
+      "cmd_histogram": {
+        "179": 1,
+        "178": 1,
+        "84": 1,
+        "3000": 2,
+        "16": 25,
+        "85": 1
+      },
+      "has_vtol_takeoff": true,
+      "has_vtol_land": true,
+      "land_approach_m": 99.9,
+      "prearm_min_m": 108.0,
+      "prearm_would_block": true
+    }
+  ],
+  "summary": {
+    "exported": 8,
+    "with_vtol_land": 8,
+    "prearm_blocked": 8,
+    "approach_min_m": 99.9,
+    "approach_max_m": 100.0
+  }
+}

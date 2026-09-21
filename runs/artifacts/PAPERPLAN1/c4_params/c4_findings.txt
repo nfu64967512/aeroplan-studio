@@ -1,0 +1,119 @@
+C4 參數讀回 102 項 —— 事實清冊（唯讀分析，未改動 repo 任何檔案）
+產生於 2026-09-21，分支 quad_swarm
+================================================================
+
+A. 產生鏈（file:line）
+----------------------
+1. 產生 32 項/機的 <UAV>.param
+   hv_dccpp/ardupilot.py:884  recommended_params(...)
+   hv_dccpp/ardupilot.py:922-952  基底字典 28 項
+   hv_dccpp/ardupilot.py:953-960  酬載參數（rgb → CAM1_TYPE, CAM1_DURATION, SERVO10_FUNCTION）
+   hv_dccpp/ardupilot.py:961-975  FENCE_ALT_MAX
+   hv_dccpp/ardupilot.py:976-987  BATT_CAPACITY/LOW/CRT —— 本情境未輸出（見 F）
+   hv_dccpp/ardupilot.py:1169  write_param_file(...) → runs/artifacts/<TRIAL>/plan/<UAV>.param
+   ⇒ 本情境實得 28 + 3(rgb) + 1(FENCE_ALT_MAX) = 32 項/機
+
+2. AIRSPEED_MAX 之來源
+   hv_dccpp/ardupilot.py:905
+     v_max = float(spec.max_airspeed_mps) if spec.max_airspeed_mps is not None else round(1.4*va, 1)
+   A（Pioneer）表 1 有值 → 35.0（整數，不會截斷）
+   B（HERO）表 1 無值 → 1.4 × 19.0 = 26.6（暫定值；HV4SITL16/report.json 的
+     warnings 明列 provisional_params(B: ... max_airspeed_mps ...)）
+
+3. Q_RTL_MODE 匯出 1.0
+   hv_dccpp/ardupilot.py:938  "Q_RTL_MODE": 1.0
+
+4. SITL 端刻意覆寫成 0
+   scripts/hv_sitl_flight.py:192-210  _write_firmware_override()
+     寫 firmware_override.parm 內容 "Q_RTL_MODE 0"，排在 --defaults 鏈最後
+   理由（原始碼註解，實測）：ArduPlane 4.8.0-dev
+     「PreArm: unset one of RTL_AUTOLAND or Q_RTL_MODE」
+     任務含 DO_LAND_START ⇒ 必須留 RTL_AUTOLAND=2、關掉 Q_RTL_MODE
+   --defaults 鏈（scripts/hv_sitl_run.py:361-368，後蓋前）：
+     plane.parm → vtol_default.parm → identity.parm → vtol_enforced.parm
+     → plan/<UAV>.param → firmware_override.parm
+
+5. 兩個不在匯出檔的參數（＝32 → 34 的差額）
+   scripts/hv_sitl_run.py:87-88  EXPECT_FALLBACK
+     {"Q_ENABLE":1, "ARMING_REQUIRE":1, "SCHED_LOOP_RATE":200, "RTL_AUTOLAND":2}
+     其中 Q_ENABLE 與 RTL_AUTOLAND **本來就在匯出檔裡**（來源記為「匯出檔」），
+     只有 ARMING_REQUIRE 與 SCHED_LOOP_RATE 真的來自常數。
+   ARMING_REQUIRE=1 的實際設定處：scripts/hv_sitl_flight.py:176-189 _write_enforced()
+     （sitl/default_params/plane.parm:84 設 0 ⇒ 四軸馬達停在 PWM 1000）
+   SCHED_LOOP_RATE=200 的實際設定處：scripts/hv_sitl_flight.py:160-173 _write_identity()
+     （300 會被 PreArm 擋下）
+   ⇒ 這兩項是 **SITL 測試平台自己的設定**，不是任務產生器的輸出。
+
+B. 比對規則（file:line）
+------------------------
+   scripts/hv_sitl_run.py:101-127  expected_params()  —— 閘門唯一決策點
+     比對集合 = EXPECT_FALLBACK | 匯出檔（檔案值優先，:114）
+     FIRMWARE_OVERRIDE 改寫期望值並把「被蓋掉的匯出值 + 理由」寫進 note
+   scripts/hv_sitl_run.py:526-527  容差
+     ok = abs(got - exp) <= max(0.01, abs(exp) * 0.001)      # 絕對 0.01 或相對 0.1%
+   scripts/hv_sitl_run.py:529-532  整數型別救援
+     if not ok and got in (float(int(exp)), float(round(exp))): ok = True
+   scripts/hv_sitl_run.py:533-535  讀回 None 一律判失敗（韌體改名的唯一徵狀）
+   scripts/hv_sitl_run.py:547-548  終端輸出「N/M 相符（P 個參數 × Q 台）」
+
+C. 實際產物（自行清點）
+-----------------------
+   runs/artifacts/HV4SITL16/plan/{A1,B2,B3}.param   各 32 項（三份鍵集合完全相同）
+   runs/artifacts/HV4SITL16/params_readback.csv     102 列，102 ok
+     來源分解：匯出檔 93、EXPECT_FALLBACK 6、FIRMWARE_OVERRIDE 3
+     93 = 96 − 3（Q_RTL_MODE 三列改掛 FIRMWARE_OVERRIDE）
+      6 = ARMING_REQUIRE、SCHED_LOOP_RATE 各 3 機
+      3 = Q_RTL_MODE × 3 機
+     整數截斷：B2.AIRSPEED_MAX 26.6→26.0、B3.AIRSPEED_MAX 26.6→26.0（A1 是 35 不截）
+   其餘 14 趟（HV4SITL1..13、15）都是舊的 17 項白名單閘門：68/68 或 51/51，
+   CSV 連 source 欄都沒有。HV4SITL16 是**唯一**一趟 102/102。
+
+D. 「相符」的三種定義（runs/artifacts/PAPERPLAN1/c4_params/c4_strictness.json）
+--------------------------------------------------------------------------
+   D1 與原始規劃值嚴格比對（只看匯出 32×3=96，不套覆寫、不套整數救援）
+        91 / 96     失敗 5：Q_RTL_MODE ×3（規劃 1 實飛 0）、AIRSPEED_MAX ×2（26.6 vs 26.0）
+   D2 與韌體正規化後之期望值比對（＝程式現行判準）
+        102 / 102
+   D3 同 D2 但拿掉整數救援
+        100 / 102   被救的 2 筆相對誤差 2.26%
+   ⇒ 論文寫的「102/102 相符」是 D2。必須在文字裡把 D2 講清楚，否則會被讀成 D1。
+
+E. 航次歸屬（本來擔心的「跨趟拼接」已排除）
+-------------------------------------------
+   表 2 的高度 120.10/120.12/120.16、最小間距 101.0、航程 +2.3%、makespan 1268.0
+   與 102/102 參數讀回**全部來自同一趟 HV4SITL16**。
+   證據：
+   * 我用 scripts/hv_sitl_report.py 同一套公式重算 HV4SITL16/{A1,B2,B3}/flight.csv，
+     得 A1 120.10 / B2 120.12 / B3 120.16 m、B2–B3 最小水平 101.0 m（垂直 29.0）、
+     規劃 30.66 → 實飛 31.36 km（+2.28%）、違規 0 —— 與表 2 逐格相同。
+   * 同一套公式先在 HV4SITL15 上驗證過：重算值與該趟已存檔的
+     flight_summary.json / separation_from_tracks.json **完全一致**（match=True）。
+   * docs/.../figures_src/fig3_data.json 的 inputs_sha256 全部 12 個檔案
+     現在重新雜湊**仍然相符**（我實測），且其 "run" 欄就是 runs/artifacts/HV4SITL16。
+   * 「同一計畫重飛 104.2 m」＝ HV4SITL15（同一 scenario key gui_legal_120_1a2b）。
+   ⚠ HV4SITL16 目錄**沒有** flight_summary.json / separation_from_tracks.json /
+     compare.png（從未跑過 hv_sitl_report.py），fig3 是另一支腳本直接讀 flight.csv 算的。
+   ⚠ HV4SITL15 與 HV4SITL16 兩個目錄在 git 都是 `??`（未納管）。
+     scripts/hv_sitl_scenarios.py:281 把 gui_legal_120_1a2b 的 trial 寫成 "HV4SITL15"，
+     ⇒ 不帶 HV_TRIAL 重跑該情境會蓋掉 HV4SITL15，HV4SITL16 需顯式 HV_TRIAL 才會被蓋。
+
+F. 順帶查到、會影響其他意見的事實
+---------------------------------
+   * plan/A1.param 的檔頭有一行 WARNING：
+       BATT_LOW_MAH/BATT_CRT_MAH not exported (pack voltage or energy model unknown)
+     ⇒ 匯出了 BATT_FS_LOW_ACT=1、BATT_FS_CRT_ACT=4 兩個**動作**，
+       但**沒有門檻**。談 endurance / failsafe 能力時不能說成已完整匯出。
+   * FENCE_ALT_MAX 匯出值是 150（不是 120）：hv_dccpp/ardupilot.py:962-975
+     取 max(h_ceil, 相對 home 最高高度 + b_v) 再 ceil。與 C1 的 120 m 論述相關。
+   * A1（Pioneer）本趟的 sensor_kinds 只有 rgb（匯出檔有 CAM1_*/SERVO10_FUNCTION，
+     沒有 LiDAR 的 SERVO*_FUNCTION=0），與 scenario.json 的 sensor_kinds {"A":"rgb","B":"rgb"} 一致。
+
+G. 產物清單（本目錄）
+---------------------
+   analyze_c4.py        清冊 + 航次重算（含在 HV4SITL15 上的公式自驗）
+   c4_evidence.json     上者的完整輸出
+   c4_summary.txt       上者的人可讀摘要
+   strictness.py        三種「相符」定義的計數 + 逐項對照表產生器
+   c4_strictness.json   D1/D2/D3 計數
+   c4_param_table.csv   102 列逐項對照（uav, param, 匯出值, 正規化期望值, 讀回值, 來源, 類別）
+   c4_findings.txt      本檔

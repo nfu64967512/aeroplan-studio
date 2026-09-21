@@ -1,0 +1,1205 @@
+{
+  "overhead": {
+    "A": {
+      "e_TO_wh": 39.18,
+      "e_LDG_wh": 81.2,
+      "e_fixed_wh": 120.37,
+      "d_fixed_km": 15.089,
+      "D_use_km": 133.0,
+      "k_unc": 1.2075,
+      "P_c_w": 511.4
+    }
+  },
+  "battery_record": {
+    "A": {
+      "auw_kg": 24.6,
+      "nominal_wh": 1500.0,
+      "available_wh": 1350.0,
+      "reference_wh": 1500.0
+    }
+  },
+  "wind": {
+    "speed_mps": 5.0,
+    "from_deg": 270.0
+  },
+  "calibration": [
+    {
+      "scenario": "S1",
+      "n": 4,
+      "uav": "A1",
+      "cls": "A",
+      "d_ceq_km": 62.145,
+      "est_km": 77.234,
+      "harvest_self_km": 76.242,
+      "err_pct": 1.301,
+      "still_air_km": 58.915
+    },
+    {
+      "scenario": "S1",
+      "n": 4,
+      "uav": "A2",
+      "cls": "A",
+      "d_ceq_km": 62.146,
+      "est_km": 77.235,
+      "harvest_self_km": 76.231,
+      "err_pct": 1.317,
+      "still_air_km": 58.915
+    },
+    {
+      "scenario": "S1",
+      "n": 4,
+      "uav": "A3",
+      "cls": "A",
+      "d_ceq_km": 61.773,
+      "est_km": 76.862,
+      "harvest_self_km": 75.866,
+      "err_pct": 1.313,
+      "still_air_km": 58.544
+    },
+    {
+      "scenario": "S1",
+      "n": 4,
+      "uav": "A4",
+      "cls": "A",
+      "d_ceq_km": 61.773,
+      "est_km": 76.862,
+      "harvest_self_km": 75.862,
+      "err_pct": 1.319,
+      "still_air_km": 58.544
+    },
+    {
+      "scenario": "S3",
+      "n": 4,
+      "uav": "A1",
+      "cls": "A",
+      "d_ceq_km": 38.366,
+      "est_km": 53.455,
+      "harvest_self_km": 52.492,
+      "err_pct": 1.834,
+      "still_air_km": 36.332
+    },
+    {
+      "scenario": "S3",
+      "n": 4,
+      "uav": "A2",
+      "cls": "A",
+      "d_ceq_km": 38.365,
+      "est_km": 53.454,
+      "harvest_self_km": 52.491,
+      "err_pct": 1.835,
+      "still_air_km": 36.332
+    },
+    {
+      "scenario": "S3",
+      "n": 4,
+      "uav": "A3",
+      "cls": "A",
+      "d_ceq_km": 38.38,
+      "est_km": 53.469,
+      "harvest_self_km": 52.506,
+      "err_pct": 1.834,
+      "still_air_km": 36.347
+    },
+    {
+      "scenario": "S3",
+      "n": 4,
+      "uav": "A4",
+      "cls": "A",
+      "d_ceq_km": 38.38,
+      "est_km": 53.469,
+      "harvest_self_km": 52.505,
+      "err_pct": 1.835,
+      "still_air_km": 36.346
+    },
+    {
+      "scenario": "S4",
+      "n": 4,
+      "uav": "A1",
+      "cls": "A",
+      "d_ceq_km": 52.86,
+      "est_km": 67.949,
+      "harvest_self_km": 72.957,
+      "err_pct": -6.864,
+      "still_air_km": 51.209
+    },
+    {
+      "scenario": "S4",
+      "n": 4,
+      "uav": "A2",
+      "cls": "A",
+      "d_ceq_km": 51.801,
+      "est_km": 66.89,
+      "harvest_self_km": 65.772,
+      "err_pct": 1.7,
+      "still_air_km": 50.211
+    },
+    {
+      "scenario": "S4",
+      "n": 4,
+      "uav": "A3",
+      "cls": "A",
+      "d_ceq_km": 32.57,
+      "est_km": 47.659,
+      "harvest_self_km": 46.605,
+      "err_pct": 2.263,
+      "still_air_km": 31.48
+    },
+    {
+      "scenario": "S4",
+      "n": 4,
+      "uav": "A4",
+      "cls": "A",
+      "d_ceq_km": 36.451,
+      "est_km": 51.54,
+      "harvest_self_km": 50.377,
+      "err_pct": 2.308,
+      "still_air_km": 35.275
+    }
+  ],
+  "dccpp_cells": [
+    {
+      "scenario": "S1",
+      "n": 2,
+      "coverage": 1.0,
+      "n_uav": 2,
+      "n_over": 0,
+      "max_frac": 0.9399,
+      "max_d_plan_est_km": 125.012,
+      "max_still_km": 104.247,
+      "per_uav": [
+        {
+          "uav": 1,
+          "cls": "A",
+          "still_air_km": 103.872,
+          "d_ceq_km": 109.542,
+          "d_plan_est_km": 124.631,
+          "d_use_km": 133.0,
+          "frac": 0.9371,
+          "over": false
+        },
+        {
+          "uav": 2,
+          "cls": "A",
+          "still_air_km": 104.247,
+          "d_ceq_km": 109.923,
+          "d_plan_est_km": 125.012,
+          "d_use_km": 133.0,
+          "frac": 0.9399,
+          "over": false
+        }
+      ]
+    },
+    {
+      "scenario": "S1",
+      "n": 4,
+      "coverage": 1.0,
+      "n_uav": 4,
+      "n_over": 0,
+      "max_frac": 0.5503,
+      "max_d_plan_est_km": 73.188,
+      "max_still_km": 55.122,
+      "per_uav": [
+        {
+          "uav": 1,
+          "cls": "A",
+          "still_air_km": 54.649,
+          "d_ceq_km": 57.623,
+          "d_plan_est_km": 72.712,
+          "d_use_km": 133.0,
+          "frac": 0.5467,
+          "over": false
+        },
+        {
+          "uav": 2,
+          "cls": "A",
+          "still_air_km": 54.041,
+          "d_ceq_km": 57.011,
+          "d_plan_est_km": 72.1,
+          "d_use_km": 133.0,
+          "frac": 0.5421,
+          "over": false
+        },
+        {
+          "uav": 3,
+          "cls": "A",
+          "still_air_km": 54.064,
+          "d_ceq_km": 57.035,
+          "d_plan_est_km": 72.124,
+          "d_use_km": 133.0,
+          "frac": 0.5423,
+          "over": false
+        },
+        {
+          "uav": 4,
+          "cls": "A",
+          "still_air_km": 55.122,
+          "d_ceq_km": 58.099,
+          "d_plan_est_km": 73.188,
+          "d_use_km": 133.0,
+          "frac": 0.5503,
+          "over": false
+        }
+      ]
+    },
+    {
+      "scenario": "S1",
+      "n": 8,
+      "coverage": 1.0,
+      "n_uav": 8,
+      "n_over": 0,
+      "max_frac": 0.3691,
+      "max_d_plan_est_km": 49.095,
+      "max_still_km": 32.251,
+      "per_uav": [
+        {
+          "uav": 1,
+          "cls": "A",
+          "still_air_km": 32.251,
+          "d_ceq_km": 34.006,
+          "d_plan_est_km": 49.095,
+          "d_use_km": 133.0,
+          "frac": 0.3691,
+          "over": false
+        },
+        {
+          "uav": 2,
+          "cls": "A",
+          "still_air_km": 31.706,
+          "d_ceq_km": 33.457,
+          "d_plan_est_km": 48.546,
+          "d_use_km": 133.0,
+          "frac": 0.365,
+          "over": false
+        },
+        {
+          "uav": 3,
+          "cls": "A",
+          "still_air_km": 31.41,
+          "d_ceq_km": 33.161,
+          "d_plan_est_km": 48.25,
+          "d_use_km": 133.0,
+          "frac": 0.3628,
+          "over": false
+        },
+        {
+          "uav": 4,
+          "cls": "A",
+          "still_air_km": 31.251,
+          "d_ceq_km": 33.002,
+          "d_plan_est_km": 48.091,
+          "d_use_km": 133.0,
+          "frac": 0.3616,
+          "over": false
+        },
+        {
+          "uav": 5,
+          "cls": "A",
+          "still_air_km": 25.894,
+          "d_ceq_km": 27.346,
+          "d_plan_est_km": 42.435,
+          "d_use_km": 133.0,
+          "frac": 0.3191,
+          "over": false
+        },
+        {
+          "uav": 6,
+          "cls": "A",
+          "still_air_km": 26.146,
+          "d_ceq_km": 27.599,
+          "d_plan_est_km": 42.688,
+          "d_use_km": 133.0,
+          "frac": 0.321,
+          "over": false
+        },
+        {
+          "uav": 7,
+          "cls": "A",
+          "still_air_km": 26.532,
+          "d_ceq_km": 27.987,
+          "d_plan_est_km": 43.076,
+          "d_use_km": 133.0,
+          "frac": 0.3239,
+          "over": false
+        },
+        {
+          "uav": 8,
+          "cls": "A",
+          "still_air_km": 26.853,
+          "d_ceq_km": 28.306,
+          "d_plan_est_km": 43.395,
+          "d_use_km": 133.0,
+          "frac": 0.3263,
+          "over": false
+        }
+      ]
+    },
+    {
+      "scenario": "S1",
+      "n": 16,
+      "coverage": 1.0,
+      "n_uav": 16,
+      "n_over": 0,
+      "max_frac": 0.2836,
+      "max_d_plan_est_km": 37.719,
+      "max_still_km": 21.471,
+      "per_uav": [
+        {
+          "uav": 1,
+          "cls": "A",
+          "still_air_km": 21.471,
+          "d_ceq_km": 22.63,
+          "d_plan_est_km": 37.719,
+          "d_use_km": 133.0,
+          "frac": 0.2836,
+          "over": false
+        },
+        {
+          "uav": 2,
+          "cls": "A",
+          "still_air_km": 21.104,
+          "d_ceq_km": 22.26,
+          "d_plan_est_km": 37.349,
+          "d_use_km": 133.0,
+          "frac": 0.2808,
+          "over": false
+        },
+        {
+          "uav": 3,
+          "cls": "A",
+          "still_air_km": 20.798,
+          "d_ceq_km": 21.952,
+          "d_plan_est_km": 37.041,
+          "d_use_km": 133.0,
+          "frac": 0.2785,
+          "over": false
+        },
+        {
+          "uav": 4,
+          "cls": "A",
+          "still_air_km": 20.563,
+          "d_ceq_km": 21.716,
+          "d_plan_est_km": 36.805,
+          "d_use_km": 133.0,
+          "frac": 0.2767,
+          "over": false
+        },
+        {
+          "uav": 5,
+          "cls": "A",
+          "still_air_km": 15.223,
+          "d_ceq_km": 16.084,
+          "d_plan_est_km": 31.173,
+          "d_use_km": 133.0,
+          "frac": 0.2344,
+          "over": false
+        },
+        {
+          "uav": 6,
+          "cls": "A",
+          "still_air_km": 15.15,
+          "d_ceq_km": 16.011,
+          "d_plan_est_km": 31.1,
+          "d_use_km": 133.0,
+          "frac": 0.2338,
+          "over": false
+        },
+        {
+          "uav": 7,
+          "cls": "A",
+          "still_air_km": 15.117,
+          "d_ceq_km": 15.978,
+          "d_plan_est_km": 31.067,
+          "d_use_km": 133.0,
+          "frac": 0.2336,
+          "over": false
+        },
+        {
+          "uav": 8,
+          "cls": "A",
+          "still_air_km": 15.125,
+          "d_ceq_km": 15.986,
+          "d_plan_est_km": 31.075,
+          "d_use_km": 133.0,
+          "frac": 0.2336,
+          "over": false
+        },
+        {
+          "uav": 9,
+          "cls": "A",
+          "still_air_km": 15.174,
+          "d_ceq_km": 16.034,
+          "d_plan_est_km": 31.123,
+          "d_use_km": 133.0,
+          "frac": 0.234,
+          "over": false
+        },
+        {
+          "uav": 10,
+          "cls": "A",
+          "still_air_km": 15.262,
+          "d_ceq_km": 16.123,
+          "d_plan_est_km": 31.212,
+          "d_use_km": 133.0,
+          "frac": 0.2347,
+          "over": false
+        },
+        {
+          "uav": 11,
+          "cls": "A",
+          "still_air_km": 15.388,
+          "d_ceq_km": 16.25,
+          "d_plan_est_km": 31.339,
+          "d_use_km": 133.0,
+          "frac": 0.2356,
+          "over": false
+        },
+        {
+          "uav": 12,
+          "cls": "A",
+          "still_air_km": 15.55,
+          "d_ceq_km": 16.412,
+          "d_plan_est_km": 31.501,
+          "d_use_km": 133.0,
+          "frac": 0.2368,
+          "over": false
+        },
+        {
+          "uav": 13,
+          "cls": "A",
+          "still_air_km": 15.743,
+          "d_ceq_km": 16.606,
+          "d_plan_est_km": 31.695,
+          "d_use_km": 133.0,
+          "frac": 0.2383,
+          "over": false
+        },
+        {
+          "uav": 14,
+          "cls": "A",
+          "still_air_km": 15.966,
+          "d_ceq_km": 16.83,
+          "d_plan_est_km": 31.919,
+          "d_use_km": 133.0,
+          "frac": 0.24,
+          "over": false
+        },
+        {
+          "uav": 15,
+          "cls": "A",
+          "still_air_km": 16.214,
+          "d_ceq_km": 17.08,
+          "d_plan_est_km": 32.169,
+          "d_use_km": 133.0,
+          "frac": 0.2419,
+          "over": false
+        },
+        {
+          "uav": 16,
+          "cls": "A",
+          "still_air_km": 16.343,
+          "d_ceq_km": 17.209,
+          "d_plan_est_km": 32.298,
+          "d_use_km": 133.0,
+          "frac": 0.2428,
+          "over": false
+        }
+      ]
+    },
+    {
+      "scenario": "S2",
+      "n": 4,
+      "coverage": 1.0,
+      "n_uav": 4,
+      "n_over": 0,
+      "max_frac": 0.6004,
+      "max_d_plan_est_km": 79.859,
+      "max_still_km": 62.634,
+      "per_uav": [
+        {
+          "uav": 2,
+          "cls": "A",
+          "still_air_km": 62.634,
+          "d_ceq_km": 64.77,
+          "d_plan_est_km": 79.859,
+          "d_use_km": 133.0,
+          "frac": 0.6004,
+          "over": false
+        },
+        {
+          "uav": 4,
+          "cls": "A",
+          "still_air_km": 58.933,
+          "d_ceq_km": 60.814,
+          "d_plan_est_km": 75.903,
+          "d_use_km": 133.0,
+          "frac": 0.5707,
+          "over": false
+        },
+        {
+          "uav": 3,
+          "cls": "A",
+          "still_air_km": 58.933,
+          "d_ceq_km": 60.814,
+          "d_plan_est_km": 75.903,
+          "d_use_km": 133.0,
+          "frac": 0.5707,
+          "over": false
+        },
+        {
+          "uav": 1,
+          "cls": "A",
+          "still_air_km": 62.634,
+          "d_ceq_km": 64.77,
+          "d_plan_est_km": 79.859,
+          "d_use_km": 133.0,
+          "frac": 0.6004,
+          "over": false
+        }
+      ]
+    },
+    {
+      "scenario": "S2",
+      "n": 8,
+      "coverage": 1.0,
+      "n_uav": 8,
+      "n_over": 0,
+      "max_frac": 0.3855,
+      "max_d_plan_est_km": 51.272,
+      "max_still_km": 34.932,
+      "per_uav": [
+        {
+          "uav": 3,
+          "cls": "A",
+          "still_air_km": 33.925,
+          "d_ceq_km": 35.112,
+          "d_plan_est_km": 50.201,
+          "d_use_km": 133.0,
+          "frac": 0.3775,
+          "over": false
+        },
+        {
+          "uav": 4,
+          "cls": "A",
+          "still_air_km": 34.91,
+          "d_ceq_km": 36.161,
+          "d_plan_est_km": 51.25,
+          "d_use_km": 133.0,
+          "frac": 0.3853,
+          "over": false
+        },
+        {
+          "uav": 7,
+          "cls": "A",
+          "still_air_km": 30.366,
+          "d_ceq_km": 31.303,
+          "d_plan_est_km": 46.392,
+          "d_use_km": 133.0,
+          "frac": 0.3488,
+          "over": false
+        },
+        {
+          "uav": 8,
+          "cls": "A",
+          "still_air_km": 30.886,
+          "d_ceq_km": 31.867,
+          "d_plan_est_km": 46.956,
+          "d_use_km": 133.0,
+          "frac": 0.3531,
+          "over": false
+        },
+        {
+          "uav": 5,
+          "cls": "A",
+          "still_air_km": 30.968,
+          "d_ceq_km": 31.951,
+          "d_plan_est_km": 47.04,
+          "d_use_km": 133.0,
+          "frac": 0.3537,
+          "over": false
+        },
+        {
+          "uav": 6,
+          "cls": "A",
+          "still_air_km": 30.06,
+          "d_ceq_km": 30.977,
+          "d_plan_est_km": 46.066,
+          "d_use_km": 133.0,
+          "frac": 0.3464,
+          "over": false
+        },
+        {
+          "uav": 1,
+          "cls": "A",
+          "still_air_km": 34.932,
+          "d_ceq_km": 36.183,
+          "d_plan_est_km": 51.272,
+          "d_use_km": 133.0,
+          "frac": 0.3855,
+          "over": false
+        },
+        {
+          "uav": 2,
+          "cls": "A",
+          "still_air_km": 33.522,
+          "d_ceq_km": 34.684,
+          "d_plan_est_km": 49.773,
+          "d_use_km": 133.0,
+          "frac": 0.3742,
+          "over": false
+        }
+      ]
+    },
+    {
+      "scenario": "S3",
+      "n": 4,
+      "coverage": 1.0,
+      "n_uav": 4,
+      "n_over": 0,
+      "max_frac": 0.3706,
+      "max_d_plan_est_km": 49.288,
+      "max_still_km": 32.36,
+      "per_uav": [
+        {
+          "uav": 1,
+          "cls": "A",
+          "still_air_km": 32.36,
+          "d_ceq_km": 34.199,
+          "d_plan_est_km": 49.288,
+          "d_use_km": 133.0,
+          "frac": 0.3706,
+          "over": false
+        },
+        {
+          "uav": 2,
+          "cls": "A",
+          "still_air_km": 24.115,
+          "d_ceq_km": 25.49,
+          "d_plan_est_km": 40.579,
+          "d_use_km": 133.0,
+          "frac": 0.3051,
+          "over": false
+        },
+        {
+          "uav": 3,
+          "cls": "A",
+          "still_air_km": 24.123,
+          "d_ceq_km": 25.498,
+          "d_plan_est_km": 40.587,
+          "d_use_km": 133.0,
+          "frac": 0.3052,
+          "over": false
+        },
+        {
+          "uav": 4,
+          "cls": "A",
+          "still_air_km": 24.156,
+          "d_ceq_km": 25.531,
+          "d_plan_est_km": 40.62,
+          "d_use_km": 133.0,
+          "frac": 0.3054,
+          "over": false
+        }
+      ]
+    },
+    {
+      "scenario": "S3",
+      "n": 8,
+      "coverage": 1.0,
+      "n_uav": 8,
+      "n_over": 0,
+      "max_frac": 0.3054,
+      "max_d_plan_est_km": 40.616,
+      "max_still_km": 24.152,
+      "per_uav": [
+        {
+          "uav": 1,
+          "cls": "A",
+          "still_air_km": 24.152,
+          "d_ceq_km": 25.527,
+          "d_plan_est_km": 40.616,
+          "d_use_km": 133.0,
+          "frac": 0.3054,
+          "over": false
+        },
+        {
+          "uav": 2,
+          "cls": "A",
+          "still_air_km": 16.012,
+          "d_ceq_km": 16.926,
+          "d_plan_est_km": 32.015,
+          "d_use_km": 133.0,
+          "frac": 0.2407,
+          "over": false
+        },
+        {
+          "uav": 3,
+          "cls": "A",
+          "still_air_km": 16.003,
+          "d_ceq_km": 16.917,
+          "d_plan_est_km": 32.006,
+          "d_use_km": 133.0,
+          "frac": 0.2406,
+          "over": false
+        },
+        {
+          "uav": 4,
+          "cls": "A",
+          "still_air_km": 16.0,
+          "d_ceq_km": 16.915,
+          "d_plan_est_km": 32.004,
+          "d_use_km": 133.0,
+          "frac": 0.2406,
+          "over": false
+        },
+        {
+          "uav": 5,
+          "cls": "A",
+          "still_air_km": 16.004,
+          "d_ceq_km": 16.919,
+          "d_plan_est_km": 32.008,
+          "d_use_km": 133.0,
+          "frac": 0.2407,
+          "over": false
+        },
+        {
+          "uav": 6,
+          "cls": "A",
+          "still_air_km": 16.014,
+          "d_ceq_km": 16.929,
+          "d_plan_est_km": 32.018,
+          "d_use_km": 133.0,
+          "frac": 0.2407,
+          "over": false
+        },
+        {
+          "uav": 7,
+          "cls": "A",
+          "still_air_km": 16.031,
+          "d_ceq_km": 16.946,
+          "d_plan_est_km": 32.035,
+          "d_use_km": 133.0,
+          "frac": 0.2409,
+          "over": false
+        },
+        {
+          "uav": 8,
+          "cls": "A",
+          "still_air_km": 16.054,
+          "d_ceq_km": 16.969,
+          "d_plan_est_km": 32.058,
+          "d_use_km": 133.0,
+          "frac": 0.241,
+          "over": false
+        }
+      ]
+    },
+    {
+      "scenario": "S4",
+      "n": 4,
+      "coverage": 1.0,
+      "n_uav": 4,
+      "n_over": 0,
+      "max_frac": 0.4683,
+      "max_d_plan_est_km": 62.281,
+      "max_still_km": 44.789,
+      "per_uav": [
+        {
+          "uav": 1,
+          "cls": "A",
+          "still_air_km": 44.789,
+          "d_ceq_km": 47.192,
+          "d_plan_est_km": 62.281,
+          "d_use_km": 133.0,
+          "frac": 0.4683,
+          "over": false
+        },
+        {
+          "uav": 2,
+          "cls": "A",
+          "still_air_km": 44.057,
+          "d_ceq_km": 46.456,
+          "d_plan_est_km": 61.545,
+          "d_use_km": 133.0,
+          "frac": 0.4627,
+          "over": false
+        },
+        {
+          "uav": 3,
+          "cls": "A",
+          "still_air_km": 39.245,
+          "d_ceq_km": 41.365,
+          "d_plan_est_km": 56.454,
+          "d_use_km": 133.0,
+          "frac": 0.4245,
+          "over": false
+        },
+        {
+          "uav": 4,
+          "cls": "A",
+          "still_air_km": 30.729,
+          "d_ceq_km": 32.328,
+          "d_plan_est_km": 47.417,
+          "d_use_km": 133.0,
+          "frac": 0.3565,
+          "over": false
+        }
+      ]
+    },
+    {
+      "scenario": "S4",
+      "n": 8,
+      "coverage": 1.0,
+      "n_uav": 8,
+      "n_over": 0,
+      "max_frac": 0.3229,
+      "max_d_plan_est_km": 42.951,
+      "max_still_km": 26.447,
+      "per_uav": [
+        {
+          "uav": 1,
+          "cls": "A",
+          "still_air_km": 26.447,
+          "d_ceq_km": 27.862,
+          "d_plan_est_km": 42.951,
+          "d_use_km": 133.0,
+          "frac": 0.3229,
+          "over": false
+        },
+        {
+          "uav": 2,
+          "cls": "A",
+          "still_air_km": 25.807,
+          "d_ceq_km": 27.216,
+          "d_plan_est_km": 42.305,
+          "d_use_km": 133.0,
+          "frac": 0.3181,
+          "over": false
+        },
+        {
+          "uav": 3,
+          "cls": "A",
+          "still_air_km": 25.449,
+          "d_ceq_km": 26.856,
+          "d_plan_est_km": 41.945,
+          "d_use_km": 133.0,
+          "frac": 0.3154,
+          "over": false
+        },
+        {
+          "uav": 4,
+          "cls": "A",
+          "still_air_km": 24.898,
+          "d_ceq_km": 26.287,
+          "d_plan_est_km": 41.376,
+          "d_use_km": 133.0,
+          "frac": 0.3111,
+          "over": false
+        },
+        {
+          "uav": 5,
+          "cls": "A",
+          "still_air_km": 18.218,
+          "d_ceq_km": 19.23,
+          "d_plan_est_km": 34.319,
+          "d_use_km": 133.0,
+          "frac": 0.258,
+          "over": false
+        },
+        {
+          "uav": 6,
+          "cls": "A",
+          "still_air_km": 16.334,
+          "d_ceq_km": 17.205,
+          "d_plan_est_km": 32.294,
+          "d_use_km": 133.0,
+          "frac": 0.2428,
+          "over": false
+        },
+        {
+          "uav": 7,
+          "cls": "A",
+          "still_air_km": 14.446,
+          "d_ceq_km": 15.175,
+          "d_plan_est_km": 30.264,
+          "d_use_km": 133.0,
+          "frac": 0.2275,
+          "over": false
+        },
+        {
+          "uav": 8,
+          "cls": "A",
+          "still_air_km": 12.847,
+          "d_ceq_km": 13.464,
+          "d_plan_est_km": 28.553,
+          "d_use_km": 133.0,
+          "frac": 0.2147,
+          "over": false
+        }
+      ]
+    },
+    {
+      "scenario": "S5",
+      "n": 8,
+      "coverage": 1.0,
+      "n_uav": 8,
+      "n_over": 0,
+      "max_frac": 0.9542,
+      "max_d_plan_est_km": 126.914,
+      "max_still_km": 105.986,
+      "per_uav": [
+        {
+          "uav": 1,
+          "cls": "A",
+          "still_air_km": 105.986,
+          "d_ceq_km": 111.825,
+          "d_plan_est_km": 126.914,
+          "d_use_km": 133.0,
+          "frac": 0.9542,
+          "over": false
+        },
+        {
+          "uav": 2,
+          "cls": "A",
+          "still_air_km": 104.991,
+          "d_ceq_km": 110.823,
+          "d_plan_est_km": 125.912,
+          "d_use_km": 133.0,
+          "frac": 0.9467,
+          "over": false
+        },
+        {
+          "uav": 3,
+          "cls": "A",
+          "still_air_km": 104.309,
+          "d_ceq_km": 110.139,
+          "d_plan_est_km": 125.228,
+          "d_use_km": 133.0,
+          "frac": 0.9416,
+          "over": false
+        },
+        {
+          "uav": 4,
+          "cls": "A",
+          "still_air_km": 104.003,
+          "d_ceq_km": 109.832,
+          "d_plan_est_km": 124.921,
+          "d_use_km": 133.0,
+          "frac": 0.9393,
+          "over": false
+        },
+        {
+          "uav": 5,
+          "cls": "A",
+          "still_air_km": 104.027,
+          "d_ceq_km": 109.856,
+          "d_plan_est_km": 124.945,
+          "d_use_km": 133.0,
+          "frac": 0.9394,
+          "over": false
+        },
+        {
+          "uav": 6,
+          "cls": "A",
+          "still_air_km": 104.4,
+          "d_ceq_km": 110.23,
+          "d_plan_est_km": 125.319,
+          "d_use_km": 133.0,
+          "frac": 0.9423,
+          "over": false
+        },
+        {
+          "uav": 7,
+          "cls": "A",
+          "still_air_km": 105.141,
+          "d_ceq_km": 110.974,
+          "d_plan_est_km": 126.063,
+          "d_use_km": 133.0,
+          "frac": 0.9478,
+          "over": false
+        },
+        {
+          "uav": 8,
+          "cls": "A",
+          "still_air_km": 95.728,
+          "d_ceq_km": 100.982,
+          "d_plan_est_km": 116.071,
+          "d_use_km": 133.0,
+          "frac": 0.8727,
+          "over": false
+        }
+      ]
+    },
+    {
+      "scenario": "S5",
+      "n": 16,
+      "coverage": 1.0,
+      "n_uav": 16,
+      "n_over": 0,
+      "max_frac": 0.6181,
+      "max_d_plan_est_km": 82.209,
+      "max_still_km": 63.641,
+      "per_uav": [
+        {
+          "uav": 1,
+          "cls": "A",
+          "still_air_km": 63.641,
+          "d_ceq_km": 67.12,
+          "d_plan_est_km": 82.209,
+          "d_use_km": 133.0,
+          "frac": 0.6181,
+          "over": false
+        },
+        {
+          "uav": 2,
+          "cls": "A",
+          "still_air_km": 63.007,
+          "d_ceq_km": 66.48,
+          "d_plan_est_km": 81.569,
+          "d_use_km": 133.0,
+          "frac": 0.6133,
+          "over": false
+        },
+        {
+          "uav": 3,
+          "cls": "A",
+          "still_air_km": 62.451,
+          "d_ceq_km": 65.921,
+          "d_plan_est_km": 81.01,
+          "d_use_km": 133.0,
+          "frac": 0.6091,
+          "over": false
+        },
+        {
+          "uav": 4,
+          "cls": "A",
+          "still_air_km": 61.988,
+          "d_ceq_km": 65.455,
+          "d_plan_est_km": 80.544,
+          "d_use_km": 133.0,
+          "frac": 0.6056,
+          "over": false
+        },
+        {
+          "uav": 5,
+          "cls": "A",
+          "still_air_km": 61.628,
+          "d_ceq_km": 65.094,
+          "d_plan_est_km": 80.183,
+          "d_use_km": 133.0,
+          "frac": 0.6029,
+          "over": false
+        },
+        {
+          "uav": 6,
+          "cls": "A",
+          "still_air_km": 61.383,
+          "d_ceq_km": 64.849,
+          "d_plan_est_km": 79.938,
+          "d_use_km": 133.0,
+          "frac": 0.601,
+          "over": false
+        },
+        {
+          "uav": 7,
+          "cls": "A",
+          "still_air_km": 61.262,
+          "d_ceq_km": 64.728,
+          "d_plan_est_km": 79.817,
+          "d_use_km": 133.0,
+          "frac": 0.6001,
+          "over": false
+        },
+        {
+          "uav": 8,
+          "cls": "A",
+          "still_air_km": 50.804,
+          "d_ceq_km": 53.685,
+          "d_plan_est_km": 68.774,
+          "d_use_km": 133.0,
+          "frac": 0.5171,
+          "over": false
+        },
+        {
+          "uav": 9,
+          "cls": "A",
+          "still_air_km": 50.881,
+          "d_ceq_km": 53.762,
+          "d_plan_est_km": 68.851,
+          "d_use_km": 133.0,
+          "frac": 0.5177,
+          "over": false
+        },
+        {
+          "uav": 10,
+          "cls": "A",
+          "still_air_km": 51.039,
+          "d_ceq_km": 53.92,
+          "d_plan_est_km": 69.009,
+          "d_use_km": 133.0,
+          "frac": 0.5189,
+          "over": false
+        },
+        {
+          "uav": 11,
+          "cls": "A",
+          "still_air_km": 51.273,
+          "d_ceq_km": 54.155,
+          "d_plan_est_km": 69.244,
+          "d_use_km": 133.0,
+          "frac": 0.5206,
+          "over": false
+        },
+        {
+          "uav": 12,
+          "cls": "A",
+          "still_air_km": 51.579,
+          "d_ceq_km": 54.462,
+          "d_plan_est_km": 69.551,
+          "d_use_km": 133.0,
+          "frac": 0.5229,
+          "over": false
+        },
+        {
+          "uav": 13,
+          "cls": "A",
+          "still_air_km": 51.951,
+          "d_ceq_km": 54.835,
+          "d_plan_est_km": 69.924,
+          "d_use_km": 133.0,
+          "frac": 0.5257,
+          "over": false
+        },
+        {
+          "uav": 14,
+          "cls": "A",
+          "still_air_km": 52.382,
+          "d_ceq_km": 55.269,
+          "d_plan_est_km": 70.358,
+          "d_use_km": 133.0,
+          "frac": 0.529,
+          "over": false
+        },
+        {
+          "uav": 15,
+          "cls": "A",
+          "still_air_km": 52.866,
+          "d_ceq_km": 55.757,
+          "d_plan_est_km": 70.846,
+          "d_use_km": 133.0,
+          "frac": 0.5327,
+          "over": false
+        },
+        {
+          "uav": 16,
+          "cls": "A",
+          "still_air_km": 53.274,
+          "d_ceq_km": 56.166,
+          "d_plan_est_km": 71.255,
+          "d_use_km": 133.0,
+          "frac": 0.5358,
+          "over": false
+        }
+      ]
+    }
+  ]
+}

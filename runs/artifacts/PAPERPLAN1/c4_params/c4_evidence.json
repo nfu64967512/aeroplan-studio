@@ -1,0 +1,1811 @@
+{
+ "inventory": {
+  "HV4SITL15": {
+   "n_aircraft": 3,
+   "per_uav": {
+    "A1": {
+     "n_file": 32,
+     "n_compared": 34,
+     "entries": [
+      {
+       "param": "AIRSPEED_CRUISE",
+       "expected": 21.5,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "AIRSPEED_MAX",
+       "expected": 35.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "AIRSPEED_MIN",
+       "expected": 18.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "AIRSPEED_STALL",
+       "expected": 14.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "ARMING_REQUIRE",
+       "expected": 1.0,
+       "source": "EXPECT_FALLBACK",
+       "note": ""
+      },
+      {
+       "param": "BATT_FS_CRT_ACT",
+       "expected": 4.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "BATT_FS_LOW_ACT",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "CAM1_DURATION",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "CAM1_TYPE",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_ACTION",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_ALT_MAX",
+       "expected": 150.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_ENABLE",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_RET_RALLY",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_TYPE",
+       "expected": 5.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FS_LONG_ACTN",
+       "expected": 0.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FS_LONG_TIMEOUT",
+       "expected": 60.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_ASSIST_SPEED",
+       "expected": 17.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_ENABLE",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_LAND_FINAL_ALT",
+       "expected": 10.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_RTL_ALT",
+       "expected": 100.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_RTL_MODE",
+       "expected": 0.0,
+       "source": "FIRMWARE_OVERRIDE",
+       "note": "deliberate override: exported 1 -> expect 0; ArduPlane 4.8.0-dev PreArm rejects RTL_AUTOLAND + Q_RTL_MODE together"
+      },
+      {
+       "param": "Q_TRANSITION_MS",
+       "expected": 20000.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "ROLL_LIMIT_DEG",
+       "expected": 20.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "RTL_AUTOLAND",
+       "expected": 2.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "RTL_RADIUS",
+       "expected": 200.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "SCHED_LOOP_RATE",
+       "expected": 200.0,
+       "source": "EXPECT_FALLBACK",
+       "note": ""
+      },
+      {
+       "param": "SERVO10_FUNCTION",
+       "expected": 10.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TECS_CLMB_MAX",
+       "expected": 1.13,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TECS_SINK_MAX",
+       "expected": 1.5,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TECS_SINK_MIN",
+       "expected": 1.35,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TERRAIN_ENABLE",
+       "expected": 0.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TERRAIN_FOLLOW",
+       "expected": 0.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "WP_LOITER_RAD",
+       "expected": 200.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "WP_RADIUS",
+       "expected": 14.0,
+       "source": "export_file",
+       "note": ""
+      }
+     ]
+    },
+    "B2": {
+     "n_file": 32,
+     "n_compared": 34,
+     "entries": [
+      {
+       "param": "AIRSPEED_CRUISE",
+       "expected": 19.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "AIRSPEED_MAX",
+       "expected": 26.6,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "AIRSPEED_MIN",
+       "expected": 16.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "AIRSPEED_STALL",
+       "expected": 12.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "ARMING_REQUIRE",
+       "expected": 1.0,
+       "source": "EXPECT_FALLBACK",
+       "note": ""
+      },
+      {
+       "param": "BATT_FS_CRT_ACT",
+       "expected": 4.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "BATT_FS_LOW_ACT",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "CAM1_DURATION",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "CAM1_TYPE",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_ACTION",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_ALT_MAX",
+       "expected": 150.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_ENABLE",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_RET_RALLY",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_TYPE",
+       "expected": 5.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FS_LONG_ACTN",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FS_LONG_TIMEOUT",
+       "expected": 60.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_ASSIST_SPEED",
+       "expected": 15.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_ENABLE",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_LAND_FINAL_ALT",
+       "expected": 10.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_RTL_ALT",
+       "expected": 100.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_RTL_MODE",
+       "expected": 0.0,
+       "source": "FIRMWARE_OVERRIDE",
+       "note": "deliberate override: exported 1 -> expect 0; ArduPlane 4.8.0-dev PreArm rejects RTL_AUTOLAND + Q_RTL_MODE together"
+      },
+      {
+       "param": "Q_TRANSITION_MS",
+       "expected": 20000.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "ROLL_LIMIT_DEG",
+       "expected": 25.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "RTL_AUTOLAND",
+       "expected": 2.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "RTL_RADIUS",
+       "expected": 120.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "SCHED_LOOP_RATE",
+       "expected": 200.0,
+       "source": "EXPECT_FALLBACK",
+       "note": ""
+      },
+      {
+       "param": "SERVO10_FUNCTION",
+       "expected": 10.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TECS_CLMB_MAX",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TECS_SINK_MAX",
+       "expected": 1.33,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TECS_SINK_MIN",
+       "expected": 1.19,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TERRAIN_ENABLE",
+       "expected": 0.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TERRAIN_FOLLOW",
+       "expected": 0.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "WP_LOITER_RAD",
+       "expected": 120.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "WP_RADIUS",
+       "expected": 19.0,
+       "source": "export_file",
+       "note": ""
+      }
+     ]
+    },
+    "B3": {
+     "n_file": 32,
+     "n_compared": 34,
+     "entries": [
+      {
+       "param": "AIRSPEED_CRUISE",
+       "expected": 19.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "AIRSPEED_MAX",
+       "expected": 26.6,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "AIRSPEED_MIN",
+       "expected": 16.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "AIRSPEED_STALL",
+       "expected": 12.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "ARMING_REQUIRE",
+       "expected": 1.0,
+       "source": "EXPECT_FALLBACK",
+       "note": ""
+      },
+      {
+       "param": "BATT_FS_CRT_ACT",
+       "expected": 4.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "BATT_FS_LOW_ACT",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "CAM1_DURATION",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "CAM1_TYPE",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_ACTION",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_ALT_MAX",
+       "expected": 150.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_ENABLE",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_RET_RALLY",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_TYPE",
+       "expected": 5.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FS_LONG_ACTN",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FS_LONG_TIMEOUT",
+       "expected": 60.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_ASSIST_SPEED",
+       "expected": 15.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_ENABLE",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_LAND_FINAL_ALT",
+       "expected": 10.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_RTL_ALT",
+       "expected": 100.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_RTL_MODE",
+       "expected": 0.0,
+       "source": "FIRMWARE_OVERRIDE",
+       "note": "deliberate override: exported 1 -> expect 0; ArduPlane 4.8.0-dev PreArm rejects RTL_AUTOLAND + Q_RTL_MODE together"
+      },
+      {
+       "param": "Q_TRANSITION_MS",
+       "expected": 20000.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "ROLL_LIMIT_DEG",
+       "expected": 25.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "RTL_AUTOLAND",
+       "expected": 2.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "RTL_RADIUS",
+       "expected": 120.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "SCHED_LOOP_RATE",
+       "expected": 200.0,
+       "source": "EXPECT_FALLBACK",
+       "note": ""
+      },
+      {
+       "param": "SERVO10_FUNCTION",
+       "expected": 10.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TECS_CLMB_MAX",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TECS_SINK_MAX",
+       "expected": 1.33,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TECS_SINK_MIN",
+       "expected": 1.19,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TERRAIN_ENABLE",
+       "expected": 0.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TERRAIN_FOLLOW",
+       "expected": 0.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "WP_LOITER_RAD",
+       "expected": 120.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "WP_RADIUS",
+       "expected": 19.0,
+       "source": "export_file",
+       "note": ""
+      }
+     ]
+    }
+   },
+   "n_file_total": 96,
+   "n_compared_total": 102
+  },
+  "HV4SITL16": {
+   "n_aircraft": 3,
+   "per_uav": {
+    "A1": {
+     "n_file": 32,
+     "n_compared": 34,
+     "entries": [
+      {
+       "param": "AIRSPEED_CRUISE",
+       "expected": 21.5,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "AIRSPEED_MAX",
+       "expected": 35.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "AIRSPEED_MIN",
+       "expected": 18.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "AIRSPEED_STALL",
+       "expected": 14.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "ARMING_REQUIRE",
+       "expected": 1.0,
+       "source": "EXPECT_FALLBACK",
+       "note": ""
+      },
+      {
+       "param": "BATT_FS_CRT_ACT",
+       "expected": 4.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "BATT_FS_LOW_ACT",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "CAM1_DURATION",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "CAM1_TYPE",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_ACTION",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_ALT_MAX",
+       "expected": 150.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_ENABLE",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_RET_RALLY",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_TYPE",
+       "expected": 5.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FS_LONG_ACTN",
+       "expected": 0.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FS_LONG_TIMEOUT",
+       "expected": 60.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_ASSIST_SPEED",
+       "expected": 17.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_ENABLE",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_LAND_FINAL_ALT",
+       "expected": 10.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_RTL_ALT",
+       "expected": 100.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_RTL_MODE",
+       "expected": 0.0,
+       "source": "FIRMWARE_OVERRIDE",
+       "note": "deliberate override: exported 1 -> expect 0; ArduPlane 4.8.0-dev PreArm rejects RTL_AUTOLAND + Q_RTL_MODE together"
+      },
+      {
+       "param": "Q_TRANSITION_MS",
+       "expected": 20000.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "ROLL_LIMIT_DEG",
+       "expected": 20.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "RTL_AUTOLAND",
+       "expected": 2.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "RTL_RADIUS",
+       "expected": 200.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "SCHED_LOOP_RATE",
+       "expected": 200.0,
+       "source": "EXPECT_FALLBACK",
+       "note": ""
+      },
+      {
+       "param": "SERVO10_FUNCTION",
+       "expected": 10.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TECS_CLMB_MAX",
+       "expected": 1.13,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TECS_SINK_MAX",
+       "expected": 1.5,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TECS_SINK_MIN",
+       "expected": 1.35,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TERRAIN_ENABLE",
+       "expected": 0.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TERRAIN_FOLLOW",
+       "expected": 0.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "WP_LOITER_RAD",
+       "expected": 200.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "WP_RADIUS",
+       "expected": 14.0,
+       "source": "export_file",
+       "note": ""
+      }
+     ]
+    },
+    "B2": {
+     "n_file": 32,
+     "n_compared": 34,
+     "entries": [
+      {
+       "param": "AIRSPEED_CRUISE",
+       "expected": 19.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "AIRSPEED_MAX",
+       "expected": 26.6,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "AIRSPEED_MIN",
+       "expected": 16.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "AIRSPEED_STALL",
+       "expected": 12.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "ARMING_REQUIRE",
+       "expected": 1.0,
+       "source": "EXPECT_FALLBACK",
+       "note": ""
+      },
+      {
+       "param": "BATT_FS_CRT_ACT",
+       "expected": 4.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "BATT_FS_LOW_ACT",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "CAM1_DURATION",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "CAM1_TYPE",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_ACTION",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_ALT_MAX",
+       "expected": 150.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_ENABLE",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_RET_RALLY",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_TYPE",
+       "expected": 5.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FS_LONG_ACTN",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FS_LONG_TIMEOUT",
+       "expected": 60.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_ASSIST_SPEED",
+       "expected": 15.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_ENABLE",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_LAND_FINAL_ALT",
+       "expected": 10.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_RTL_ALT",
+       "expected": 100.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_RTL_MODE",
+       "expected": 0.0,
+       "source": "FIRMWARE_OVERRIDE",
+       "note": "deliberate override: exported 1 -> expect 0; ArduPlane 4.8.0-dev PreArm rejects RTL_AUTOLAND + Q_RTL_MODE together"
+      },
+      {
+       "param": "Q_TRANSITION_MS",
+       "expected": 20000.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "ROLL_LIMIT_DEG",
+       "expected": 25.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "RTL_AUTOLAND",
+       "expected": 2.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "RTL_RADIUS",
+       "expected": 120.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "SCHED_LOOP_RATE",
+       "expected": 200.0,
+       "source": "EXPECT_FALLBACK",
+       "note": ""
+      },
+      {
+       "param": "SERVO10_FUNCTION",
+       "expected": 10.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TECS_CLMB_MAX",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TECS_SINK_MAX",
+       "expected": 1.33,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TECS_SINK_MIN",
+       "expected": 1.19,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TERRAIN_ENABLE",
+       "expected": 0.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TERRAIN_FOLLOW",
+       "expected": 0.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "WP_LOITER_RAD",
+       "expected": 120.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "WP_RADIUS",
+       "expected": 19.0,
+       "source": "export_file",
+       "note": ""
+      }
+     ]
+    },
+    "B3": {
+     "n_file": 32,
+     "n_compared": 34,
+     "entries": [
+      {
+       "param": "AIRSPEED_CRUISE",
+       "expected": 19.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "AIRSPEED_MAX",
+       "expected": 26.6,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "AIRSPEED_MIN",
+       "expected": 16.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "AIRSPEED_STALL",
+       "expected": 12.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "ARMING_REQUIRE",
+       "expected": 1.0,
+       "source": "EXPECT_FALLBACK",
+       "note": ""
+      },
+      {
+       "param": "BATT_FS_CRT_ACT",
+       "expected": 4.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "BATT_FS_LOW_ACT",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "CAM1_DURATION",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "CAM1_TYPE",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_ACTION",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_ALT_MAX",
+       "expected": 150.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_ENABLE",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_RET_RALLY",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FENCE_TYPE",
+       "expected": 5.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FS_LONG_ACTN",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "FS_LONG_TIMEOUT",
+       "expected": 60.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_ASSIST_SPEED",
+       "expected": 15.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_ENABLE",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_LAND_FINAL_ALT",
+       "expected": 10.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_RTL_ALT",
+       "expected": 100.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "Q_RTL_MODE",
+       "expected": 0.0,
+       "source": "FIRMWARE_OVERRIDE",
+       "note": "deliberate override: exported 1 -> expect 0; ArduPlane 4.8.0-dev PreArm rejects RTL_AUTOLAND + Q_RTL_MODE together"
+      },
+      {
+       "param": "Q_TRANSITION_MS",
+       "expected": 20000.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "ROLL_LIMIT_DEG",
+       "expected": 25.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "RTL_AUTOLAND",
+       "expected": 2.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "RTL_RADIUS",
+       "expected": 120.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "SCHED_LOOP_RATE",
+       "expected": 200.0,
+       "source": "EXPECT_FALLBACK",
+       "note": ""
+      },
+      {
+       "param": "SERVO10_FUNCTION",
+       "expected": 10.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TECS_CLMB_MAX",
+       "expected": 1.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TECS_SINK_MAX",
+       "expected": 1.33,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TECS_SINK_MIN",
+       "expected": 1.19,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TERRAIN_ENABLE",
+       "expected": 0.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "TERRAIN_FOLLOW",
+       "expected": 0.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "WP_LOITER_RAD",
+       "expected": 120.0,
+       "source": "export_file",
+       "note": ""
+      },
+      {
+       "param": "WP_RADIUS",
+       "expected": 19.0,
+       "source": "export_file",
+       "note": ""
+      }
+     ]
+    }
+   },
+   "n_file_total": 96,
+   "n_compared_total": 102
+  }
+ },
+ "readback_csv": {
+  "HV4SITL1": {
+   "rows": 68,
+   "ok": 68,
+   "has_source_column": false,
+   "uavs": [
+    "A1",
+    "B2",
+    "B3",
+    "B4"
+   ],
+   "n_params": 17,
+   "by_source": {
+    "(no source column)": 68
+   },
+   "int_truncated": [
+    "B2.AIRSPEED_MAX(26.6->26.0)",
+    "B3.AIRSPEED_MAX(26.6->26.0)",
+    "B4.AIRSPEED_MAX(26.6->26.0)"
+   ],
+   "override_rows": []
+  },
+  "HV4SITL10": {
+   "rows": 68,
+   "ok": 68,
+   "has_source_column": false,
+   "uavs": [
+    "A1",
+    "B2",
+    "B3",
+    "B4"
+   ],
+   "n_params": 17,
+   "by_source": {
+    "(no source column)": 68
+   },
+   "int_truncated": [
+    "B2.AIRSPEED_MAX(26.6->26.0)",
+    "B3.AIRSPEED_MAX(26.6->26.0)",
+    "B4.AIRSPEED_MAX(26.6->26.0)"
+   ],
+   "override_rows": []
+  },
+  "HV4SITL11": {
+   "rows": 68,
+   "ok": 68,
+   "has_source_column": false,
+   "uavs": [
+    "A1",
+    "B2",
+    "B3",
+    "B4"
+   ],
+   "n_params": 17,
+   "by_source": {
+    "(no source column)": 68
+   },
+   "int_truncated": [
+    "B2.AIRSPEED_MAX(26.6->26.0)",
+    "B3.AIRSPEED_MAX(26.6->26.0)",
+    "B4.AIRSPEED_MAX(26.6->26.0)"
+   ],
+   "override_rows": []
+  },
+  "HV4SITL12": {
+   "rows": 68,
+   "ok": 68,
+   "has_source_column": false,
+   "uavs": [
+    "A1",
+    "B2",
+    "B3",
+    "B4"
+   ],
+   "n_params": 17,
+   "by_source": {
+    "(no source column)": 68
+   },
+   "int_truncated": [
+    "B2.AIRSPEED_MAX(26.6->26.0)",
+    "B3.AIRSPEED_MAX(26.6->26.0)",
+    "B4.AIRSPEED_MAX(26.6->26.0)"
+   ],
+   "override_rows": []
+  },
+  "HV4SITL13": {
+   "rows": 68,
+   "ok": 68,
+   "has_source_column": false,
+   "uavs": [
+    "A1",
+    "B2",
+    "B3",
+    "B4"
+   ],
+   "n_params": 17,
+   "by_source": {
+    "(no source column)": 68
+   },
+   "int_truncated": [
+    "B2.AIRSPEED_MAX(26.6->26.0)",
+    "B3.AIRSPEED_MAX(26.6->26.0)",
+    "B4.AIRSPEED_MAX(26.6->26.0)"
+   ],
+   "override_rows": []
+  },
+  "HV4SITL15": {
+   "rows": 51,
+   "ok": 51,
+   "has_source_column": false,
+   "uavs": [
+    "A1",
+    "B2",
+    "B3"
+   ],
+   "n_params": 17,
+   "by_source": {
+    "(no source column)": 51
+   },
+   "int_truncated": [
+    "B2.AIRSPEED_MAX(26.6->26.0)",
+    "B3.AIRSPEED_MAX(26.6->26.0)"
+   ],
+   "override_rows": []
+  },
+  "HV4SITL16": {
+   "rows": 102,
+   "ok": 102,
+   "has_source_column": true,
+   "uavs": [
+    "A1",
+    "B2",
+    "B3"
+   ],
+   "n_params": 34,
+   "by_source": {
+    "匯出檔": 93,
+    "EXPECT_FALLBACK": 6,
+    "FIRMWARE_OVERRIDE": 3
+   },
+   "int_truncated": [
+    "B2.AIRSPEED_MAX(26.6->26.0)",
+    "B3.AIRSPEED_MAX(26.6->26.0)"
+   ],
+   "override_rows": [
+    "A1.Q_RTL_MODE",
+    "B2.Q_RTL_MODE",
+    "B3.Q_RTL_MODE"
+   ]
+  },
+  "HV4SITL2": {
+   "rows": 68,
+   "ok": 68,
+   "has_source_column": false,
+   "uavs": [
+    "A1",
+    "B2",
+    "B3",
+    "B4"
+   ],
+   "n_params": 17,
+   "by_source": {
+    "(no source column)": 68
+   },
+   "int_truncated": [
+    "B2.AIRSPEED_MAX(26.6->26.0)",
+    "B3.AIRSPEED_MAX(26.6->26.0)",
+    "B4.AIRSPEED_MAX(26.6->26.0)"
+   ],
+   "override_rows": []
+  },
+  "HV4SITL3": {
+   "rows": 68,
+   "ok": 68,
+   "has_source_column": false,
+   "uavs": [
+    "A1",
+    "B2",
+    "B3",
+    "B4"
+   ],
+   "n_params": 17,
+   "by_source": {
+    "(no source column)": 68
+   },
+   "int_truncated": [
+    "B2.AIRSPEED_MAX(26.6->26.0)",
+    "B3.AIRSPEED_MAX(26.6->26.0)",
+    "B4.AIRSPEED_MAX(26.6->26.0)"
+   ],
+   "override_rows": []
+  },
+  "HV4SITL4": {
+   "rows": 68,
+   "ok": 68,
+   "has_source_column": false,
+   "uavs": [
+    "A1",
+    "A2",
+    "B3",
+    "B4"
+   ],
+   "n_params": 17,
+   "by_source": {
+    "(no source column)": 68
+   },
+   "int_truncated": [
+    "B3.AIRSPEED_MAX(26.6->26.0)",
+    "B4.AIRSPEED_MAX(26.6->26.0)"
+   ],
+   "override_rows": []
+  },
+  "HV4SITL5": {
+   "rows": 68,
+   "ok": 68,
+   "has_source_column": false,
+   "uavs": [
+    "A1",
+    "A2",
+    "A3",
+    "B4"
+   ],
+   "n_params": 17,
+   "by_source": {
+    "(no source column)": 68
+   },
+   "int_truncated": [
+    "B4.AIRSPEED_MAX(26.6->26.0)"
+   ],
+   "override_rows": []
+  },
+  "HV4SITL6": {
+   "rows": 68,
+   "ok": 68,
+   "has_source_column": false,
+   "uavs": [
+    "A1",
+    "B2",
+    "B3",
+    "B4"
+   ],
+   "n_params": 17,
+   "by_source": {
+    "(no source column)": 68
+   },
+   "int_truncated": [
+    "B2.AIRSPEED_MAX(26.6->26.0)",
+    "B3.AIRSPEED_MAX(26.6->26.0)",
+    "B4.AIRSPEED_MAX(26.6->26.0)"
+   ],
+   "override_rows": []
+  },
+  "HV4SITL7": {
+   "rows": 68,
+   "ok": 68,
+   "has_source_column": false,
+   "uavs": [
+    "A1",
+    "B2",
+    "B3",
+    "B4"
+   ],
+   "n_params": 17,
+   "by_source": {
+    "(no source column)": 68
+   },
+   "int_truncated": [
+    "B2.AIRSPEED_MAX(26.6->26.0)",
+    "B3.AIRSPEED_MAX(26.6->26.0)",
+    "B4.AIRSPEED_MAX(26.6->26.0)"
+   ],
+   "override_rows": []
+  },
+  "HV4SITL8": {
+   "rows": 68,
+   "ok": 68,
+   "has_source_column": false,
+   "uavs": [
+    "A1",
+    "B2",
+    "B3",
+    "B4"
+   ],
+   "n_params": 17,
+   "by_source": {
+    "(no source column)": 68
+   },
+   "int_truncated": [
+    "B2.AIRSPEED_MAX(26.6->26.0)",
+    "B3.AIRSPEED_MAX(26.6->26.0)",
+    "B4.AIRSPEED_MAX(26.6->26.0)"
+   ],
+   "override_rows": []
+  },
+  "HV4SITL9": {
+   "rows": 68,
+   "ok": 68,
+   "has_source_column": false,
+   "uavs": [
+    "A1",
+    "B2",
+    "B3",
+    "B4"
+   ],
+   "n_params": 17,
+   "by_source": {
+    "(no source column)": 68
+   },
+   "int_truncated": [
+    "B2.AIRSPEED_MAX(26.6->26.0)",
+    "B3.AIRSPEED_MAX(26.6->26.0)",
+    "B4.AIRSPEED_MAX(26.6->26.0)"
+   ],
+   "override_rows": []
+  }
+ },
+ "flights": {
+  "HV4SITL15": {
+   "trial": "HV4SITL15",
+   "rows": [
+    {
+     "uav": "A1",
+     "clock_offset_s": 67.5,
+     "flown_t_takeoff_s": 659.5,
+     "plan_t_takeoff_s": 656.0,
+     "plan_t_land_s": 1260.4,
+     "flown_t_land_s": 1267.5,
+     "plan_km": 10.29,
+     "flown_km": 10.53,
+     "peak_alt_m": 120.1,
+     "peak_alt_m_2dp": 120.11,
+     "n_samples": 1282,
+     "err_pct": 2.3
+    },
+    {
+     "uav": "B2",
+     "clock_offset_s": 67.5,
+     "flown_t_takeoff_s": 6.5,
+     "plan_t_takeoff_s": 0.0,
+     "plan_t_land_s": 533.9,
+     "flown_t_land_s": 534.5,
+     "plan_km": 7.93,
+     "flown_km": 8.13,
+     "peak_alt_m": 120.1,
+     "peak_alt_m_2dp": 120.14,
+     "n_samples": 1282,
+     "err_pct": 2.5
+    },
+    {
+     "uav": "B3",
+     "clock_offset_s": 67.5,
+     "flown_t_takeoff_s": 109.5,
+     "plan_t_takeoff_s": 106.0,
+     "plan_t_land_s": 894.4,
+     "flown_t_land_s": 877.5,
+     "plan_km": 12.44,
+     "flown_km": 12.71,
+     "peak_alt_m": 120.2,
+     "peak_alt_m_2dp": 120.15,
+     "n_samples": 1282,
+     "err_pct": 2.2
+    }
+   ],
+   "sep": {
+    "min_h_m": 104.2,
+    "d_v_at_min_m": 29.0,
+    "pair": [
+     "B2",
+     "B3"
+    ],
+    "t_s": 439.50000000000006,
+    "per_pair": {
+     "A1-B2": {
+      "min_h_m": null,
+      "d_v_at_min_m": null,
+      "n_violations": 0
+     },
+     "A1-B3": {
+      "min_h_m": 262.9,
+      "d_v_at_min_m": 76.3,
+      "n_violations": 0
+     },
+     "B2-B3": {
+      "min_h_m": 104.2,
+      "d_v_at_min_m": 29.0,
+      "n_violations": 0
+     }
+    },
+    "n_airborne_samples": 311,
+    "n_violations": 0,
+    "step_s": 2.0
+   },
+   "total_plan_km": 30.66,
+   "total_flown_km": 31.37,
+   "total_err_pct": 2.32
+  },
+  "HV4SITL16": {
+   "trial": "HV4SITL16",
+   "rows": [
+    {
+     "uav": "A1",
+     "clock_offset_s": 72.0,
+     "flown_t_takeoff_s": 660.0,
+     "plan_t_takeoff_s": 656.0,
+     "plan_t_land_s": 1260.4,
+     "flown_t_land_s": 1268.0,
+     "plan_km": 10.29,
+     "flown_km": 10.52,
+     "peak_alt_m": 120.1,
+     "peak_alt_m_2dp": 120.1,
+     "n_samples": 1291,
+     "err_pct": 2.2
+    },
+    {
+     "uav": "B2",
+     "clock_offset_s": 72.0,
+     "flown_t_takeoff_s": 6.0,
+     "plan_t_takeoff_s": 0.0,
+     "plan_t_land_s": 533.9,
+     "flown_t_land_s": 533.0,
+     "plan_km": 7.93,
+     "flown_km": 8.13,
+     "peak_alt_m": 120.1,
+     "peak_alt_m_2dp": 120.12,
+     "n_samples": 1291,
+     "err_pct": 2.5
+    },
+    {
+     "uav": "B3",
+     "clock_offset_s": 72.0,
+     "flown_t_takeoff_s": 109.0,
+     "plan_t_takeoff_s": 106.0,
+     "plan_t_land_s": 894.4,
+     "flown_t_land_s": 876.0,
+     "plan_km": 12.44,
+     "flown_km": 12.71,
+     "peak_alt_m": 120.2,
+     "peak_alt_m_2dp": 120.16,
+     "n_samples": 1291,
+     "err_pct": 2.2
+    }
+   ],
+   "sep": {
+    "min_h_m": 101.0,
+    "d_v_at_min_m": 29.0,
+    "pair": [
+     "B2",
+     "B3"
+    ],
+    "t_s": 440.0,
+    "per_pair": {
+     "A1-B2": {
+      "min_h_m": null,
+      "d_v_at_min_m": null,
+      "n_violations": 0
+     },
+     "A1-B3": {
+      "min_h_m": 262.7,
+      "d_v_at_min_m": 80.0,
+      "n_violations": 0
+     },
+     "B2-B3": {
+      "min_h_m": 101.0,
+      "d_v_at_min_m": 29.0,
+      "n_violations": 0
+     }
+    },
+    "n_airborne_samples": 310,
+    "n_violations": 0,
+    "step_s": 2.0
+   },
+   "total_plan_km": 30.66,
+   "total_flown_km": 31.36,
+   "total_err_pct": 2.28
+  }
+ },
+ "method_check_on_HV4SITL15": {
+  "per_uav": [
+   {
+    "uav": "A1",
+    "stored": {
+     "flown_km": 10.53,
+     "peak_alt_m": 120.1,
+     "err_pct": 2.3,
+     "flown_t_land_s": 1267.5
+    },
+    "recomputed": {
+     "flown_km": 10.53,
+     "peak_alt_m": 120.1,
+     "err_pct": 2.3,
+     "flown_t_land_s": 1267.5
+    },
+    "match": true
+   },
+   {
+    "uav": "B2",
+    "stored": {
+     "flown_km": 8.13,
+     "peak_alt_m": 120.1,
+     "err_pct": 2.5,
+     "flown_t_land_s": 534.5
+    },
+    "recomputed": {
+     "flown_km": 8.13,
+     "peak_alt_m": 120.1,
+     "err_pct": 2.5,
+     "flown_t_land_s": 534.5
+    },
+    "match": true
+   },
+   {
+    "uav": "B3",
+    "stored": {
+     "flown_km": 12.71,
+     "peak_alt_m": 120.2,
+     "err_pct": 2.2,
+     "flown_t_land_s": 877.5
+    },
+    "recomputed": {
+     "flown_km": 12.71,
+     "peak_alt_m": 120.2,
+     "err_pct": 2.2,
+     "flown_t_land_s": 877.5
+    },
+    "match": true
+   }
+  ],
+  "separation": {
+   "stored_min_h_m": 104.2,
+   "recomputed_min_h_m": 104.2,
+   "match": true
+  }
+ }
+}

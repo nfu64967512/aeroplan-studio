@@ -1,0 +1,40 @@
+prep_text — citation verification (2026-09-21).  Crossref REST API + publisher full text.
+Purpose: C6 must say R_eff is a STANDARD result and cite it correctly.
+
+[5] (already in the draft, cowork_brief.md:231) — VERIFIED via Crossref 10.3390/s18072132
+    Coombes, M.; Fletcher, T.; Chen, W.-H.; Liu, C.,
+    "Optimal Polygon Decomposition for UAV Survey Coverage Path Planning in Wind",
+    Sensors, Vol. 18, No. 7, Article 2132, published 3 July 2018.
+    Draft's entry matches the record exactly. NO CHANGE NEEDED.
+
+    Full text checked (PMC6068989).  FINDINGS THAT CONSTRAIN THE WORDING:
+      * The paper DOES model the ground track of a turn in wind as a trochoid, and
+        builds Dubins-style paths from tangents between two trochoids.  Its turn
+        parametrisation is the plain x_t = -R cos(alpha), y_t = R sin(alpha) + R*beta*alpha
+        with R = V / psi_dot.
+      * The paper does NOT inflate the turn radius by (1 + W/Va)^2 anywhere.
+      * Its turning-time equations are attributed by the authors to two of their own
+        references, one of which is Techy & Woolsey (see below).  The repo's own
+        first-hand reading note says the same: docs/hv_dccpp/論文_三篇全文閱讀_2026-09-10.md:104
+        ("轉彎時間模型 Eqs.(6)-(18) 他們自己註明出自 Techy & Woolsey [19]").
+    => [5] is a CORRECT citation for "the ground track of a constant-bank turn in wind
+       is a trochoid".  It is the WRONG citation for the scalar R_eff = R_theo(1+W/Va)^2.
+       The paper must present R_eff as a one-line consequence of trochoid curvature, not
+       as something taken from [5], and must not present it as new either.
+
+[15] (proposed new entry, optional, only if the 4-page budget allows) — VERIFIED via
+     Crossref 10.2514/1.44580
+     Techy, L., and Woolsey, C. A.,
+     "Minimum-Time Path Planning for Unmanned Aerial Vehicles in Steady Uniform Winds",
+     Journal of Guidance, Control, and Dynamics, Vol. 32, No. 6, pp 1736-1746, November 2009.
+     Title / authors / volume / issue / pages / month all match the proposed entry.
+
+[alt] also verified, NOT recommended (redundant with [15] under a 4-page limit) —
+     Crossref 10.2514/1.25042
+     McGee, T. G., and Hedrick, J. K., "Optimal Path Planning with a Kinematic Airplane
+     Model", Journal of Guidance, Control, and Dynamics, Vol. 30, No. 2, pp 629-633,
+     March 2007.
+     NOTE: the C6 investigation recorded this one as "pp 1736-1746"-style unknown title;
+     the real title/pages are the ones above.  Use these if it is ever cited.
+
+Reproduce: WebFetch https://api.crossref.org/works/<doi>

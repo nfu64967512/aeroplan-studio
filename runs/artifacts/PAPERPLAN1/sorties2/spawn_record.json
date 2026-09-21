@@ -1,0 +1,629 @@
+{
+ "note": "displacement = actual spawn minus the --home handed to SITL; bearing is degrees clockwise from north; pairwise spacing is computed from the same coordinates, planned vs actual",
+ "per_trial": {
+  "HV4W00": {
+   "sim_wind": {
+    "spd_mps": 0.0,
+    "dir_from_deg": 270.0,
+    "turb": 0.0,
+    "profile_type": 1.0
+   },
+   "plan_wind": [
+    0.0,
+    270.0
+   ],
+   "spawn_spread_m": 10.0,
+   "tol_m": 2.0,
+   "tol_default_m": 2.0,
+   "tol_overridden": false,
+   "tol_source": "default (runner predates the override)",
+   "max_displacement_m": 0.03,
+   "rows": [
+    {
+     "uav": "A1",
+     "takeoff_site": "TO_A1",
+     "commanded_home": [
+      23.949999999968718,
+      120.89990170530359
+     ],
+     "actual_spawn": [
+      23.9499998,
+      120.8999017
+     ],
+     "d_north_m": -0.022,
+     "d_east_m": -0.001,
+     "displacement_m": 0.022,
+     "bearing_deg": 181.39,
+     "settle_s": 5.0,
+     "settle_trace_samples": 0,
+     "final_groundspeed_mps": null,
+     "heading_span_deg": null
+    },
+    {
+     "uav": "B2",
+     "takeoff_site": "TO_B2",
+     "commanded_home": [
+      23.949999999999996,
+      120.9
+     ],
+     "actual_spawn": [
+      23.9499998,
+      120.9
+     ],
+     "d_north_m": -0.022,
+     "d_east_m": 0.0,
+     "displacement_m": 0.022,
+     "bearing_deg": 180.0,
+     "settle_s": 3.0,
+     "settle_trace_samples": 0,
+     "final_groundspeed_mps": null,
+     "heading_span_deg": null
+    },
+    {
+     "uav": "B3",
+     "takeoff_site": "TO_B3",
+     "commanded_home": [
+      23.949999999968718,
+      120.90009829469643
+     ],
+     "actual_spawn": [
+      23.9499998,
+      120.9000981
+     ],
+     "d_north_m": -0.022,
+     "d_east_m": -0.02,
+     "displacement_m": 0.03,
+     "bearing_deg": 221.73,
+     "settle_s": 3.0,
+     "settle_trace_samples": 0,
+     "final_groundspeed_mps": null,
+     "heading_span_deg": null
+    }
+   ],
+   "pairwise_spacing": [
+    {
+     "pair": "A1-B2",
+     "planned_m": 10.0083,
+     "actual_m": 10.0089,
+     "delta_m": 0.0005
+    },
+    {
+     "pair": "A1-B3",
+     "planned_m": 20.0166,
+     "actual_m": 19.9973,
+     "delta_m": -0.0193
+    },
+    {
+     "pair": "B2-B3",
+     "planned_m": 10.0083,
+     "actual_m": 9.9885,
+     "delta_m": -0.0198
+    }
+   ],
+   "rigid_translation_max_abs_delta_m": 0.0198
+  },
+  "HV4W05": {
+   "sim_wind": {
+    "spd_mps": 5.0,
+    "dir_from_deg": 270.0,
+    "turb": 0.0,
+    "profile_type": 1.0
+   },
+   "plan_wind": [
+    0.0,
+    270.0
+   ],
+   "spawn_spread_m": 10.0,
+   "tol_m": 2.0,
+   "tol_default_m": 2.0,
+   "tol_overridden": false,
+   "tol_source": "default (runner predates the override)",
+   "max_displacement_m": 0.215,
+   "rows": [
+    {
+     "uav": "A1",
+     "takeoff_site": "TO_A1",
+     "commanded_home": [
+      23.949999999968718,
+      120.89990170530359
+     ],
+     "actual_spawn": [
+      23.9499998,
+      120.899903
+     ],
+     "d_north_m": -0.022,
+     "d_east_m": 0.132,
+     "displacement_m": 0.134,
+     "bearing_deg": 99.57,
+     "settle_s": 5.1,
+     "settle_trace_samples": 0,
+     "final_groundspeed_mps": null,
+     "heading_span_deg": null
+    },
+    {
+     "uav": "B2",
+     "takeoff_site": "TO_B2",
+     "commanded_home": [
+      23.949999999999996,
+      120.9
+     ],
+     "actual_spawn": [
+      23.95,
+      120.9000018
+     ],
+     "d_north_m": 0.0,
+     "d_east_m": 0.183,
+     "displacement_m": 0.183,
+     "bearing_deg": 90.0,
+     "settle_s": 3.0,
+     "settle_trace_samples": 0,
+     "final_groundspeed_mps": null,
+     "heading_span_deg": null
+    },
+    {
+     "uav": "B3",
+     "takeoff_site": "TO_B3",
+     "commanded_home": [
+      23.949999999968718,
+      120.90009829469643
+     ],
+     "actual_spawn": [
+      23.9500001,
+      120.9001004
+     ],
+     "d_north_m": 0.011,
+     "d_east_m": 0.214,
+     "displacement_m": 0.215,
+     "bearing_deg": 87.03,
+     "settle_s": 3.0,
+     "settle_trace_samples": 0,
+     "final_groundspeed_mps": null,
+     "heading_span_deg": null
+    }
+   ],
+   "pairwise_spacing": [
+    {
+     "pair": "A1-B2",
+     "planned_m": 10.0083,
+     "actual_m": 10.0598,
+     "delta_m": 0.0515
+    },
+    {
+     "pair": "A1-B3",
+     "planned_m": 20.0166,
+     "actual_m": 20.0992,
+     "delta_m": 0.0826
+    },
+    {
+     "pair": "B2-B3",
+     "planned_m": 10.0083,
+     "actual_m": 10.0394,
+     "delta_m": 0.0311
+    }
+   ],
+   "rigid_translation_max_abs_delta_m": 0.0826
+  },
+  "HV4W55": {
+   "sim_wind": {
+    "spd_mps": 5.0,
+    "dir_from_deg": 270.0,
+    "turb": 0.0,
+    "profile_type": 1.0
+   },
+   "plan_wind": [
+    5.0,
+    270.0
+   ],
+   "spawn_spread_m": 10.0,
+   "tol_m": 2.0,
+   "tol_default_m": 2.0,
+   "tol_overridden": false,
+   "tol_source": "default (runner predates the override)",
+   "max_displacement_m": 0.215,
+   "rows": [
+    {
+     "uav": "A1",
+     "takeoff_site": "TO_A1",
+     "commanded_home": [
+      23.949999999968718,
+      120.89990170530359
+     ],
+     "actual_spawn": [
+      23.9499998,
+      120.899903
+     ],
+     "d_north_m": -0.022,
+     "d_east_m": 0.132,
+     "displacement_m": 0.134,
+     "bearing_deg": 99.57,
+     "settle_s": 5.1,
+     "settle_trace_samples": 0,
+     "final_groundspeed_mps": null,
+     "heading_span_deg": null
+    },
+    {
+     "uav": "B2",
+     "takeoff_site": "TO_B2",
+     "commanded_home": [
+      23.949999999999996,
+      120.9
+     ],
+     "actual_spawn": [
+      23.95,
+      120.9000018
+     ],
+     "d_north_m": 0.0,
+     "d_east_m": 0.183,
+     "displacement_m": 0.183,
+     "bearing_deg": 90.0,
+     "settle_s": 3.0,
+     "settle_trace_samples": 0,
+     "final_groundspeed_mps": null,
+     "heading_span_deg": null
+    },
+    {
+     "uav": "B3",
+     "takeoff_site": "TO_B3",
+     "commanded_home": [
+      23.949999999968718,
+      120.90009829469643
+     ],
+     "actual_spawn": [
+      23.9500001,
+      120.9001004
+     ],
+     "d_north_m": 0.011,
+     "d_east_m": 0.214,
+     "displacement_m": 0.215,
+     "bearing_deg": 87.03,
+     "settle_s": 3.0,
+     "settle_trace_samples": 0,
+     "final_groundspeed_mps": null,
+     "heading_span_deg": null
+    }
+   ],
+   "pairwise_spacing": [
+    {
+     "pair": "A1-B2",
+     "planned_m": 10.0083,
+     "actual_m": 10.0598,
+     "delta_m": 0.0515
+    },
+    {
+     "pair": "A1-B3",
+     "planned_m": 20.0166,
+     "actual_m": 20.0992,
+     "delta_m": 0.0826
+    },
+    {
+     "pair": "B2-B3",
+     "planned_m": 10.0083,
+     "actual_m": 10.0394,
+     "delta_m": 0.0311
+    }
+   ],
+   "rigid_translation_max_abs_delta_m": 0.0826
+  },
+  "HV4W55R": {
+   "sim_wind": {
+    "spd_mps": 5.0,
+    "dir_from_deg": 270.0,
+    "turb": 0.0,
+    "profile_type": 1.0
+   },
+   "plan_wind": [
+    5.0,
+    270.0
+   ],
+   "spawn_spread_m": 10.0,
+   "tol_m": 2.0,
+   "tol_default_m": 2.0,
+   "tol_overridden": false,
+   "tol_source": "default",
+   "max_displacement_m": 0.215,
+   "rows": [
+    {
+     "uav": "A1",
+     "takeoff_site": "TO_A1",
+     "commanded_home": [
+      23.949999999968718,
+      120.89990170530359
+     ],
+     "actual_spawn": [
+      23.9499998,
+      120.899903
+     ],
+     "d_north_m": -0.022,
+     "d_east_m": 0.132,
+     "displacement_m": 0.134,
+     "bearing_deg": 99.57,
+     "settle_s": 5.1,
+     "settle_trace_samples": 4,
+     "final_groundspeed_mps": 0.006,
+     "heading_span_deg": [
+      352.2,
+      340.3
+     ]
+    },
+    {
+     "uav": "B2",
+     "takeoff_site": "TO_B2",
+     "commanded_home": [
+      23.949999999999996,
+      120.9
+     ],
+     "actual_spawn": [
+      23.95,
+      120.9000018
+     ],
+     "d_north_m": 0.0,
+     "d_east_m": 0.183,
+     "displacement_m": 0.183,
+     "bearing_deg": 90.0,
+     "settle_s": 3.0,
+     "settle_trace_samples": 3,
+     "final_groundspeed_mps": 0.008,
+     "heading_span_deg": [
+      336.8,
+      330.2
+     ]
+    },
+    {
+     "uav": "B3",
+     "takeoff_site": "TO_B3",
+     "commanded_home": [
+      23.949999999968718,
+      120.90009829469643
+     ],
+     "actual_spawn": [
+      23.9500001,
+      120.9001004
+     ],
+     "d_north_m": 0.011,
+     "d_east_m": 0.214,
+     "displacement_m": 0.215,
+     "bearing_deg": 87.03,
+     "settle_s": 3.0,
+     "settle_trace_samples": 3,
+     "final_groundspeed_mps": 0.002,
+     "heading_span_deg": [
+      327.7,
+      322.0
+     ]
+    }
+   ],
+   "pairwise_spacing": [
+    {
+     "pair": "A1-B2",
+     "planned_m": 10.0083,
+     "actual_m": 10.0598,
+     "delta_m": 0.0515
+    },
+    {
+     "pair": "A1-B3",
+     "planned_m": 20.0166,
+     "actual_m": 20.0992,
+     "delta_m": 0.0826
+    },
+    {
+     "pair": "B2-B3",
+     "planned_m": 10.0083,
+     "actual_m": 10.0394,
+     "delta_m": 0.0311
+    }
+   ],
+   "rigid_translation_max_abs_delta_m": 0.0826
+  },
+  "HV4W55S": {
+   "sim_wind": {
+    "spd_mps": 5.0,
+    "dir_from_deg": 180.0,
+    "turb": 0.0,
+    "profile_type": 1.0
+   },
+   "plan_wind": [
+    5.0,
+    180.0
+   ],
+   "spawn_spread_m": 10.0,
+   "tol_m": 6.0,
+   "tol_default_m": 2.0,
+   "tol_overridden": true,
+   "tol_source": "HV_SPAWN_TOL_M",
+   "max_displacement_m": 5.118,
+   "rows": [
+    {
+     "uav": "A1",
+     "takeoff_site": "TO_A1",
+     "commanded_home": [
+      23.949999999968718,
+      120.89990170530359
+     ],
+     "actual_spawn": [
+      23.9500323,
+      120.8999361
+     ],
+     "d_north_m": 3.59,
+     "d_east_m": 3.502,
+     "displacement_m": 5.015,
+     "bearing_deg": 44.29,
+     "settle_s": 15.2,
+     "settle_trace_samples": 14,
+     "final_groundspeed_mps": 0.005,
+     "heading_span_deg": [
+      15.1,
+      95.9
+     ]
+    },
+    {
+     "uav": "B2",
+     "takeoff_site": "TO_B2",
+     "commanded_home": [
+      23.949999999999996,
+      120.9
+     ],
+     "actual_spawn": [
+      23.9500329,
+      120.9000345
+     ],
+     "d_north_m": 3.656,
+     "d_east_m": 3.513,
+     "displacement_m": 5.07,
+     "bearing_deg": 43.85,
+     "settle_s": 3.0,
+     "settle_trace_samples": 3,
+     "final_groundspeed_mps": 0.004,
+     "heading_span_deg": [
+      99.3,
+      107.2
+     ]
+    },
+    {
+     "uav": "B3",
+     "takeoff_site": "TO_B3",
+     "commanded_home": [
+      23.949999999968718,
+      120.90009829469643
+     ],
+     "actual_spawn": [
+      23.9500334,
+      120.9001329
+     ],
+     "d_north_m": 3.712,
+     "d_east_m": 3.523,
+     "displacement_m": 5.118,
+     "bearing_deg": 43.51,
+     "settle_s": 3.1,
+     "settle_trace_samples": 3,
+     "final_groundspeed_mps": 0.004,
+     "heading_span_deg": [
+      110.9,
+      117.8
+     ]
+    }
+   ],
+   "pairwise_spacing": [
+    {
+     "pair": "A1-B2",
+     "planned_m": 10.0083,
+     "actual_m": 10.0193,
+     "delta_m": 0.0109
+    },
+    {
+     "pair": "A1-B3",
+     "planned_m": 20.0166,
+     "actual_m": 20.0384,
+     "delta_m": 0.0218
+    },
+    {
+     "pair": "B2-B3",
+     "planned_m": 10.0083,
+     "actual_m": 10.0192,
+     "delta_m": 0.0109
+    }
+   ],
+   "rigid_translation_max_abs_delta_m": 0.0218
+  },
+  "BEAMIDP1": {
+   "sim_wind": {
+    "spd_mps": 0.0,
+    "dir_from_deg": 270.0,
+    "turb": 0.0,
+    "profile_type": 1.0
+   },
+   "plan_wind": [
+    5.0,
+    270.0
+   ],
+   "spawn_spread_m": 10.0,
+   "tol_m": 2.0,
+   "tol_default_m": 2.0,
+   "tol_overridden": false,
+   "tol_source": "default (runner predates the override)",
+   "max_displacement_m": 0.03,
+   "rows": [
+    {
+     "uav": "A1",
+     "takeoff_site": "TO_A1",
+     "commanded_home": [
+      23.949999999968718,
+      120.89990170530359
+     ],
+     "actual_spawn": [
+      23.9499998,
+      120.8999017
+     ],
+     "d_north_m": -0.022,
+     "d_east_m": -0.001,
+     "displacement_m": 0.022,
+     "bearing_deg": 181.39,
+     "settle_s": 5.1,
+     "settle_trace_samples": 0,
+     "final_groundspeed_mps": null,
+     "heading_span_deg": null
+    },
+    {
+     "uav": "B2",
+     "takeoff_site": "TO_B2",
+     "commanded_home": [
+      23.949999999999996,
+      120.9
+     ],
+     "actual_spawn": [
+      23.9499998,
+      120.9
+     ],
+     "d_north_m": -0.022,
+     "d_east_m": 0.0,
+     "displacement_m": 0.022,
+     "bearing_deg": 180.0,
+     "settle_s": 3.0,
+     "settle_trace_samples": 0,
+     "final_groundspeed_mps": null,
+     "heading_span_deg": null
+    },
+    {
+     "uav": "B3",
+     "takeoff_site": "TO_B3",
+     "commanded_home": [
+      23.949999999968718,
+      120.90009829469643
+     ],
+     "actual_spawn": [
+      23.9499998,
+      120.9000981
+     ],
+     "d_north_m": -0.022,
+     "d_east_m": -0.02,
+     "displacement_m": 0.03,
+     "bearing_deg": 221.73,
+     "settle_s": 3.1,
+     "settle_trace_samples": 0,
+     "final_groundspeed_mps": null,
+     "heading_span_deg": null
+    }
+   ],
+   "pairwise_spacing": [
+    {
+     "pair": "A1-B2",
+     "planned_m": 10.0083,
+     "actual_m": 10.0089,
+     "delta_m": 0.0005
+    },
+    {
+     "pair": "A1-B3",
+     "planned_m": 20.0166,
+     "actual_m": 19.9973,
+     "delta_m": -0.0193
+    },
+    {
+     "pair": "B2-B3",
+     "planned_m": 10.0083,
+     "actual_m": 9.9885,
+     "delta_m": -0.0198
+    }
+   ],
+   "rigid_translation_max_abs_delta_m": 0.0198
+  }
+ }
+}

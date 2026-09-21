@@ -1,0 +1,180 @@
+{
+ "home_msl": 9.313225746154785e-10,
+ "h_ceil": {
+  "A": 120.0,
+  "B": 120.0
+ },
+ "top_rows": [
+  {
+   "uav": "A1",
+   "i": 155,
+   "d_home_m": 900.66,
+   "z_enu": 119.936436,
+   "agl": 120.0,
+   "msl": 119.999996,
+   "rel": 119.999996,
+   "phase": "Phase.RTB",
+   "mode": "Mode.CRUISE"
+  },
+  {
+   "uav": "A1",
+   "i": 180,
+   "d_home_m": 1122.36,
+   "z_enu": 119.901272,
+   "agl": 120.0,
+   "msl": 119.999994,
+   "rel": 119.999994,
+   "phase": "Phase.RTB",
+   "mode": "Mode.CRUISE"
+  },
+  {
+   "uav": "A1",
+   "i": 106,
+   "d_home_m": 1027.43,
+   "z_enu": 119.917266,
+   "agl": 120.0,
+   "msl": 119.999993,
+   "rel": 119.999993,
+   "phase": "Phase.TRANSFER",
+   "mode": "Mode.CRUISE"
+  },
+  {
+   "uav": "A1",
+   "i": 44,
+   "d_home_m": 1057.33,
+   "z_enu": 119.912376,
+   "agl": 120.0,
+   "msl": 119.999993,
+   "rel": 119.999993,
+   "phase": "Phase.ENTRY",
+   "mode": "Mode.CRUISE"
+  },
+  {
+   "uav": "A1",
+   "i": 65,
+   "d_home_m": 983.06,
+   "z_enu": 119.924224,
+   "agl": 120.0,
+   "msl": 119.999993,
+   "rel": 119.999993,
+   "phase": "Phase.TRANSFER",
+   "mode": "Mode.CRUISE"
+  },
+  {
+   "uav": "B2",
+   "i": 91,
+   "d_home_m": 1173.33,
+   "z_enu": 119.892062,
+   "agl": 120.0,
+   "msl": 119.999994,
+   "rel": 119.999994,
+   "phase": "Phase.TRANSFER",
+   "mode": "Mode.CRUISE"
+  },
+  {
+   "uav": "B2",
+   "i": 116,
+   "d_home_m": 564.4,
+   "z_enu": 119.975003,
+   "agl": 120.0,
+   "msl": 119.999992,
+   "rel": 119.999992,
+   "phase": "Phase.OPERATE",
+   "mode": "Mode.CRUISE"
+  },
+  {
+   "uav": "B2",
+   "i": 117,
+   "d_home_m": 767.78,
+   "z_enu": 119.953773,
+   "agl": 120.0,
+   "msl": 119.99999,
+   "rel": 119.99999,
+   "phase": "Phase.OPERATE",
+   "mode": "Mode.CRUISE"
+  },
+  {
+   "uav": "B2",
+   "i": 107,
+   "d_home_m": 943.52,
+   "z_enu": 119.930214,
+   "agl": 120.0,
+   "msl": 119.999989,
+   "rel": 119.999989,
+   "phase": "Phase.TRANSFER",
+   "mode": "Mode.CRUISE"
+  },
+  {
+   "uav": "B2",
+   "i": 115,
+   "d_home_m": 383.59,
+   "z_enu": 119.988429,
+   "agl": 120.0,
+   "msl": 119.999989,
+   "rel": 119.999989,
+   "phase": "Phase.OPERATE",
+   "mode": "Mode.CRUISE"
+  },
+  {
+   "uav": "B3",
+   "i": 80,
+   "d_home_m": 1104.24,
+   "z_enu": 119.904462,
+   "agl": 120.0,
+   "msl": 119.999996,
+   "rel": 119.999996,
+   "phase": "Phase.TRANSFER",
+   "mode": "Mode.CRUISE"
+  },
+  {
+   "uav": "B3",
+   "i": 105,
+   "d_home_m": 505.95,
+   "z_enu": 119.979933,
+   "agl": 120.0,
+   "msl": 119.999994,
+   "rel": 119.999994,
+   "phase": "Phase.OPERATE",
+   "mode": "Mode.CRUISE"
+  },
+  {
+   "uav": "B3",
+   "i": 149,
+   "d_home_m": 1141.79,
+   "z_enu": 119.897838,
+   "agl": 120.0,
+   "msl": 119.999994,
+   "rel": 119.999994,
+   "phase": "Phase.TRANSFER",
+   "mode": "Mode.CRUISE"
+  },
+  {
+   "uav": "B3",
+   "i": 106,
+   "d_home_m": 725.92,
+   "z_enu": 119.958702,
+   "agl": 120.0,
+   "msl": 119.999992,
+   "rel": 119.999992,
+   "phase": "Phase.OPERATE",
+   "mode": "Mode.CRUISE"
+  },
+  {
+   "uav": "B3",
+   "i": 109,
+   "d_home_m": 871.92,
+   "z_enu": 119.940424,
+   "agl": 120.0,
+   "msl": 119.999992,
+   "rel": 119.999992,
+   "phase": "Phase.TRANSFER",
+   "mode": "Mode.CRUISE"
+  }
+ ],
+ "makespan_s": 1260.4260664854269,
+ "dist_m": {
+  "A1": 10292.996747769124,
+  "B2": 7925.8749729741285,
+  "B3": 12439.449101156883
+ }
+}

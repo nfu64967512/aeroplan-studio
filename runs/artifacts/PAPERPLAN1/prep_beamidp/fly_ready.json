@@ -1,0 +1,863 @@
+{
+ "scenario": "beamidp_1a2b_1195",
+ "trial": "BEAMIDP1",
+ "out_dir": "C:/Users/joy46/Documents/Projects/aeroplan-studio\\runs/artifacts/BEAMIDP1",
+ "cap_m": 119.5,
+ "report": {
+  "status": "GO_WITH_WARNINGS",
+  "errors": [],
+  "warnings": [
+   "provisional_params",
+   "wind: wind_layer[0]: agl [0,3000] -> ENU z [0.0,3000.0] using home ground z=0.0 (assumption: AGL referenced to home ground)",
+   "wind: wind layer bounds converted MSL->ENU z at home only; the curvature term (~196 m at 50 km) is not applied per position (known approximation)",
+   "reference_battery_assumed(A1)",
+   "battery_temp_assumed(A1)",
+   "reference_battery_assumed(B2)",
+   "battery_temp_assumed(B2)",
+   "reference_battery_assumed(B3)",
+   "battery_temp_assumed(B3)",
+   "per_uav_start_sites(A1@TO_A1,B2@TO_B2,B3@TO_B3)",
+   "per_uav_recovery_sites(A1@ALT1)",
+   "battery_nominal_example(A1)",
+   "battery_nominal_example(B2)",
+   "battery_nominal_example(B3)",
+   "provisional_params(A: a_tr_mps2, battery_nominal_wh, c2_link_range_km, crosswind_site_max_mps, dv_tr_margin_mps, gamma_tr_max_deg, gust_site_max_mps, hover_power_ratio, idle_descent_ratio, k_gamma_auw, obstacle_horizontal_buffer_m, p_accel_ratio, prop_efficiency, reference_battery_wh, reference_test_depth_of_discharge, t_hold_s, t_hover_reserve_s, t_tr_in_s, t_tr_out_s, terrain_clearance_m, transition_complete_agl_m, transition_ground_run_m, transition_start_agl_m, vtol_climb_rate_mps, vtol_descent_rate_mps, vtol_site_clear_radius_m)",
+   "avionics_unvalidated(A: airspeed_sensor_validated=False, battery_monitor_validated=False → k_unc=1.2075, V_tr,cmd=18, H_tc,cmd=100, D_use=133 km)",
+   "provisional_params(B: a_tr_mps2, battery_nominal_wh, c2_link_range_km, crosswind_site_max_mps, dv_tr_margin_mps, gamma_tr_max_deg, gust_site_max_mps, hover_power_ratio, idle_descent_ratio, k_gamma_auw, max_airspeed_mps, obstacle_horizontal_buffer_m, p_accel_ratio, payload_max_kg, prop_efficiency, reference_battery_wh, reference_test_depth_of_discharge, t_hold_s, t_hover_reserve_s, t_tr_in_s, t_tr_out_s, terrain_clearance_m, transition_complete_agl_m, transition_ground_run_m, transition_start_agl_m, vtol_climb_rate_mps, vtol_descent_rate_mps, vtol_site_clear_radius_m)",
+   "avionics_unvalidated(B: airspeed_sensor_validated=False, battery_monitor_validated=False → k_unc=1.2075, V_tr,cmd=16, H_tc,cmd=90, D_use=79 km)",
+   "time_separation(Z1_1)",
+   "time_separation(Z2_1)",
+   "time_separation(Z3_1)"
+  ],
+  "notes": [
+   "per_uav_takeoff_sites(3 個；最小間距 10.0 m)",
+   "takeoff_sites_close(最小間距 10.0 m < 50 m ⇒ 起飛與降落走廊要靠 4D 修復錯開，makespan 約 +7～26%；分離本身安全，見 vendored #8)",
+   "per_uav_recovery_sites(A1@ALT1)",
+   "preflight:provisional_params",
+   "preflight:wind: wind_layer[0]: agl [0,3000] -> ENU z [0.0,3000.0] using home ground z=0.0 (assumption: AGL referenced to home ground)",
+   "preflight:wind: wind layer bounds converted MSL->ENU z at home only; the curvature term (~196 m at 50 km) is not applied per position (known approximation)",
+   "preflight:reference_battery_assumed(A1)",
+   "preflight:battery_temp_assumed(A1)",
+   "preflight:reference_battery_assumed(B2)",
+   "preflight:battery_temp_assumed(B2)",
+   "preflight:reference_battery_assumed(B3)",
+   "preflight:battery_temp_assumed(B3)",
+   "preflight:per_uav_start_sites(A1@TO_A1,B2@TO_B2,B3@TO_B3)",
+   "preflight:per_uav_recovery_sites(A1@ALT1)",
+   "preflight:battery_nominal_example(A1)",
+   "preflight:battery_nominal_example(B2)",
+   "preflight:battery_nominal_example(B3)",
+   "preflight:provisional_params(A: a_tr_mps2, battery_nominal_wh, c2_link_range_km, crosswind_site_max_mps, dv_tr_margin_mps, gamma_tr_max_deg, gust_site_max_mps, hover_power_ratio, idle_descent_ratio, k_gamma_auw, obstacle_horizontal_buffer_m, p_accel_ratio, prop_efficiency, reference_battery_wh, reference_test_depth_of_discharge, t_hold_s, t_hover_reserve_s, t_tr_in_s, t_tr_out_s, terrain_clearance_m, transition_complete_agl_m, transition_ground_run_m, transition_start_agl_m, vtol_climb_rate_mps, vtol_descent_rate_mps, vtol_site_clear_radius_m)",
+   "preflight:avionics_unvalidated(A: airspeed_sensor_validated=False, battery_monitor_validated=False → k_unc=1.2075, V_tr,cmd=18, H_tc,cmd=100, D_use=133 km)",
+   "preflight:provisional_params(B: a_tr_mps2, battery_nominal_wh, c2_link_range_km, crosswind_site_max_mps, dv_tr_margin_mps, gamma_tr_max_deg, gust_site_max_mps, hover_power_ratio, idle_descent_ratio, k_gamma_auw, max_airspeed_mps, obstacle_horizontal_buffer_m, p_accel_ratio, payload_max_kg, prop_efficiency, reference_battery_wh, reference_test_depth_of_discharge, t_hold_s, t_hover_reserve_s, t_tr_in_s, t_tr_out_s, terrain_clearance_m, transition_complete_agl_m, transition_ground_run_m, transition_start_agl_m, vtol_climb_rate_mps, vtol_descent_rate_mps, vtol_site_clear_radius_m)",
+   "preflight:avionics_unvalidated(B: airspeed_sensor_validated=False, battery_monitor_validated=False → k_unc=1.2075, V_tr,cmd=16, H_tc,cmd=90, D_use=79 km)",
+   "preflight:time_separation(Z1_1)",
+   "preflight:time_separation(Z2_1)",
+   "preflight:time_separation(Z3_1)"
+  ],
+  "uncovered": [],
+  "timing_ms": {
+   "context": 0.001700012944638729,
+   "preflight": 25.61120002064854,
+   "decompose": 494.1698999609798,
+   "layering": 638.0932000465691,
+   "corridors": 23.282899986952543,
+   "cache": 641.1551999626681,
+   "allocate": 625.5672000115737,
+   "idp": 43.547899986151606,
+   "assemble_3d": 138.00920004723594,
+   "deconflict": 2252.8227999573573,
+   "total": 4882.271900016349
+  }
+ },
+ "validation": {
+  "passed": true,
+  "conflicts": 0,
+  "coverage_ok": true,
+  "energy_ok": true,
+  "min_sep_h_m": 180.5612423172731,
+  "min_sep_v_m": Infinity
+ },
+ "scenario_json": {
+  "key": "beamidp_1a2b_1195",
+  "path": "gui",
+  "n_a": 1,
+  "n_b": 2,
+  "altitude_m": 119.5,
+  "hfov_deg": 60.0,
+  "vfov_deg": 45.0,
+  "overlap_rate": 0.3,
+  "wind": [
+   5.0,
+   270.0
+  ],
+  "areas": [
+   {
+    "area_id": 1,
+    "priority": 1.0,
+    "polygon": [
+     [
+      23.944601015009177,
+      120.8715182071002
+     ],
+     [
+      23.944601015009177,
+      120.88723229973458
+     ],
+     [
+      23.955398984990822,
+      120.88723229973458
+     ],
+     [
+      23.955398984990822,
+      120.8715182071002
+     ]
+    ]
+   },
+   {
+    "area_id": 2,
+    "priority": 1.0,
+    "polygon": [
+     [
+      23.944601015009177,
+      120.89214295368282
+     ],
+     [
+      23.944601015009177,
+      120.90785704631719
+     ],
+     [
+      23.955398984990822,
+      120.90785704631719
+     ],
+     [
+      23.955398984990822,
+      120.89214295368282
+     ]
+    ]
+   },
+   {
+    "area_id": 3,
+    "priority": 1.0,
+    "polygon": [
+     [
+      23.944601015009177,
+      120.91276770026543
+     ],
+     [
+      23.944601015009177,
+      120.92848179289982
+     ],
+     [
+      23.955398984990822,
+      120.92848179289982
+     ],
+     [
+      23.955398984990822,
+      120.91276770026543
+     ]
+    ]
+   }
+  ],
+  "nfz": [],
+  "note": "Beam-IDP 跳帶排序觸發情境：三塊 1600x1200 m（5.76 km²）、1 Pioneer + 2 HERO、上限 119.5 m。每胞 n > k（A 6/7 > 5、B 6/7/13 > 3）⇒ 跳帶排序真的作用",
+  "sim_wind": {
+   "spd_mps": 0.0,
+   "dir_from_deg": 270.0,
+   "turb": 0.0,
+   "profile_type": 1.0
+  },
+  "sensor_kinds": {
+   "A": "rgb",
+   "B": "rgb"
+  },
+  "speedup": 5.0,
+  "spawn_spread_m": 10.0,
+  "takeoff_sites": {
+   "A1": "TO_A1",
+   "B2": "TO_B2",
+   "B3": "TO_B3"
+  },
+  "waiver_max_agl_m": 119.5,
+  "h_ceil_m": 119.5,
+  "min_fw_agl_m": {
+   "A": 100.0,
+   "B": 100.0
+  },
+  "dh_band_min_m": 15.0,
+  "target_gsd": 0.05
+ },
+ "mission_summary_uavs": {
+  "A1": {
+   "cls": "A",
+   "n_items": 263,
+   "n_nav": 235,
+   "n_waypoints_in": 811,
+   "strips": [
+    [
+     "Z2_1_A_2",
+     -1
+    ],
+    [
+     "Z2_1_A_6",
+     1
+    ],
+    [
+     "Z2_1_A_1",
+     -1
+    ],
+    [
+     "Z2_1_A_5",
+     1
+    ],
+    [
+     "Z2_1_A_3",
+     -1
+    ],
+    [
+     "Z2_1_A_4",
+     1
+    ],
+    [
+     "Z3_1_A_7",
+     -1
+    ],
+    [
+     "Z3_1_A_2",
+     1
+    ],
+    [
+     "Z3_1_A_6",
+     -1
+    ],
+    [
+     "Z3_1_A_1",
+     1
+    ],
+    [
+     "Z3_1_A_5",
+     -1
+    ],
+    [
+     "Z3_1_A_3",
+     1
+    ],
+    [
+     "Z3_1_A_4",
+     1
+    ]
+   ],
+   "t_takeoff_s": 74.0,
+   "t_arr_ptc_s": 2107.636916272116,
+   "t_land_s": 2217.6369162721153,
+   "takeoff_site": "TO_A1",
+   "landing_site": "ALT1",
+   "energy_used_wh": 459.154133815686,
+   "energy_margin_wh": 440.845866184314,
+   "distance_m": 41742.119531656106,
+   "orbits_inserted": 0,
+   "warnings": [
+    "planned_landing_at_alternate(ALT1)"
+   ],
+   "takeoff_delay_s": 74.0,
+   "param_warnings": [
+    "BATT_LOW_MAH/BATT_CRT_MAH not exported (pack voltage or energy model unknown): BATT_FS_LOW_ACT/BATT_FS_CRT_ACT have no threshold until you set BATT_LOW_MAH/BATT_CRT_MAH (or BATT_LOW_VOLT/BATT_CRT_VOLT) on the vehicle"
+   ],
+   "params": {
+    "AIRSPEED_CRUISE": 21.5,
+    "AIRSPEED_MIN": 18.0,
+    "AIRSPEED_MAX": 35.0,
+    "AIRSPEED_STALL": 14.0,
+    "TECS_CLMB_MAX": 1.13,
+    "TECS_SINK_MAX": 1.5,
+    "TECS_SINK_MIN": 1.35,
+    "ROLL_LIMIT_DEG": 20.0,
+    "WP_LOITER_RAD": 200.0,
+    "WP_RADIUS": 19.0,
+    "RTL_RADIUS": 200.0,
+    "Q_ENABLE": 1.0,
+    "Q_TRANSITION_MS": 20000.0,
+    "Q_ASSIST_SPEED": 17.0,
+    "Q_RTL_ALT": 100.0,
+    "Q_RTL_MODE": 1.0,
+    "Q_LAND_FINAL_ALT": 10.0,
+    "RTL_AUTOLAND": 2.0,
+    "FENCE_ENABLE": 1.0,
+    "FENCE_TYPE": 5.0,
+    "FENCE_ACTION": 1.0,
+    "FENCE_RET_RALLY": 1.0,
+    "FS_LONG_ACTN": 0.0,
+    "FS_LONG_TIMEOUT": 60.0,
+    "TERRAIN_ENABLE": 0.0,
+    "TERRAIN_FOLLOW": 0.0,
+    "BATT_FS_LOW_ACT": 1.0,
+    "BATT_FS_CRT_ACT": 4.0,
+    "CAM1_TYPE": 1.0,
+    "CAM1_DURATION": 1.0,
+    "SERVO10_FUNCTION": 10.0,
+    "FENCE_ALT_MAX": 150.0
+   },
+   "files": {
+    "waypoints": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\BEAMIDP1\\plan\\A1.waypoints",
+    "rally": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\BEAMIDP1\\plan\\A1_rally.txt",
+    "fence": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\BEAMIDP1\\plan\\A1_fence.txt",
+    "param": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\BEAMIDP1\\plan\\A1.param",
+    "plan": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\BEAMIDP1\\plan\\A1.plan"
+   }
+  },
+  "B2": {
+   "cls": "B",
+   "n_items": 165,
+   "n_nav": 137,
+   "n_waypoints_in": 415,
+   "strips": [
+    [
+     "Z2_1_B_k6_B_3",
+     -1
+    ],
+    [
+     "Z2_1_B_k6_B_6",
+     1
+    ],
+    [
+     "Z2_1_B_k6_B_2",
+     -1
+    ],
+    [
+     "Z2_1_B_k6_B_5",
+     1
+    ],
+    [
+     "Z2_1_B_k6_B_1",
+     -1
+    ],
+    [
+     "Z2_1_B_k6_B_4",
+     1
+    ],
+    [
+     "Z2_1_B_k6_B_7",
+     -1
+    ],
+    [
+     "Z3_1_B_k7_B_4",
+     -1
+    ],
+    [
+     "Z3_1_B_k7_B_1",
+     1
+    ],
+    [
+     "Z3_1_B_k7_B_5",
+     -1
+    ],
+    [
+     "Z3_1_B_k7_B_2",
+     1
+    ],
+    [
+     "Z3_1_B_k7_B_6",
+     -1
+    ],
+    [
+     "Z3_1_B_k7_B_3",
+     1
+    ]
+   ],
+   "t_takeoff_s": 172.0,
+   "t_arr_ptc_s": 2248.0447192734696,
+   "t_land_s": 2348.0447192734696,
+   "takeoff_site": "TO_B2",
+   "landing_site": "H",
+   "energy_used_wh": 165.31321969412804,
+   "energy_margin_wh": 88.68678030587196,
+   "distance_m": 37171.22984242131,
+   "orbits_inserted": 9,
+   "warnings": [
+    "delay_orbit(n=9, T_lap=41.9s, wp=367)"
+   ],
+   "takeoff_delay_s": 172.0,
+   "param_warnings": [
+    "BATT_LOW_MAH/BATT_CRT_MAH not exported (pack voltage or energy model unknown): BATT_FS_LOW_ACT/BATT_FS_CRT_ACT have no threshold until you set BATT_LOW_MAH/BATT_CRT_MAH (or BATT_LOW_VOLT/BATT_CRT_VOLT) on the vehicle"
+   ],
+   "params": {
+    "AIRSPEED_CRUISE": 19.0,
+    "AIRSPEED_MIN": 16.0,
+    "AIRSPEED_MAX": 26.6,
+    "AIRSPEED_STALL": 12.0,
+    "TECS_CLMB_MAX": 1.0,
+    "TECS_SINK_MAX": 1.33,
+    "TECS_SINK_MIN": 1.19,
+    "ROLL_LIMIT_DEG": 25.0,
+    "WP_LOITER_RAD": 120.0,
+    "WP_RADIUS": 13.0,
+    "RTL_RADIUS": 120.0,
+    "Q_ENABLE": 1.0,
+    "Q_TRANSITION_MS": 20000.0,
+    "Q_ASSIST_SPEED": 15.0,
+    "Q_RTL_ALT": 100.0,
+    "Q_RTL_MODE": 1.0,
+    "Q_LAND_FINAL_ALT": 10.0,
+    "RTL_AUTOLAND": 2.0,
+    "FENCE_ENABLE": 1.0,
+    "FENCE_TYPE": 5.0,
+    "FENCE_ACTION": 1.0,
+    "FENCE_RET_RALLY": 1.0,
+    "FS_LONG_ACTN": 1.0,
+    "FS_LONG_TIMEOUT": 60.0,
+    "TERRAIN_ENABLE": 0.0,
+    "TERRAIN_FOLLOW": 0.0,
+    "BATT_FS_LOW_ACT": 1.0,
+    "BATT_FS_CRT_ACT": 4.0,
+    "CAM1_TYPE": 1.0,
+    "CAM1_DURATION": 1.0,
+    "SERVO10_FUNCTION": 10.0,
+    "FENCE_ALT_MAX": 150.0
+   },
+   "files": {
+    "waypoints": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\BEAMIDP1\\plan\\B2.waypoints",
+    "rally": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\BEAMIDP1\\plan\\B2_rally.txt",
+    "fence": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\BEAMIDP1\\plan\\B2_fence.txt",
+    "param": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\BEAMIDP1\\plan\\B2.param",
+    "plan": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\BEAMIDP1\\plan\\B2.plan"
+   }
+  },
+  "B3": {
+   "cls": "B",
+   "n_items": 175,
+   "n_nav": 147,
+   "n_waypoints_in": 499,
+   "strips": [
+    [
+     "Z1_1_B_7",
+     1
+    ],
+    [
+     "Z1_1_B_4",
+     -1
+    ],
+    [
+     "Z1_1_B_1",
+     1
+    ],
+    [
+     "Z1_1_B_5",
+     -1
+    ],
+    [
+     "Z1_1_B_2",
+     1
+    ],
+    [
+     "Z1_1_B_6",
+     -1
+    ],
+    [
+     "Z1_1_B_9",
+     1
+    ],
+    [
+     "Z1_1_B_12",
+     -1
+    ],
+    [
+     "Z1_1_B_8",
+     1
+    ],
+    [
+     "Z1_1_B_11",
+     -1
+    ],
+    [
+     "Z1_1_B_13",
+     1
+    ],
+    [
+     "Z1_1_B_10",
+     -1
+    ],
+    [
+     "Z1_1_B_3",
+     -1
+    ]
+   ],
+   "t_takeoff_s": 0.0,
+   "t_arr_ptc_s": 1892.688304855189,
+   "t_land_s": 1992.688304855189,
+   "takeoff_site": "TO_B3",
+   "landing_site": "H",
+   "energy_used_wh": 153.9244555426884,
+   "energy_margin_wh": 100.0755444573116,
+   "distance_m": 33808.85635747637,
+   "orbits_inserted": 0,
+   "warnings": [],
+   "takeoff_delay_s": 0.0,
+   "param_warnings": [
+    "BATT_LOW_MAH/BATT_CRT_MAH not exported (pack voltage or energy model unknown): BATT_FS_LOW_ACT/BATT_FS_CRT_ACT have no threshold until you set BATT_LOW_MAH/BATT_CRT_MAH (or BATT_LOW_VOLT/BATT_CRT_VOLT) on the vehicle"
+   ],
+   "params": {
+    "AIRSPEED_CRUISE": 19.0,
+    "AIRSPEED_MIN": 16.0,
+    "AIRSPEED_MAX": 26.6,
+    "AIRSPEED_STALL": 12.0,
+    "TECS_CLMB_MAX": 1.0,
+    "TECS_SINK_MAX": 1.33,
+    "TECS_SINK_MIN": 1.19,
+    "ROLL_LIMIT_DEG": 25.0,
+    "WP_LOITER_RAD": 120.0,
+    "WP_RADIUS": 10.0,
+    "RTL_RADIUS": 120.0,
+    "Q_ENABLE": 1.0,
+    "Q_TRANSITION_MS": 20000.0,
+    "Q_ASSIST_SPEED": 15.0,
+    "Q_RTL_ALT": 100.0,
+    "Q_RTL_MODE": 1.0,
+    "Q_LAND_FINAL_ALT": 10.0,
+    "RTL_AUTOLAND": 2.0,
+    "FENCE_ENABLE": 1.0,
+    "FENCE_TYPE": 5.0,
+    "FENCE_ACTION": 1.0,
+    "FENCE_RET_RALLY": 1.0,
+    "FS_LONG_ACTN": 1.0,
+    "FS_LONG_TIMEOUT": 60.0,
+    "TERRAIN_ENABLE": 0.0,
+    "TERRAIN_FOLLOW": 0.0,
+    "BATT_FS_LOW_ACT": 1.0,
+    "BATT_FS_CRT_ACT": 4.0,
+    "CAM1_TYPE": 1.0,
+    "CAM1_DURATION": 1.0,
+    "SERVO10_FUNCTION": 10.0,
+    "FENCE_ALT_MAX": 150.0
+   },
+   "files": {
+    "waypoints": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\BEAMIDP1\\plan\\B3.waypoints",
+    "rally": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\BEAMIDP1\\plan\\B3_rally.txt",
+    "fence": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\BEAMIDP1\\plan\\B3_fence.txt",
+    "param": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\BEAMIDP1\\plan\\B3.param",
+    "plan": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\BEAMIDP1\\plan\\B3.plan"
+   }
+  }
+ },
+ "exported_altitude": {
+  "A1": {
+   "n_items_rel": 233,
+   "max_rel_alt_m": 119.6703,
+   "excess_vs_cap_m": 0.1703,
+   "excess_vs_120_m": -0.3297,
+   "at_cmd": 16,
+   "frames": {
+    "0": 1,
+    "3": 262
+   },
+   "n_over_120": 0
+  },
+  "B2": {
+   "n_items_rel": 135,
+   "max_rel_alt_m": 119.5136,
+   "excess_vs_cap_m": 0.0136,
+   "excess_vs_120_m": -0.4864,
+   "at_cmd": 16,
+   "frames": {
+    "0": 1,
+    "3": 164
+   },
+   "n_over_120": 0
+  },
+  "B3": {
+   "n_items_rel": 145,
+   "max_rel_alt_m": 119.554,
+   "excess_vs_cap_m": 0.054,
+   "excess_vs_120_m": -0.446,
+   "at_cmd": 16,
+   "frames": {
+    "0": 1,
+    "3": 174
+   },
+   "n_over_120": 0
+  }
+ },
+ "param_gate": {
+  "A1": {
+   "n_in_param_file": 32,
+   "n_compared": 34,
+   "from_fallback": [
+    "ARMING_REQUIRE",
+    "SCHED_LOOP_RATE"
+   ],
+   "overridden": [
+    "Q_RTL_MODE"
+   ],
+   "names": [
+    "AIRSPEED_CRUISE",
+    "AIRSPEED_MAX",
+    "AIRSPEED_MIN",
+    "AIRSPEED_STALL",
+    "ARMING_REQUIRE",
+    "BATT_FS_CRT_ACT",
+    "BATT_FS_LOW_ACT",
+    "CAM1_DURATION",
+    "CAM1_TYPE",
+    "FENCE_ACTION",
+    "FENCE_ALT_MAX",
+    "FENCE_ENABLE",
+    "FENCE_RET_RALLY",
+    "FENCE_TYPE",
+    "FS_LONG_ACTN",
+    "FS_LONG_TIMEOUT",
+    "Q_ASSIST_SPEED",
+    "Q_ENABLE",
+    "Q_LAND_FINAL_ALT",
+    "Q_RTL_ALT",
+    "Q_RTL_MODE",
+    "Q_TRANSITION_MS",
+    "ROLL_LIMIT_DEG",
+    "RTL_AUTOLAND",
+    "RTL_RADIUS",
+    "SCHED_LOOP_RATE",
+    "SERVO10_FUNCTION",
+    "TECS_CLMB_MAX",
+    "TECS_SINK_MAX",
+    "TECS_SINK_MIN",
+    "TERRAIN_ENABLE",
+    "TERRAIN_FOLLOW",
+    "WP_LOITER_RAD",
+    "WP_RADIUS"
+   ]
+  },
+  "B2": {
+   "n_in_param_file": 32,
+   "n_compared": 34,
+   "from_fallback": [
+    "ARMING_REQUIRE",
+    "SCHED_LOOP_RATE"
+   ],
+   "overridden": [
+    "Q_RTL_MODE"
+   ],
+   "names": [
+    "AIRSPEED_CRUISE",
+    "AIRSPEED_MAX",
+    "AIRSPEED_MIN",
+    "AIRSPEED_STALL",
+    "ARMING_REQUIRE",
+    "BATT_FS_CRT_ACT",
+    "BATT_FS_LOW_ACT",
+    "CAM1_DURATION",
+    "CAM1_TYPE",
+    "FENCE_ACTION",
+    "FENCE_ALT_MAX",
+    "FENCE_ENABLE",
+    "FENCE_RET_RALLY",
+    "FENCE_TYPE",
+    "FS_LONG_ACTN",
+    "FS_LONG_TIMEOUT",
+    "Q_ASSIST_SPEED",
+    "Q_ENABLE",
+    "Q_LAND_FINAL_ALT",
+    "Q_RTL_ALT",
+    "Q_RTL_MODE",
+    "Q_TRANSITION_MS",
+    "ROLL_LIMIT_DEG",
+    "RTL_AUTOLAND",
+    "RTL_RADIUS",
+    "SCHED_LOOP_RATE",
+    "SERVO10_FUNCTION",
+    "TECS_CLMB_MAX",
+    "TECS_SINK_MAX",
+    "TECS_SINK_MIN",
+    "TERRAIN_ENABLE",
+    "TERRAIN_FOLLOW",
+    "WP_LOITER_RAD",
+    "WP_RADIUS"
+   ]
+  },
+  "B3": {
+   "n_in_param_file": 32,
+   "n_compared": 34,
+   "from_fallback": [
+    "ARMING_REQUIRE",
+    "SCHED_LOOP_RATE"
+   ],
+   "overridden": [
+    "Q_RTL_MODE"
+   ],
+   "names": [
+    "AIRSPEED_CRUISE",
+    "AIRSPEED_MAX",
+    "AIRSPEED_MIN",
+    "AIRSPEED_STALL",
+    "ARMING_REQUIRE",
+    "BATT_FS_CRT_ACT",
+    "BATT_FS_LOW_ACT",
+    "CAM1_DURATION",
+    "CAM1_TYPE",
+    "FENCE_ACTION",
+    "FENCE_ALT_MAX",
+    "FENCE_ENABLE",
+    "FENCE_RET_RALLY",
+    "FENCE_TYPE",
+    "FS_LONG_ACTN",
+    "FS_LONG_TIMEOUT",
+    "Q_ASSIST_SPEED",
+    "Q_ENABLE",
+    "Q_LAND_FINAL_ALT",
+    "Q_RTL_ALT",
+    "Q_RTL_MODE",
+    "Q_TRANSITION_MS",
+    "ROLL_LIMIT_DEG",
+    "RTL_AUTOLAND",
+    "RTL_RADIUS",
+    "SCHED_LOOP_RATE",
+    "SERVO10_FUNCTION",
+    "TECS_CLMB_MAX",
+    "TECS_SINK_MAX",
+    "TECS_SINK_MIN",
+    "TERRAIN_ENABLE",
+    "TERRAIN_FOLLOW",
+    "WP_LOITER_RAD",
+    "WP_RADIUS"
+   ]
+  }
+ },
+ "param_gate_total": 102,
+ "param_gate_note": "expected_params() is the fly path's only decision point; it raises SystemExit if an exported parameter escapes the comparison set.  It ran clean here, so the 34 x 3 gate is intact.",
+ "tours": {
+  "A1": {
+   "cls": "A",
+   "n": 13,
+   "cells_in_visit_order": [
+    "Z2_1",
+    "Z3_1"
+   ],
+   "contiguous_per_cell": true,
+   "strip_ids": [
+    "Z2_1_A_2",
+    "Z2_1_A_6",
+    "Z2_1_A_1",
+    "Z2_1_A_5",
+    "Z2_1_A_3",
+    "Z2_1_A_4",
+    "Z3_1_A_7",
+    "Z3_1_A_2",
+    "Z3_1_A_6",
+    "Z3_1_A_1",
+    "Z3_1_A_5",
+    "Z3_1_A_3",
+    "Z3_1_A_4"
+   ],
+   "cell_labels": [
+    "Z2_1",
+    "Z2_1",
+    "Z2_1",
+    "Z2_1",
+    "Z2_1",
+    "Z2_1",
+    "Z3_1",
+    "Z3_1",
+    "Z3_1",
+    "Z3_1",
+    "Z3_1",
+    "Z3_1",
+    "Z3_1"
+   ],
+   "t_takeoff_s": 74.0,
+   "t_land_s": 2217.6,
+   "distance_m": 41742.1,
+   "energy_used_wh": 459.15,
+   "energy_margin_wh": 440.85,
+   "takeoff_site": "TO_A1"
+  },
+  "B2": {
+   "cls": "B",
+   "n": 13,
+   "cells_in_visit_order": [
+    "Z2_1_B_k6",
+    "Z3_1_B_k7"
+   ],
+   "contiguous_per_cell": true,
+   "strip_ids": [
+    "Z2_1_B_k6_B_3",
+    "Z2_1_B_k6_B_6",
+    "Z2_1_B_k6_B_2",
+    "Z2_1_B_k6_B_5",
+    "Z2_1_B_k6_B_1",
+    "Z2_1_B_k6_B_4",
+    "Z2_1_B_k6_B_7",
+    "Z3_1_B_k7_B_4",
+    "Z3_1_B_k7_B_1",
+    "Z3_1_B_k7_B_5",
+    "Z3_1_B_k7_B_2",
+    "Z3_1_B_k7_B_6",
+    "Z3_1_B_k7_B_3"
+   ],
+   "cell_labels": [
+    "Z2_1_B_k6",
+    "Z2_1_B_k6",
+    "Z2_1_B_k6",
+    "Z2_1_B_k6",
+    "Z2_1_B_k6",
+    "Z2_1_B_k6",
+    "Z2_1_B_k6",
+    "Z3_1_B_k7",
+    "Z3_1_B_k7",
+    "Z3_1_B_k7",
+    "Z3_1_B_k7",
+    "Z3_1_B_k7",
+    "Z3_1_B_k7"
+   ],
+   "t_takeoff_s": 172.0,
+   "t_land_s": 2348.0,
+   "distance_m": 37171.2,
+   "energy_used_wh": 165.31,
+   "energy_margin_wh": 88.69,
+   "takeoff_site": "TO_B2"
+  },
+  "B3": {
+   "cls": "B",
+   "n": 13,
+   "cells_in_visit_order": [
+    "Z1_1"
+   ],
+   "contiguous_per_cell": true,
+   "strip_ids": [
+    "Z1_1_B_7",
+    "Z1_1_B_4",
+    "Z1_1_B_1",
+    "Z1_1_B_5",
+    "Z1_1_B_2",
+    "Z1_1_B_6",
+    "Z1_1_B_9",
+    "Z1_1_B_12",
+    "Z1_1_B_8",
+    "Z1_1_B_11",
+    "Z1_1_B_13",
+    "Z1_1_B_10",
+    "Z1_1_B_3"
+   ],
+   "cell_labels": [
+    "Z1_1",
+    "Z1_1",
+    "Z1_1",
+    "Z1_1",
+    "Z1_1",
+    "Z1_1",
+    "Z1_1",
+    "Z1_1",
+    "Z1_1",
+    "Z1_1",
+    "Z1_1",
+    "Z1_1",
+    "Z1_1"
+   ],
+   "t_takeoff_s": 0.0,
+   "t_land_s": 1992.7,
+   "distance_m": 33808.9,
+   "energy_used_wh": 153.92,
+   "energy_margin_wh": 100.08,
+   "takeoff_site": "TO_B3"
+  }
+ },
+ "makespan_s": 2348.04,
+ "all_aircraft_have_work": true,
+ "fly_command": "cd C:/Users/joy46/Documents/Projects/aeroplan-studio  &&  python scripts/hv_sitl_run.py fly beamidp_1a2b_1195"
+}

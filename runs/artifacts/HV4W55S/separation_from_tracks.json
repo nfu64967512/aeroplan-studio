@@ -1,0 +1,35 @@
+{
+ "min_h_m": 268.5,
+ "d_v_at_min_m": 93.2,
+ "pair": [
+  "B2",
+  "B3"
+ ],
+ "t_s": 751.5,
+ "per_pair": {
+  "A1-B2": {
+   "min_h_m": 466.1,
+   "d_v_at_min_m": 0.0,
+   "n_violations": 0
+  },
+  "A1-B3": {
+   "min_h_m": 369.3,
+   "d_v_at_min_m": 1.8,
+   "n_violations": 0
+  },
+  "B2-B3": {
+   "min_h_m": 268.5,
+   "d_v_at_min_m": 93.2,
+   "n_violations": 0
+  }
+ },
+ "thresholds": {
+  "d_sep_m": 100.0,
+  "dh_sep_m": 50.0
+ },
+ "n_airborne_samples": 709,
+ "n_violations": 0,
+ "worst_violation": null,
+ "step_s": 2.0,
+ "caveat": "只在兩架都 >2 m AGL 的時刻計算；線性內插 ⇒ 水平距離是上界。違規＝水平 < d_sep **且** 垂直 < dh_sep，只看 min_h_m 判斷不了"
+}

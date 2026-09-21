@@ -1,0 +1,121 @@
+{
+ "sim_wind": {
+  "SIM_WIND_SPD": 5.0,
+  "SIM_WIND_DIR": 270.0,
+  "SIM_WIND_TURB": 0.0,
+  "SIM_WIND_T": 1.0,
+  "MIN_GROUNDSPEED": 0.0
+ },
+ "plan_wind": [
+  0.0,
+  270.0
+ ],
+ "rows": [
+  {
+   "uav": "A1",
+   "param": "SIM_WIND_SPD",
+   "expected": 5.0,
+   "actual": 5.0,
+   "ok": true
+  },
+  {
+   "uav": "A1",
+   "param": "SIM_WIND_DIR",
+   "expected": 270.0,
+   "actual": 270.0,
+   "ok": true
+  },
+  {
+   "uav": "A1",
+   "param": "SIM_WIND_TURB",
+   "expected": 0.0,
+   "actual": 0.0,
+   "ok": true
+  },
+  {
+   "uav": "A1",
+   "param": "SIM_WIND_T",
+   "expected": 1.0,
+   "actual": 1.0,
+   "ok": true
+  },
+  {
+   "uav": "A1",
+   "param": "MIN_GROUNDSPEED",
+   "expected": 0.0,
+   "actual": 0.0,
+   "ok": true
+  },
+  {
+   "uav": "B2",
+   "param": "SIM_WIND_SPD",
+   "expected": 5.0,
+   "actual": 5.0,
+   "ok": true
+  },
+  {
+   "uav": "B2",
+   "param": "SIM_WIND_DIR",
+   "expected": 270.0,
+   "actual": 270.0,
+   "ok": true
+  },
+  {
+   "uav": "B2",
+   "param": "SIM_WIND_TURB",
+   "expected": 0.0,
+   "actual": 0.0,
+   "ok": true
+  },
+  {
+   "uav": "B2",
+   "param": "SIM_WIND_T",
+   "expected": 1.0,
+   "actual": 1.0,
+   "ok": true
+  },
+  {
+   "uav": "B2",
+   "param": "MIN_GROUNDSPEED",
+   "expected": 0.0,
+   "actual": 0.0,
+   "ok": true
+  },
+  {
+   "uav": "B3",
+   "param": "SIM_WIND_SPD",
+   "expected": 5.0,
+   "actual": 5.0,
+   "ok": true
+  },
+  {
+   "uav": "B3",
+   "param": "SIM_WIND_DIR",
+   "expected": 270.0,
+   "actual": 270.0,
+   "ok": true
+  },
+  {
+   "uav": "B3",
+   "param": "SIM_WIND_TURB",
+   "expected": 0.0,
+   "actual": 0.0,
+   "ok": true
+  },
+  {
+   "uav": "B3",
+   "param": "SIM_WIND_T",
+   "expected": 1.0,
+   "actual": 1.0,
+   "ok": true
+  },
+  {
+   "uav": "B3",
+   "param": "MIN_GROUNDSPEED",
+   "expected": 0.0,
+   "actual": 0.0,
+   "ok": true
+  }
+ ],
+ "dir_convention": "氣象「來向」（270 = 西風，吹向東），與 hv_dccpp dir_from_deg 同約定"
+}

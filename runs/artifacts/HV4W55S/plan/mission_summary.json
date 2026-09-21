@@ -1,0 +1,254 @@
+{
+  "home": {
+    "site_id": "H",
+    "lat_deg": 23.95,
+    "lon_deg": 120.9,
+    "alt_msl_m": 9.313225746154785e-10
+  },
+  "alt_frame": "relative",
+  "makespan_s": 966.2206642639601,
+  "feasibility": "GO_WITH_WARNINGS",
+  "uncovered": [],
+  "takeoff": {
+    "mode": "operator",
+    "t0_s": 0.0,
+    "spread_s": 442.2122092176985,
+    "delay_s": {
+      "A1": 210.0,
+      "B2": 442.2,
+      "B3": 0.0
+    },
+    "note": "任務不含時間原點：地面站須於 t0 + delay_s[uav] 才對該機 MISSION_START（規格 13.5 同墊 60 s 間隔與 4D 去衝突延遲全靠此）。"
+  },
+  "uavs": {
+    "A1": {
+      "cls": "A",
+      "n_items": 83,
+      "n_nav": 75,
+      "n_waypoints_in": 241,
+      "strips": [
+        [
+          "Z2_1_A_1",
+          -1
+        ],
+        [
+          "Z4_1_A_1",
+          1
+        ],
+        [
+          "Z3_1_A_1",
+          -1
+        ]
+      ],
+      "t_takeoff_s": 210.0,
+      "t_arr_ptc_s": 830.4145095593699,
+      "t_land_s": 940.4145095593694,
+      "takeoff_site": "TO_A1",
+      "landing_site": "ALT1",
+      "energy_used_wh": 216.73140966443066,
+      "energy_margin_wh": 683.2685903355693,
+      "distance_m": 13603.621103105204,
+      "orbits_inserted": 0,
+      "warnings": [
+        "planned_landing_at_alternate(ALT1)"
+      ],
+      "takeoff_delay_s": 210.0,
+      "param_warnings": [
+        "BATT_LOW_MAH/BATT_CRT_MAH not exported (pack voltage or energy model unknown): BATT_FS_LOW_ACT/BATT_FS_CRT_ACT have no threshold until you set BATT_LOW_MAH/BATT_CRT_MAH (or BATT_LOW_VOLT/BATT_CRT_VOLT) on the vehicle"
+      ],
+      "params": {
+        "AIRSPEED_CRUISE": 21.5,
+        "AIRSPEED_MIN": 18.0,
+        "AIRSPEED_MAX": 35.0,
+        "AIRSPEED_STALL": 14.0,
+        "TECS_CLMB_MAX": 1.13,
+        "TECS_SINK_MAX": 1.5,
+        "TECS_SINK_MIN": 1.35,
+        "ROLL_LIMIT_DEG": 20.0,
+        "WP_LOITER_RAD": 200.0,
+        "WP_RADIUS": 23.0,
+        "RTL_RADIUS": 200.0,
+        "Q_ENABLE": 1.0,
+        "Q_TRANSITION_MS": 20000.0,
+        "Q_ASSIST_SPEED": 17.0,
+        "Q_RTL_ALT": 100.0,
+        "Q_RTL_MODE": 1.0,
+        "Q_LAND_FINAL_ALT": 10.0,
+        "RTL_AUTOLAND": 2.0,
+        "FENCE_ENABLE": 1.0,
+        "FENCE_TYPE": 5.0,
+        "FENCE_ACTION": 1.0,
+        "FENCE_RET_RALLY": 1.0,
+        "FS_LONG_ACTN": 0.0,
+        "FS_LONG_TIMEOUT": 60.0,
+        "TERRAIN_ENABLE": 0.0,
+        "TERRAIN_FOLLOW": 0.0,
+        "BATT_FS_LOW_ACT": 1.0,
+        "BATT_FS_CRT_ACT": 4.0,
+        "CAM1_TYPE": 1.0,
+        "CAM1_DURATION": 1.0,
+        "SERVO10_FUNCTION": 10.0,
+        "FENCE_ALT_MAX": 150.0
+      },
+      "files": {
+        "waypoints": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\HV4W55S\\plan\\A1.waypoints",
+        "rally": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\HV4W55S\\plan\\A1_rally.txt",
+        "fence": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\HV4W55S\\plan\\A1_fence.txt",
+        "param": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\HV4W55S\\plan\\A1.param",
+        "plan": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\HV4W55S\\plan\\A1.plan"
+      }
+    },
+    "B2": {
+      "cls": "B",
+      "n_items": 53,
+      "n_nav": 47,
+      "n_waypoints_in": 158,
+      "strips": [
+        [
+          "Z2_1_B_k1_B_2",
+          1
+        ],
+        [
+          "Z2_1_B_k1_B_1",
+          -1
+        ]
+      ],
+      "t_takeoff_s": 442.2122092176985,
+      "t_arr_ptc_s": 866.2206642639601,
+      "t_land_s": 966.2206642639601,
+      "takeoff_site": "TO_B2",
+      "landing_site": "H",
+      "energy_used_wh": 62.64691816915712,
+      "energy_margin_wh": 191.35308183084288,
+      "distance_m": 7922.534312339036,
+      "orbits_inserted": 0,
+      "warnings": [],
+      "takeoff_delay_s": 442.2,
+      "param_warnings": [
+        "BATT_LOW_MAH/BATT_CRT_MAH not exported (pack voltage or energy model unknown): BATT_FS_LOW_ACT/BATT_FS_CRT_ACT have no threshold until you set BATT_LOW_MAH/BATT_CRT_MAH (or BATT_LOW_VOLT/BATT_CRT_VOLT) on the vehicle"
+      ],
+      "params": {
+        "AIRSPEED_CRUISE": 19.0,
+        "AIRSPEED_MIN": 16.0,
+        "AIRSPEED_MAX": 26.6,
+        "AIRSPEED_STALL": 12.0,
+        "TECS_CLMB_MAX": 1.0,
+        "TECS_SINK_MAX": 1.33,
+        "TECS_SINK_MIN": 1.19,
+        "ROLL_LIMIT_DEG": 25.0,
+        "WP_LOITER_RAD": 120.0,
+        "WP_RADIUS": 19.0,
+        "RTL_RADIUS": 120.0,
+        "Q_ENABLE": 1.0,
+        "Q_TRANSITION_MS": 20000.0,
+        "Q_ASSIST_SPEED": 15.0,
+        "Q_RTL_ALT": 100.0,
+        "Q_RTL_MODE": 1.0,
+        "Q_LAND_FINAL_ALT": 10.0,
+        "RTL_AUTOLAND": 2.0,
+        "FENCE_ENABLE": 1.0,
+        "FENCE_TYPE": 5.0,
+        "FENCE_ACTION": 1.0,
+        "FENCE_RET_RALLY": 1.0,
+        "FS_LONG_ACTN": 1.0,
+        "FS_LONG_TIMEOUT": 60.0,
+        "TERRAIN_ENABLE": 0.0,
+        "TERRAIN_FOLLOW": 0.0,
+        "BATT_FS_LOW_ACT": 1.0,
+        "BATT_FS_CRT_ACT": 4.0,
+        "CAM1_TYPE": 1.0,
+        "CAM1_DURATION": 1.0,
+        "SERVO10_FUNCTION": 10.0,
+        "FENCE_ALT_MAX": 150.0
+      },
+      "files": {
+        "waypoints": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\HV4W55S\\plan\\B2.waypoints",
+        "rally": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\HV4W55S\\plan\\B2_rally.txt",
+        "fence": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\HV4W55S\\plan\\B2_fence.txt",
+        "param": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\HV4W55S\\plan\\B2.param",
+        "plan": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\HV4W55S\\plan\\B2.plan"
+      }
+    },
+    "B3": {
+      "cls": "B",
+      "n_items": 77,
+      "n_nav": 67,
+      "n_waypoints_in": 209,
+      "strips": [
+        [
+          "Z3_1_B_k1_B_2",
+          1
+        ],
+        [
+          "Z4_1_B_k1_B_2",
+          -1
+        ],
+        [
+          "Z4_1_B_k1_B_1",
+          1
+        ],
+        [
+          "Z3_1_B_k1_B_1",
+          -1
+        ]
+      ],
+      "t_takeoff_s": 0.0,
+      "t_arr_ptc_s": 646.2206642639601,
+      "t_land_s": 746.2206642639601,
+      "takeoff_site": "TO_B3",
+      "landing_site": "H",
+      "energy_used_wh": 76.45435567571792,
+      "energy_margin_wh": 177.54564432428208,
+      "distance_m": 11984.967661545132,
+      "orbits_inserted": 0,
+      "warnings": [
+        "resequenced"
+      ],
+      "takeoff_delay_s": 0.0,
+      "param_warnings": [
+        "BATT_LOW_MAH/BATT_CRT_MAH not exported (pack voltage or energy model unknown): BATT_FS_LOW_ACT/BATT_FS_CRT_ACT have no threshold until you set BATT_LOW_MAH/BATT_CRT_MAH (or BATT_LOW_VOLT/BATT_CRT_VOLT) on the vehicle"
+      ],
+      "params": {
+        "AIRSPEED_CRUISE": 19.0,
+        "AIRSPEED_MIN": 16.0,
+        "AIRSPEED_MAX": 26.6,
+        "AIRSPEED_STALL": 12.0,
+        "TECS_CLMB_MAX": 1.0,
+        "TECS_SINK_MAX": 1.33,
+        "TECS_SINK_MIN": 1.19,
+        "ROLL_LIMIT_DEG": 25.0,
+        "WP_LOITER_RAD": 120.0,
+        "WP_RADIUS": 18.0,
+        "RTL_RADIUS": 120.0,
+        "Q_ENABLE": 1.0,
+        "Q_TRANSITION_MS": 20000.0,
+        "Q_ASSIST_SPEED": 15.0,
+        "Q_RTL_ALT": 100.0,
+        "Q_RTL_MODE": 1.0,
+        "Q_LAND_FINAL_ALT": 10.0,
+        "RTL_AUTOLAND": 2.0,
+        "FENCE_ENABLE": 1.0,
+        "FENCE_TYPE": 5.0,
+        "FENCE_ACTION": 1.0,
+        "FENCE_RET_RALLY": 1.0,
+        "FS_LONG_ACTN": 1.0,
+        "FS_LONG_TIMEOUT": 60.0,
+        "TERRAIN_ENABLE": 0.0,
+        "TERRAIN_FOLLOW": 0.0,
+        "BATT_FS_LOW_ACT": 1.0,
+        "BATT_FS_CRT_ACT": 4.0,
+        "CAM1_TYPE": 1.0,
+        "CAM1_DURATION": 1.0,
+        "SERVO10_FUNCTION": 10.0,
+        "FENCE_ALT_MAX": 150.0
+      },
+      "files": {
+        "waypoints": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\HV4W55S\\plan\\B3.waypoints",
+        "rally": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\HV4W55S\\plan\\B3_rally.txt",
+        "fence": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\HV4W55S\\plan\\B3_fence.txt",
+        "param": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\HV4W55S\\plan\\B3.param",
+        "plan": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\HV4W55S\\plan\\B3.plan"
+      }
+    }
+  }
+}

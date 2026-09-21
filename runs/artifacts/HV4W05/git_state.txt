@@ -1,0 +1,231 @@
+5e0295f5eb63e6597a787120d66526d3e4b17e7f
+ M .gitignore
+ D BUILD.md
+ D aeroplan-studio.sln
+ M aeroplan_studio.spec
+ D build.bat
+ M cli/demo_cmd.py
+ M cli/sitl_cmd.py
+ M config/settings.py
+ M core/dccpp/area_processor.py
+ M core/dccpp/collision_avoidance.py
+ M core/dccpp/dccpp_path_builder.py
+ M core/geometry/polygon.py
+ M docs/PROJECT_STATUS.md
+ M docs/adr/0007-hv-dccpp-planner.md
+ M docs/adr/0008-planning-in-worker-thread.md
+ M docs/adr/0009-uniform-single-lens-camera.md
+ M docs/adr/0010-harvest-naming.md
+ M docs/hv_dccpp/README.md
+ M docs/hv_dccpp/VENDOR.md
+ M "docs/hv_dccpp/reference/ArduPilot_QuadPlane_\346\225\264\345\220\210\347\255\206\350\250\230.md"
+ M docs/hv_dccpp/reference/design_drafts/design_geometry.md
+ M docs/hv_dccpp/reference/design_drafts/design_implementation.md
+ M docs/hv_dccpp/reference/design_drafts/design_mission.md
+ M "docs/hv_dccpp/reference/\344\273\273\345\213\231\347\260\241\345\240\261_v2.md"
+ M "docs/hv_dccpp/reference/\346\227\242\346\234\211\347\263\273\347\265\261\346\225\264\345\220\210\347\255\206\350\250\230.md"
+ M "docs/hv_dccpp/\344\272\244\346\216\245\350\252\252\346\230\216.md"
+ M "docs/hv_dccpp/\345\260\215\347\205\247\346\216\203\346\217\217_2026-09-07.md"
+ M "docs/hv_dccpp/\346\216\203\346\217\217\347\265\220\346\236\234_2026-09-07.md"
+ M "docs/hv_dccpp/\347\263\273\347\265\261\345\217\215\346\200\235_2026-09-08.md"
+ M "docs/hv_dccpp/\350\253\226\346\226\207_\350\262\242\347\215\273\344\270\273\345\274\265_v2.md"
+ M hv_dccpp/allocate.py
+ M hv_dccpp/ardupilot.py
+ M hv_dccpp/context.py
+ M hv_dccpp/deconflict.py
+ M hv_dccpp/dynamic.py
+ M hv_dccpp/geometry.py
+ M hv_dccpp/integration/aeroplan_adapter.py
+ M hv_dccpp/mission.py
+ M hv_dccpp/planner.py
+ M hv_dccpp/preflight.py
+ M hv_dccpp/sim.py
+ M mission/geofence_manager.py
+ M mission/sitl_launcher.py
+ M mission/swarm_coordinator.py
+ M mission/vtol_mission_exporter.py
+ M requirements.txt
+ M research/cpp_benchmark/README.md
+ M research/cpp_benchmark/bench.py
+ M research/cpp_benchmark/gt_harness.py
+ M runs/artifacts/HV4SITL2/README.md
+ M runs/artifacts/HV4SITL9/compare.png
+ M runs/artifacts/HV4SITL9/flight_summary.json
+ M runs/artifacts/HV4SITL9/git_state.txt
+ M runs/artifacts/HV4SITL9/hv_sitl_report.py
+ M runs/artifacts/HV4SITL9/hv_sitl_run.py
+ M runs/artifacts/HV4SITL9/hv_sitl_scenarios.py
+ M runs/artifacts/HV4SITL9/plan/A1.waypoints
+ M runs/artifacts/HV4SITL9/plan/B2.waypoints
+ M runs/artifacts/HV4SITL9/plan/B3.waypoints
+ M runs/artifacts/HV4SITL9/plan/B4.waypoints
+ M runs/artifacts/HV4SITL9/plan/mission_summary.json
+ M runs/artifacts/HV4SITL9/report.json
+ M runs/artifacts/HV4SITL9/validation.json
+ M scripts/harvest_nfz_strategies_figure.py
+ M scripts/harvest_vs_dccpp_figure.py
+ M scripts/hv_sitl_artifacts.py
+ M scripts/hv_sitl_compare.py
+ M scripts/hv_sitl_flight.py
+ M scripts/hv_sitl_fly.py
+ M scripts/hv_sitl_report.py
+ M scripts/hv_sitl_run.py
+ M scripts/hv_sitl_scenarios.py
+ M scripts/hv_sitl_scout.py
+ M sitl/default_params/vtol_default.parm
+ M tests/hv_dccpp/test_allocate.py
+ M tests/hv_dccpp/test_decompose.py
+ M tests/hv_dccpp/test_mission.py
+ M tests/test_dccpp_pipeline.py
+ M tests/test_hv_dccpp_adapter.py
+ M tests/test_hv_uniform_sensor.py
+ M tests/test_min_fw_altitude.py
+ M tools/hv_dccpp/examples/__init__.py
+ M tools/hv_dccpp/examples/_compat.py
+ M ui/main_window.py
+ M ui/widgets/cesium_map_widget.py
+ M ui/widgets/hil_connect_panel.py
+ M ui/widgets/parameter_panel.py
+ M utils/math_utils.py
+?? "Claude outputs/"
+?? cad/
+?? core/base/airframe.py
+?? core/dccpp/vtol_profile.py
+?? core/recon/
+?? docs/AASRC2026_STOT_abstract/
+?? docs/adr/0013-fleet-split-stays-equal-area.md
+?? docs/adr/0014-one-area-auto-split-is-the-default.md
+?? docs/design_2026-09-05_heterogeneous_vtol_planning.md
+?? docs/handoff_2026-08-21.md
+?? docs/handoff_2026-08-25.md
+?? docs/handoff_2026-08-25_auto_mission.md
+?? docs/handoff_2026-09-03_fence_scan_angle.md
+?? docs/handoff_2026-09-04_fence_scan_angle_done.md
+?? docs/handoff_2026-09-09_vtol_recon_cowork.html
+?? docs/handoff_2026-09-09_vtol_recon_cowork.md
+?? docs/handoff_2026-09-10_harvest.md
+?? docs/hv_dccpp/AASRC2026_abstract/
+?? docs/hv_dccpp/reference/papers/Apostolidis2022_Cooperative_mCPP_platform_arXiv2201.07030.txt
+?? docs/hv_dccpp/reference/papers/Kusnur2019_Persistent_MultiUAV_Coverage_GlobalDeconfliction_arXiv1908.09236.txt
+?? docs/hv_dccpp/reference/papers/Munir2024_EnergyAware_Heterogeneous_Coverage_arXiv2411.02230.txt
+?? "docs/hv_dccpp/\345\260\201\351\226\211\345\237\272\346\272\226_2026-09-10.md"
+?? "docs/hv_dccpp/\350\253\226\346\226\207_\344\270\211\347\257\207\345\205\250\346\226\207\351\226\261\350\256\200_2026-09-10.md"
+?? "docs/hv_dccpp/\350\253\226\346\226\207_\345\205\210\350\241\214\346\212\200\350\241\223_2026-09-09.md"
+?? "docs/hv_dccpp/\350\253\226\346\226\207_\350\262\242\347\215\273\344\270\273\345\274\265_v3_\350\250\202\346\255\243.md"
+?? docs/lit/removed_thin_sources_2026-08-21.md
+?? docs/nzc_decision_rule.md
+?? docs/requirements_2026-09-04_heterogeneous_vtol_recon.md
+?? docs/vtol_form_research_2026-09-03.md
+?? exports/
+?? matlab/
+?? mission/mission_view.py
+?? mission/param_backup.py
+?? oos.json
+?? research/cpp_benchmark/dccpp_S1_n2.log
+?? research/cpp_benchmark/prof_h_s1_n8.prof
+?? research/cpp_benchmark/prof_h_s1_n8.txt
+?? research/cpp_benchmark/results/harvest_2026-09-10_baseline.json
+?? research/cpp_benchmark/results/harvest_before_sweeporder.json
+?? research/cpp_benchmark/results/project_rows_5e0295f5_dirty.csv
+?? runs/artifacts/BEAMIDP1/
+?? runs/artifacts/HV4SITL12/
+?? runs/artifacts/HV4SITL13/
+?? runs/artifacts/HV4SITL15/
+?? runs/artifacts/HV4SITL16/
+?? runs/artifacts/HV4W05/
+?? runs/artifacts/HV4W55/
+?? runs/artifacts/PAPERPLAN1/
+?? runs_gz/
+?? scratchpad/
+?? scripts/_capture_probe.py
+?? scripts/_encode_frames.py
+?? scripts/_fence_angle_probe.py
+?? scripts/_full_flow_capture.py
+?? scripts/harvest_c_gap_probe.py
+?? scripts/harvest_vs_dccpp_slide.py
+?? scripts/wsl/formation_config.sh
+?? scripts/wsl/formation_readout.py
+?? scripts/wsl/gz_port_probe.py
+?? scripts/wsl/gz_vtol_coordinator.py
+?? scripts/wsl/gz_vtol_down.sh
+?? scripts/wsl/gz_vtol_up.sh
+?? scripts/wsl/gz_vtol_world.py
+?? scripts/wsl/nzc_readout.py
+?? scripts/wsl/run_nzclamp.sh
+?? scripts/wsl/sar_swarm_patches/formation_log.py
+?? scripts/wsl/sar_swarm_patches/mission_plan.py
+?? scripts/wsl/weave_readout.py
+?? sitl/copter/
+?? sitl/default_params/firmware_param_names.json
+?? sitl/flightgear/
+?? sitl/gazebo/
+?? sitl/jsbsim/
+?? sitl/vtol/
+?? tests/hv_dccpp/test_corridor_exemption_identity.py
+?? tests/hv_dccpp/test_fleet_1p2h_envelope.py
+?? tests/hv_dccpp/test_global_reschedule.py
+?? tests/hv_dccpp/test_orbit_keeps_strip_endpoint.py
+?? tests/hv_dccpp/test_per_uav_recovery_site.py
+?? tests/hv_dccpp/test_sweep_order_search.py
+?? tests/hv_dccpp/test_validate_uses_start_sites.py
+?? tests/test_airframe.py
+?? tests/test_align_weave_instrument.py
+?? tests/test_auto_mission.py
+?? tests/test_clear_all_wipes_map.py
+?? tests/test_collision_alt_cap.py
+?? tests/test_collision_avoidance_rounds.py
+?? tests/test_contract_verify_imports.py
+?? tests/test_coop_homing_topics.py
+?? tests/test_dccpp_scan_angle.py
+?? tests/test_dccpp_strip_pitch.py
+?? tests/test_fence_scan_angle.py
+?? tests/test_fleet_split_guards.py
+?? tests/test_formation_echelon.py
+?? tests/test_formation_guided_and_altcmd.py
+?? tests/test_formation_log.py
+?? tests/test_heatmap_true_cone_only.py
+?? tests/test_hil_connect_panel.py
+?? tests/test_idp_load_balance.py
+?? tests/test_kill_deadlock.py
+?? tests/test_lateral_tracking_instrument.py
+?? tests/test_launcher_param_coverage.py
+?? tests/test_mission_download.py
+?? tests/test_nfz_defeats_auto_split.py
+?? tests/test_nz_closed_loop.py
+?? tests/test_param_backup.py
+?? tests/test_parameter_panel_unknown_keys.py
+?? tests/test_per_aircraft_turn_radius.py
+?? tests/test_recon_coverage.py
+?? tests/test_recovery_assignment.py
+?? tests/test_recovery_auto_wiring.py
+?? tests/test_recovery_sites_wiring.py
+?? tests/test_requested_vs_effective.py
+?? tests/test_sar_heatmap_resolution.py
+?? tests/test_settings_path_rebase.py
+?? tests/test_sitl_airframe_params.py
+?? tests/test_sitl_launcher_contract.py
+?? tests/test_sitl_param_gate.py
+?? tests/test_sitl_param_names.py
+?? tests/test_sitl_spawn_row.py
+?? tests/test_solver_wallclock_independence.py
+?? tests/test_tot_energy_cols.py
+?? tests/test_turn_feasibility.py
+?? tests/test_vendored_naming_boundary.py
+?? tests/test_vtol_fov_cone.py
+?? tests/test_vtol_mission_export_commands.py
+?? tests/test_vtol_prearm_real.py
+?? tests/test_vtol_profile.py
+?? tests/test_vtol_recon_fixes.py
+?? tests/test_vtol_recon_panel.py
+?? tests/test_vtol_sitl_enforced.py
+?? tests/test_weave_absorption_invariant.py
+?? tests/test_weave_aim.py
+?? tests/test_weave_relative.py
+?? tests/test_zarchan_citations.py
+?? tests/test_zarchan_decode.py
+?? tests/test_zarchan_extract.py
+?? tests/test_zarchan_port_lint.py
+?? ui/resources/images/
+?? ui/widgets/vtol_recon_panel.py
+?? ui/workers/
+?? x.json

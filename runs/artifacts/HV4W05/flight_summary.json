@@ -1,0 +1,41 @@
+[
+ {
+  "uav": "A1",
+  "class": "Pioneer",
+  "clock_offset_s": 73.5,
+  "flown_t_takeoff_s": 615.5,
+  "plan_t_takeoff_s": 612.0,
+  "plan_t_land_s": 1205.5,
+  "flown_t_land_s": 1246.5,
+  "plan_km": 10.23,
+  "flown_km": 10.62,
+  "peak_alt_m": 119.6,
+  "err_pct": 3.8
+ },
+ {
+  "uav": "B2",
+  "class": "HERO",
+  "clock_offset_s": 73.5,
+  "flown_t_takeoff_s": 5.5,
+  "plan_t_takeoff_s": 0.0,
+  "plan_t_land_s": 519.7,
+  "flown_t_land_s": 566.5,
+  "plan_km": 7.87,
+  "flown_km": 8.23,
+  "peak_alt_m": 119.6,
+  "err_pct": 4.6
+ },
+ {
+  "uav": "B3",
+  "class": "HERO",
+  "clock_offset_s": 73.5,
+  "flown_t_takeoff_s": 106.5,
+  "plan_t_takeoff_s": 100.0,
+  "plan_t_land_s": 855.3,
+  "flown_t_land_s": 917.5,
+  "plan_km": 12.34,
+  "flown_km": 12.81,
+  "peak_alt_m": 119.6,
+  "err_pct": 3.8
+ }
+]

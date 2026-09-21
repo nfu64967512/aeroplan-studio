@@ -1,4 +1,4 @@
-"""HV-DCCPP SITL 航次的「情境」定義。
+"""HARVEST SITL 航次的「情境」定義。
 
 一個情境 = 機隊 + 作業區 + 規劃路徑 + 高度。`scripts/hv_sitl_flight.py` 以
 環境變數 ``HV_SCENARIO`` 選一個來跑，預設 ``lidar_rgb_1a3b``（HV4SITL1/2 那一組）。
@@ -77,14 +77,38 @@ class Scenario:
     min_fw_agl_m: dict[str, float] | None = None
     dh_band_min_m: float | None = None
     target_gsd: float | None = None
+    #: 生成點間距（m）。0 ⇒ 全隊共點（既有行為，逐位元不變）。
+    #:
+    #: ⚠⚠⚠ > 0 時每一台各有自己的起飛點，於是轉接層的 `per_uav_takeoff_sites`
+    #:   會生出 n 個 `TO_<uav>` 站。**這是 vendored #8 那個缺陷的作用區間**：
+    #:   走廊豁免原本比場坪座標 ≤ 50 m，而走廊排程以 site_id 為鍵 ⇒ 間距 < 50 m
+    #:   時起飛與降落走廊兩層保護同時失效。修好之後 10 m 也安全（規劃層實測
+    #:   最小水平間距 107.2 m），代價是 makespan +7～26%。
+    #: ⚠⚠ SITL 的 `--home` 也**必須**跟著逐機分開，否則規劃說 A 從 TO_A1 起飛、
+    #:   飛機卻生在 HOME —— 那是**靜默**的不一致（見 `hv_sitl_run.launch`）。
+    spawn_spread_m: float = 0.0
     note: str = ""
 
     @property
     def fleet(self):
         return fleet_of(self.n_a, self.n_b)
 
+    def spawn_points(self) -> list[tuple[float, float]]:
+        """逐機生成點。`spawn_spread_m` = 0 時全部回 HOME（與舊版逐位元相同）。
+
+        ⚠ 用 `utils.math_utils.spawn_positions`（GUI 的同一支），不要自己算：
+          手刻 111320 m/deg 與 `EARTH_RADIUS_M` 差 0.51 m/deg，排 50 m 會量成
+          49.999771 m 而掉到門檻底下。
+        """
+        n = len(self.fleet)
+        if self.spawn_spread_m <= 0.0:
+            return [HOME] * n
+        from utils.math_utils import spawn_positions
+        return spawn_positions(HOME[0], HOME[1], n, 0.0, float(self.spawn_spread_m))
+
     def drones(self) -> list[dict[str, Any]]:
-        return [{"drone_id": i + 1, "name": n, "hv_class": c, "position": HOME,
+        pts = self.spawn_points()
+        return [{"drone_id": i + 1, "name": n, "hv_class": c, "position": pts[i],
                  "speed": v, "heading": 0.0, "turn_radius": r,
                  "vehicle_type": "vtol", "fov_width": self.coverage_width_m}
                 for i, (n, c, _sysid, v, r) in enumerate(self.fleet)]
@@ -206,3 +230,113 @@ _add(Scenario(
     target_gsd=0.05,
     note="模式一：一大區（1.248 km²）自動切給 1A+3B，法規 120 m 上限無豁免。"
          "與 gui_legal_120 面積相同 ⇒ 可對照「自動切」vs「分開畫」"))
+
+
+# ── 同一份幾何，開全域起飛重排（vendored 修改 #3）────────────────────
+#   與 gui_legal_120_split（HV4SITL9）**逐欄相同**，只換 trial ⇒ 這是一次乾淨的 A/B：
+#   規劃器唯一的差別是 PlannerConfig.global_reschedule（預設已 True）。
+#   ⚠ 分開 trial 是為了不覆寫 HV4SITL9 的基準產物（它是關掉重排的對照組）。
+#   規劃值：makespan 1799.8 → 1450.8 s、掃描完成 1594.6 → 1216.4 s，
+#   航程／條帶／航點逐位不變（只動時間戳）。這一趟要看它飛不飛得成。
+_add(Scenario(
+    key="gui_legal_120_split_resched", trial="HV4SITL13", path="gui", n_a=1, n_b=3,
+    areas=[{"area_id": 1, "priority": 1.0, "polygon": rect(0, 0, 780, 400)}],
+    coverage_altitude_m=120.0, coverage_width_m=150.0, overlap_rate=0.30,
+    waiver_max_agl_m=None,
+    min_fw_agl_m={"A": 100.0, "B": 100.0},
+    dh_band_min_m=15.0,
+    target_gsd=0.05,
+    note="與 HV4SITL9 同一份幾何與空域，開全域起飛重排 ⇒ 乾淨 A/B"))
+
+
+# ── 四台四個起降點（間距 10 m）：vendored #8 的實飛驗證 ─────────────────
+#   與 gui_legal_120_split_resched **完全相同**，只多 spawn_spread_m=10 ⇒ 乾淨 A/B。
+#   ⚠⚠⚠ 為什麼是 10 m：使用者要「n 台 n 個起降點，方便快速起 SITL」，而 10 m 正好
+#     把兩台 VTOL 的淨空圈（vtol_site_clear_radius_m 6–8 m）分開。10 m 也**遠低於**
+#     SAME_PAD_TOL_M(50)，所以這一組落在 vendored #8 缺陷的正中央：
+#     修好之前規劃層量到兩機水平 15.0 m／垂直 22.3 m 而 validate 回報通過。
+#   ⚠⚠ 這是第一個 spawn_spread_m > 0 的情境 ⇒ 也是 `per_uav_takeoff_sites`
+#     第一次在 SITL 真的生效（既有情境每一台的 position 都是同一個 HOME ⇒ no-op）。
+_add(Scenario(
+    key="gui_legal_120_split_spread10", trial="HV4SITL14", path="gui", n_a=1, n_b=3,
+    areas=[{"area_id": 1, "priority": 1.0, "polygon": rect(0, 0, 780, 400)}],
+    coverage_altitude_m=120.0, coverage_width_m=150.0, overlap_rate=0.30,
+    waiver_max_agl_m=None,
+    min_fw_agl_m={"A": 100.0, "B": 100.0},
+    dh_band_min_m=15.0,
+    target_gsd=0.05,
+    spawn_spread_m=10.0,
+    note="四台四個起降點（間距 10 m）；與 HV4SITL13 同幾何 ⇒ 驗 vendored #8"))
+
+
+# ── 實際機隊：1 Pioneer + 2 HERO（三台）────────────────────────────────
+#   使用者 2026-09-10 定調實際要飛的就是這個機隊。與 gui_legal_120_split_spread10
+#   （HV4SITL14）**逐欄相同，只把 n_b 從 3 改成 2** ⇒ 受控對照，唯一變數是少一台 HERO。
+#   ⚠⚠ 為什麼不直接用作業面積 12 km²：那是另一個變數。先在已經飛過的幾何上看
+#     「四台→三台」會怎麼變，壞掉才知道是機隊數造成的，不是面積造成的。
+#     12 km² 的容量包絡另外量過（tests/hv_dccpp/test_fleet_1p2h_envelope.py，
+#     天花板 15.50–16.00 km²），要飛那個再開一個情境。
+#   ⚠ 三台是**奇數**：機隊切區會切成 3 個子區，而既有情境全是 4 的偶數切法。
+#   ⚠⚠⚠ trial="HV4SITL15" 已是 AASRC2026 論文證據：重跑這個情境**一律**要設 HV_TRIAL
+#     （fly 與 report 都要），否則會覆寫該目錄。2026-09-21 的風場／天花板架次用 HV4W*。
+_add(Scenario(
+    key="gui_legal_120_1a2b", trial="HV4SITL15", path="gui", n_a=1, n_b=2,
+    areas=[{"area_id": 1, "priority": 1.0, "polygon": rect(0, 0, 780, 400)}],
+    coverage_altitude_m=120.0, coverage_width_m=150.0, overlap_rate=0.30,
+    waiver_max_agl_m=None,
+    min_fw_agl_m={"A": 100.0, "B": 100.0},
+    dh_band_min_m=15.0,
+    target_gsd=0.05,
+    spawn_spread_m=10.0,
+    note="實際機隊 1 Pioneer + 2 HERO；與 HV4SITL14 同幾何同空域，只少一台 ⇒ 乾淨 A/B"))
+
+
+# ── 1 Pioneer + 3 HERO：禁航區 × 法規上限（兩件事第一次一起飛）────────
+#   幾何、機隊、禁航區與 gui_nfz_1a3b（HV4SITL7）完全相同，只把空域換成
+#   「無豁免 ⇒ 法規 120 m」那一組 ⇒ 可與 HV4SITL7（140 m、假設有 200 m 豁免）對照。
+#   ⚠ 這一趟會同時走兩條切區路徑：先 split_area_for_fleet 再 split_areas_around_nfz。
+#     禁航區子區的 id 從 "3_1" 這種字串改成整數（轉接層 int() 會把底線吃掉變 31 撞號）
+#     之後**還沒有飛過**，這是第一次上天。
+_add(Scenario(
+    key="gui_legal_120_nfz", trial="HV4SITL12", path="gui", n_a=1, n_b=3,
+    areas=_grid(4, 260, 300, 1500), coverage_altitude_m=120.0,
+    coverage_width_m=150.0, overlap_rate=0.30,
+    nfz=[rect(-1132, 174, 150, 150)],
+    waiver_max_agl_m=None,
+    min_fw_agl_m={"A": 100.0, "B": 100.0},
+    dh_band_min_m=15.0,
+    target_gsd=0.05,
+    note="1 Pioneer + 3 HERO，禁航區 + 法規 120 m AGL 無豁免。"
+         "與 HV4SITL7 同幾何同禁航區，只差空域 ⇒ 可直接對照"))
+
+
+# ── Beam-IDP 跳帶排序「真的觸發」的情境（論文 C3 用）───────────────────
+#   ⚠ 為什麼要新開一個情境：跳帶序 `_skip_sequence(n,k)` 在 **k >= n** 時
+#     逐位元等於順序來回掃描（decompose.py:689-693），所以觸發門檻是 **n > k**，
+#     不是論文原本寫的「n >= 3」。gui_legal_120_1a2b 切完之後 A 胞 n=1、
+#     B 胞 n=2，兩邊都 <= k（5 與 3）⇒ 那一趟**從來沒有觸發過**跳帶排序。
+#   這一組把每個胞撐到 n > k：實測 A 胞 n=6/7（k=5）、B 胞 n=6/7/13（k=3）。
+#
+#   與 gui_legal_120_1a2b 的差別**只有幾何**（機隊、風、起降點間距、
+#   min_fw、高度帶、GSD 全部相同），高度上限則依 C1 的結論降到 119.5 m
+#   （coverage_altitude_m 與 waiver_max_agl_m 一起給 ⇒ h_ceil=119.5，
+#    匯出的最高點 119.55 m、實飛預估 < 120 m）。
+#   ⚠ 幾何必須是「三塊各 1600 x 1200 m」而不是一塊大區：
+#     split_area_for_fleet 沿掃描步進軸把母區切成 n_uav 塊，子區再依構型切，
+#     A 大約只拿到該子區的一半條帶 ⇒ 單一大區要 A 胞 n>=6 得 3000 x 3000 m
+#     (9.00 km²、makespan 3842.6 s)；切成三塊只要 5.76 km²、makespan 2348.0 s。
+#     實測淘汰過：三塊 1560x800（A 胞 n=3,3,4）、三塊 1200x1000（A 胞 n=5,5）。
+#   ⚠ trial 故意不取 HV4SITL17，避免與 C1「降上限重飛」那一趟搶編號。
+_add(Scenario(
+    key="beamidp_1a2b_1195", trial="BEAMIDP1", path="gui", n_a=1, n_b=2,
+    areas=[{"area_id": i + 1, "priority": 1.0,
+            "polygon": rect(-2100.0 + i * 2100.0, 0.0, 800.0, 600.0)}
+           for i in range(3)],
+    coverage_altitude_m=119.5, coverage_width_m=150.0, overlap_rate=0.30,
+    waiver_max_agl_m=119.5,
+    min_fw_agl_m={"A": 100.0, "B": 100.0},
+    dh_band_min_m=15.0,
+    target_gsd=0.05,
+    spawn_spread_m=10.0,
+    note="Beam-IDP 跳帶排序觸發情境：三塊 1600x1200 m（5.76 km²）、1 Pioneer + 2 HERO、"
+         "上限 119.5 m。每胞 n > k（A 6/7 > 5、B 6/7/13 > 3）⇒ 跳帶排序真的作用"))

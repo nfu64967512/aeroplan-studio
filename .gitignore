@@ -112,6 +112,10 @@ runs/artifacts/*
 #   全部是 txt/json/csv/waypoints/png,11 趟合計約 6 MB。
 #   (runs/artifacts 全目錄 1.9 GB,其餘航次仍然排除。)
 !runs/artifacts/HV4SITL*
+# ── 2026-09-21 AASRC2026 投稿證據：風場對照、Beam-IDP 實飛與準備討論 ──
+!runs/artifacts/HV4W*
+!runs/artifacts/BEAMIDP*
+!runs/artifacts/PAPERPLAN1*
 
 # 文獻 PDF(56 MB)。⚠️ docs/lit/*.md 與 docs/lit/ardupilot/ 的參考原始碼**要**進版控
 docs/lit/pdf/

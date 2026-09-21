@@ -1,4 +1,4 @@
-"""把一趟 HV-DCCPP SITL 航次整理成圖 + 機器可讀摘要（情境驅動版）。
+"""把一趟 HARVEST SITL 航次整理成圖 + 機器可讀摘要（情境驅動版）。
 
     python scripts/hv_sitl_report.py gui_uniform_1a3b
 
@@ -16,6 +16,12 @@ from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
+# ⚠ 標題含中文與全形括號，DejaVu Sans 沒有這些字 ⇒ compare.png 會出現豆腐字，
+#   而且只在 stderr 印 UserWarning，圖照存不會失敗。字型必須在**建圖之前**設定。
+#   本機實測有 Microsoft JhengHei / YaHei；沒有 SimHei / Noto CJK。
+matplotlib.rcParams["font.sans-serif"] = ["Microsoft JhengHei", "Microsoft YaHei",
+                                          "DejaVu Sans"]
+matplotlib.rcParams["axes.unicode_minus"] = False
 import matplotlib.pyplot as plt  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -24,8 +30,29 @@ sys.path.insert(0, str(ROOT))
 from scripts.hv_sitl_run import out_dir  # noqa: E402
 from scripts.hv_sitl_scenarios import SCENARIOS  # noqa: E402
 
-CLS_COLOR = {"A": "#ff6b35", "B": "#1c7ed6"}
 CLS_NAME = {"A": "Pioneer", "B": "HERO"}
+
+# ⚠ 舊版是 `CLS_COLOR = {"A": ..., "B": ...}`，**按構型**上色 ⇒ 三台 HERO 共用同一個
+#   藍色，圖上分不出是哪一台（1A+3B 的機隊裡有四分之三看起來一樣）。
+#   改成逐機一色，但同構型留在同一個**色系**：暖色＝Pioneer、冷色＝HERO
+#   ⇒ 既分得出個別機體，也仍然一眼看得出構型。
+CLS_PALETTE = {
+    "A": ["#ff6b35", "#e8590c", "#ffa94d", "#c92a2a"],   # Pioneer：暖色系
+    "B": ["#1c7ed6", "#0ca678", "#7048e8", "#0b7285"],   # HERO：冷色系
+}
+
+
+def uav_colors(uavs) -> dict[str, str]:
+    """{機號: 顏色}。同構型依機號排序後在自己的色系裡依序取色。"""
+    used: dict[str, int] = {}
+    out: dict[str, str] = {}
+    for u in sorted(uavs):
+        cls = str(u)[0]
+        pal = CLS_PALETTE.get(cls) or ["#888888"]
+        i = used.get(cls, 0)
+        used[cls] = i + 1
+        out[u] = pal[i % len(pal)]
+    return out
 
 
 def _track(out: Path, uav: str):
@@ -158,6 +185,13 @@ def _min_separation(series: dict, step_s: float = 2.0) -> dict:
     ⚠ 這是**實飛**量測，跟 `validation.json` 的 `min_sep_h_m` 不是同一個東西
       （那個是規劃值）。兩者差很多才值得追。
     ⚠ 內插會低估瞬時最小值（兩點之間可能更近），所以這是一個**上界**。
+
+    ⚠⚠⚠ **水平距離單獨看不出有沒有違規**。判準是水平 < ``d_sep_m``(100)
+      **且**垂直 < ``dh_sep_m``(50)，兩個都要成立。同一批規劃實測過
+      「最近 17.9 m 但垂直 58 m」＝合法，也實測過「30.0 m ／ 2 m」＝違規；
+      只報水平的話這兩者長得一模一樣。所以除了 `min_h_m` 另外回報**違規樣本數**
+      與最嚴重的那一筆（見 vendored #8）。
+    ⚠⚠ 空中閘門是 AGL > 2 m：地面上兩台相距 10 m 不算違規，垂直起飛到 3 m 就算。
     """
     import math
 
@@ -184,27 +218,48 @@ def _min_separation(series: dict, step_s: float = 2.0) -> dict:
         t, lat, lon, alt = series[u]
         g[u] = (interp(t, lat, grid), interp(t, lon, grid), interp(t, alt, grid))
 
-    best, worst_pair, worst_t, pairs = float("inf"), None, None, {}
+    from hv_dccpp.mission import PlannerConfig
+    _cfg = PlannerConfig()
+    D_SEP, DH_SEP = float(_cfg.d_sep_m), float(_cfg.dh_sep_m)
+
+    best, worst_pair, worst_t, best_dv, pairs = float("inf"), None, None, None, {}
+    n_viol, viol_worst, n_airborne = 0, None, 0
     for i, a in enumerate(uavs):
         for b in uavs[i + 1:]:
-            pmin = float("inf")
+            pmin, pmin_dv, pviol = float("inf"), None, 0
             for k, tk in enumerate(grid):
                 la, oa, aa = g[a][0][k], g[a][1][k], g[a][2][k]
                 lb, ob, ab = g[b][0][k], g[b][1][k], g[b][2][k]
                 if None in (la, oa, aa, lb, ob, ab) or aa <= 2.0 or ab <= 2.0:
                     continue
+                n_airborne += 1
                 dy = (la - lb) * 111132.0
                 dx = (oa - ob) * 111412.0 * math.cos(math.radians(la))
                 d = math.hypot(dx, dy)
+                dv = abs(aa - ab)
+                if d < D_SEP and dv < DH_SEP:           # ← 兩個都成立才是違規
+                    pviol += 1
+                    n_viol += 1
+                    if viol_worst is None or d < viol_worst["d_h_m"]:
+                        viol_worst = {"pair": f"{a}-{b}", "t_s": round(tk, 1),
+                                      "d_h_m": round(d, 1), "d_v_m": round(dv, 1),
+                                      "agl_m": [round(aa, 1), round(ab, 1)]}
                 if d < pmin:
-                    pmin = d
+                    pmin, pmin_dv = d, dv
                 if d < best:
-                    best, worst_pair, worst_t = d, (a, b), tk
-            pairs[f"{a}-{b}"] = (round(pmin, 1) if pmin < float("inf") else None)
+                    best, worst_pair, worst_t, best_dv = d, (a, b), tk, dv
+            pairs[f"{a}-{b}"] = {"min_h_m": round(pmin, 1) if pmin < float("inf") else None,
+                                 "d_v_at_min_m": round(pmin_dv, 1) if pmin_dv is not None else None,
+                                 "n_violations": pviol}
     return {"min_h_m": round(best, 1) if best < float("inf") else None,
-            "pair": worst_pair, "t_s": worst_t, "per_pair_min_h_m": pairs,
+            "d_v_at_min_m": round(best_dv, 1) if best_dv is not None else None,
+            "pair": worst_pair, "t_s": worst_t, "per_pair": pairs,
+            "thresholds": {"d_sep_m": D_SEP, "dh_sep_m": DH_SEP},
+            "n_airborne_samples": n_airborne,
+            "n_violations": n_viol, "worst_violation": viol_worst,
             "step_s": step_s,
-            "caveat": "只在兩架都 >2 m AGL 的時刻計算；線性內插 ⇒ 這是上界"}
+            "caveat": ("只在兩架都 >2 m AGL 的時刻計算；線性內插 ⇒ 水平距離是上界。"
+                       "違規＝水平 < d_sep **且** 垂直 < dh_sep，只看 min_h_m 判斷不了")}
 
 
 def main() -> int:
@@ -230,9 +285,10 @@ def main() -> int:
     offset = _clock_offset(out, uavs)
     print(f"telemetry 時基偏移 {offset:.1f} s（已從所有實飛時刻扣掉）")
     rows, tracks, series = [], {}, {}
+    colors = uav_colors(uavs)
     for uav in uavs:
         cls = uav[0]
-        c = CLS_COLOR.get(cls, "#888")
+        c = colors[uav]
         plon, plat = _planned(out, uav)
         ax1.plot(plon, plat, color=c, lw=0.8, alpha=0.35, ls=":")
         lon, lat, t, alt, armed = _track(out, uav)
@@ -296,9 +352,20 @@ def main() -> int:
             json.dumps(sep, ensure_ascii=False, indent=1), encoding="utf-8")
         plan_sep = json.loads((out / "validation.json").read_text(encoding="utf-8")
                               ).get("min_sep_h_m")
-        print(f"\n實飛最小水平間距 {sep['min_h_m']} m"
-              f"（{sep['pair']} 於 t={sep['t_s']:.0f}s；規劃值 {plan_sep:.1f} m）")
-        print("  逐對:", sep["per_pair_min_h_m"])
+        print(f"\n實飛最小水平間距 {sep['min_h_m']} m（垂直 {sep['d_v_at_min_m']} m）"
+              f"　{sep['pair']} 於 t={sep['t_s']:.0f}s；規劃值 {plan_sep:.1f} m")
+        # ⚠ 判準是水平 < d_sep **且** 垂直 < dh_sep；只看 min_h_m 判斷不了合不合法
+        th = sep["thresholds"]
+        if sep["n_violations"]:
+            w = sep["worst_violation"]
+            print(f"  ✗ 違規 {sep['n_violations']} 筆／{sep['n_airborne_samples']} 個空中樣本"
+                  f"（門檻 水平<{th['d_sep_m']:.0f} 且 垂直<{th['dh_sep_m']:.0f}）")
+            print(f"    最嚴重 {w['pair']} t={w['t_s']}s 水平 {w['d_h_m']} m "
+                  f"垂直 {w['d_v_m']} m（AGL {w['agl_m'][0]} / {w['agl_m'][1]}）")
+        else:
+            print(f"  ✅ 違規 0 筆／{sep['n_airborne_samples']} 個空中樣本"
+                  f"（門檻 水平<{th['d_sep_m']:.0f} 且 垂直<{th['dh_sep_m']:.0f}）")
+        print("  逐對:", sep["per_pair"])
     except Exception as e:      # noqa: BLE001
         print("間距回算失敗:", e)
 

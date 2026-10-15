@@ -1,0 +1,129 @@
+{
+ "pages": 4,
+ "used_cm_per_page": [
+  25.38,
+  25.57,
+  25.25,
+  22.77
+ ],
+ "content_cm": 98.97,
+ "pages_equiv": 3.851,
+ "last_page_lines": 47,
+ "last_line_top_cm": 24.26,
+ "last_page_used_cm": 22.72,
+ "body_height_cm": 25.7,
+ "last_page_fill_pct": 88.4,
+ "n_paragraphs": 143,
+ "n_paragraphs_snap_to_grid_on": 0,
+ "n_table_row_end_marks_reported_on": 15,
+ "where": [
+  [
+   "一、前言",
+   1,
+   11.8
+  ],
+  [
+   "二、研究方法",
+   1,
+   17.4
+  ],
+  [
+   "2.1 系統架構與規劃流",
+   1,
+   18.0
+  ],
+  [
+   "2.2 核心公式",
+   1,
+   22.0
+  ],
+  [
+   "三、SITL 驗證與成果",
+   2,
+   15.2
+  ],
+  [
+   "3.1 實驗設置",
+   2,
+   15.8
+  ],
+  [
+   "3.2 規劃與 SITL",
+   2,
+   20.3
+  ],
+  [
+   "表1 規劃與 SITL ",
+   2,
+   23.4
+  ],
+  [
+   "3.3 規劃天花板與風場",
+   3,
+   6.3
+  ],
+  [
+   "表2 規劃天花板與風場之",
+   3,
+   11.9
+  ],
+  [
+   "四、結論與限制",
+   3,
+   19.7
+  ],
+  [
+   "誌謝",
+   4,
+   7.4
+  ],
+  [
+   "參考文獻",
+   4,
+   8.4
+  ]
+ ],
+ "figures": [],
+ "tables": [
+  {
+   "tnum": "1",
+   "col_cm": [
+    6.51,
+    4.01,
+    6.49
+   ]
+  },
+  {
+   "tnum": "2",
+   "col_cm": [
+    2.11,
+    1.36,
+    3.0,
+    1.63,
+    2.87,
+    1.63,
+    4.39
+   ]
+  }
+ ],
+ "n_omath": 4,
+ "build_s": 6.7,
+ "layout": {
+  "indent": false,
+  "spacing": false,
+  "compress_punct": false,
+  "table_split": true,
+  "no_widow": false
+ },
+ "caveats_missing": [],
+ "caveats_checked": 61,
+ "name": "V0+L1+L2+L3",
+ "cuts": [],
+ "candidates": [
+  "L1",
+  "L2",
+  "L3"
+ ],
+ "docx": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\PAPERPLAN1\\word_layout\\variants\\V0pL1pL2pL3.docx",
+ "pdf": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\PAPERPLAN1\\word_layout\\variants\\V0pL1pL2pL3.pdf"
+}

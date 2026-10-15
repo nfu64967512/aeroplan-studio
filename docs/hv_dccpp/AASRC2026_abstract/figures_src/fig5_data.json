@@ -1,0 +1,345 @@
+{
+ "caveats": [
+  "HV4W55R 與 HV4W55 只差規劃天花板（同風場、同匯出項數、參數檔逐位元相同）：NUMBERS.json ceiling_control。",
+  "HV4SITL15／16 為 120.0 m 天花板、模擬未設風之歷史對照，與 119.5 m 各趟差兩個變因。",
+  "121.92 m（400 ft）法規上限落在圖 (a) 縱軸之外。",
+  "規劃間距為 2 s 網格上界，與 SITL 飛行值不是同一種量測。",
+  "每格 1 趟；SITL 為決定性模擬。"
+ ],
+ "definitions": {
+  "altitude": "POS.RelHomeAlt at native ~5.1-6.4 Hz; time above a level by linear interpolation of the crossings, not by sample counting",
+  "exported_per_uav": "metrics.json *.altitude.per_uav.*.exported_max_rel_m (fleet max asserted equal to NUMBERS exported_max_rel_m)",
+  "flat_repo_frame": "NUMBERS.json corrections.K1_separation_note_e.per_trial.*.flat_repo_frame_m: the existing flat 111132 m/deg reporter frame on native samples",
+  "planned": "NUMBERS.json trials.*.separation.planned_m (planner 2 s grid, upper bound)",
+  "separation_frame": "exact WGS84 geodetic -> ECEF -> local ENU; continuous-time minimum on the union of both aircraft's native POS times"
+ },
+ "figure": {
+  "dpi": 300,
+  "height_cm": 6.4,
+  "min_font_pt": 8.0,
+  "png": "docs/hv_dccpp/AASRC2026_abstract/fig5_compliance.png",
+  "printed_as": "圖3",
+  "svg": "docs/hv_dccpp/AASRC2026_abstract/fig5_compliance.svg",
+  "width_cm": 17.0
+ },
+ "panel_a_altitude": [
+  {
+   "ceiling_m": 120.0,
+   "max_exported_rel_alt_m": 120.0526,
+   "max_flown_rel_alt_m": 120.1066,
+   "time_above_120_s_uav": 140.052,
+   "trial": "HV4W55R",
+   "uav": "A1"
+  },
+  {
+   "ceiling_m": 120.0,
+   "max_exported_rel_alt_m": 120.0331,
+   "max_flown_rel_alt_m": 120.1422,
+   "time_above_120_s_uav": 73.566,
+   "trial": "HV4W55R",
+   "uav": "B2"
+  },
+  {
+   "ceiling_m": 120.0,
+   "max_exported_rel_alt_m": 120.0331,
+   "max_flown_rel_alt_m": 120.1742,
+   "time_above_120_s_uav": 141.307,
+   "trial": "HV4W55R",
+   "uav": "B3"
+  },
+  {
+   "fleet_exported_n_above_120": 88,
+   "fleet_time_above_120_s": 354.925,
+   "label_printed": "354.93",
+   "trial": "HV4W55R"
+  },
+  {
+   "ceiling_m": 119.5,
+   "max_exported_rel_alt_m": 119.5526,
+   "max_flown_rel_alt_m": 119.6221,
+   "time_above_120_s_uav": 0.0,
+   "trial": "HV4W55",
+   "uav": "A1"
+  },
+  {
+   "ceiling_m": 119.5,
+   "max_exported_rel_alt_m": 119.5332,
+   "max_flown_rel_alt_m": 119.6356,
+   "time_above_120_s_uav": 0.0,
+   "trial": "HV4W55",
+   "uav": "B2"
+  },
+  {
+   "ceiling_m": 119.5,
+   "max_exported_rel_alt_m": 119.5331,
+   "max_flown_rel_alt_m": 119.6752,
+   "time_above_120_s_uav": 0.0,
+   "trial": "HV4W55",
+   "uav": "B3"
+  },
+  {
+   "fleet_exported_n_above_120": 0,
+   "fleet_time_above_120_s": 0.0,
+   "label_printed": "0",
+   "trial": "HV4W55"
+  },
+  {
+   "ceiling_m": 119.5,
+   "max_exported_rel_alt_m": 119.5521,
+   "max_flown_rel_alt_m": 119.6029,
+   "time_above_120_s_uav": 0.0,
+   "trial": "HV4W05",
+   "uav": "A1"
+  },
+  {
+   "ceiling_m": 119.5,
+   "max_exported_rel_alt_m": 119.5329,
+   "max_flown_rel_alt_m": 119.6607,
+   "time_above_120_s_uav": 0.0,
+   "trial": "HV4W05",
+   "uav": "B2"
+  },
+  {
+   "ceiling_m": 119.5,
+   "max_exported_rel_alt_m": 119.5328,
+   "max_flown_rel_alt_m": 119.6485,
+   "time_above_120_s_uav": 0.0,
+   "trial": "HV4W05",
+   "uav": "B3"
+  },
+  {
+   "fleet_exported_n_above_120": 0,
+   "fleet_time_above_120_s": 0.0,
+   "label_printed": "0",
+   "trial": "HV4W05"
+  },
+  {
+   "ceiling_m": 119.5,
+   "max_exported_rel_alt_m": 119.5521,
+   "max_flown_rel_alt_m": 119.5972,
+   "time_above_120_s_uav": 0.0,
+   "trial": "HV4W00",
+   "uav": "A1"
+  },
+  {
+   "ceiling_m": 119.5,
+   "max_exported_rel_alt_m": 119.5329,
+   "max_flown_rel_alt_m": 119.6307,
+   "time_above_120_s_uav": 0.0,
+   "trial": "HV4W00",
+   "uav": "B2"
+  },
+  {
+   "ceiling_m": 119.5,
+   "max_exported_rel_alt_m": 119.5328,
+   "max_flown_rel_alt_m": 119.6627,
+   "time_above_120_s_uav": 0.0,
+   "trial": "HV4W00",
+   "uav": "B3"
+  },
+  {
+   "fleet_exported_n_above_120": 0,
+   "fleet_time_above_120_s": 0.0,
+   "label_printed": "0",
+   "trial": "HV4W00"
+  },
+  {
+   "ceiling_m": 119.5,
+   "max_exported_rel_alt_m": 119.5526,
+   "max_flown_rel_alt_m": 119.6108,
+   "time_above_120_s_uav": 0.0,
+   "trial": "HV4W55S",
+   "uav": "A1"
+  },
+  {
+   "ceiling_m": 119.5,
+   "max_exported_rel_alt_m": 119.5332,
+   "max_flown_rel_alt_m": 119.6341,
+   "time_above_120_s_uav": 0.0,
+   "trial": "HV4W55S",
+   "uav": "B2"
+  },
+  {
+   "ceiling_m": 119.5,
+   "max_exported_rel_alt_m": 119.5331,
+   "max_flown_rel_alt_m": 119.6786,
+   "time_above_120_s_uav": 0.0,
+   "trial": "HV4W55S",
+   "uav": "B3"
+  },
+  {
+   "fleet_exported_n_above_120": 0,
+   "fleet_time_above_120_s": 0.0,
+   "label_printed": "0",
+   "trial": "HV4W55S"
+  },
+  {
+   "ceiling_m": 119.5,
+   "max_exported_rel_alt_m": 119.6703,
+   "max_flown_rel_alt_m": 119.6969,
+   "time_above_120_s_uav": 0.0,
+   "trial": "BEAMIDP1",
+   "uav": "A1"
+  },
+  {
+   "ceiling_m": 119.5,
+   "max_exported_rel_alt_m": 119.5136,
+   "max_flown_rel_alt_m": 119.6611,
+   "time_above_120_s_uav": 0.0,
+   "trial": "BEAMIDP1",
+   "uav": "B2"
+  },
+  {
+   "ceiling_m": 119.5,
+   "max_exported_rel_alt_m": 119.554,
+   "max_flown_rel_alt_m": 119.6937,
+   "time_above_120_s_uav": 0.0,
+   "trial": "BEAMIDP1",
+   "uav": "B3"
+  },
+  {
+   "fleet_exported_n_above_120": 0,
+   "fleet_time_above_120_s": 0.0,
+   "label_printed": "0",
+   "trial": "BEAMIDP1"
+  },
+  {
+   "ceiling_m": 120.0,
+   "max_exported_rel_alt_m": 120.0526,
+   "max_flown_rel_alt_m": 120.115,
+   "time_above_120_s_uav": 147.527,
+   "trial": "HV4SITL15",
+   "uav": "A1"
+  },
+  {
+   "ceiling_m": 120.0,
+   "max_exported_rel_alt_m": 120.0331,
+   "max_flown_rel_alt_m": 120.1456,
+   "time_above_120_s_uav": 57.622,
+   "trial": "HV4SITL15",
+   "uav": "B2"
+  },
+  {
+   "ceiling_m": 120.0,
+   "max_exported_rel_alt_m": 120.0331,
+   "max_flown_rel_alt_m": 120.1522,
+   "time_above_120_s_uav": 120.643,
+   "trial": "HV4SITL15",
+   "uav": "B3"
+  },
+  {
+   "fleet_exported_n_above_120": 88,
+   "fleet_time_above_120_s": 325.792,
+   "label_printed": "325.79",
+   "trial": "HV4SITL15"
+  },
+  {
+   "ceiling_m": 120.0,
+   "max_exported_rel_alt_m": 120.0526,
+   "max_flown_rel_alt_m": 120.103,
+   "time_above_120_s_uav": 147.267,
+   "trial": "HV4SITL16",
+   "uav": "A1"
+  },
+  {
+   "ceiling_m": 120.0,
+   "max_exported_rel_alt_m": 120.0331,
+   "max_flown_rel_alt_m": 120.1291,
+   "time_above_120_s_uav": 56.763,
+   "trial": "HV4SITL16",
+   "uav": "B2"
+  },
+  {
+   "ceiling_m": 120.0,
+   "max_exported_rel_alt_m": 120.0331,
+   "max_flown_rel_alt_m": 120.1619,
+   "time_above_120_s_uav": 126.105,
+   "trial": "HV4SITL16",
+   "uav": "B3"
+  },
+  {
+   "fleet_exported_n_above_120": 88,
+   "fleet_time_above_120_s": 330.135,
+   "label_printed": "330.14",
+   "trial": "HV4SITL16"
+  }
+ ],
+ "panel_b_separation": [
+  {
+   "binding_pair": "B2-B3",
+   "d_v_at_min_h_m": 28.9079,
+   "flown_min_sep_h_m_exact_ellipsoid": 100.5789,
+   "flown_min_sep_h_m_flat_repo_frame": 100.919,
+   "n_violations": 0,
+   "planned_min_sep_h_m_2s_grid": 105.4641,
+   "trial": "HV4W55R"
+  },
+  {
+   "binding_pair": "B2-B3",
+   "d_v_at_min_h_m": 28.3942,
+   "flown_min_sep_h_m_exact_ellipsoid": 100.4256,
+   "flown_min_sep_h_m_flat_repo_frame": 100.7652,
+   "n_violations": 0,
+   "planned_min_sep_h_m_2s_grid": 105.6992,
+   "trial": "HV4W55"
+  },
+  {
+   "binding_pair": "B2-B3",
+   "d_v_at_min_h_m": 28.6509,
+   "flown_min_sep_h_m_exact_ellipsoid": 100.2909,
+   "flown_min_sep_h_m_flat_repo_frame": 100.63,
+   "n_violations": 0,
+   "planned_min_sep_h_m_2s_grid": 104.6374,
+   "trial": "HV4W05"
+  },
+  {
+   "binding_pair": "B2-B3",
+   "d_v_at_min_h_m": 28.6801,
+   "flown_min_sep_h_m_exact_ellipsoid": 100.435,
+   "flown_min_sep_h_m_flat_repo_frame": 100.7746,
+   "n_violations": 0,
+   "planned_min_sep_h_m_2s_grid": 104.6374,
+   "trial": "HV4W00"
+  },
+  {
+   "binding_pair": "B2-B3",
+   "d_v_at_min_h_m": 28.7569,
+   "flown_min_sep_h_m_exact_ellipsoid": 100.6895,
+   "flown_min_sep_h_m_flat_repo_frame": 101.0299,
+   "n_violations": 0,
+   "planned_min_sep_h_m_2s_grid": 105.4641,
+   "trial": "HV4SITL15"
+  },
+  {
+   "binding_pair": "B2-B3",
+   "d_v_at_min_h_m": 28.8111,
+   "flown_min_sep_h_m_exact_ellipsoid": 100.6854,
+   "flown_min_sep_h_m_flat_repo_frame": 101.0258,
+   "n_violations": 0,
+   "planned_min_sep_h_m_2s_grid": 105.4641,
+   "trial": "HV4SITL16"
+  },
+  {
+   "binding_pair": "B2-B3",
+   "flown_min_sep_h_m_exact_ellipsoid": 266.1767,
+   "flown_min_sep_h_m_flat_repo_frame": 267.0753,
+   "n_violations": 0,
+   "not_plotted": "off the axis range; stated in the panel annotation",
+   "planned_min_sep_h_m_2s_grid": 322.3797,
+   "trial": "HV4W55S"
+  },
+  {
+   "binding_pair": "A1-B2",
+   "flown_min_sep_h_m_exact_ellipsoid": 180.7735,
+   "flown_min_sep_h_m_flat_repo_frame": 181.383,
+   "n_violations": 0,
+   "not_plotted": "off the axis range; stated in the panel annotation",
+   "planned_min_sep_h_m_2s_grid": 180.5612,
+   "trial": "BEAMIDP1"
+  }
+ ],
+ "sources": {
+  "runs/artifacts/PAPERPLAN1/update_paper/out/NUMBERS.json": "0c1a6f47aaf05f6c65613d02e70dd93550ae74d92bbd15150883bf62d47676ed",
+  "runs/artifacts/PAPERPLAN1/update_paper/out/metrics.json": "9ec87ece600e3884d5d9d212228ab00c02b094ada8fc085766f345c61d6fdc87"
+ }
+}

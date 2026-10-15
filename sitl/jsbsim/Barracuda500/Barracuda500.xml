@@ -1,0 +1,444 @@
+<?xml version="1.0"?>
+<?xml-stylesheet type="text/xsl" href="http://jsbsim.sf.net/JSBSim.xsl"?>
+<fdm_config name="Barracuda500" version="2.0" release="ALPHA"
+            xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+            xsi:noNamespaceSchemaLocation="http://jsbsim.sf.net/JSBSim.xsd">
+
+ <fileheader>
+  <author>aeroplan-studio</author>
+  <filecreationdate>2026-08-26</filecreationdate>
+  <description>
+    Barracuda-500 噴射改裝固定翼(22 kg 級),給 ArduPilot SITL 的 JSBSim 後端。
+
+    ═══════════════════════════════════════════════════════════════════════
+     ⚠️⚠️⚠️ 這個模型裡的數字分三級,不可混為一談
+    ═══════════════════════════════════════════════════════════════════════
+    【量到的】  S_REF 0.45 m^2、翼展 1.88 m、質量 22 kg、CD0 0.01642
+                來源:predictor.py:39-41、jet_model.json。
+    【推導的】  弦長 0.239 m(= S/b)、AR 7.85、CL_alpha 4.88 /rad
+                (Helmbold,AR 7.85)、巡航需求推力 ~82 N @ 3100 m / 157 m/s。
+    【假設的】  ⚠️ **慣量張量整組是估的** —— 本專案沒有量過,而
+                matlab/mgs/README.md:507-509 明文記著「沒有慣量張量、
+                沒有舵面導數」。Ixx/Iyy/Izz 用細長體近似估算,
+                **所有與角速率(p/q/r)有關的結果在校準之前都不可引用。**
+    【矛盾未解】⚠️⚠️ 推力:predictor.py:45 給 T/W = 1.43,而分析文件記
+                T/W = 0.274 —— **差 5 倍**。用飛行資料反算(3100 m、
+                ρ≈0.9、CD0 0.01642):巡航 157 m/s 需 ~82 N、
+                193 m/s 需 ~124 N ⇒ 0.274(59 N)飛不到巡航速,
+                1.43(308 N)過大。這裡取海平面靜推力 150 N,
+                **待實測校準**。
+
+    ⚠️⚠️ 換到 JSBSim = 換物理後端。`jet_model.json` / `JET_CDP` /
+       `JET_THRMAX` **完全不會被讀**,既有 KPI 基線不可延用
+       (同 gazebo-backend-facts 記載的那件事)。
+
+    ⚠️ CL_alpha 用 4.88(Helmbold 幾何值)而不是「辨識值」6.9503:
+       6.9503 高於無限展弦比的理論上限 2π=6.28,對 AR=7.85 的有限翼
+       物理上不可能(有限展弦比只會**降低**斜率)。那個辨識值是穿過
+       ArduPilot 自己的模型擬合出來的,不可直接搬進另一個氣動框架。
+       同理 CL_max 用 1.4 而不是 3.2503。
+  </description>
+ </fileheader>
+
+ <metrics>
+  <wingarea  unit="M2">0.45</wingarea>
+  <wingspan  unit="M">1.88</wingspan>
+  <chord     unit="M">0.239</chord>
+  <htailarea unit="M2">0.075</htailarea>
+  <htailarm  unit="M">0.75</htailarm>
+  <vtailarea unit="M2">0.045</vtailarea>
+  <vtailarm  unit="M">0.75</vtailarm>
+  <location name="AERORP" unit="M">
+   <x>0.00</x><y>0.0</y><z>0.0</z>
+  </location>
+  <location name="EYEPOINT" unit="M">
+   <x>-0.50</x><y>0.0</y><z>0.10</z>
+  </location>
+  <location name="VRP" unit="M">
+   <x>0.0</x><y>0.0</y><z>0.0</z>
+  </location>
+ </metrics>
+
+ <mass_balance>
+  <!-- ⚠️ 慣量:估算值,見檔頭。細長體近似 I ~ m*(尺度/4)^2。 -->
+  <ixx unit="KG*M2">4.9</ixx>
+  <iyy unit="KG*M2">3.1</iyy>
+  <izz unit="KG*M2">7.9</izz>
+  <ixz unit="KG*M2">0.0</ixz>
+  <emptywt unit="KG">22.0</emptywt>
+  <location name="CG" unit="M">
+   <x>0.0</x><y>0.0</y><z>0.0</z>
+  </location>
+ </mass_balance>
+
+ <ground_reactions>
+  <contact type="BOGEY" name="NOSE">
+   <!-- ⚠️⚠️ 名字取錯了:x=+0.55 在 CG **後方**(JSBSim 結構座標 +X 朝後),
+        所以這其實是**尾輪**。
+        z 由 -0.20 抬到 -0.05,給約 13 度的機頭朝上地面姿態。
+        為什麼非改不可(2026-08-27 實測):三個接觸點原本**同高** ⇒ 地面
+        姿態 0 度,而本機的 CL 表在 α=0 時 CL=0(無彎度) ⇒ 滑跑整段
+        產生**負升力**,實測滑跑俯仰角 -1.9 到 -5.4 度,永遠抬不起頭。
+        會飛的 Rascal 是 14.3 度朝上,而 ArduPilot 產生的 reset.xml 裡
+        寫死 theta=13.0,正是照它的姿態校的。 -->
+   <location unit="M"><x>0.55</x><y>0.0</y><z>-0.05</z></location>
+   <static_friction>0.80</static_friction>
+   <dynamic_friction>0.50</dynamic_friction>
+   <rolling_friction>0.02</rolling_friction>
+   <spring_coeff unit="N/M">3000</spring_coeff>
+   <damping_coeff unit="N/M/SEC">300</damping_coeff>
+   <max_steer unit="DEG">0.0</max_steer>
+   <brake_group>NONE</brake_group>
+   <retractable>0</retractable>
+  </contact>
+  <contact type="BOGEY" name="LEFT_MAIN">
+   <location unit="M"><x>-0.10</x><y>-0.30</y><z>-0.20</z></location>
+   <static_friction>0.80</static_friction>
+   <dynamic_friction>0.50</dynamic_friction>
+   <rolling_friction>0.02</rolling_friction>
+   <spring_coeff unit="N/M">4000</spring_coeff>
+   <damping_coeff unit="N/M/SEC">400</damping_coeff>
+   <max_steer unit="DEG">0.0</max_steer>
+   <brake_group>LEFT</brake_group>
+   <retractable>0</retractable>
+  </contact>
+  <contact type="BOGEY" name="RIGHT_MAIN">
+   <location unit="M"><x>-0.10</x><y>0.30</y><z>-0.20</z></location>
+   <static_friction>0.80</static_friction>
+   <dynamic_friction>0.50</dynamic_friction>
+   <rolling_friction>0.02</rolling_friction>
+   <spring_coeff unit="N/M">4000</spring_coeff>
+   <damping_coeff unit="N/M/SEC">400</damping_coeff>
+   <max_steer unit="DEG">0.0</max_steer>
+   <brake_group>RIGHT</brake_group>
+   <retractable>0</retractable>
+  </contact>
+ </ground_reactions>
+
+ <propulsion>
+  <engine file="barracuda_jet">
+   <location unit="M"><x>-0.40</x><y>0.0</y><z>0.0</z></location>
+   <orient unit="DEG"><roll>0.0</roll><pitch>0.0</pitch><yaw>0.0</yaw></orient>
+   <feed>0</feed>
+   <thruster file="direct">
+    <location unit="M"><x>-0.60</x><y>0.0</y><z>0.0</z></location>
+    <orient unit="DEG"><roll>0.0</roll><pitch>0.0</pitch><yaw>0.0</yaw></orient>
+   </thruster>
+  </engine>
+  <tank type="FUEL" number="0">
+   <location unit="M"><x>0.0</x><y>0.0</y><z>0.0</z></location>
+   <capacity unit="KG">3.0</capacity>
+   <contents unit="KG">3.0</contents>
+  </tank>
+ </propulsion>
+
+ <flight_control name="FCS: Barracuda500">
+  <!-- ⚠️ ArduPilot 的 SIM_JSBSim 只寫這四個 *-cmd-norm 屬性
+       (libraries/SITL/SIM_JSBSim.cpp:366-369),所以這四條通道
+       是**介面契約**,改名字等於斷線而且是靜默的。 -->
+
+  <channel name="Aileron">
+   <summer name="fcs/aileron-sum">
+    <input>fcs/aileron-cmd-norm</input>
+    <clipto><min>-1</min><max>1</max></clipto>
+   </summer>
+   <aerosurface_scale name="fcs/left-aileron-pos-rad">
+    <input>fcs/aileron-sum</input>
+    <domain><min>-1</min><max>1</max></domain>
+    <range><min>-0.35</min><max>0.35</max></range>
+    <output>fcs/left-aileron-pos-norm</output>
+   </aerosurface_scale>
+   <aerosurface_scale name="fcs/right-aileron-pos-rad">
+    <input>-fcs/aileron-sum</input>
+    <domain><min>-1</min><max>1</max></domain>
+    <range><min>-0.35</min><max>0.35</max></range>
+    <output>fcs/right-aileron-pos-norm</output>
+   </aerosurface_scale>
+  </channel>
+
+  <channel name="Elevator">
+   <summer name="fcs/elevator-sum">
+    <input>fcs/elevator-cmd-norm</input>
+    <clipto><min>-1</min><max>1</max></clipto>
+   </summer>
+   <aerosurface_scale name="fcs/elevator-pos-rad">
+    <input>fcs/elevator-sum</input>
+    <domain><min>-1</min><max>1</max></domain>
+    <range><min>-0.35</min><max>0.35</max></range>
+    <output>fcs/elevator-pos-norm</output>
+   </aerosurface_scale>
+  </channel>
+
+  <channel name="Rudder">
+   <summer name="fcs/rudder-sum">
+    <input>fcs/rudder-cmd-norm</input>
+    <clipto><min>-1</min><max>1</max></clipto>
+   </summer>
+   <aerosurface_scale name="fcs/rudder-pos-rad">
+    <input>fcs/rudder-sum</input>
+    <domain><min>-1</min><max>1</max></domain>
+    <range><min>-0.35</min><max>0.35</max></range>
+    <output>fcs/rudder-pos-norm</output>
+   </aerosurface_scale>
+  </channel>
+
+  <channel name="Throttle">
+   <summer name="fcs/throttle-sum">
+    <input>fcs/throttle-cmd-norm</input>
+    <clipto><min>0</min><max>1</max></clipto>
+    <output>fcs/throttle-pos-norm[0]</output>
+   </summer>
+  </channel>
+
+  <!-- ⚠️⚠️⚠️ 引擎啟動:**必須由 ArduPilot 那一側修**,不要在這裡做。
+       ArduPilot 產生的 JSBSim 腳本寫的是
+           propulsion/engine[0]/set-running     (SIM_JSBSim.cpp:116)
+       那一個綁到 FGEngine::SetRunning(),只設 `Running` 旗標,
+       **`turbine_engine` 的相位機不吃它** —— 相位留在 Off、
+       N1/N2 停在 0.003、推力恆 0。
+
+       實測(JSBSim 單獨跑,同一個機體檔):
+           propulsion/engine[0]/set-running  ⇒ thrust  0.00 lbf, N1   0.003
+           propulsion/set-running            ⇒ thrust 32.89 lbf, N1 100.0
+       後者綁到 FGPropulsion::SetEngineRunning(),那一支才會推相位。
+
+       ⚠️ 失效是**完全靜默的**:ArduPilot 側油門照樣顯示 100%、零錯誤訊息。
+          表徵是「跑道上加速到 61 m/s 後一路減速回 1.8 m/s、永遠不離地」。
+
+       ⚠️⚠️ **試過的錯誤修法(已推翻,不要重試)**:在這個 flight_control 裡
+          加一條 `pure_gain` 持續把 0 寫進 `propulsion/set-running`。
+          那會讓 JSBSim **每一幀重新初始化引擎狀態機** ⇒ 整個模擬卡死
+          (實測 JSBSim 跑超過 120 s 沒有任何輸出)。
+       ⇒ 正確修法是在 SIM_JSBSim.cpp 的腳本樣板補一行
+         `<set name="propulsion/set-running" value="-1"/>`,見
+         sitl/jsbsim/README.md。 -->
+
+  <channel name="InfiniteFuel">
+   <!-- ⚠️⚠️ JSBSim 的 FGTurbine.cpp:528 把待機油耗**寫死**成
+          IdleFF = pow(milthrust, 0.2) * 107.0  [pph]   (原註解: just an estimate)
+        那是照全尺寸發動機擬合的經驗式。我們 milthrust=33.72 lbf ⇒ 216.25 pph
+        = 0.06007 pps。而 FGTurbine.cpp:226 把它當成**下限**套用
+        (低於 IdleFF 就拉回 IdleFF) ⇒ 機體檔裡的 `tsfc` **降不下來**。
+
+        後果:3 kg 油箱 6.6139 lb / 0.06007 pps = **110 秒**燒光,引擎在
+        航次中途**靜默熄火**(油門照樣顯示 100%,零告警)。
+        ⚠️ 這正好是本專案先前歸因給 milthrust 單位 bug 的那個表徵
+           「加速到 61 m/s 後一路減速、永遠不離地」—— 兩個不同的原因,
+           同一個症狀。單位那個已經修好了,這個是**另一個**。
+
+        算術上不可能靠加大油箱解決:要撐 1200 s 需要 72.1 lb = 32.7 kg 的油,
+        而整機才 22 kg。
+
+        修法:每幀把 propulsion/refuel 拉成 true,FGPropulsion.cpp:149 會
+        呼叫 DoRefuel 把油箱補滿 ⇒ 質量恆定、續航無限。
+        ⚠️ propulsion/refuel 是一個**單純的 bool 成員**(FGPropulsion.cpp:827
+           用 Tie 綁上去),**不是** propulsion/set-running 那種驅動狀態機的
+           屬性 ⇒ 每幀寫它是安全的。實測 400 s:推力恆 32.058 lbf、
+           油量恆 6.6139 lb、不卡死。 -->
+   <summer name="fcs/infinite-fuel">
+    <bias>1.0</bias>
+    <clipto><min>1.0</min><max>1.0</max></clipto>
+    <output>propulsion/refuel</output>
+   </summer>
+  </channel>
+ </flight_control>
+
+ <aerodynamics>
+
+  <!-- ── 升力 ────────────────────────────────────────────────────── -->
+  <axis name="LIFT">
+   <function name="aero/coefficient/CLalpha">
+    <description>Lift due to alpha (Helmbold, AR 7.85)</description>
+    <product>
+     <property>aero/qbar-psf</property>
+     <property>metrics/Sw-sqft</property>
+     <table>
+      <independentVar lookup="row">aero/alpha-rad</independentVar>
+      <tableData>
+       -0.35  -1.30
+       -0.20  -0.98
+        0.00   0.00
+        0.20   0.98
+        0.24   1.19
+        0.28   1.36
+        0.32   1.40
+        0.40   1.10
+      </tableData>
+     </table>
+    </product>
+   </function>
+   <function name="aero/coefficient/CLde">
+    <description>Lift due to elevator</description>
+    <product>
+     <property>aero/qbar-psf</property>
+     <property>metrics/Sw-sqft</property>
+     <property>fcs/elevator-pos-rad</property>
+     <value>0.30</value>
+    </product>
+   </function>
+  </axis>
+
+  <!-- ── 阻力 ────────────────────────────────────────────────────── -->
+  <axis name="DRAG">
+   <function name="aero/coefficient/CD0">
+    <description>寄生阻力 —— **量到的值** 0.01642(jet_model.json)</description>
+    <product>
+     <property>aero/qbar-psf</property>
+     <property>metrics/Sw-sqft</property>
+     <value>0.01642</value>
+    </product>
+   </function>
+   <function name="aero/coefficient/CDi">
+    <description>誘導阻力 CL^2/(pi e AR),AR 7.85、e 0.8 ⇒ 1/(pi e AR)=0.0507</description>
+    <product>
+     <property>aero/qbar-psf</property>
+     <property>metrics/Sw-sqft</property>
+     <property>aero/cl-squared</property>
+     <value>0.0507</value>
+    </product>
+   </function>
+   <function name="aero/coefficient/CDde">
+    <description>舵面阻力</description>
+    <product>
+     <property>aero/qbar-psf</property>
+     <property>metrics/Sw-sqft</property>
+     <abs><property>fcs/elevator-pos-norm</property></abs>
+     <value>0.04</value>
+    </product>
+   </function>
+   <function name="aero/coefficient/CDbeta">
+    <description>側滑阻力</description>
+    <product>
+     <property>aero/qbar-psf</property>
+     <property>metrics/Sw-sqft</property>
+     <abs><property>aero/beta-rad</property></abs>
+     <value>0.20</value>
+    </product>
+   </function>
+  </axis>
+
+  <!-- ── 側力 ────────────────────────────────────────────────────── -->
+  <axis name="SIDE">
+   <function name="aero/coefficient/CYb">
+    <product>
+     <property>aero/qbar-psf</property>
+     <property>metrics/Sw-sqft</property>
+     <property>aero/beta-rad</property>
+     <value>-0.35</value>
+    </product>
+   </function>
+  </axis>
+
+  <!-- ── 滾轉力矩 ⚠️ 導數全部是估算值,見檔頭 ───────────────────── -->
+  <axis name="ROLL">
+   <function name="aero/coefficient/Clb">
+    <!-- ⚠️ 2026-08-27 試過調到 -0.04(理由:-0.08 是高翼加上反角教練機的
+         量級,本機是中/低翼噴射 UAV)。**受控實測更糟**,已回復 -0.08。
+         見 Clda 的註解。 -->
+    <product>
+     <property>aero/qbar-psf</property><property>metrics/Sw-sqft</property>
+     <property>metrics/bw-ft</property><property>aero/beta-rad</property>
+     <value>-0.08</value>
+    </product>
+   </function>
+   <function name="aero/coefficient/Clp">
+    <product>
+     <property>aero/qbar-psf</property><property>metrics/Sw-sqft</property>
+     <property>metrics/bw-ft</property><property>aero/bi2vel</property>
+     <property>velocities/p-aero-rad_sec</property>
+     <value>-0.42</value>
+    </product>
+   </function>
+   <function name="aero/coefficient/Clr">
+    <product>
+     <property>aero/qbar-psf</property><property>metrics/Sw-sqft</property>
+     <property>metrics/bw-ft</property><property>aero/bi2vel</property>
+     <property>velocities/r-aero-rad_sec</property>
+     <value>0.08</value>
+    </product>
+   </function>
+   <function name="aero/coefficient/Clda">
+    <!-- ⚠️⚠️ 2026-08-27 實測紀錄:**試過調小,被推翻,不要重試。**
+
+         假說:pb/2V 過大。Clda=0.18、|Clp|=0.42、δa_max=0.35 rad、b=1.88 m、
+         V=60 m/s ⇒ p_ss = 9.57 rad/s = 548 度/秒,pb/2V = **0.15**,
+         是戰鬥機典型值 0.09 的 1.7 倍 ⇒ 看起來明顯過強。
+
+         受控實測(只有這一個值不同,其餘完全相同):
+           Clda 0.18  ⇒ 起飛、爬升 **688.9 m**,之後橫向失控
+           Clda 0.06  ⇒ **連離地都做不到**(爬升 3.5 m),21 秒觸地
+           Clda 0.12 + Clb -0.04 + Cnr -0.15 ⇒ 也飛不起來(爬升 4.0 m)
+
+         ⇒ 降低副翼權限**讓情況更糟**,因為自駕儀失去救回擾動的能力。
+            真正的失效不是權限過大,而是離地後的橫向極限環
+            (p 峰值正負 190 到 220 度/秒、週期約 2 到 3 秒)。
+
+         ⚠️ 這一組橫向導數與**整個慣量張量**都是估計值(見檔頭)。
+            正確的下一步是**開迴路量測**:飛 FBWA、階躍副翼、量實得滾轉率,
+            再據以校 Clda —— 不是照理論值猜。在量到之前不要再動這個數字。 -->
+    <product>
+     <property>aero/qbar-psf</property><property>metrics/Sw-sqft</property>
+     <property>metrics/bw-ft</property><property>fcs/left-aileron-pos-rad</property>
+     <value>0.18</value>
+    </product>
+   </function>
+  </axis>
+
+  <!-- ── 俯仰力矩 ────────────────────────────────────────────────── -->
+  <axis name="PITCH">
+   <function name="aero/coefficient/Cmalpha">
+    <description>靜穩定度 —— 負值代表縱向靜穩定</description>
+    <product>
+     <property>aero/qbar-psf</property><property>metrics/Sw-sqft</property>
+     <property>metrics/cbarw-ft</property><property>aero/alpha-rad</property>
+     <value>-0.60</value>
+    </product>
+   </function>
+   <function name="aero/coefficient/Cmde">
+    <product>
+     <property>aero/qbar-psf</property><property>metrics/Sw-sqft</property>
+     <property>metrics/cbarw-ft</property><property>fcs/elevator-pos-rad</property>
+     <value>-1.10</value>
+    </product>
+   </function>
+   <function name="aero/coefficient/Cmq">
+    <product>
+     <property>aero/qbar-psf</property><property>metrics/Sw-sqft</property>
+     <property>metrics/cbarw-ft</property><property>aero/ci2vel</property>
+     <property>velocities/q-aero-rad_sec</property>
+     <value>-12.0</value>
+    </product>
+   </function>
+  </axis>
+
+  <!-- ── 偏航力矩 ────────────────────────────────────────────────── -->
+  <axis name="YAW">
+   <function name="aero/coefficient/Cnb">
+    <description>方向靜穩定度 —— 正值代表風標穩定</description>
+    <product>
+     <property>aero/qbar-psf</property><property>metrics/Sw-sqft</property>
+     <property>metrics/bw-ft</property><property>aero/beta-rad</property>
+     <value>0.065</value>
+    </product>
+   </function>
+   <function name="aero/coefficient/Cnr">
+    <!-- ⚠️ 2026-08-27 試過調到 -0.15(增加偏航阻尼)。同批實測更糟,
+         已回復 -0.10。見 Clda 的註解。 -->
+    <product>
+     <property>aero/qbar-psf</property><property>metrics/Sw-sqft</property>
+     <property>metrics/bw-ft</property><property>aero/bi2vel</property>
+     <property>velocities/r-aero-rad_sec</property>
+     <value>-0.10</value>
+    </product>
+   </function>
+   <function name="aero/coefficient/Cndr">
+    <product>
+     <property>aero/qbar-psf</property><property>metrics/Sw-sqft</property>
+     <property>metrics/bw-ft</property><property>fcs/rudder-pos-rad</property>
+     <value>-0.06</value>
+    </product>
+   </function>
+  </axis>
+
+ </aerodynamics>
+</fdm_config>

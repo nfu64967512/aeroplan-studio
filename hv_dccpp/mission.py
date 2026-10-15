@@ -54,6 +54,8 @@ __all__ = [
     "WindLayer",
     "SortieEnergy",
     "PayloadRequirement",
+    "MappingModeConfig",
+    "MappingMissionInputs",
     "C2Link",
     "NoFlyZone",
     "Airspace",
@@ -719,12 +721,30 @@ class UAVInstance:
     `start_site_id`（選填）：本機**起飛**站點之 `Site.site_id`（各機自有地面站；論文 §4.1 情境）。
     None → `MissionInputs.home`（既有情境與測試行為不變）。回收／降落仍依 D40（`recovery_site_id` → home），
     起飛點與回收點可不同。站點存在性由 `MissionInputs.__post_init__` 檢查。
+
+    `recovery_site_id`（選填）：本機**降落／回收**站點之 `Site.site_id`。
+    None → `MissionInputs.recovery_site`（D40 的既有全域行為，一個字都沒變）。
+
+    ⚠⚠⚠ vendored 修改 #4（見 docs/hv_dccpp/VENDOR.md）。為什麼需要逐機回收站：
+    HV4SITL9 的 makespan 有 **70.3%** 是起飛錯開，而驅動它的 6 筆衝突**全部**是
+    同一個場坪 H 的**降落**走廊排隊（d_h = d_v = 0.0），沒有一筆是空間衝突。
+    上游只有全域 `recovery_site_id`，加上 `_site_order` 把它無條件排第一、
+    `append_rtb` 取第一個能量可行者 ⇒ **給 8 個備降點，四機仍 100% 落 H**。
+    生產路徑端到端實測：把兩機的降落站改到別的場坪，makespan
+    1450.8 → **926.8 s（−36.1%）**、validate 通過、覆蓋率與條帶數不變。
+    對照之下**起飛**站分流的精確天花板只有 −52.6 s（−3.6%）。
+
+    ⚠ 這個欄位只提供**表達能力**，不含指派規則。誰該去哪一站目前要由呼叫端決定，
+    而實測顯示那是一張彩票：同一份幾何的 16 種指派分布在 921–1394 s，其中 2 種
+    validate 不過；場坪位置也一樣（400 m 驗證失敗、600 m 最好、800 m 掉掉六成效益）。
+    **自動指派與其安全守衛是另一件事**（見 VENDOR.md #4 的「尚未做」）。
     """
     uav_id: str
     spec: PlatformSpec
     sensors: tuple[SensorHardware, ...]
     sortie: SortieEnergy
     start_site_id: str | None = None
+    recovery_site_id: str | None = None
 
     def __post_init__(self) -> None:
         _str_id(self.uav_id, "UAVInstance.uav_id")
@@ -750,6 +770,9 @@ class UAVInstance:
         if self.start_site_id is not None:
             _str_id(self.start_site_id, f"{n}.start_site_id")
             object.__setattr__(self, "start_site_id", str(self.start_site_id))
+        if self.recovery_site_id is not None:
+            _str_id(self.recovery_site_id, f"{n}.recovery_site_id")
+            object.__setattr__(self, "recovery_site_id", str(self.recovery_site_id))
 
     @property
     def available_kinds(self) -> frozenset[str]:
@@ -768,6 +791,119 @@ class UAVInstance:
 def allowed_override_keys(spec: PlatformSpec) -> frozenset[str]:
     """`platform_overrides` 允許鍵：provisional ∪ provisional_supplementary ∪ {min_fw_operation_agl_m}（規格 §3.5）。"""
     return frozenset(spec.provisional) | frozenset(spec.provisional_supplementary) | frozenset({"min_fw_operation_agl_m"})
+
+
+@dataclass(frozen=True, slots=True)
+class MappingModeConfig:
+    """攝影測量「建圖模式」（opt-in；放在 :class:`MappingMissionInputs` 的 ``mapping_mode``，
+    純 :class:`MissionInputs`／None ＝ 舊行為逐位元不變）。
+
+    多機拍的照片要能進**同一次**光束法平差、整張圖 GSD 一致，所以：
+
+    * ``seam_tie``：不同架飛的相鄰區塊（子區、凸分割胞、A/B 殘帶）重疊至少等於「同區塊相鄰條帶的重疊」
+      w − s（≥ side_overlap·w；有偏流餘裕時更大）。作法（`decompose.area_edge_deltas`）：凸分割胞外擴改為
+      max(δ_edge, (w − s)/2)、相鄰子區（多個 AreaSpec，例如 GUI 的 split_area_for_fleet）各往對方長 (w − s)/2
+      （兩側各一半 ⇒ 接縫合計 ≥ w − s），A/B 殘帶只往 A 側單邊外擴，改為 max(δ_edge, w − s)。
+      區域外緣仍只外擴 δ_edge（不在任務區外多飛）。
+    * ``no_altitude_layering``：不做 A/B 高度分層（`altitude.layering` 會把一型抬高 Δh_sep + δ_prof，
+      GSD 差 1.5 倍）；同胞兩構型改走既有的時間分隔（4-D 去衝突）。
+    * ``crab_margin``：機身固定的相機在側風下偏流 ψ = asin(W/V_a)（W = 規劃風速各層最大值、V_a = 該構型巡航空速），
+      足跡（橫 w、縱 l）跟著轉 ψ，保守可用寬 w_eff = w cosψ − l sinψ；條帶間距改用 w_eff(1 − side_overlap)。
+      w_eff ≤ 0 → `build_context` 丟 MissionInputError（preflight／plan_mission 轉 NO_GO）。
+    * ``lead_in_m``：條帶兩端在 e_ext 之外再各延長 lead_in_m（匯出器在帶起點之後 lead_in_m 才開相機時不掉覆蓋；
+      **匯出器的 camera_lead_in_m 必須是同一個數**）。
+    * ``min_block_strips``：實際飛的區塊（胞）條帶數少於此值者列警告 `mapping_small_blocks`（不改分解）；0 ＝ 不檢查。
+
+    **交叉航帶**（``cross_strips``，opt-in，預設關；關閉時其餘 ``cross_*`` 必須維持預設值，否則丟
+    MissionInputError ——「設了一個不會生效的值」不靜默吃掉）。文獻依據與限制見
+    ``docs/討論_2026-10-15_HARVEST航拍建圖_NotebookLM.md`` B1：Gerke & Przybilla 2016 的交叉塊**同時換方向與高度**
+    （75 對 105 m）、只蓋約 20% 面積，平地、4 GCP、無 RTK 時 Z RMSE 16.5 → 2.4 cm；料堆區無顯著差異；GCP 加到
+    17–18 個差異消失。Štroner 2021：同高度垂直雙網格只有小幅改善。⇒ 這裡只提供「可量、可比較」的幾何，不宣稱精度。
+
+    * 作法（`planner._insert_cross_strips`，在 Beam-IDP／RTB／leftover 再拍賣**之後**、組裝之前）：每架實際飛的
+      每個區塊（＝該機在某胞飛的主條帶；殘帶情形只取該機那幾條的足跡 ∩ 胞多邊形）加一組平行交叉條帶：
+      方向 = 該區塊主條帶方向 α* + ``cross_angle_offset_deg``；區域 = 區塊的**中央橫帶**（沿交叉條帶方向貫穿
+      整個區塊、在主條帶方向上置中於區塊形心、高度 H 以二分法解到「橫帶 ∩ 區塊」面積 = ``cross_fraction`` × 區塊面積），
+      再以 `geometry.lay_strips`（同一套刈幅／間距／e_ext＋引入段／局部包絡／禁區檢查）鋪滿該橫帶。
+      ⇒ 每條交叉帶橫越該機全部主條帶（每條都綁到所有主帶），條帶數少、轉彎少（固定翼）。
+    * 至少 2 條相鄰（互相連結）：比例算出來只要 1 條時，橫帶放寬到剛好 2 條（w + s），並以警告列出**有效比例**；
+      區塊放不下 2 條（或交叉帶碰禁區／局部包絡不可行）⇒ 該區塊略過，列在 `mapping_cross_skipped(...)` 警告。
+    * 同一架飛（**同一架、不換機**；交叉帶本身在母區塊內，但兩端的 e_ext＋引入段＋迴轉會伸出區塊側邊，
+      進到鄰塊的空域 ⇒ 4-D 去衝突照常處理，鄰機可能被延後起飛）：交叉帶插在**同一架**的序列裡、緊鄰其母區塊
+      （母區塊每段主條帶之前或之後，取增加時間最少者；交叉帶內部的順序與掃向：≤ 12 條用精確 DP（子集 × 末條帶 ×
+      掃向），更多條用 skip-k／折疊蛇形候選 + 逐帶掃向 DP）。
+    * 高度：h_x = 母區塊作業高度 + ``cross_alt_offset_m``；必須在該區塊作業高度帶 [max(最低固定翼, 地形淨空),
+      min(h_ceil, 感測器上限)] 內（＝主條帶 h_op 被夾的同一組界），否則整份計畫 NO_GO（preflight 構型層級先擋、
+      planner 逐區塊再擋；訊息寫出 h_x 與帶界；**不夾限**）。build_3d 對交叉帶作業段的高度上界收緊到
+      z_des + 0.25 m（`altitude.sample_bounds`），升降一定在前後轉場完成；插入時前後段路徑短於 |Δh|/tanγ
+      （進入／返航段以過境高度 h_transit 計）的位置加罰（全部犯規才照選並警告 `mapping_cross_altitude_change`）。
+      匯出器對交叉帶以「本帶 OPERATE 航點最低 AGL」算 206 觸發距離（保守）。
+    * 能量／4-D：交叉帶進 `CostCache`（op、轉場、進入、返航、能量預算），整條序列重算後再跑 `append_rtb`；
+      組裝後再以 `sim.check_energy`（validate 同一準則，含重飛能量 e_MA）複驗。不過時自最後插入的一組起逐組退回，
+      退回的交叉帶列入 ``plan.uncovered``（原因 ``cross_energy_infeasible``）⇒ 建圖上傳閘門擋下（不靜默少飛）。
+      去衝突照常（空間互斥豁免另把交叉帶足跡 ⊕ 交叉方向迴轉帶算進去，距離 < d_sep 就取消豁免）。
+    * 識別：條帶 id ``f"{cell}_{cls}_cross_{uav}_{k}"``（:func:`hv_dccpp.geometry.is_cross_strip`），
+      ``Strip.cell_id`` 仍是母胞（轉接層的區域歸屬不變）。
+    * ``cross_fraction`` ∈ (0, 1]；``cross_alt_offset_m`` 有限實數；``cross_angle_offset_deg`` 與主條帶夾角
+      （mod 180°）須 ∈ [10°, 170°]。
+
+    有效值：`build_context` 寫 `mapping_mode(...)`／`mapping_crab_margin(...)` 警告，preflight 在
+    `derived[cls]["mapping"]` 列出逐構型實際用的 ψ、w、w_eff、s、接縫重疊與外擴量（開交叉帶時另列交叉高度、
+    刈幅、間距）；規劃後 `mapping_cross(...)` 警告逐機逐區塊列出交叉帶數、有效面積比例、高度、插入位置、增加時間。
+    ``cross_strips=False`` 時 `to_dict` 不含 ``cross_*`` 鍵（與加入交叉帶之前逐位元相同）。
+    """
+    seam_tie: bool = True
+    no_altitude_layering: bool = True
+    crab_margin: bool = True
+    lead_in_m: float = 0.0
+    min_block_strips: int = 3
+    cross_strips: bool = False
+    cross_fraction: float = 0.2
+    cross_alt_offset_m: float = 0.0
+    cross_angle_offset_deg: float = 90.0
+
+    def __post_init__(self) -> None:
+        for key in ("seam_tie", "no_altitude_layering", "crab_margin", "cross_strips"):
+            if not isinstance(getattr(self, key), bool):
+                raise MissionInputError(f"MappingModeConfig.{key} 須為 bool，得 {getattr(self, key)!r}")
+        object.__setattr__(self, "lead_in_m", _nonneg(_num(self.lead_in_m, "MappingModeConfig.lead_in_m"),
+                                                      "MappingModeConfig.lead_in_m"))
+        n = self.min_block_strips
+        if isinstance(n, bool) or not isinstance(n, (int, np.integer)) or int(n) < 0:
+            raise MissionInputError(f"MappingModeConfig.min_block_strips 須為 ≥ 0 之整數，得 {n!r}")
+        object.__setattr__(self, "min_block_strips", int(n))
+        frac = _num(self.cross_fraction, "MappingModeConfig.cross_fraction")
+        if not (0.0 < frac <= 1.0):
+            raise MissionInputError(f"MappingModeConfig.cross_fraction（交叉航帶面積比例）須 ∈ (0, 1]，得 {frac!r}")
+        dh = _num(self.cross_alt_offset_m, "MappingModeConfig.cross_alt_offset_m")
+        ang = _num(self.cross_angle_offset_deg, "MappingModeConfig.cross_angle_offset_deg")
+        rel = ang % 180.0
+        if not (10.0 - 1e-9 <= rel <= 170.0 + 1e-9):
+            raise MissionInputError(
+                f"MappingModeConfig.cross_angle_offset_deg={ang!r}：交叉航帶與主條帶夾角（mod 180°）{rel:g}° "
+                "須 ∈ [10°, 170°]（太接近平行就不是交叉航帶）")
+        object.__setattr__(self, "cross_fraction", frac)
+        object.__setattr__(self, "cross_alt_offset_m", dh)
+        object.__setattr__(self, "cross_angle_offset_deg", ang)
+        if not self.cross_strips:
+            # 有效值契約：沒開交叉航帶時，cross_* 不會生效 ⇒ 設了非預設值就是「會被靜默忽略的值」，拒絕
+            off = [f"{k}={getattr(self, k)!r}" for k, d in _CROSS_DEFAULTS.items() if getattr(self, k) != d]
+            if off:
+                raise MissionInputError(
+                    "MappingModeConfig：cross_strips=False（沒開交叉航帶）卻設了 " + "、".join(off)
+                    + " ⇒ 這些值不會生效；要用就把 cross_strips 設 True，不用就保持預設")
+
+    def to_dict(self) -> dict[str, Any]:
+        d = {f.name: getattr(self, f.name) for f in fields(self)}
+        if not self.cross_strips:
+            # 沒開交叉航帶 ⇒ cross_* 必為預設（__post_init__ 已擋），不列 ⇒ 與加入交叉航帶前的輸出逐位元相同
+            for k in ("cross_strips", *_CROSS_DEFAULTS):
+                d.pop(k, None)
+        return d
+
+
+#: 交叉航帶參數的預設值（`MappingModeConfig.cross_strips=False` 時必須維持這些值）
+_CROSS_DEFAULTS: dict[str, float] = {"cross_fraction": 0.2, "cross_alt_offset_m": 0.0, "cross_angle_offset_deg": 90.0}
 
 
 @dataclass(frozen=True, slots=True)
@@ -837,6 +973,9 @@ class MissionInputs:
             if u.start_site_id is not None and u.start_site_id not in site_ids:
                 raise MissionInputError(
                     f"UAVInstance[{u.uav_id}].start_site_id={u.start_site_id!r} 不是已知站點 {site_ids}")
+            if u.recovery_site_id is not None and u.recovery_site_id not in site_ids:
+                raise MissionInputError(
+                    f"UAVInstance[{u.uav_id}].recovery_site_id={u.recovery_site_id!r} 不是已知站點 {site_ids}")
         # 酬載需求
         pr = self.payload_reqs
         if pr is None:
@@ -887,6 +1026,11 @@ class MissionInputs:
             if self.recovery_site_id not in site_ids:
                 raise MissionInputError(f"recovery_site_id={self.recovery_site_id!r} 不是已知站點 {site_ids}")
 
+    @property
+    def mapping_mode(self) -> "MappingModeConfig | None":
+        """建圖模式設定；表 2 本身沒有這一項 ⇒ 恆為 None（:class:`MappingMissionInputs` 覆寫為欄位）。"""
+        return None
+
     # -- 查詢 -----------------------------------------------------------------
     @property
     def sites(self) -> dict[str, Site]:
@@ -910,6 +1054,13 @@ class MissionInputs:
     def start_site_id_of(self, uav_id: str) -> str:
         """該機起飛站點 id：`UAVInstance.start_site_id` → home（未設定時；既有情境行為不變）。"""
         return self.uav_by_id(uav_id).start_site_id or self.home.site_id
+
+    def recovery_site_id_of(self, uav_id: str) -> str:
+        """該機**回收／降落**站點 id：`UAVInstance.recovery_site_id` → 全域 recovery（D40）。
+
+        ⚠ 未設定時逐位元等於既有行為 —— 這是 vendored 修改 #4 的退回保證。
+        """
+        return self.uav_by_id(uav_id).recovery_site_id or self.recovery_site.site_id
 
     def start_site(self, uav_id: str) -> Site:
         """該機起飛站點 :class:`Site`（未設定 `start_site_id` → home）。"""
@@ -962,6 +1113,33 @@ class MissionInputs:
 
     def to_json(self, indent: int | None = None) -> str:
         return json.dumps(self.to_dict(), indent=indent, ensure_ascii=False)
+
+
+@dataclass(frozen=True, slots=True)
+class MappingMissionInputs(MissionInputs):
+    """:class:`MissionInputs`（表 2）＋ 建圖模式 :class:`MappingModeConfig`。
+
+    表 2 的欄位清單是鎖死的（tests/hv_dccpp/test_mission.py::test_table2_fields_present），所以建圖模式不塞進
+    MissionInputs，而是用這個子類別承載；`build_context`／`preflight`／`plan_mission` 一律讀 ``inputs.mapping_mode``
+    （基底類別恆為 None），其餘流程與 MissionInputs 完全相同。`to_dict` 多一個 ``"mapping_mode"`` 鍵，
+    `load_mission` 看到該鍵（非 null）就建這個類別。
+    """
+    mapping_mode: MappingModeConfig | None = None
+
+    def __post_init__(self) -> None:
+        MissionInputs.__post_init__(self)
+        mm = self.mapping_mode
+        if isinstance(mm, Mapping):
+            mm = _build(MappingModeConfig, mm, "mapping_mode")
+        if mm is not None and not isinstance(mm, MappingModeConfig):
+            # 不認得的型別大聲拒絕，而不是默默當成「沒開建圖模式」
+            raise MissionInputError(f"mapping_mode 須為 MappingModeConfig 或 None，得 {type(mm).__name__}")
+        object.__setattr__(self, "mapping_mode", mm)
+
+    def to_dict(self) -> dict[str, Any]:
+        d = MissionInputs.to_dict(self)
+        d["mapping_mode"] = None if self.mapping_mode is None else self.mapping_mode.to_dict()
+        return d
 
 
 # ---------------------------------------------------------------------------
@@ -1017,6 +1195,16 @@ class PlannerConfig:
     t_sep_ldg_s: float = 90.0
     idp_branching: Literal["event", "lockstep"] = "event"
     transfer_types: tuple[str, ...] = ("rev", "same")
+    # ⚠⚠⚠ vendored 修改 #3（見 docs/hv_dccpp/VENDOR.md）：全隊起飛時刻全域重排。
+    #   `repair` 是逐衝突貪婪、`_compact_makespan` 一次只平移一機 ⇒ 協同平移做不到。
+    #   實測 HV4SITL9 起飛被排成 0/289.1/623.9/1265.6 s（makespan 的 70.3%），而
+    #   驅動它的 6 筆衝突**全部**是同一場坪的**降落**走廊排隊。同一組門檻下重排
+    #   可到 1461.3 s。關掉（False）即逐位元退回上游行為。
+    global_reschedule: bool = True
+    reschedule_step_s: float = 10.0
+    reschedule_objective: Literal["landing", "scan"] = "landing"
+    """`landing`＝規格 Eq.(1) 的 min-max 落地時刻；`scan`＝最快**掃完**（相機最後開著的時刻）。"""
+    reschedule_max_evals: int = 20000
     # ⚠⚠⚠ vendored 修改 #2（見 docs/hv_dccpp/VENDOR.md）。
     #   估計層（decompose.exact_time / allocate.sweep_order）原本用**固定**的
     #   skip-k 序列，而規劃層（planner IDP beam）是**搜尋**的 ⇒ 估計器系統性悲觀，
@@ -1326,6 +1514,13 @@ class UAVPlan:
     cruise_equiv_km: float
     orbits_inserted: int
     warnings: list[str]
+    takeoff_site: str = ""
+    """起飛站 site_id（vendored 修改 #8）。``landing_site`` 的對稱項。
+
+    ⚠⚠⚠ 這不是裝飾用的：``deconflict`` 的起降走廊豁免要靠它判斷「兩機是否在**同一站**」。
+    空字串 ⇒ 退回比場坪**座標**（≤ :data:`~hv_dccpp.deconflict.SAME_PAD_TOL_M`），而那個
+    proxy 在「兩個不同的站相距 < 50 m」時會**錯誤地**豁免掉真違規（實測見該常數的說明）。
+    正式規劃路徑一律由 :func:`~hv_dccpp.planner.build_uav_plan` 填入。"""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -1337,6 +1532,7 @@ class UAVPlan:
             "energy_used_wh": self.energy_used_wh, "energy_margin_wh": self.energy_margin_wh,
             "distance_m": self.distance_m, "cruise_equiv_km": self.cruise_equiv_km,
             "orbits_inserted": int(self.orbits_inserted), "warnings": list(self.warnings),
+            "takeoff_site": self.takeoff_site,
         }
 
     @classmethod
@@ -1511,7 +1707,7 @@ def _uav_to_dict(u: UAVInstance) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 _TOP_KEYS = {"home", "alternates", "areas", "dem", "obstacles", "wind", "fleet", "payload_reqs", "c2", "airspace",
-             "weather_thresholds", "weather_obs", "t0_epoch_s", "platform_overrides", "recovery_site_id"}
+             "weather_thresholds", "weather_obs", "t0_epoch_s", "platform_overrides", "recovery_site_id", "mapping_mode"}
 _META_KEYS = {"name", "description", "version", "meta", "metadata", "$schema", "notes", "comment", "type", "title"}
 _GEOJSON_TYPES = {"Feature", "FeatureCollection", "Point", "LineString", "Polygon", "MultiPolygon", "MultiPoint",
                   "MultiLineString"}
@@ -2058,10 +2254,13 @@ def load_mission(obj: dict | str | os.PathLike) -> MissionInputs:
     obs_w = data["weather_obs"]
     weather_obs = obs_w if isinstance(obs_w, WeatherObs) else _build(WeatherObs, obs_w, "weather_obs")
     ov = data.get("platform_overrides") or {}
-    return MissionInputs(
+    kw = dict(
         home=home, alternates=alternates, areas=areas, dem=dem, obstacles=obstacles, wind=wind, fleet=fleet,
         payload_reqs=payload_reqs, c2=c2, airspace=airspace, weather_thresholds=thresholds, weather_obs=weather_obs,
         t0_epoch_s=float(data.get("t0_epoch_s", 0.0) or 0.0),
         platform_overrides={str(k): dict(v) for k, v in ov.items()} if isinstance(ov, Mapping) else ov,
         recovery_site_id=data.get("recovery_site_id"),
     )
+    if data.get("mapping_mode") is not None:                 # 建圖模式（MappingMissionInputs）
+        return MappingMissionInputs(**kw, mapping_mode=data["mapping_mode"])
+    return MissionInputs(**kw)

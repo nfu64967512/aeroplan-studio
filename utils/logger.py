@@ -24,6 +24,34 @@ LOG_LEVELS = {
 
 
 # ==========================================
+# 日誌檔目錄（環境變數開關）
+# ==========================================
+# 預設寫進 <repo>/data/logs —— 那是使用者 GUI 的真日誌。任何 import 專案模組的
+# pytest／診斷腳本都會經由 get_logger() 寫進去（2026-10-07 一次診斷追加了 124 行假紀錄），
+# 所以測試與腳本要用下列環境變數把它關掉或導走。GUI 正常啟動時兩個都不會設。
+#   AEROPLAN_NO_FILE_LOG   設為 0/false/no/off/空字串以外的任何值 ⇒ 完全不掛 FileHandler
+#   AEROPLAN_LOG_DIR       取代日誌目錄（連呼叫端明傳的 log_dir 一起取代）
+NO_FILE_LOG_ENV = 'AEROPLAN_NO_FILE_LOG'
+LOG_DIR_ENV = 'AEROPLAN_LOG_DIR'
+DEFAULT_LOG_DIR = os.path.join(Path(__file__).resolve().parent.parent, 'data', 'logs')
+
+
+def resolve_log_dir(log_dir: Optional[str] = None) -> Optional[str]:
+    """
+    決定 FileHandler 要寫的目錄
+
+    優先序: AEROPLAN_NO_FILE_LOG > AEROPLAN_LOG_DIR > 參數 log_dir > DEFAULT_LOG_DIR
+
+    返回:
+        目錄路徑；None 表示不掛 FileHandler
+    """
+    # 認不得的值一律當「關」—— 寧可少寫一份日誌，也不要讓測試寫進使用者的真日誌
+    if os.environ.get(NO_FILE_LOG_ENV, '').strip().lower() not in ('', '0', 'false', 'no', 'off'):
+        return None
+    return os.environ.get(LOG_DIR_ENV) or log_dir or DEFAULT_LOG_DIR
+
+
+# ==========================================
 # 日誌格式定義
 # ==========================================
 class LogFormatter(logging.Formatter):
@@ -111,22 +139,21 @@ class Logger:
             self.logger.addHandler(console_handler)
         
         # 文件處理器
-        if log_to_file:
-            if log_dir is None:
-                # 使用預設日誌目錄
-                project_root = Path(__file__).parent.parent
-                log_dir = os.path.join(project_root, 'data', 'logs')
-            
+        # 實際寫入的檔案路徑（沒掛 FileHandler 時為 None），供呼叫端與測試核對生效值
+        self.log_file: Optional[str] = None
+        log_dir = resolve_log_dir(log_dir) if log_to_file else None
+        if log_dir is not None:
             # 確保日誌目錄存在
             os.makedirs(log_dir, exist_ok=True)
-            
+
             # 建立日誌文件（按日期命名）
             log_filename = f"{name}_{datetime.now().strftime('%Y%m%d')}.log"
             log_filepath = os.path.join(log_dir, log_filename)
-            
+
             file_handler = logging.FileHandler(log_filepath, encoding='utf-8')
             file_handler.setFormatter(LogFormatter(use_color=False))
             self.logger.addHandler(file_handler)
+            self.log_file = log_filepath
         
         # 防止日誌向上傳播
         self.logger.propagate = False

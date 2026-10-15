@@ -113,12 +113,12 @@ def run_planner(use_hv: bool, polys, n_a, n_b, *, alt, pitch, overlap,
     drones, cls = _drones(n_a, n_b, pitch)
     c = SwarmCoordinator()
     if use_hv:
-        c.use_hv_dccpp = True
+        c.use_harvest = True
         c.hv_class_of = lambda d: cls[int(d["drone_id"])]
         c.hv_home = HOME_LL
         c.hv_wind = wind
         c.hv_fence_zones = []
-        c.hv_params = {"hfov_deg": hfov, "vfov_deg": vfov, "hv_c2_range_km": 25.0,
+        c.harvest_params = {"hfov_deg": hfov, "vfov_deg": vfov, "hv_c2_range_km": 25.0,
                        "hv_waiver_max_agl_m": 200.0, "hv_dem_margin_m": 3000.0}
     try:
         res = c.plan_coverage_dccpp(areas=polys_to_areas(polys), drones=drones,
@@ -338,12 +338,12 @@ def run_planner_nfz(use_hv: bool, polys, n_a, n_b, *, alt, pitch, overlap, nfz_p
     drones, cls = _drones(n_a, n_b, pitch)
     c = SwarmCoordinator()
     if use_hv:
-        c.use_hv_dccpp = True
+        c.use_harvest = True
         c.hv_class_of = lambda d: cls[int(d["drone_id"])]
         c.hv_home = HOME_LL
         c.hv_wind = kw.get("wind", (5.0, 270.0))
         c.hv_fence_zones = make_fence_zones(nfz_polys)
-        c.hv_params = {"hfov_deg": kw.get("hfov", 60.0), "vfov_deg": kw.get("vfov", 45.0),
+        c.harvest_params = {"hfov_deg": kw.get("hfov", 60.0), "vfov_deg": kw.get("vfov", 45.0),
                        "hv_c2_range_km": 25.0, "hv_waiver_max_agl_m": 200.0,
                        "hv_dem_margin_m": 3000.0}
     try:

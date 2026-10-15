@@ -1,4 +1,4 @@
-# HV-DCCPP 設計文件（實作／資料流／即時性優先版）
+# HARVEST 設計文件（實作／資料流／即時性優先版）
 
 Heterogeneous-VTOL Dynamic Complete Coverage Path Planning：Pioneer PNP（構型 A）+ HERO PNP（構型 B）兩構型 lift-and-cruise 4+1 VTOL 群飛偵查路徑演算法。基礎：Wang et al. 2025, *Defence Technology* 47:197–215（以下簡稱「論文」）。本文件所有數值以 `platform_params.md` 表 1／表 2 為權威來源；「暫定／待填入」項目一律做成可設定參數並標記 `provisional`。
 

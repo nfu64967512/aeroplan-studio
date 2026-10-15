@@ -43,6 +43,19 @@ from scripts.hv_sitl_flight import (  # noqa: E402
 from scripts.hv_sitl_scenarios import HOME, SCENARIOS, Scenario  # noqa: E402
 
 SPEEDUP = float(os.environ.get("HV_SPEEDUP", "5"))
+# ── SITL 起始埠 ──────────────────────────────────────────────────────
+#   ⚠⚠⚠ ArduPlane 的 `--instance N` 是「所有埠都加 10·N」，起始 5760。
+#   這台機器上另一個 session 會跑 WSL 的 SITL 群，`wslrelay.exe` 把
+#   5760/5770/5780/5790 從 WSL 轉發到 Windows localhost ⇒ 撞到時我們的
+#   ArduPlane 起得來，但 client 連到的是**別人的載具**，症狀是
+#   「90 s 內無載具心跳」，看起來像我們的 SITL 壞了（HV4SITL10 第一次就這樣）。
+#   ⇒ 預設整段錯開到 **6760**（instance 100），與標準埠段完全分離。
+_SITL_PORT0 = 5760                       # ArduPlane 的內建起始埠，不可改
+BASE_PORT = int(os.environ.get("HV_BASE_PORT", "6760"))
+if BASE_PORT < _SITL_PORT0 or (BASE_PORT - _SITL_PORT0) % 10:
+    raise SystemExit(f"HV_BASE_PORT 必須 ≥ {_SITL_PORT0} 且為 10 的倍數偏移，收到 {BASE_PORT}")
+INSTANCE_OFFSET = int(os.environ.get("HV_INSTANCE_OFFSET",
+                                     str((BASE_PORT - _SITL_PORT0) // 10)))
 ALTERNATES = [(23.972571, 120.90)]
 
 CHECK_PARAMS = [
@@ -240,7 +253,9 @@ def launch(sc: Scenario, hv) -> list[dict]:
         _n, cls, sysid, *_ = sc.fleet[int(drone_id) - 1]
         sysid_of[uav_id] = (sysid, cls)
     procs, lines = [], []
-    for i, uav in enumerate(sorted(hv.last_plan.plans)):
+    # 埠段錯開的理由見檔頭 BASE_PORT。
+    for j, uav in enumerate(sorted(hv.last_plan.plans)):
+        i = j + INSTANCE_OFFSET
         sysid, cls = sysid_of[uav]
         work = _instance_dir(i)
         for junk in ("eeprom.bin", "mav.parm"):
@@ -265,7 +280,7 @@ def launch(sc: Scenario, hv) -> list[dict]:
         proc = subprocess.Popen(cmd, cwd=str(work),
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         procs.append({"uav": uav, "cls": cls, "sysid": sysid, "instance": i,
-                      "port": 5760 + 10 * i, "pid": proc.pid})
+                      "port": _SITL_PORT0 + 10 * i, "pid": proc.pid})
         time.sleep(1.0)
     (out / "sitl_cmdlines.txt").write_text("\n".join(lines), encoding="utf-8")
     return procs

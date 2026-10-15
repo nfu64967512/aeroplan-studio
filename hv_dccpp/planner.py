@@ -19,15 +19,17 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Hashable, Iterable, Mapping, Sequence
 
 import numpy as np
+import shapely
 
 from .allocate import AllocationResult, Team, allocate
 from .altitude import CorridorResult, PathSegment2D, build_3d, landing_corridor, layering, takeoff_corridor
 from .context import MissionContext, build_context
 from .costs import CostCache, PathCost
 from .deconflict import CorridorSchedule, check_separation, repair, spatially_exclusive
-from .decompose import altitude_band, build_strips, decompose_area, exact_time, residual_candidates, resolve_sensor
+from .decompose import (CrossSet, altitude_band, build_strips, decompose_area, exact_time, residual_candidates,
+                        resolve_sensor)
 from .dubins import DubinsPath, Pose, dubins_path
-from .geometry import Cell, Strip
+from .geometry import Cell, Strip, is_cross_strip
 from .mission import (FeasibilityReport, MissionInputs, MissionPlan, Mode, Phase, PlannerConfig, UAVInstance, UAVPlan,
                       UAVState, Waypoint)
 from .platform import EnergyModel, PlatformSpec
@@ -923,10 +925,21 @@ def beam_idp(team: Team, strips: dict[str, Strip], cache: CostCache, models: dic
 # ---------------------------------------------------------------------------
 # ENERGY_SAFE_CHECK、返航附加、能量修復（規格 §5.5、§10.5、D40）
 # ---------------------------------------------------------------------------
-def _site_order(cache: CostCache, cls: str, l: int, idx: int, recovery: str | None) -> list[str]:
+def _site_order(cache: CostCache, cls: str, l: int, idx: int, recovery: str | None,
+                preferred: str | None = None) -> list[str]:
+    """回收站候選順序。``preferred``（vendored #4 的逐機回收站）插到最前面。
+
+    ⚠⚠ 為什麼要「插到最前面」而不是「只回傳它」：`append_rtb` 取第一個**能量可行**者，
+    所以偏好站點若吃不下，仍會自動退回全域 recovery 與其他備降點 —— 指派不會把任務打死。
+    ⚠ 反過來說，這也是為什麼「只是宣告偏好」不保證真的落在那裡；要驗證有沒有生效，
+    必須讀回 `UAVPlan.landing_site`，不能只看有沒有傳參數。
+    """
     others = [s for (c, s) in cache.rtb if c == cls and s != recovery]
     others.sort(key=lambda s: float(cache.rtb[(cls, s)][l, idx]))
-    return ([recovery] if recovery is not None and (cls, recovery) in cache.rtb else []) + others
+    base = ([recovery] if recovery is not None and (cls, recovery) in cache.rtb else []) + others
+    if preferred is None or (cls, preferred) not in cache.rtb:
+        return base
+    return [preferred] + [s for s in base if s != preferred]
 
 
 def _rtb_pathcost(cache: CostCache, cls: str, seq: UAVSequence, site: str) -> PathCost | None:
@@ -1071,8 +1084,18 @@ def append_rtb(seq: UAVSequence, ctx: MissionContext, cache: CostCache, model: E
     l = cache.idx[cls][last.strip_id]
     idx = (last.dir + 1) // 2
     recovery = _recovery_site(cache, cls, ctx.recovery_site_id)
+    # vendored #4：逐機回收站偏好（`getattr` 是為了手搭 context 的向後相容）
+    pref: str | None = None
+    _fn = getattr(ctx, "recovery_site_id_of", None)
+    if callable(_fn):
+        try:
+            _p = _fn(seq.uav_id)
+        except Exception:                                   # pragma: no cover - 手搭 context
+            _p = None
+        if _p is not None and _p in getattr(ctx, "sites_enu", {}):
+            pref = str(_p)
     first_fail: EnergyInfeasible | None = None
-    for site in _site_order(cache, cls, l, idx, recovery):
+    for site in _site_order(cache, cls, l, idx, recovery, preferred=pref):
         pc = _rtb_pathcost(cache, cls, seq, site)
         if pc is None:
             continue
@@ -1213,7 +1236,7 @@ def build_uav_plan(uav: UAVInstance, seq: UAVSequence, takeoff: CorridorResult, 
     warnings = list(seq.warnings) + [f"profile:{v}" for v in stats.violations]
     plan = UAVPlan(uav.uav_id, cls, wps, [(it.strip_id, int(it.dir)) for it in seq.items], float(t0_s), float(t_arr),
                    float(t_land), site, float(e_used), float(e_end - model.reserve_wh()), dist,
-                   float(model.cruise_equiv_km(e_used)), 0, warnings)
+                   float(model.cruise_equiv_km(e_used)), 0, warnings, takeoff_site=start)
     return plan, stats
 
 
@@ -1256,6 +1279,524 @@ def _empty_plan(report: FeasibilityReport, timing: dict[str, float], cells: list
     return MissionPlan({}, 0.0, list(cells or []), {}, list(uncovered or []), report, timing, (0, 0, 0))
 
 
+def _mapping_plan_notes(plans: Mapping[str, UAVPlan], strips: Mapping[str, Strip], min_block_strips: int,
+                        uncovered: Sequence[tuple[str, str]] = ()) -> list[str]:
+    """建圖模式事後檢查（**不改計畫**，只出警告）：
+
+    * ``mapping_small_blocks``：實際飛的區塊（胞，含 A/B 殘帶子胞）條帶數 < min_block_strips（0 ＝ 不查）——
+      1–4 條的碎區塊與鄰塊只靠接縫連，削弱整體平差；
+    * ``mapping_altitude_nonuniform``：飛的條帶作業 AGL（h_op）不一致 ⇒ GSD 不一致；
+    * ``mapping_incomplete``：有未覆蓋項（建圖會有破洞；preflight 狀態不會因此變成 NO_GO）。
+    """
+    out: list[str] = []
+    if uncovered:
+        out.append(f"mapping_incomplete(未覆蓋 {len(uncovered)} 項：" + ", ".join(f"{k}:{r}" for k, r in uncovered)
+                   + "；拼出來的圖會有破洞)")
+    # 交叉航帶（建圖模式 cross_strips）另有 mapping_cross(...) 摘要：不算進區塊條帶數，也不算「主作業高度不一致」
+    flown = [strips[sid] for p in plans.values() for sid, _d in p.strips if sid in strips and not is_cross_strip(sid)]
+    if min_block_strips > 0:
+        cnt: dict[str, int] = {}
+        for s in flown:
+            cnt[s.cell_id] = cnt.get(s.cell_id, 0) + 1
+        small = sorted((cid, n) for cid, n in cnt.items() if n < min_block_strips)
+        if small:
+            out.append(f"mapping_small_blocks(< {min_block_strips} 條：" + ", ".join(f"{cid}={n}" for cid, n in small)
+                       + "；碎區塊削弱整體平差，分解未改)")
+    hs = [float(s.h_op_m) for s in flown]
+    if hs and max(hs) - min(hs) > 1.0:
+        out.append(f"mapping_altitude_nonuniform(作業 AGL {min(hs):.1f}–{max(hs):.1f} m ⇒ GSD 相差 {max(hs) / min(hs):.2f} 倍)")
+    return out
+
+
+# ---------------------------------------------------------------------------
+# 建圖模式：交叉航帶（MappingModeConfig.cross_strips；設計見 mission.MappingModeConfig docstring）
+# ---------------------------------------------------------------------------
+@dataclass(slots=True)
+class CrossPlacement:
+    """一組交叉航帶插進某架序列的結果（`plan_mission` 內部；`MissionPlan` 不帶，摘要寫進 `mapping_cross(...)` 警告）。"""
+    cs: CrossSet
+    where: str                      # "before" | "after"：在母區塊主條帶之前或之後
+    anchor: str                     # 緊鄰的主條帶 id
+    added_s: float                  # 快取估計之增加時間（轉場 + 作業；插入前後同一對端點的差）
+    order: list[tuple[str, int]]    # 交叉帶飛行順序與掃向
+
+
+def _rebuild_sequence(u: str, items: Sequence[tuple[str, int]], cache: CostCache, init: UAVState,
+                      site: str | None) -> UAVSequence:
+    """以 (strip_id, dir) 序列自 ``init`` 重算單機序列（時間、能量、轉場路徑）：與 Beam-IDP 同一套
+    `_apply_warm` → `_sequences_from` 算術（未改動的序列重算結果與 IDP 輸出相同）。"""
+    cls = cache.uav_cls[u]
+    root = _root_node((u,), {u: init}, np.zeros(cache.n_strips(cls), dtype=bool))
+    node = _apply_warm(root, u, list(items), cache)
+    return _sequences_from(node, cache, {u: init}, site, cache.strips.get(cls, {}))[u]
+
+
+_CROSS_EXACT_MAX_N = 12           # 交叉帶飛行順序：條帶數 ≤ 此值用精確 DP（子集 × 末條帶 × 掃向），其餘用候選序列
+
+
+def _cross_order_exact(xs: Sequence[int], f0: np.ndarray, g: np.ndarray, tr: np.ndarray, op: np.ndarray
+                       ) -> tuple[float, list[tuple[int, int]]]:
+    """精確開放路徑 DP（Held-Karp，節點 = (條帶, 掃向)，同一條帶兩個掃向共用子集位元）：f0 = 進入各節點（含作業）、
+    g = 自各節點離開；回傳 (最小總時間, [(快取索引, idx)])。n ≤ `_CROSS_EXACT_MAX_N`（2^12·24 狀態，numpy 向量化）。"""
+    n = len(xs)
+    N = 2 * n
+    node_m = np.repeat(np.asarray(xs, dtype=int), 2)
+    node_d = np.tile(np.array([0, 1]), n)
+    C = tr[node_m[:, None], node_m[None, :], 2 * node_d[:, None] + node_d[None, :]] + op[node_m, node_d][None, :]
+    strip_of = np.arange(N) // 2
+    C = np.where(strip_of[:, None] == strip_of[None, :], np.inf, C)
+    full = 1 << n
+    dp = np.full((full, N), np.inf)
+    par = np.full((full, N), -1, dtype=np.int16)
+    bit = (1 << strip_of).astype(np.int64)
+    dp[bit, np.arange(N)] = f0
+    cols = np.arange(N)
+    for mask in range(1, full):
+        row = dp[mask]
+        if not np.isfinite(row).any():
+            continue
+        cand = row[:, None] + C
+        bp = np.argmin(cand, axis=0)
+        best = cand[bp, cols]
+        sel = ((bit & mask) == 0) & np.isfinite(best)
+        if not sel.any():
+            continue
+        b = cols[sel]
+        nm = mask | bit[b]
+        better = best[b] < dp[nm, b]
+        if better.any():
+            dp[nm[better], b[better]] = best[b][better]
+            par[nm[better], b[better]] = bp[b][better]
+    tot = dp[full - 1] + g
+    j = int(np.argmin(tot))
+    total = float(tot[j])
+    if not math.isfinite(total):
+        return _INF, []
+    seq: list[int] = []
+    mask = full - 1
+    while j >= 0:
+        seq.append(j)
+        pj = int(par[mask, j])
+        mask ^= int(bit[j])
+        j = pj
+    seq.reverse()
+    return total, [(int(node_m[k]), int(node_d[k])) for k in seq]
+
+
+#: 交叉帶進入／離開段「水平距離不夠完成升降」的罰時（秒）：DP 會避開；全部選項都犯規時照選最佳者並警告
+_CROSS_VERT_PENALTY_S = 1.0e6
+
+
+def _cross_vert_penalty(L: np.ndarray, dz: np.ndarray, vert: tuple[float, ...] | None) -> np.ndarray:
+    """升降需要的水平距離 |dz|/tanγ（爬升 γ_c、下降 γ_d）> 路徑長 L ⇒ 罰時，否則 0。``vert`` None ⇒ 不檢查。"""
+    if vert is None:
+        return np.zeros_like(np.asarray(L, dtype=float))
+    tan_c, tan_d = vert[0], vert[1]
+    dz = np.asarray(dz, dtype=float)
+    need = np.where(dz > 0, dz / max(tan_c, 1e-9), -dz / max(tan_d, 1e-9))
+    return np.where(np.asarray(L, dtype=float) + 1e-6 < need - 1e-6, _CROSS_VERT_PENALTY_S, 0.0)
+
+
+def _cross_order(xs: Sequence[int], prev: tuple[int, int] | None, nxt: tuple[int, int] | None, cache: CostCache,
+                 cls: str, u: str, site: str | None, vert: tuple[float, ...] | None = None
+                 ) -> tuple[float, list[tuple[int, int]]]:
+    """交叉帶（快取索引 xs）插在 prev 與 nxt 之間的最省時飛法；prev=None ＝ 自起飛走廊進入、nxt=None ＝ 返航
+    （回收點 ``site``）。n ≤ `_CROSS_EXACT_MAX_N` → 精確 DP（:func:`_cross_order_exact`）；否則順序候選 =
+    skip-k／折疊蛇形（`decompose._seq_candidates`）＋順序／反序，掃向逐帶 DP（2 狀態）。
+
+    ``vert`` = (tanγ_c, tanγ_d, h_transit)：前後轉場的路徑若短於完成高度差所需的水平距離（build_3d 不在轉場插
+    盤旋；交叉帶作業段的高度上界已收緊（altitude.sample_bounds），路徑太短 ⇒ 包絡不可行），加
+    :data:`_CROSS_VERT_PENALTY_S`；起飛進入段（prev=None）與返航段（nxt=None）的目標高度是過境高度 h_transit，
+    以 |h_x − h_transit| 與該段路徑長判定。
+    回傳 (總時間 = 進入 + Σ作業 + Σ轉場 + 離開（含罰時）, [(快取索引, idx)])；不可行 → (inf, [])。"""
+    from .decompose import _seq_candidates
+    from .dubins import skip_k
+    tr = cache.tr[cls]
+    op = cache.op[cls]
+    n = len(xs)
+    if n == 0:
+        return _INF, []
+    xa = np.asarray(xs, dtype=int)
+    ent0 = cache.entry.get(u)
+    rtb0 = cache.rtb.get((cls, site)) if site is not None else None
+    tin = np.full((n, 2), _INF)                       # [i, d]：進入第 i 條（以 d 掃）之時間（含罰）
+    tout = np.zeros((n, 2))                           # [i, d]：自第 i 條（以 d 掃完）離開之時間（含罰）
+    for d in (0, 1):
+        if prev is None:
+            if ent0 is not None and ent0.shape[0] > int(xa.max()):
+                pen = 0.0
+                if vert is not None and len(vert) > 2 and u in cache.entry_len:
+                    # 起飛後的進入段：build_3d 的 ENTRY 目標高度是過境高度 h_transit（交叉帶作業段上界已收緊，
+                    #   altitude.sample_bounds）⇒ 進入路徑要夠長才能在帶起點前完成 h_transit → h_x 的升降
+                    hx = np.array([float(cache.strips[cls][cache.strip_ids[cls][m]].h_op_m) for m in xa])
+                    pen = _cross_vert_penalty(cache.entry_len[u][xa, d], hx - float(vert[2]), vert)
+                tin[:, d] = ent0[xa, d] + pen
+        else:
+            k = 2 * prev[1] + d
+            tin[:, d] = tr[prev[0], xa, k] + _cross_vert_penalty(cache.tr_len[cls][prev[0], xa, k],
+                                                                 cache.tr_dz[cls][prev[0], xa, k], vert)
+        if nxt is None:
+            tout[:, d] = rtb0[xa, d] if rtb0 is not None else 0.0
+            if rtb0 is not None and vert is not None and len(vert) > 2 and (cls, site) in cache.rtb_len:
+                # 返航段同理：自交叉高度回到 h_transit 要在返航路徑上完成
+                hx = np.array([float(cache.strips[cls][cache.strip_ids[cls][m]].h_op_m) for m in xa])
+                tout[:, d] += _cross_vert_penalty(cache.rtb_len[(cls, site)][xa, d], float(vert[2]) - hx, vert)
+        else:
+            k = 2 * d + nxt[1]
+            tout[:, d] = tr[xa, nxt[0], k] + _cross_vert_penalty(cache.tr_len[cls][xa, nxt[0], k],
+                                                                 cache.tr_dz[cls][xa, nxt[0], k], vert)
+    if n <= _CROSS_EXACT_MAX_N:
+        f0 = np.empty(2 * n)
+        g = np.empty(2 * n)
+        for d in (0, 1):
+            f0[d::2] = tin[:, d] + op[xa, d]
+            g[d::2] = tout[:, d]
+        return _cross_order_exact(xs, f0, g, tr, op)
+    pos = {int(m): i for i, m in enumerate(xa)}
+    s_mean = float(np.mean([cache.strips[cls][cache.strip_ids[cls][m]].spacing_m for m in xs]))
+    R = float(cache.R_eff.get(cls, 0.0))
+    kk = skip_k(s_mean, R) if s_mean > 0 and R > 0 else 1
+    seen: set[tuple[int, ...]] = set()
+    orders: list[list[int]] = []
+    for o in _seq_candidates(n, kk) + [list(range(n))]:
+        for oo in (list(o), list(reversed(o))):
+            t = tuple(oo)
+            if t not in seen:
+                seen.add(t)
+                orders.append(oo)
+    best: tuple[float, list[tuple[int, int]]] = (_INF, [])
+    for o in orders:
+        ms = [int(xs[j]) for j in o]
+        c = np.array([float(tin[pos[ms[0]], d]) + float(op[ms[0], d]) for d in (0, 1)])
+        back: list[tuple[int, int]] = []
+        for a, b in zip(ms[:-1], ms[1:]):
+            nc = np.empty(2)
+            arg = [0, 0]
+            for db in (0, 1):
+                v0 = c[0] + float(tr[a, b, db])
+                v1 = c[1] + float(tr[a, b, 2 + db])
+                j = 0 if v0 <= v1 else 1
+                arg[db] = j
+                nc[db] = (v0 if j == 0 else v1) + float(op[b, db])
+            back.append((arg[0], arg[1]))
+            c = nc
+        tot = np.array([c[d] + float(tout[pos[ms[-1]], d]) for d in (0, 1)])
+        d_last = 0 if tot[0] <= tot[1] else 1
+        total = float(tot[d_last])
+        if not math.isfinite(total) or total >= best[0] - 1e-9:
+            continue
+        dirs = [d_last]
+        for arg in reversed(back):
+            dirs.append(arg[dirs[-1]])
+        dirs.reverse()
+        best = (total, list(zip(ms, dirs)))
+    return best
+
+
+def _cross_base_cost(prev: tuple[int, int] | None, nxt: tuple[int, int] | None, cache: CostCache, cls: str, u: str,
+                     site: str | None) -> float:
+    """插入前 prev → nxt 之直接時間（進入／轉場／返航；與 :func:`_cross_order` 同一套快取表）。"""
+    if prev is None and nxt is None:
+        return 0.0
+    if prev is None:
+        ent = cache.entry.get(u)
+        return float(ent[nxt[0], nxt[1]]) if ent is not None else _INF
+    if nxt is None:
+        rtb = cache.rtb.get((cls, site)) if site is not None else None
+        return float(rtb[prev[0], prev[1]]) if rtb is not None else 0.0
+    return float(cache.tr[cls][prev[0], nxt[0], 2 * prev[1] + nxt[1]])
+
+
+def _insert_cross_strips(seqs: dict[str, UAVSequence], ctx: MissionContext, dc: Any, cfg: PlannerConfig,
+                         cache: CostCache, cells_by_id: Mapping[str, Cell], fleet: Sequence[UAVInstance],
+                         init_states: Mapping[str, UAVState], t0_of: Mapping[str, float], recovery: str | None,
+                         mapping: Any, uncovered: list[tuple[str, str]], warnings: list[str]
+                         ) -> tuple[dict[str, list[CrossPlacement]], str | None]:
+    """建圖模式交叉航帶（`MappingModeConfig.cross_strips`）：Beam-IDP／RTB／leftover 再拍賣**之後**、組裝之前。
+
+    1. 每架、每個它實際飛的區塊（同一母胞的主條帶）→ `decompose.build_cross_set`（中央橫帶、≥ 2 條、高度檢查）；
+       高度不合法 → 回傳 (…, 拒絕訊息) ⇒ 呼叫端整份 NO_GO；放不下／碰禁區 → `mapping_cross_skipped(...)`。
+    2. 全部交叉帶一次進 `CostCache`（每構型一次 `add_strips`：作業、轉場、進入、返航、能量預算）。
+    3. 逐組插進**同一架**序列：位置只考慮母區塊每段主條帶之前或之後，取 `_cross_order` 增加時間最少者。
+    4. `_rebuild_sequence` 重算整條序列 → `append_rtb`（能量安全檢查）；不通過 ⇒ 自最後插入的一組起逐組退回，
+       退回的交叉帶列入 ``uncovered``（``cross_energy_infeasible``）並警告 ⇒ 建圖上傳閘門擋下。
+
+    回傳 ({uav: [CrossPlacement]}, None) 或 ({}, 拒絕訊息)。``seqs``／``uncovered``／``warnings`` 就地更新。"""
+    from .decompose import CrossStripRefused, build_cross_set
+    sets_by_uav: dict[str, list[CrossSet]] = {}
+    skipped: list[str] = []
+    per_cell: dict[str, int] = {}
+    for u in sorted(seqs):
+        sq = seqs[u]
+        if not sq.items:
+            continue
+        cls = sq.cls or cache.uav_cls[u]
+        main = [cache.strips[cls][it.strip_id] for it in sq.items if not is_cross_strip(it.strip_id)]
+        for cid in dict.fromkeys(st.cell_id for st in main):
+            parent = cells_by_id.get(cid)
+            if parent is None:
+                skipped.append(f"{cid}@{u}: 找不到母胞")
+                continue
+            ms = [st for st in main if st.cell_id == cid]
+            base = len(parent.strips.get(cls, [])) + per_cell.get(cid, 0)
+            try:
+                res = build_cross_set(parent, cls, ms, dc, uav_id=u, fraction=float(mapping.cross_fraction),
+                                      alt_offset_m=float(mapping.cross_alt_offset_m),
+                                      angle_offset_deg=float(mapping.cross_angle_offset_deg), index_base=base)
+            except CrossStripRefused as exc:
+                return {}, str(exc)
+            if isinstance(res, str):
+                skipped.append(res)
+                continue
+            per_cell[cid] = per_cell.get(cid, 0) + len(res.strips)
+            sets_by_uav.setdefault(u, []).append(res)
+    if skipped:
+        warnings.append("mapping_cross_skipped(" + "；".join(skipped) + "；這些區塊沒有交叉航帶)")
+    by_cls: dict[str, list[Strip]] = {}
+    for u in sorted(sets_by_uav):
+        for cs in sets_by_uav[u]:
+            found = resolve_sensor(dc, cs.cls, cells_by_id[cs.cell_id].payload_req_id)
+            for st in cs.strips:
+                by_cls.setdefault(cs.cls, []).append(st)
+                if found is not None:
+                    cache.strip_sensors[st.strip_id] = found[0]
+    for c in sorted(by_cls):
+        cache.add_strips(c, by_cls[c], list(fleet), dict(init_states), dict(cache.sites), ctx)
+    placed: dict[str, list[CrossPlacement]] = {}
+    for u in sorted(sets_by_uav):
+        sq = seqs[u]
+        cls = sq.cls or cache.uav_cls[u]
+        model = ctx.models.get(u) or ctx.models_rep[cls]
+        site = sq.landing_site if (cls, sq.landing_site) in cache.rtb else _recovery_site(cache, cls, recovery)
+        idx = cache.idx[cls]
+        L: list[tuple[str, int]] = [(it.strip_id, int(it.dir)) for it in sq.items]
+
+        def _ix(item: tuple[str, int]) -> tuple[int, int]:
+            return int(idx[item[0]]), (int(item[1]) + 1) // 2
+
+        _spec = ctx.specs[cls]
+        from .altitude import _h_transit_of
+        vert = (math.tan(float(_spec.gamma_c_auw(model.auw_kg))), math.tan(float(_spec.gamma_d())),
+                float(_h_transit_of(ctx, cls, _spec)))
+
+        plc: list[CrossPlacement] = []
+        for cs in sets_by_uav[u]:
+            xs = [int(idx[s.strip_id]) for s in cs.strips]
+            runs: list[tuple[int, int]] = []
+            for i, (sid, _d) in enumerate(L):
+                if is_cross_strip(sid) or cache.strips[cls][sid].cell_id != cs.cell_id:
+                    continue
+                if runs and runs[-1][1] == i - 1:
+                    runs[-1] = (runs[-1][0], i)
+                else:
+                    runs.append((i, i))
+            best: tuple[tuple[float, int, int], str, int, list[tuple[int, int]]] | None = None
+            for i0, i1 in runs:
+                for where, p in (("before", i0), ("after", i1 + 1)):
+                    prev = _ix(L[p - 1]) if p > 0 else None
+                    nxt = _ix(L[p]) if p < len(L) else None
+                    total, order = _cross_order(xs, prev, nxt, cache, cls, u, site, vert=vert)
+                    base = _cross_base_cost(prev, nxt, cache, cls, u, site)
+                    if not (math.isfinite(total) and math.isfinite(base)) or not order:
+                        continue
+                    key = (total - base, 0 if where == "after" else 1, p)
+                    if best is None or key < best[0]:
+                        best = (key, where, p, order)
+            if best is None:
+                uncovered.extend((sid, "cross_insert_infeasible") for sid in cs.strip_ids)
+                warnings.append(f"mapping_cross_dropped({u}: {cs.cell_id} 的 {len(cs.strips)} 條交叉帶找不到可行的插入位置"
+                                "（轉場不可行），列入未覆蓋)")
+                continue
+            key, where, p, order = best
+            seg = [(cache.strip_ids[cls][m], -1 if i == 0 else 1) for m, i in order]
+            anchor = L[p - 1][0] if where == "after" else L[p][0]
+            L = L[:p] + seg + L[p:]
+            added = float(key[0])
+            n_pen = int(math.floor((added + 0.5 * _CROSS_VERT_PENALTY_S) / _CROSS_VERT_PENALTY_S))
+            if n_pen:
+                added -= n_pen * _CROSS_VERT_PENALTY_S
+                warnings.append(f"mapping_cross_altitude_change({u}: {cs.cell_id} 交叉帶 {cs.h_cross_m:g} m 與前後段高度差"
+                                "在進入／離開段來不及完成（build_3d 不在轉場插盤旋 ⇒ 升降延伸進交叉帶，該帶前段不在交叉高度）；"
+                                "206 觸發距離以該帶最低 AGL 計，前向重疊不低於規劃)")
+            plc.append(CrossPlacement(cs, where, anchor, added, seg))
+        init = replace(init_states[u], t_s=float(init_states[u].t_s) + float(t0_of.get(u, 0.0)))
+        out: UAVSequence | EnergyInfeasible | None = None
+        while True:
+            new = _rebuild_sequence(u, L, cache, init, site)
+            out = append_rtb(replace(new, cls=cls), ctx, cache, model, cfg)
+            if not isinstance(out, EnergyInfeasible):
+                break
+            if not plc:
+                out = None
+                break
+            drop = plc.pop()
+            gone = set(drop.cs.strip_ids)
+            L = [x for x in L if x[0] not in gone]
+            uncovered.extend((sid, "cross_energy_infeasible") for sid in drop.cs.strip_ids)
+            warnings.append(f"mapping_cross_dropped({u}: {drop.cs.cell_id} 的 {len(gone)} 條交叉帶 → 能量安全檢查不過"
+                            f"（缺 {float(out.deficit_wh):.1f} Wh @序列第 {out.seg_index} 項），列入未覆蓋 ⇒ 建圖上傳會被擋；"
+                            "可降低交叉航帶面積比例)")
+        if out is None:                                    # pragma: no cover - 原序列本來就過了 append_rtb
+            warnings.append(f"mapping_cross_dropped({u}: 重算後連原序列都不可行，保留原序列)")
+            continue
+        seqs[u] = out
+        if plc:
+            placed[u] = plc
+    return placed, None
+
+
+def _cross_energy_fallback(u: str, plan: UAVPlan, sq: UAVSequence, assemble: Any, placed: list[CrossPlacement],
+                           ctx: MissionContext, cache: CostCache, cfg: PlannerConfig, t0: float, recovery: str | None,
+                           uncovered: list[tuple[str, str]], warnings: list[str]) -> tuple[UAVPlan, UAVSequence]:
+    """組裝後以 `sim.check_energy`（validate 同一準則：沿途備降可達、承諾點 E(P_tc) ≥ r·E_nom + e_MA、落地餘量…）
+    複驗有交叉航帶的機；不過就自最後插入的一組起逐組退回（列入 ``uncovered``：``cross_energy_infeasible``）並重組。
+
+    為什麼需要：`append_rtb` 的能量安全檢查不含重飛（missed approach）能量 e_MA，validate 有 ⇒ 交叉帶把餘裕吃到
+    介於兩者之間時，規劃器照收、validate 卻不過（2×2 km、比例 0.2：B3 餘裕 4.3 Wh，E(P_tc) 156.7 < 158.5）。
+    原本就不過的（與交叉帶無關）不處理：退到沒有交叉帶為止。"""
+    from .sim import check_energy
+    cls = plan.cls
+    model = ctx.models.get(u) or ctx.models_rep[cls]
+    while placed:
+        viol = check_energy(plan, model, ctx, cache)
+        if not viol:
+            break
+        drop = placed.pop()
+        gone = set(drop.cs.strip_ids)
+        items = [(it.strip_id, int(it.dir)) for it in sq.items if it.strip_id not in gone]
+        base = cache.init_states[u]
+        init = replace(base, t_s=float(base.t_s) + float(t0))
+        site = sq.landing_site if (cls, sq.landing_site) in cache.rtb else _recovery_site(cache, cls, recovery)
+        new = append_rtb(replace(_rebuild_sequence(u, items, cache, init, site), cls=cls), ctx, cache, model, cfg)
+        uncovered.extend((sid, "cross_energy_infeasible") for sid in drop.cs.strip_ids)
+        warnings.append(f"mapping_cross_dropped({u}: {drop.cs.cell_id} 的 {len(gone)} 條交叉帶 → 組裝後能量複驗不過（"
+                        + "；".join(v.split("(")[0] if len(v) > 120 else v for v in viol[:2])
+                        + "），列入未覆蓋 ⇒ 建圖上傳會被擋；可降低交叉航帶面積比例)")
+        if isinstance(new, EnergyInfeasible):               # pragma: no cover - 退回一組反而不可行（理論上不會）
+            # 全部交叉帶都退回 ⇒ 回到 IDP 原序列（它過過 append_rtb）
+            rest = list(placed)
+            placed.clear()
+            allx = gone | {sid for pl in rest for sid in pl.cs.strip_ids}
+            for pl in rest:
+                uncovered.extend((sid, "cross_energy_infeasible") for sid in pl.cs.strip_ids)
+            warnings.append(f"mapping_cross_dropped({u}: 退回一組後重算仍不可行 ⇒ 其餘 {len(rest)} 組交叉帶一併退回)")
+            items = [(it.strip_id, int(it.dir)) for it in sq.items if it.strip_id not in allx]
+            new = append_rtb(replace(_rebuild_sequence(u, items, cache, init, site), cls=cls), ctx, cache, model, cfg)
+            if isinstance(new, EnergyInfeasible):
+                warnings.append(f"mapping_cross_dropped({u}: 連沒有交叉帶的原序列都重算不過；保留組裝結果，請看 validate)")
+                break
+        plan, sq = assemble(u, new)
+    return plan, sq
+
+
+def _cross_summary(placed: Mapping[str, Sequence[CrossPlacement]], mapping: Any) -> str:
+    """`mapping_cross(...)` 有效值摘要（逐機逐區塊）。"""
+    parts: list[str] = []
+    for u in sorted(placed):
+        for pl in placed[u]:
+            cs = pl.cs
+            km = sum(float(s.length_m) for s in cs.strips) / 1000.0
+            gsd = cs.h_cross_m / cs.h_main_m if cs.h_main_m > 0 else math.nan
+            parts.append(
+                f"{u}:{cs.cell_id} {len(cs.strips)} 條 {km:.2f} km、方向 {math.degrees(cs.beta_rad):.1f}°"
+                f"（主 {math.degrees(cs.alpha_main_rad):.1f}°）、高度 {cs.h_cross_m:g} m（主 {cs.h_main_m:g} m，GSD 比 {gsd:.3f}）、"
+                f"面積比例 {cs.fraction_effective:.3f}（目標 {cs.fraction_target:g}"
+                + ("；不足 2 條，已放寬到 2 條" if cs.widened_to_two else "") + f"）、成像 {cs.imaged_area_m2 / cs.block_area_m2:.3f}、"
+                f"{'接在' if pl.where == 'after' else '排在'} {pl.anchor} {'之後' if pl.where == 'after' else '之前'}、+{pl.added_s:.0f} s"
+                + (f"、{'；'.join(cs.notes)}" if cs.notes else ""))
+    head = (f"mapping_cross(交叉航帶：面積比例 {float(mapping.cross_fraction):g}、高度差 {float(mapping.cross_alt_offset_m):+g} m、"
+            f"夾角 {float(mapping.cross_angle_offset_deg):g}°；")
+    return head + ("；".join(parts) if parts else "沒有任何區塊排進交叉航帶") + ")"
+
+
+def _cross_airspace_note(plans: Mapping[str, UAVPlan], strips_all: Mapping[str, Strip],
+                         placed: Mapping[str, Sequence[CrossPlacement]]) -> str | None:
+    """`mapping_cross_airspace(...)`：實際飛的交叉帶足跡 ⊕ 交叉方向迴轉帶，與**他機獨占主條帶區塊**（他機主條帶足跡
+    扣掉本機主條帶足跡）的重疊面積。交叉帶沿交叉方向貫穿區塊、兩端再加 e_ext＋引入段與迴轉 ⇒ 幾何上必然伸進鄰機區塊
+    （審查探針 2026-10-15：作業航跡 300–2000 m／架、迴轉 750–4500 m／架）；建圖模式不分高度層，這段只靠 4D 時間錯開。
+    沒有重疊 ⇒ None（只報不擋：validate 不過時建圖閘門本來就擋）。"""
+    from .geometry import is_cross_strip, strips_union_footprint, turn_band
+    main_fp: dict[str, Any] = {}
+    for v, p in plans.items():
+        ss = [strips_all[sid] for sid, _d in p.strips if sid in strips_all and not is_cross_strip(sid)]
+        if ss:
+            main_fp[v] = strips_union_footprint(ss)
+    parts: list[str] = []
+    for u in sorted(placed):
+        if u not in plans:
+            continue
+        flown = {sid for sid, _d in plans[u].strips}
+        geoms = []
+        for pl in placed[u]:
+            ss = [s for s in pl.cs.strips if s.strip_id in flown]
+            if not ss:
+                continue
+            fp = strips_union_footprint(ss)
+            for part in getattr(fp, "geoms", [fp]):
+                geoms.append(turn_band(part, pl.cs.beta_rad, pl.cs.d_turn_m, pl.cs.lateral_m))
+        if not geoms:
+            continue
+        g = shapely.union_all(geoms)
+        own = main_fp.get(u)
+        hits = []
+        for v in sorted(main_fp):
+            if v == u:
+                continue
+            excl = main_fp[v] if own is None else main_fp[v].difference(own)
+            a = float(g.intersection(excl).area)
+            if a > 1.0:
+                hits.append(f"{v} {a / 1e4:.2f} ha")
+        if hits:
+            parts.append(f"{u} → " + "、".join(hits))
+    if not parts:
+        return None
+    return ("mapping_cross_airspace(交叉航帶（含 e_ext＋引入段與交叉方向迴轉帶）伸進他機獨占主條帶區塊：" + "；".join(parts)
+            + "；建圖模式不分高度層 ⇒ 這段與鄰機同高、只靠 4D 時間錯開，起飛延誤或風造成的時程漂移會吃掉間隔)")
+
+
+def _cross_skip_filter(skip: set[tuple[str, str]], teams: Sequence[Team], cells_by_id: Mapping[str, Cell],
+                       placed: Mapping[str, Sequence[CrossPlacement]], cache: CostCache, cfg: PlannerConfig
+                       ) -> set[tuple[str, str]]:
+    """空間互斥豁免（`deconflict.spatially_exclusive`）只看胞多邊形 ⊕ 主條帶迴轉帶；交叉帶沿另一方向伸出胞邊
+    （e_ext + 引入段 + 迴轉），所以飛交叉帶的機對要把「交叉帶足跡 ⊕ 交叉方向迴轉帶」併進去重判：距離 < d_sep
+    就取消豁免（保守：只會多檢查、不會少檢查）。"""
+    from .deconflict import _team_band
+    from .geometry import strips_union_footprint, turn_band
+    if not skip or not placed:
+        return skip
+    margin = float(cfg.d_sep_m)
+    team_of: dict[str, str] = {}
+    band_of: dict[str, Any] = {}
+    for tm in teams:
+        try:
+            band_of[tm.team_id] = _team_band(tm, dict(cells_by_id), cache.R_eff.get(tm.cls))
+        except Exception:                                   # pragma: no cover - 幾何失敗 ⇒ 不豁免
+            band_of[tm.team_id] = None
+        for u in tm.uav_ids:
+            team_of.setdefault(u, tm.team_id)
+    extra: dict[str, Any] = {}
+    for u, lst in placed.items():
+        geoms = []
+        for pl in lst:
+            fp = strips_union_footprint(list(pl.cs.strips))
+            for part in getattr(fp, "geoms", [fp]):
+                geoms.append(turn_band(part, pl.cs.beta_rad, pl.cs.d_turn_m, pl.cs.lateral_m))
+        if geoms:
+            extra[u] = shapely.union_all(geoms)
+    out: set[tuple[str, str]] = set()
+    for a, b in skip:
+        if a not in extra and b not in extra:
+            out.add((a, b))
+            continue
+        ga = [g for g in (band_of.get(team_of.get(a, "")), extra.get(a)) if g is not None and not g.is_empty]
+        gb = [g for g in (band_of.get(team_of.get(b, "")), extra.get(b)) if g is not None and not g.is_empty]
+        if not ga or not gb:
+            continue
+        if float(shapely.distance(shapely.union_all(ga), shapely.union_all(gb))) >= margin - 1e-6:
+            out.add((a, b))
+    return out
+
+
 def plan_mission(inputs: MissionInputs, cfg: PlannerConfig = PlannerConfig(), *, terrain_margin_m: float | None = None,
                  ctx: MissionContext | None = None) -> MissionPlan:
     """完整流程（契約 §10 步驟）：build_context → preflight → decompose_area×區（含 residual_candidates）→ layering
@@ -1284,6 +1825,7 @@ def plan_mission(inputs: MissionInputs, cfg: PlannerConfig = PlannerConfig(), *,
             timing["total"] = (time.perf_counter() - t_all) * 1e3
             return _empty_plan(rep, timing)
     cfg = ctx.cfg
+    mapping = ctx.inputs.mapping_mode                    # 建圖模式（MappingMissionInputs；None ＝ 舊行為）
     lap("context")
     report = preflight(inputs, cfg, ctx)
     lap("preflight")
@@ -1306,8 +1848,13 @@ def plan_mission(inputs: MissionInputs, cfg: PlannerConfig = PlannerConfig(), *,
             uncovered.append((area.area_id, pa.get("uncoverable_reason") or "no_feasible_class"))
             continue
         poly = ctx.areas_enu.get(area.area_id)
+        kw_seam: dict[str, Any] = {}
+        if mapping is not None and mapping.seam_tie and len(inputs.areas) > 1:
+            # 建圖模式：相鄰子區（例如 GUI 的 split_area_for_fleet 切出來、各給一架飛的）要互相長進對方
+            others = [g for aid, g in ctx.areas_enu.items() if aid != area.area_id]
+            kw_seam["seam_neighbors"] = shapely.union_all(others) if others else None
         try:
-            new = decompose_area(area, dc, classes, polygon_enu=poly, rho_sym_m=ctx.rho_sym_m, n_uav=n_uav)
+            new = decompose_area(area, dc, classes, polygon_enu=poly, rho_sym_m=ctx.rho_sym_m, n_uav=n_uav, **kw_seam)
         except Exception as exc:
             uncovered.append((area.area_id, f"decompose_failed({exc})"))
             continue
@@ -1325,6 +1872,20 @@ def plan_mission(inputs: MissionInputs, cfg: PlannerConfig = PlannerConfig(), *,
                 except Exception:
                     pass
     lay = layering(cells, ctx.specs, bands, cfg)
+    if mapping is not None and mapping.no_altitude_layering:
+        # 建圖模式：不把任一型抬到別的高度帶（GSD 會差 1.5 倍）⇒ 凡是分層會改高度的胞一律改走既有的
+        #   time_separation 路徑（不重鋪；同高的兩型由 4-D 去衝突錯開時間）。
+        kept: list[str] = []
+        for cell in cells:
+            res = lay.get(cell.cell_id, {})
+            moved = any(isinstance(h, (int, float)) and cell.feasible.get(c, False)
+                        and abs(float(h) - float(cell.h_op_m.get(c, h))) > 1e-6 for c, h in res.items())
+            if moved:
+                lay[cell.cell_id] = {"mode": "time_separation"}
+                kept.append(cell.cell_id + "(" + "/".join(f"{c} {float(cell.h_op_m[c]):.1f}"
+                                                          for c in sorted(res) if c in cell.h_op_m) + ")")
+        if kept:
+            warnings.append(f"mapping_no_altitude_layering({', '.join(kept)} m：不分層、同高改時間分隔)")
     for cell in cells:
         res = lay.get(cell.cell_id, {})
         if res.get("mode") == "time_separation":
@@ -1509,13 +2070,26 @@ def plan_mission(inputs: MissionInputs, cfg: PlannerConfig = PlannerConfig(), *,
             uncovered.append((sid, "energy_leftover" if res.must_rtb else "idp_leftover"))
     lap("idp")
 
+    # ---- 6b. 建圖模式交叉航帶（MappingModeConfig.cross_strips；關閉時整段不執行 ⇒ 舊行為逐位元不變）----------
+    cross_placed: dict[str, list[CrossPlacement]] = {}
+    if mapping is not None and getattr(mapping, "cross_strips", False) and seqs:
+        cross_placed, refusal = _insert_cross_strips(seqs, ctx, dc, cfg, cache, cells_by_id, fleet, init_states, t0_of,
+                                                     recovery, mapping, uncovered, warnings)
+        if refusal is not None:
+            report.status = "NO_GO"
+            report.errors = list(report.errors) + [refusal]
+            report.warnings = list(dict.fromkeys(list(report.warnings) + warnings))
+            timing["total"] = (time.perf_counter() - t_all) * 1e3
+            return _empty_plan(report, timing, list(cells_by_id.values()))
+        warnings.append(_cross_summary(cross_placed, mapping))
+        lap("cross_strips")
+
     # ---- 7. 起飛走廊精算 + 2D/3D 組裝 -------------------------------------------
     plans: dict[str, UAVPlan] = {}
     uav_by_id = {u.uav_id: u for u in fleet}
     strips_all: dict[str, Strip] = {sid: s for c in cache.strips for sid, s in cache.strips[c].items()}
-    for u, sq in seqs.items():
-        if not sq.items:
-            continue
+
+    def _assemble_one(u: str, sq: UAVSequence) -> tuple[UAVPlan, UAVSequence]:
         uav = uav_by_id[u]
         cls = uav.cls
         t0 = t0_of.get(u, 0.0)
@@ -1540,6 +2114,15 @@ def plan_mission(inputs: MissionInputs, cfg: PlannerConfig = PlannerConfig(), *,
             ld = landing_rep.get((cls, site)) or ld
         plan, _stats = build_uav_plan(uav, sq, to, ld, cache, ctx, t0, strips_all)
         plan.warnings += [f"corridor:{i}" for i in (to.issues + ld.issues)]
+        return plan, sq
+
+    for u, sq in seqs.items():
+        if not sq.items:
+            continue
+        plan, sq = _assemble_one(u, sq)
+        if cross_placed.get(u):
+            plan, sq = _cross_energy_fallback(u, plan, sq, _assemble_one, cross_placed[u], ctx, cache, cfg,
+                                              t0_of.get(u, 0.0), recovery, uncovered, warnings)
         plans[u] = plan
         seqs[u] = sq
     lap("assemble_3d")
@@ -1554,6 +2137,8 @@ def plan_mission(inputs: MissionInputs, cfg: PlannerConfig = PlannerConfig(), *,
             skip = spatially_exclusive(alloc.teams, cells_by_id, cfg, r_eff_m=dict(cache.R_eff))
         except Exception:
             skip = set()
+        if cross_placed:
+            skip = _cross_skip_filter(skip, alloc.teams, cells_by_id, cross_placed, cache, cfg)
         conflicts = check_separation(plans, cfg, skip_pairs=skip)
         if conflicts or schedule.conflicts():
             hook = _make_resequence_hook(ctx, cfg, cache, uav_by_id, alloc.teams, strips_all, t0_of, start_of,
@@ -1562,9 +2147,15 @@ def plan_mission(inputs: MissionInputs, cfg: PlannerConfig = PlannerConfig(), *,
                                           takeoff_site=start_of, resequence_hook=hook)
             if residual_conf:
                 warnings.append(f"residual_conflicts({len(residual_conf)})")
+        if cross_placed:
+            note = _cross_airspace_note(plans, strips_all, cross_placed)
+            if note is not None:
+                warnings.append(note)
     lap("deconflict")
 
     makespan = max((p.t_land_s for p in plans.values()), default=0.0)
+    if mapping is not None:
+        warnings += _mapping_plan_notes(plans, strips_all, mapping.min_block_strips, list(dict.fromkeys(uncovered)))
     report.warnings = list(dict.fromkeys(list(report.warnings) + warnings))
     timing["total"] = (time.perf_counter() - t_all) * 1e3
     return MissionPlan(plans, float(makespan), list(cells_by_id.values()), strips_all,

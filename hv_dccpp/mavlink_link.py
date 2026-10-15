@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import logging
 import math
 import os
 import socket
@@ -49,6 +50,8 @@ except ImportError:  # pragma: no cover - 取決於環境
     HAVE_PYMAVLINK = False
 
 from .mission import FW_PHASES, MissionPlan, Phase, PlannerConfig, Site, UAVPlan, Waypoint, WindLayer
+
+_log = logging.getLogger(__name__)
 
 _PYMAVLINK_MSG = ("hv_dccpp.mavlink_link 需要 pymavlink（pip install pymavlink）；"
                   "純規劃功能不受影響，只有 MAVLink 上傳／遙測需要此套件。")
@@ -632,14 +635,20 @@ def _ardupilot_module() -> Any | None:
 
 
 def _call_compat(fn: Callable[..., Any], *args: Any, **kw: Any) -> Any:
-    """依函式簽章只傳它接受的關鍵字（容許 ardupilot 之簽章差異）。"""
+    """依函式簽章只傳它接受的關鍵字（容許 ardupilot 之簽章差異）。丟掉的關鍵字一律記 WARNING（不靜默）。"""
+    name = getattr(fn, "__qualname__", repr(fn))
     try:
         sig = inspect.signature(fn)
     except (TypeError, ValueError):
+        if kw:
+            _log.warning("_call_compat: %s 簽章無法檢視，呼叫端給的關鍵字 %s 全部未傳入", name, sorted(kw))
         return fn(*args)
     params = sig.parameters
     accepts_var = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values())
     kws = {k: v for k, v in kw.items() if accepts_var or k in params}
+    dropped = sorted(set(kw) - set(kws))
+    if dropped:
+        _log.warning("_call_compat: %s 不接受關鍵字 %s，已丟棄（其設定不會生效）", name, dropped)
     n_pos = sum(1 for p in params.values() if p.kind in (inspect.Parameter.POSITIONAL_ONLY,
                                                           inspect.Parameter.POSITIONAL_OR_KEYWORD))
     if any(p.kind is inspect.Parameter.VAR_POSITIONAL for p in params.values()):
@@ -648,7 +657,15 @@ def _call_compat(fn: Callable[..., Any], *args: Any, **kw: Any) -> Any:
 
 
 def _home_msl(plan: UAVPlan, ctx: Any) -> tuple[float, float, float]:
-    """(lat, lon, msl) 起飛點地面：首航點 lat/lon，MSL = alt_msl − agl（首航點於地面／H_ts 皆成立）。"""
+    """(lat, lon, msl) 起飛點地面＝飛控解鎖後的 home。`hv_dccpp.ardupilot.fc_home`（本機起飛站）可用 ⇒ 用它（與匯出器
+    同一個基準）；否則首航點 lat/lon，MSL = alt_msl − agl（首航點於地面／H_ts 皆成立）。"""
+    ap = _ardupilot_module()
+    if ap is not None and hasattr(ap, "fc_home") and ctx is not None and hasattr(ctx, "sites_enu"):
+        try:
+            _sid, lat, lon, msl = ap.fc_home(ctx, plan)
+            return float(lat), float(lon), float(msl)
+        except Exception as e:  # noqa: BLE001 - 舊 ctx／缺站點 ⇒ 退回首航點
+            _log.warning("_home_msl(%s): fc_home 失敗（%s）⇒ 退回首航點地面", getattr(plan, "uav_id", "?"), e)
     w0 = plan.waypoints[0]
     return float(w0.lat_deg), float(w0.lon_deg), float(w0.alt_msl_m - w0.agl_m)
 
@@ -677,7 +694,7 @@ def plan_to_mission_items(plan: UAVPlan, ctx: Any, cfg: PlannerConfig | None = N
     """UAVPlan → :class:`MissionItems`（含 ``.seqmap``）。
 
     `hv_dccpp.ardupilot.plan_to_mission_items(plan, ctx, cfg, alt_frame, …)` 存在 → 呼叫之（`frame` 可為 MAV_FRAME 整數或
-    'relative'/'msl'/'terrain'；其餘關鍵字如 `camera_trigger`、`wp_radius_m`、`strip_sensors`、`z_tol_m` 透傳），
+    'relative'/'msl'/'terrain'；其餘關鍵字如 `camera_trigger`、`wp_radius_m`、`strip_sensors`、`z_tol_m`、`camera_cfg` 透傳），
     結果經 :func:`as_mission_item` 正規化並以 :func:`mission_seq_map`（以 lat/lon 對應計畫航點）建 seqmap；
     否則採 :func:`plan_to_mission_items_fallback`。
     """
@@ -771,6 +788,10 @@ def plan_to_mission_items_fallback(plan: UAVPlan, ctx: Any, cfg: PlannerConfig |
     land_start_done = False
     last_xy: np.ndarray | None = None
     trig = float(cam_trigger_dist_m) if cam_trigger_dist_m > 0 else 1.0
+    if not cam_trigger_dist_m > 0 and any(w.sensor_on for w in wps):
+        # 保留 1 m（既有測試依賴），但這不是真的觸發距離：實際頻率只被 CAM1_DURATION 限住
+        _log.warning("plan_to_mission_items_fallback(%s): cam_trigger_dist_m=%r 無效 ⇒ 206 觸發距離退回 1.0 m"
+                     "（不是規劃值；請給 cam_trigger_dist_m 或改用 hv_dccpp.ardupilot）", plan.uav_id, cam_trigger_dist_m)
     # 固定翼段：從 TRANS_OUT 之最後一點（P_tc）起
     i_ptc = i_tro
     if i_tro is not None:
@@ -853,15 +874,16 @@ def plan_to_mission_items_fallback(plan: UAVPlan, ctx: Any, cfg: PlannerConfig |
 
 
 def rally_items(sites: Sequence[Site] | Any, ctx: Any, *, alt_rel_m: float = 100.0,
-                frame: int | str | None = None) -> MissionItems:
+                frame: int | str | None = None, ref_msl_m: float | None = None) -> MissionItems:
     """備降點 → MAV_CMD_NAV_RALLY_POINT。`hv_dccpp.ardupilot.rally_items(inputs, ctx, alt_frame)` 存在則優先
     （home + 全部備降點、alt = 站地面 + H_tc；`sites` 可為 `MissionInputs` 或站點序列——後者只用於後備）；
-    後備：每站 frame GLOBAL_RELATIVE_ALT、z = `alt_rel_m`。"""
+    後備：每站 frame GLOBAL_RELATIVE_ALT、z = `alt_rel_m`。`ref_msl_m`：「相對 home」的 home MSL（飛控 home ＝
+    該機起飛坪，見 `ardupilot.fc_home`）；None ＝ 規劃 home。"""
     m = _require_pymavlink()
     ap = _ardupilot_module()
     if ap is not None and hasattr(ap, "rally_items"):
         inputs = sites if hasattr(sites, "home") else getattr(ctx, "inputs")
-        raw = _call_compat(ap.rally_items, inputs, ctx, alt_frame=_alt_frame_name(frame))
+        raw = _call_compat(ap.rally_items, inputs, ctx, alt_frame=_alt_frame_name(frame), ref_msl_m=ref_msl_m)
         return MissionItems([as_mission_item(x, seq=i, mission_type=m.MAV_MISSION_TYPE_RALLY) for i, x in enumerate(raw)],
                             mission_type=m.MAV_MISSION_TYPE_RALLY)
     if hasattr(sites, "home"):
@@ -928,9 +950,10 @@ def fence_items(plan: MissionPlan | UAVPlan | Sequence[UAVPlan], ctx: Any, cfg: 
 
 def suggest_params(spec: Any, ctx: Any | None = None, cfg: PlannerConfig | None = None, *,
                    h_ceil_m: float | None = None, uav_plan: UAVPlan | None = None,
-                   uav_id: str | None = None) -> dict[str, float]:
+                   uav_id: str | None = None, camera_cfg: Any | None = None) -> dict[str, float]:
     """表 1 → ArduPilot 參數建議值（§15.2；只是建議，不自動寫入）。`ardupilot.recommended_params` 存在則優先
-    （帶入該機 EnergyModel、pack 電壓、風速、h_ceil、失鏈策略、t_ll）；否則本模組之簡表。"""
+    （帶入該機 EnergyModel、pack 電壓、風速、h_ceil、失鏈策略、t_ll、`camera_cfg`——與 `export_all` 之 `.param`
+    同一組相機參數；其 warnings 記 WARNING）；否則本模組之簡表（不支援 `camera_cfg`，給了就丟例外）。"""
     ap = _ardupilot_module()
     cfg = cfg or getattr(ctx, "cfg", None) or PlannerConfig()
     if ap is not None and hasattr(ap, "recommended_params"):
@@ -965,9 +988,15 @@ def suggest_params(spec: Any, ctx: Any | None = None, cfg: PlannerConfig | None 
                 home_msl = None
         kinds = sorted({k for k in ((getattr(s, "kind", None) for (c, _r), s in (getattr(ctx, "sensors", {}) or {}).items()
                                      if c == spec.cls)) if k}) if ctx is not None else []
-        return dict(_call_compat(ap.recommended_params, spec, model, cfg, uav_plan, pack_voltage_v=pack_v,
-                                 wind_speed_mps=w_ref, h_ceil_agl_m=h_ceil_m, lost_link_policy=policy, t_ll_s=t_ll,
-                                 home_msl_m=home_msl, sensor_kinds=kinds))
+        p_warn: list[str] = []
+        out = dict(_call_compat(ap.recommended_params, spec, model, cfg, uav_plan, pack_voltage_v=pack_v,
+                                wind_speed_mps=w_ref, h_ceil_agl_m=h_ceil_m, lost_link_policy=policy, t_ll_s=t_ll,
+                                home_msl_m=home_msl, sensor_kinds=kinds, warnings=p_warn, camera_cfg=camera_cfg))
+        for w in p_warn:
+            _log.warning("suggest_params(%s): %s", uav_id or getattr(spec, "cls", "?"), w)
+        return out
+    if camera_cfg is not None:
+        raise MavlinkLinkError("suggest_params: camera_cfg 需要 hv_dccpp.ardupilot.recommended_params；後備簡表不輸出相機參數")
     tc = spec.transition_cmd()
     p: dict[str, float] = {
         "Q_ENABLE": 1.0,
@@ -1829,12 +1858,15 @@ class FleetLink:
                     rally: bool = True, fence: bool = True, write_params: bool = True, set_params: bool = False,
                     frame: int | str | None = None, mission_id: str = "", timeout_s: float | None = None,
                     **item_kw: Any) -> dict[str, PlanUploadReport]:
-        """每架（有連線且在 plan 中者）：任務項目（:func:`plan_to_mission_items`）上傳 + rally（home + 備降點）+
+        """每架（有連線且在 plan 中者）：任務項目（:func:`plan_to_mission_items`）上傳 + rally（home + 備降點；高度相對
+        **該機起飛坪**＝飛控解鎖後的 home）+
         該構型 fence；`out_dir` 給定 → `hv_dccpp.ardupilot.export_all`（`<uav>.waypoints`、`<uav>_rally.txt`、
         `<uav>_fence.txt`、`<uav>.param`、`<uav>.plan`、`mission_summary.json`；不可用時本模組後備寫 `<uav>.waypoints`、
         `rally.waypoints`、`fence_<cls>.waypoints`、`<uav>.param`）並一律加寫 `<uav>.seqmap.json`。
         `set_params=True` 才以 PARAM_SET 寫入建議參數（預設不寫，§15.2）。`item_kw` 透傳給 `plan_to_mission_items`
-        （如 `camera_trigger`、`wp_radius_m`、`strip_sensors`）。"""
+        （如 `camera_trigger`、`wp_radius_m`、`strip_sensors`、`camera_cfg`）；其中 `camera_trigger`／`wp_radius_m`／
+        `strip_sensors`／`camera_cfg` 也傳給 `export_all`，`camera_cfg` 另傳給 :func:`suggest_params`（上傳、匯出檔與
+        寫入之參數三者一致）。其餘鍵 `export_all` 不支援 ⇒ 記 WARNING（匯出檔可能與上傳內容不同）。"""
         cfg = cfg or getattr(ctx, "cfg", None) or PlannerConfig()
         ids = [u for u in (uav_ids or plan.plans.keys()) if u in self.links and u in plan.plans]
         od = Path(out_dir) if out_dir is not None else None
@@ -1843,10 +1875,16 @@ class FleetLink:
         if od is not None:
             od.mkdir(parents=True, exist_ok=True)
             if ap is not None and hasattr(ap, "export_all"):
-                kw_exp = {k: v for k, v in item_kw.items() if k in ("camera_trigger", "wp_radius_m", "strip_sensors")}
+                kw_exp = {k: v for k, v in item_kw.items()
+                          if k in ("camera_trigger", "wp_radius_m", "strip_sensors", "camera_cfg")}
+                not_exp = sorted(set(item_kw) - set(kw_exp))
+                if not_exp:
+                    _log.warning("upload_plan: %s 只套用到上傳之任務、未傳給 export_all ⇒ %s 內之匯出檔可能與上傳內容不同",
+                                 not_exp, od)
                 summary = _call_compat(ap.export_all, plan, ctx, cfg, od, alt_frame=_alt_frame_name(frame), **kw_exp)
                 exported = dict(summary.get("uavs", {}))
         inputs = ctx.inputs
+        # rally 高度是「相對 home」，而每架飛控的 home 是它自己的起飛坪 ⇒ 逐機算（共用檔只在無匯出器的後備路徑寫）
         r_items = rally_items(inputs, ctx, frame=frame) if rally else None
         f_by_cls: dict[str, MissionItems] = {}
         shared_files: list[str] = []
@@ -1875,12 +1913,14 @@ class FleetLink:
                     files.append(items.seqmap.save(od / f"{u}.seqmap.json"))
             params: dict[str, float] | None = None
             if write_params or set_params:
-                params = suggest_params(ctx.specs[up.cls], ctx, cfg, uav_plan=up, uav_id=u)
+                params = suggest_params(ctx.specs[up.cls], ctx, cfg, uav_plan=up, uav_id=u,
+                                        camera_cfg=item_kw.get("camera_cfg"))
                 if od is not None and write_params and not (exported and u in exported):
                     files.append(write_param_file(params, od / f"{u}.param",
                                                   header=[f"HV-DCCPP suggested params for {u} ({up.cls}); review before use"]))
             res_m = link.upload_mission(items, _mav.MAV_MISSION_TYPE_MISSION, timeout_s=timeout_s)
-            res_r = link.upload_rally(r_items, timeout_s=timeout_s) if r_items is not None else None
+            r_u = rally_items(inputs, ctx, frame=frame, ref_msl_m=_home_msl(up, ctx)[2]) if rally else None
+            res_r = link.upload_rally(r_u, timeout_s=timeout_s) if r_u is not None else None
             res_f = link.upload_fence(f_items, timeout_s=timeout_s) if f_items is not None else None
             pres = link.set_params(params) if (set_params and params) else None
             link.seqmap = items.seqmap

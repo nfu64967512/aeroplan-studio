@@ -789,6 +789,11 @@ class SITLHud(QWidget):
     cmd_takeoff    = pyqtSignal(float)       # 高度
     cmd_upload     = pyqtSignal()            # 上傳當前任務
     cmd_download   = pyqtSignal()            # 從飛控讀回任務航線（Read WPs）
+    # Mission Planner 風格航點檔三兄弟（Load / Write / Save；Read 就是上面的 cmd_download）。
+    # 對象一律由 main_window._target_links() 決定，這裡不帶參數。
+    cmd_load_wp    = pyqtSignal()            # 從檔案載入航點檔（純本機讀檔，不需要連線）
+    cmd_write_wp   = pyqtSignal()            # 把已載入的航點檔寫入飛控（安全關鍵，見 on_sitl_write_wp）
+    cmd_save_wp    = pyqtSignal()            # 把「剛讀回」的任務存成航點檔
     cmd_upload_fence = pyqtSignal()          # 上傳電子圍籬
     cmd_auto_start = pyqtSignal()            # 一鍵 AUTO+ARM+MISSION_START
     cmd_param_set  = pyqtSignal(str, float, str)   # name, value, ptype
@@ -1220,6 +1225,48 @@ class SITLHud(QWidget):
         )
         self.btn_download.clicked.connect(self.cmd_download.emit)
         cmd_outer.addWidget(self.btn_download)
+
+        # ── Mission Planner 風格航點檔三兄弟：Load / Write / Save ──────
+        # （Read WPs 就是上面剛接好的 btn_download，這裡補齊另外三顆）
+        self.btn_load_wp = self._cmd_btn('📂 載入航點檔 (Load WP File)', TC.FG_EMPHASIS)
+        self.btn_load_wp.setToolTip(
+            '從 .waypoints（QGC WPL）或 .plan（QGroundControl）檔案載入一份任務，\n'
+            '預覽到地圖上 —— 純讀檔 + 畫圖，不需要連線、也不會自動寫入飛控。\n'
+            '載入時若檔案有格式或語意錯誤（如缺欄位、DO_JUMP 目標不存在），\n'
+            '會擋下並列出原因；載入成功後才能按「✍️ 寫入飛控」。'
+        )
+        self.btn_load_wp.clicked.connect(self.cmd_load_wp.emit)
+        cmd_outer.addWidget(self.btn_load_wp)
+
+        self.btn_write_wp = self._cmd_btn('✍️ 寫入飛控 (Write WPs)', TC.HOSTILE)
+        self.btn_write_wp.setToolTip(
+            '把「已載入的航點檔」寫入飛控。\n'
+            '⚠️ 這顆鈕本身只依「有沒有連線」與「有沒有寫入還在等回報」兩個條件\n'
+            '決定能不能按；「指令對象要恰好選中單一台 UAV」是送出時另外檢查的\n'
+            '——選成「全部」或選到 0/多台的話，按下去會先跳出提示，不會真的送出。\n'
+            '⚠️ 送出前一定會跳出確認對話框，列出目標機、連線方式、航點摘要與所有警告，\n'
+            '對真實飛控（COM/序列埠）會用更強的字句提醒 —— 只有明確按「是」才會真的送出，\n'
+            '按「取消」什麼都不會發生。\n'
+            '寫入期間本鈕會暫時停用，避免連點造成兩筆寫入互相競爭。'
+        )
+        # 預設無連線 → 不可用；之後由 main_window._update_write_wp_enabled()
+        # 依「有連線 且 沒有正在等待回報的寫入」這兩個條件統一決定，見那裡的註解。
+        # ⚠️ 這裡刻意不額外檢查「指令對象是否恰好一台」——那個檢查在
+        # on_sitl_write_wp() 的入口做（見那裡 (2) 對象面），保持「按不按得下去」
+        # 跟「按下去會不會被拒絕」分開兩層，鈕本身的 enabled 狀態不需要跟著
+        # HUD 上「指令對象」下拉選單的即時變動重算。
+        self.btn_write_wp.setEnabled(False)
+        self.btn_write_wp.clicked.connect(self.cmd_write_wp.emit)
+        cmd_outer.addWidget(self.btn_write_wp)
+
+        self.btn_save_wp = self._cmd_btn('💾 存成航點檔 (Save WP File)', TC.FG_EMPHASIS)
+        self.btn_save_wp.setToolTip(
+            '把「剛剛從飛控讀回」的那份任務（📥 從飛控讀回任務航線的結果）存成 .waypoints 檔。\n'
+            '⚠️ 存的是**讀回結果**，不是尚未寫入飛控的載入檔 —— 兩者不同就是還沒寫入成功。\n'
+            '尚未讀回任何任務時會說明原因，不會偷偷存成別的東西。'
+        )
+        self.btn_save_wp.clicked.connect(self.cmd_save_wp.emit)
+        cmd_outer.addWidget(self.btn_save_wp)
 
         self.btn_upload_fence = self._cmd_btn('🛡️ 上傳電子圍籬', TC.WARNING)
         self.btn_upload_fence.setToolTip(

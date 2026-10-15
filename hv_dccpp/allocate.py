@@ -20,7 +20,7 @@ from shapely.geometry import Point
 
 from .context import MissionContext
 from .costs import CostCache
-from .decompose import _skip_sequence, class_can_serve, exact_time, sensor_compatible
+from .decompose import _best_sequence, _skip_sequence, class_can_serve, exact_time, sensor_compatible
 from .dubins import skip_k
 from .geometry import Cell, Strip
 from .mission import PlannerConfig, UAVInstance, UAVState
@@ -175,9 +175,47 @@ def _resolve_site(cache: CostCache, cls: str, recovery_site_id: str | None) -> s
     return cands[0]
 
 
-def sweep_order(strip_ids: Sequence[str], cls: str, cache: CostCache) -> list[int]:
-    """估計用固定 skip-k 掃描序（規格 §7.1／§9.4）：``_skip_sequence(n, skip_k(s̄, R_eff))`` 映射為 cache 索引；
-    首條 = 進入條帶、末條 = RTB 條帶。條帶不在 cache → KeyError。"""
+def _task_cost_matrix(idxs: Sequence[int], cls: str, cache: CostCache) -> np.ndarray:
+    """任務內條帶兩兩之轉場時間 (n,n)，取法與 `decompose.exact_time._pair_poses` **逐字對應**。
+
+    ``cache.tr[cls]`` 之第三軸 k = 2·idx_l + idx_m ⇒
+    * 兩條帶皆雙向可行：交替掃描的兩條可達鏈是 (0→1) 與 (1→0)，即 k=1 與 k=2，權重各 0.5
+      （與 `exact_time` 的 ``[0.5, 0.5]`` 相同；⚠ 那不是「把選擇平均掉」，是兩條**可達**鏈的算術平均）；
+    * 有一條是單向胞（D34）：只能同向 racetrack ⇒ idx_l == idx_m ⇒ k = 3·idx。
+    """
+    tr = cache.tr[cls]
+    op = cache.op[cls]
+    n = len(idxs)
+    C = np.full((n, n), math.inf, dtype=float)
+    both = [bool(np.isfinite(op[l]).all()) for l in idxs]
+    for a in range(n):
+        la = idxs[a]
+        for b in range(n):
+            if a == b:
+                continue
+            lb = idxs[b]
+            if both[a] and both[b]:
+                C[a, b] = 0.5 * (float(tr[la, lb, 1]) + float(tr[la, lb, 2]))
+            else:
+                idx = 0 if (math.isfinite(op[la, 0]) and math.isfinite(op[lb, 0])) else 1
+                C[a, b] = float(tr[la, lb, 3 * idx])
+    return C
+
+
+def sweep_order(strip_ids: Sequence[str], cls: str, cache: CostCache,
+                cfg: PlannerConfig | None = None) -> list[int]:
+    """估計用掃描序（規格 §7.1／§9.4）：映射為 cache 索引；首條 = 進入條帶、末條 = RTB 條帶。
+
+    ``cfg`` 未給或 ``cfg.sweep_sequence != "search"`` → 固定 ``_skip_sequence(n, skip_k(s̄, R_eff))``
+    （＝舊行為，逐位元不變）。給了且為 ``"search"`` → 與 `decompose.exact_time` **同一支**
+    `_best_sequence` 在同一組候選上取 argmin。
+
+    ⚠⚠ 為什麼要接（2026-09-10）：`decompose.exact_time` 早在 vendored #2 就改成搜尋，
+    而這裡一直無條件用固定序 ⇒ **兩個估計層對同一件事給不同答案**。
+    ⚠ 但它**不影響 λ_floor** —— `_min_entry`/`_min_rtb` 對胞內所有條帶取 min，與順序無關。
+      真正會動的是 `_chain` 的進入／RTB 端點與 makespan 估計（本函式只有頭尾被 `_task_options` 用到）。
+    ⚠ 候選集第一個就是固定序 ⇒ 在同一個成本矩陣下**不可能比舊行為差**。
+    """
     try:
         idxs = [cache.idx[cls][sid] for sid in strip_ids]
     except KeyError as e:
@@ -188,14 +226,20 @@ def sweep_order(strip_ids: Sequence[str], cls: str, cache: CostCache) -> list[in
     strips = [cache.strips[cls][sid] for sid in strip_ids]
     s_mean = float(np.mean([s.spacing_m for s in strips]))
     k = skip_k(s_mean, cache.R_eff.get(cls, s_mean)) if s_mean > 0 else 1
-    return [idxs[p] for p in _skip_sequence(n, k)]
+    if cfg is None or getattr(cfg, "sweep_sequence", "fixed") != "search" or n < 3:
+        return [idxs[p] for p in _skip_sequence(n, k)]
+    if cls not in cache.tr or cls not in cache.op:
+        return [idxs[p] for p in _skip_sequence(n, k)]
+    seq = _best_sequence(n, k, _task_cost_matrix(idxs, cls, cache), cfg)
+    return [idxs[p] for p in seq]
 
 
-def _task_options(task: _Task, cache: CostCache) -> list[tuple[int, int, int, int]]:
+def _task_options(task: _Task, cache: CostCache,
+                  cfg: PlannerConfig | None = None) -> list[tuple[int, int, int, int]]:
     """任務之 (first_l, idx_in, last_l, idx_last) 選項：固定 skip-k 序列之正／反向 × 進入側；終端側由奇偶決定
     （n 奇 → idx_last = idx_in；n 偶 → 1 − idx_in）；終端向不可行（單向胞，D34 racetrack）→ 改可行向。"""
     cls = task.cls
-    order = sweep_order(task.strip_ids, cls, cache)
+    order = sweep_order(task.strip_ids, cls, cache, cfg)
     n = len(order)
     if n == 0:
         return []
@@ -243,6 +287,17 @@ def _chain(tasks: Sequence[_Task], uav_id: str, cls: str, cache: CostCache, cfg:
     # DP 狀態：(last_l, idx_last) → (t, e, delay, trace)
     states: dict[tuple[int, int] | None, tuple[float, float, float, list]] = {None: (float(t0_s), 0.0, 0.0, [])}
     for j, task in enumerate(tasks):
+        # ⚠⚠⚠ **刻意不傳 cfg** —— 端點維持取自固定 skip-k 序。
+        #   2026-09-10 曾把 `cfg` 傳下去（讓端點跟著 `exact_time` 的搜尋序），
+        #   理由是「T_single 是搜尋序的成本、端點卻是固定序的，兩層不一致」。
+        #   單一情境（hills）看起來是好的：makespan 5087.4 → 5037.6 s（−49.8）。
+        #   ⚠ 但封閉基準 24 格（research/cpp_benchmark）**否決了它**：
+        #     HARVEST     S5 n=16   −3.17%      HARVEST_mix S2 n=4   +1.09%
+        #     HARVEST     S1 n=16   −0.51%      HARVEST_mix S1 n=8  **+10.70%**
+        #     HARVEST_mix S4 n=4    −2.19%      HARVEST_mix S4 n=8  **+13.17%**
+        #     ⇒ 淨 **+731 s（更差）**；其餘 18 格 0.00%。
+        #   「一致」買到的是更差的結果 ⇒ 不採用。要重開就把 `cfg` 傳回去，
+        #   並先用 `research/cpp_benchmark/rerun_project_rows.py` 重跑那 24 格。
         opts = _task_options(task, cache)
         if not opts:
             return PlanEstimate(_INF, _INF, 0.0, False, f"no_option({task.key})", [])

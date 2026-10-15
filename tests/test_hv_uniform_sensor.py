@@ -1,4 +1,4 @@
-"""HV-DCCPP：兩個構型共用同一台單光相機。
+"""HARVEST：兩個構型共用同一台單光相機。
 
 背景：轉接層的 `_hardware_for` 是**照構型字母**決定酬載種類（A→LiDAR、B→相機）。
 不明確給 `sensor_a`/`sensor_b` 就會憑空生出一個酬載差異，讓「哪一型做哪一塊」
@@ -42,15 +42,15 @@ def _rect(cx: float, half_e: float, half_n: float) -> list[tuple[float, float]]:
 
 
 def _plan(uniform: bool):
-    """跑一次真的 HV-DCCPP 規劃，回傳 `HvDccppCoordinator`。"""
+    """跑一次真的 HARVEST 規劃，回傳 `HvDccppCoordinator`。"""
     coord = SwarmCoordinator()
-    coord.use_hv_dccpp = True
+    coord.use_harvest = True
     coord.hv_uniform_sensor = uniform
     coord.hv_class_of = lambda d: CLASS_OF[int(d["drone_id"])]
     coord.hv_home = HOME
     coord.hv_wind = (0.0, 0.0)
     coord.hv_fence_zones = []
-    coord.hv_params = {"hfov_deg": HFOV, "vfov_deg": VFOV, "hv_c2_range_km": 25.0,
+    coord.harvest_params = {"hfov_deg": HFOV, "vfov_deg": VFOV, "hv_c2_range_km": 25.0,
                        "hv_waiver_max_agl_m": 200.0, "hv_dem_margin_m": 3000.0}
     drones = [{"drone_id": i + 1, "name": n, "position": HOME, "speed": v,
                "heading": 0.0, "turn_radius": r, "vehicle_type": "vtol",
@@ -87,10 +87,14 @@ def test_uniform_camera_swath_matches_panel_hfov():
     assert along == pytest.approx(2.0 * ALT * math.tan(math.radians(VFOV) / 2.0), rel=1e-9)
 
 
-def test_uniform_camera_is_not_flagged_as_example():
-    """使用者給的規格不可被標成「範例硬體」，否則 preflight 會發出誤導的警告。"""
-    assert _uniform_camera(hfov_deg=HFOV, vfov_deg=VFOV).is_default_example is False
-    assert _uniform_camera(hfov_deg=0.0, vfov_deg=0.0).is_default_example is False
+def test_uniform_camera_is_flagged_as_example():
+    """焦距 16 mm／像素 3.9 µm／1 Hz 仍是範例值（只有刈幅來自面板）⇒ 必須標成範例硬體。
+
+    2026-10-14 改值（bug fix）：舊版斷言 False，把 preflight 的 sensor_spec_default_example 警告壓掉了；
+    GSD 與觸發率限速都不是真相機。真相機走「航測建圖」（tests/test_hdmap_gui_coordinator.py）。
+    """
+    assert _uniform_camera(hfov_deg=HFOV, vfov_deg=VFOV).is_default_example is True
+    assert _uniform_camera(hfov_deg=0.0, vfov_deg=0.0).is_default_example is True
 
 
 def test_uniform_camera_falls_back_without_fov():
@@ -165,7 +169,7 @@ def test_lidar_area_under_uniform_camera_is_dropped_silently(caplog):
     import logging
 
     coord = SwarmCoordinator()
-    coord.use_hv_dccpp = True
+    coord.use_harvest = True
     coord.hv_uniform_sensor = True
     # ⚠ 這一條鎖的是**修好之前的現象**與那道守衛，所以要把機隊切區器關掉；
     #   開著的話 split_area_for_fleet 會先把區切開，現象就不會發生了。
@@ -176,7 +180,7 @@ def test_lidar_area_under_uniform_camera_is_dropped_silently(caplog):
     coord.hv_fence_zones = []
     report: dict = {}
     coord.hv_on_report = report.update
-    coord.hv_params = {"hfov_deg": HFOV, "vfov_deg": VFOV, "hv_c2_range_km": 25.0,
+    coord.harvest_params = {"hfov_deg": HFOV, "vfov_deg": VFOV, "hv_c2_range_km": 25.0,
                        "hv_waiver_max_agl_m": 200.0, "hv_dem_margin_m": 3000.0}
     drones = [{"drone_id": i + 1, "name": n, "position": HOME, "speed": v,
                "heading": 0.0, "turn_radius": r, "vehicle_type": "vtol",
@@ -224,12 +228,12 @@ def test_validate_is_actually_run(hv_uniform):
         "轉接層現在會自己 validate 了？那這一段補丁可以拿掉，先確認再改"
 
     coord = SwarmCoordinator()
-    coord.use_hv_dccpp = True
+    coord.use_harvest = True
     coord.hv_class_of = lambda d: CLASS_OF[int(d["drone_id"])]
     coord.hv_home = HOME
     coord.hv_wind = (0.0, 0.0)
     coord.hv_fence_zones = []
-    coord.hv_params = {"hfov_deg": HFOV, "vfov_deg": VFOV, "hv_c2_range_km": 25.0,
+    coord.harvest_params = {"hfov_deg": HFOV, "vfov_deg": VFOV, "hv_c2_range_km": 25.0,
                        "hv_waiver_max_agl_m": 200.0, "hv_dem_margin_m": 3000.0}
     drones = [{"drone_id": i + 1, "name": n, "position": HOME, "speed": v,
                "heading": 0.0, "turn_radius": r, "vehicle_type": "vtol",
@@ -257,14 +261,14 @@ def test_validate_failure_is_reported(caplog):
     會冒出 `partial_fleet_assigned`，用 `startswith` 會被排序綁死。
     """
     coord = SwarmCoordinator()
-    coord.use_hv_dccpp = True
+    coord.use_harvest = True
     coord.hv_class_of = lambda d: CLASS_OF[int(d["drone_id"])]
     coord.hv_home = HOME
     coord.hv_wind = (0.0, 0.0)
     coord.hv_fence_zones = []
     report: dict = {}
     coord.hv_on_report = report.update
-    coord.hv_params = {"hfov_deg": HFOV, "vfov_deg": VFOV, "hv_c2_range_km": 25.0,
+    coord.harvest_params = {"hfov_deg": HFOV, "vfov_deg": VFOV, "hv_c2_range_km": 25.0,
                        "hv_waiver_max_agl_m": 200.0, "hv_dem_margin_m": 3000.0}
     drones = [{"drone_id": i + 1, "name": n, "position": HOME, "speed": v,
                "heading": 0.0, "turn_radius": r, "vehicle_type": "vtol",
@@ -309,7 +313,7 @@ def _plan_single_area(n_a: int, n_b: int, half_m: float):
                "heading": 0.0, "turn_radius": r, "vehicle_type": "vtol",
                "fov_width": 150.0} for i, (c, v, r) in enumerate(fleet)]
     coord = SwarmCoordinator()
-    coord.use_hv_dccpp = True
+    coord.use_harvest = True
     # ⚠ 同上：這一條鎖的是「單一胞 + 混編 = 空計畫」這個現象本身。
     coord.hv_split_area_for_fleet = False
     coord.hv_class_of = lambda d: cls[int(d["drone_id"])]
@@ -318,7 +322,7 @@ def _plan_single_area(n_a: int, n_b: int, half_m: float):
     coord.hv_fence_zones = []
     report: dict = {}
     coord.hv_on_report = report.update
-    coord.hv_params = {"hfov_deg": HFOV, "vfov_deg": VFOV, "hv_c2_range_km": 25.0,
+    coord.harvest_params = {"hfov_deg": HFOV, "vfov_deg": VFOV, "hv_c2_range_km": 25.0,
                        "hv_waiver_max_agl_m": 200.0, "hv_dem_margin_m": 3000.0}
     res = coord.plan_coverage_dccpp(
         areas=[{"area_id": 1, "priority": 1.0, "polygon": _rect(0, half_m, half_m)}],
@@ -400,12 +404,12 @@ def test_main_window_falls_back_to_loaded_dem():
 def _spacing_for(width: float, overlap: float) -> float:
     """跑一次 HV 規劃，回傳它實際採用的條帶間距（公尺）。"""
     coord = SwarmCoordinator()
-    coord.use_hv_dccpp = True
+    coord.use_harvest = True
     coord.hv_class_of = lambda d: CLASS_OF[int(d["drone_id"])]
     coord.hv_home = HOME
     coord.hv_wind = (0.0, 0.0)
     coord.hv_fence_zones = []
-    coord.hv_params = {"hfov_deg": HFOV, "vfov_deg": VFOV, "hv_c2_range_km": 25.0,
+    coord.harvest_params = {"hfov_deg": HFOV, "vfov_deg": VFOV, "hv_c2_range_km": 25.0,
                        "hv_waiver_max_agl_m": 200.0, "hv_dem_margin_m": 3000.0}
     drones = [{"drone_id": i + 1, "name": n, "position": HOME, "speed": v,
                "heading": 0.0, "turn_radius": r, "vehicle_type": "vtol",
@@ -459,13 +463,13 @@ def _plan_single_big(n_a: int, n_b: int, *, split: bool, half_e=2500.0, half_n=2
                "heading": 0.0, "turn_radius": r, "vehicle_type": "vtol",
                "fov_width": 150.0} for i, (c, v, r) in enumerate(fleet)]
     coord = SwarmCoordinator()
-    coord.use_hv_dccpp = True
+    coord.use_harvest = True
     coord.hv_split_area_for_fleet = split
     coord.hv_class_of = lambda d: cls[int(d["drone_id"])]
     coord.hv_home = HOME
     coord.hv_wind = (5.0, 270.0)
     coord.hv_fence_zones = []
-    coord.hv_params = {"hfov_deg": HFOV, "vfov_deg": VFOV, "hv_c2_range_km": 25.0,
+    coord.harvest_params = {"hfov_deg": HFOV, "vfov_deg": VFOV, "hv_c2_range_km": 25.0,
                        "hv_waiver_max_agl_m": 200.0, "hv_dem_margin_m": 3000.0}
     res = coord.plan_coverage_dccpp(
         areas=[{"area_id": 1, "priority": 1.0,
@@ -576,14 +580,14 @@ def _plan_two(alt: float):
                "heading": 0.0, "turn_radius": 120.0, "vehicle_type": "vtol",
                "fov_width": 150.0}]
     coord = SwarmCoordinator()
-    coord.use_hv_dccpp = True
+    coord.use_harvest = True
     coord.hv_class_of = lambda d: {1: "A", 2: "B"}[int(d["drone_id"])]
     coord.hv_home = HOME
     coord.hv_wind = (0.0, 0.0)
     coord.hv_fence_zones = []
     report: dict = {}
     coord.hv_on_report = report.update
-    coord.hv_params = {"hfov_deg": HFOV, "vfov_deg": VFOV, "hv_c2_range_km": 25.0,
+    coord.harvest_params = {"hfov_deg": HFOV, "vfov_deg": VFOV, "hv_c2_range_km": 25.0,
                        "hv_waiver_max_agl_m": 200.0, "hv_dem_margin_m": 3000.0}
     coord.plan_coverage_dccpp(
         areas=[{"area_id": 1, "priority": 1.0,
@@ -636,15 +640,15 @@ def _plan_two_gsd(alt: float, gsd=None):
                "heading": 0.0, "turn_radius": 120.0, "vehicle_type": "vtol",
                "fov_width": 150.0}]
     coord = SwarmCoordinator()
-    coord.use_hv_dccpp = True
+    coord.use_harvest = True
     coord.hv_class_of = lambda d: {1: "A", 2: "B"}[int(d["drone_id"])]
     coord.hv_home = HOME
     coord.hv_wind = (0.0, 0.0)
     coord.hv_fence_zones = []
-    coord.hv_params = {"hfov_deg": HFOV, "vfov_deg": VFOV, "hv_c2_range_km": 25.0,
+    coord.harvest_params = {"hfov_deg": HFOV, "vfov_deg": VFOV, "hv_c2_range_km": 25.0,
                        "hv_waiver_max_agl_m": 200.0, "hv_dem_margin_m": 3000.0}
     if gsd is not None:
-        coord.hv_params["target_gsd"] = gsd
+        coord.harvest_params["target_gsd"] = gsd
     coord.plan_coverage_dccpp(
         areas=[{"area_id": 1, "priority": 1.0,
                 "polygon": [_ll(-half, -half), _ll(half, -half),
@@ -734,14 +738,14 @@ def test_narrow_altitude_band_is_reported(caplog):
     四個原因擠在一句話裡，看不出是高度帶。
     """
     coord = SwarmCoordinator()
-    coord.use_hv_dccpp = True
+    coord.use_harvest = True
     coord.hv_class_of = lambda d: {1: "A", 2: "B"}[int(d["drone_id"])]
     coord.hv_home = HOME
     coord.hv_wind = (0.0, 0.0)
     coord.hv_fence_zones = []
     report: dict = {}
     coord.hv_on_report = report.update
-    coord.hv_params = {"hfov_deg": HFOV, "vfov_deg": VFOV, "hv_c2_range_km": 25.0,
+    coord.harvest_params = {"hfov_deg": HFOV, "vfov_deg": VFOV, "hv_c2_range_km": 25.0,
                        "hv_dem_margin_m": 3000.0, "target_gsd": 0.05}   # 沒有豁免
     half = math.sqrt(2449789.0) / 2.0
     drones = [{"drone_id": 1, "name": "A1", "position": HOME, "speed": 21.5,
@@ -802,5 +806,5 @@ def test_failure_dialog_carries_the_loud_notes():
     import ui.main_window as mw
     src = inspect.getsource(mw.MainWindow._on_hv_failed)
     assert "loud_notes" in src, "失敗對話框沒有取用收集到的重點"
-    assert "QMessageBox.critical(self, 'HV-DCCPP 失敗', text)" in src, \
+    assert "QMessageBox.critical(self, 'HARVEST 失敗', text)" in src, \
         "還是把原始 msg 直接丟進對話框"

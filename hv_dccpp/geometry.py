@@ -62,7 +62,26 @@ __all__ = [
     "lay_strips",
     "residual_subcell",
     "strips_union_footprint",
+    "CROSS_STRIP_TAG",
+    "cross_strip_id",
+    "is_cross_strip",
 ]
+
+#: 建圖模式交叉航帶的條帶 id 標記（`MappingModeConfig.cross_strips`；主條帶 id 是 f"{cell}_{cls}_{k}"，不含此字串）
+CROSS_STRIP_TAG: str = "_cross_"
+
+
+def cross_strip_id(cell_id: str, cls: str, uav_id: str, k: int) -> str:
+    """交叉航帶 id：``f"{cell}_{cls}_cross_{uav}_{k}"``（k 自 1 起；同一胞多架各自一組時以 uav 區分）。"""
+    return f"{cell_id}_{cls}{CROSS_STRIP_TAG}{uav_id}_{int(k)}"
+
+
+def is_cross_strip(strip: "Strip | str | None") -> bool:
+    """條帶（或條帶 id）是不是建圖模式的交叉航帶。"""
+    if strip is None:
+        return False
+    sid = strip if isinstance(strip, str) else getattr(strip, "strip_id", "")
+    return CROSS_STRIP_TAG in str(sid)
 
 _TWO_PI = 2.0 * math.pi
 _CUT_OVERHANG_M = 1e-3        # 切線兩端外延量（保證與邊界確實相交，供 shapely.split 節點化）
@@ -189,6 +208,17 @@ class Cell:
     infeasible_reason: dict[str, str]
     alpha_rad: dict[str, float]
     strips: dict[str, list[Strip]]
+    #: 前 `_N_TOP_DIRS` 名掃描方向與其胞內時間 `(alpha_rad, T_single_s)`，依 T 遞增。
+    #:
+    #: ⚠⚠⚠ **目前沒有任何消費者**（2026-09-10 全 repo 掃過：寫入於
+    #: `decompose.py:1069/1130/1297`、`planner.py:1657` 只是 `replace()` 帶過，
+    #: `ui/`、`scripts/`、`integration/` 都沒有讀）。它看起來像「我們支援備選方向」，
+    #: 實際上是**死資料**。留著是因為它是「把胞間轉場回饋給方向選擇」的現成輸入
+    #: （設計文件 :677），但在有人真的消費它之前，不要把它當成一項能力。
+    #:
+    #: ⚠ 接不接的判斷已經量過（`scratchpad/alt_dirs_measure.py`，hills 情境 12 組）：
+    #: 第 2 名/第 1 名的胞內時間比中位 **1.107**、全距 1.008–1.524，
+    #: 只有 **3/12** 在 2% 以內 ⇒ 胞間轉場只在那三組有機會翻盤。
     alt_dirs: dict[str, list[tuple[float, float]]]
     fit: dict[str, float]
     n_strips: dict[str, int]

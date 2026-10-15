@@ -1,4 +1,4 @@
-"""tests/test_hv_dccpp_adapter.py — HV-DCCPP（異構雙構型 VTOL）接縫測試。
+"""tests/test_hv_dccpp_adapter.py — HARVEST（異構雙構型 VTOL）接縫測試。
 
 被測的是 **AeroPlan 這一側的接線**，不是 hv_dccpp 本身（那邊自己有 809 項測試）：
 
@@ -84,13 +84,13 @@ def _plan_kwargs() -> dict:
 
 def _hv_coordinator(**overrides) -> SwarmCoordinator:
     c = SwarmCoordinator()
-    c.use_hv_dccpp = True
+    c.use_harvest = True
     c.hv_class_of = lambda d: 'A' if int(d['drone_id']) == 1 else 'B'
     c.hv_home = HOME
     # ⚠ 一定要明給豁免：沒有豁免時 AGL 上限就是法規的 120 m，而 Pioneer 的
     #   最低固定翼作業高度也是 120 ⇒ 可用高度帶 0 m ⇒ 整趟 preflight NO_GO。
     #   這些測試量的是別的東西，所以把空域條件固定在「已取得 200 m 豁免」。
-    c.hv_params = {'min_separation_m': 100.0, 'alt_offset_m': 50.0,
+    c.harvest_params = {'min_separation_m': 100.0, 'alt_offset_m': 50.0,
                    'hv_waiver_max_agl_m': 200.0}
     for k, v in overrides.items():
         setattr(c, k, v)
@@ -111,7 +111,7 @@ def hv_plan():
 def test_flag_is_off_by_default():
     """預設不得走 hv —— 否則 test_dccpp_pipeline 的 golden 會整組變紅。"""
     c = SwarmCoordinator()
-    assert c.use_hv_dccpp is False
+    assert c.use_harvest is False
     assert c.hv_coordinator is None
     assert c.hv_class_of is None
 
@@ -164,9 +164,9 @@ def test_class_of_decides_the_two_platforms(hv_plan):
 
     # 刪除實驗：把回呼拿掉，兩台都會變成 A
     bare = SwarmCoordinator()
-    bare.use_hv_dccpp = True
+    bare.use_harvest = True
     bare.hv_home = HOME
-    bare.hv_params = {'hv_waiver_max_agl_m': 200.0}   # 見 _hv_coordinator 的註解
+    bare.harvest_params = {'hv_waiver_max_agl_m': 200.0}   # 見 _hv_coordinator 的註解
     bare_result = bare.plan_coverage_dccpp(**_plan_kwargs())
     assert set(bare_result) == SIX_KEYS
     assert set(bare.hv_coordinator.id_map.values()) == {'A1', 'A2'}, (
@@ -251,7 +251,7 @@ def test_ui_params_reach_the_planner_config(monkeypatch):
 
     monkeypatch.setattr(hv_adapter, 'HvDccppCoordinator', _Spy)
     coord = _hv_coordinator()
-    coord.hv_params = {'min_separation_m': 250.0, 'alt_offset_m': 80.0,
+    coord.harvest_params = {'min_separation_m': 250.0, 'alt_offset_m': 80.0,
                        'hv_c2_range_km': 40.0, 'hv_waiver_max_agl_m': 200.0}
     coord.plan_coverage_dccpp(**_plan_kwargs())
     assert seen['cfg'].d_sep_m == 250.0
@@ -268,7 +268,7 @@ try:
     from ui.main_window import MainWindow          # 先匯入以載入 QtWebEngine
     from PyQt6.QtCore import QCoreApplication
     from PyQt6.QtWidgets import QApplication
-    from ui.workers.planning_worker import HvPlanningWorker
+    from ui.workers.planning_worker import HarvestPlanningWorker
     _QT_APP = QApplication.instance() or QApplication([])
     _QT_OK = True
 except Exception as _e:      # pragma: no cover - 環境相依
@@ -304,7 +304,7 @@ def test_hv_gate(vehicle_type, hv_flag, expected):
     params = {'hv_dccpp': hv_flag, 'num_drones': 2, 'hv_num_a': 1}
     got = MainWindow._configure_hv_dccpp(win, coord, params, vehicle_type)
     assert got is expected
-    assert coord.use_hv_dccpp is expected
+    assert coord.use_harvest is expected
 
 
 @qt_only
@@ -344,7 +344,7 @@ def test_worker_emits_result_on_success():
                     'uav_states': []}
 
     seen = {'progress': [], 'report': [], 'ok': [], 'failed': []}
-    w = HvPlanningWorker(_StubCoordinator(), {})
+    w = HarvestPlanningWorker(_StubCoordinator(), {})
     w.progress.connect(lambda f, m: seen['progress'].append((f, m)))
     w.report.connect(lambda p: seen['report'].append(p))
     w.finished_ok.connect(lambda r: seen['ok'].append(r))
@@ -378,7 +378,7 @@ def test_worker_reports_failure_on_its_own_signal():
             raise err
 
     seen = {'ok': [], 'failed': []}
-    w = HvPlanningWorker(_Boom(), {})
+    w = HarvestPlanningWorker(_Boom(), {})
     w.finished_ok.connect(lambda r: seen['ok'].append(r))
     w.failed.connect(lambda m: seen['failed'].append(m))
     w.start()
@@ -403,7 +403,7 @@ def test_worker_clears_its_callbacks_from_the_coordinator():
                     'uav_states': [], 'total_makespan': 0.0, 'assembled_paths': {}}
 
     stub = _Stub()
-    w = HvPlanningWorker(stub, {})
+    w = HarvestPlanningWorker(stub, {})
     w.start()
     assert w.wait(20000)
     assert stub.hv_progress is None and stub.hv_on_report is None
@@ -746,7 +746,7 @@ def test_stop_does_not_pretend_to_cancel():
             return empty
 
     coord = _TicksThenReturns()
-    w = HvPlanningWorker(coord, {})
+    w = HarvestPlanningWorker(coord, {})
     seen = {'progress': [], 'ok': [], 'cancelled': []}
     w.progress.connect(lambda f, m: seen['progress'].append((f, m)))
     w.finished_ok.connect(lambda r: seen['ok'].append(r))
@@ -763,11 +763,24 @@ def test_stop_does_not_pretend_to_cancel():
 
 @qt_only
 @hv_only
-def test_panel_keys_reach_the_planner(monkeypatch):
-    """VTOL 偵察面板 → coordinator.hv_params → HvDccppCoordinator 這一整跳。
+def test_world_terrain_tick_reaches_the_coordinator_without_planning(monkeypatch):
+    """面板的「使用 Cesium World Terrain」勾選 → `_configure_hv_dccpp` → `coordinator.harvest_params`（不規劃、不連網）。"""
+    from ui.widgets.vtol_recon_panel import VTOLReconPanel
+    monkeypatch.setattr("utils.cesium_ion.configured_ion_token", lambda *a, **k: ("a.b.c", "測試"))
+    panel = VTOLReconPanel()
+    panel.algo_combo.setCurrentIndex(panel.algo_combo.findData('hv_dccpp'))
+    for ticked in (True, False):
+        panel.hv_world_terrain_chk.setChecked(ticked)
+        coord = SwarmCoordinator()
+        assert MainWindow._configure_hv_dccpp(_FakeWindow(home=HOME), coord, panel.get_params(), 'vtol') is True
+        assert coord.harvest_params['hv_world_terrain'] is ticked
 
-    `_configure_hv_dccpp` 裡的 `coordinator.hv_params = dict(params)` 是那幾個面板鍵
-    唯一的通路；先前的測試都是自己手寫 hv_params，等於跳過它。
+
+def test_panel_keys_reach_the_planner(monkeypatch):
+    """VTOL 偵察面板 → coordinator.harvest_params → HvDccppCoordinator 這一整跳。
+
+    `_configure_hv_dccpp` 裡的 `coordinator.harvest_params = dict(params)` 是那幾個面板鍵
+    唯一的通路；先前的測試都是自己手寫 harvest_params，等於跳過它。
     """
     from ui.widgets.vtol_recon_panel import VTOLReconPanel
     panel = VTOLReconPanel()
@@ -781,6 +794,10 @@ def test_panel_keys_reach_the_planner(monkeypatch):
     panel.hv_clearance_spin.setValue(55.0)
     panel.hv_wind_speed_spin.setValue(3.0)   # 太大會撞到陣風站點檢查 ⇒ NO_GO
     panel.hv_wind_dir_spin.setValue(90.0)
+    # 這條測的是「面板鍵 → 規劃器」，與地形來源無關：面板預設在有 ion token 時會勾 World Terrain，
+    # 那會讓規劃去連 Cesium ion（測試不該連網、也不該依賴使用者的 token）。World Terrain 的接線另有測試
+    # （tests/test_cesium_world_terrain.py）。
+    panel.hv_world_terrain_chk.setChecked(False)
     params = panel.get_params()
     assert params['vehicle_type'] == 'vtol' and params['hv_dccpp'] is True
 
@@ -815,16 +832,25 @@ def test_recon_panel_offers_both_planners():
     data = [panel.algo_combo.itemData(i) for i in range(panel.algo_combo.count())]
     assert data == ['dccpp', 'hv_dccpp'], f'演算法選項變了：{data}'
 
-    # 預設是既有 DCCPP，hv 旗標關著
+    # 預設是 HARVEST（2026-10-08 使用者定調）：一開頁就是 HV 的旗標、按鈕與參數區
     p0 = panel.get_params()
-    assert p0['planner'] == 'dccpp' and p0['hv_dccpp'] is False
-    assert 'DCCPP' in panel.btn_plan.text() and 'HV' not in panel.btn_plan.text()
+    assert p0['planner'] == 'hv_dccpp' and p0['hv_dccpp'] is True
+    assert 'HARVEST' in panel.btn_plan.text()
+    assert not panel.hv_group.isHidden(), 'HARVEST 是預設，參數區卻沒顯示'
+    assert not panel.num_drones_spin.isEnabled(), 'HARVEST 模式下總台數應由機隊組成決定（唯讀）'
 
-    # 切到 HV：旗標打開、按鈕字樣跟著改、HV 專屬欄位一起送出
+    # 切回既有 DCCPP：旗標關掉、按鈕字樣與欄位跟著變
+    panel.algo_combo.setCurrentIndex(panel.algo_combo.findData('dccpp'))
+    pd = panel.get_params()
+    assert pd['planner'] == 'dccpp' and pd['hv_dccpp'] is False
+    assert 'DCCPP' in panel.btn_plan.text() and 'HARVEST' not in panel.btn_plan.text()
+    assert panel.hv_group.isHidden() and panel.num_drones_spin.isEnabled()
+
+    # 再切回 HV：旗標打開、按鈕字樣跟著改、HV 專屬欄位一起送出
     panel.algo_combo.setCurrentIndex(panel.algo_combo.findData('hv_dccpp'))
     p1 = panel.get_params()
     assert p1['planner'] == 'hv_dccpp' and p1['hv_dccpp'] is True
-    assert 'HV-DCCPP' in panel.btn_plan.text()
+    assert 'HARVEST' in panel.btn_plan.text()
     for key in ('hv_num_a', 'hv_waiver_max_agl_m', 'hv_c2_range_km',
                 'hv_terrain_clearance_m', 'hv_wind', 'hv_reduce_waypoints'):
         assert key in p1, f'少送 {key}'
@@ -963,6 +989,9 @@ def test_recon_page_drives_either_planner(hv_plan, monkeypatch):
             self.survey_areas = []
             self.survey_area_polygons = types.MethodType(
                 MainWindow.survey_area_polygons, self)
+            # 起降場（2026-10-08 起規劃前必選，否則被閘門擋下）；
+            # 這條測的是規劃分派，所以給一個；閘門本身見 tests/test_vtol_launch_site.py
+            self.home_point = (23.05, 120.05)
 
         def _get_cesium_widget(self):
             return None            # 3D 視覺化不在這條測試的範圍
@@ -979,12 +1008,12 @@ def test_recon_page_drives_either_planner(hv_plan, monkeypatch):
     assert win.seen == [('dccpp', False)]
     assert any('DCCPP 規劃中' in t for t in win.vtol_recon_panel.status)
 
-    # ② HV-DCCPP → 背景執行緒
+    # ② HARVEST → 背景執行緒
     win = _Win()
     win._on_vtol_recon_plan({'planner': 'hv_dccpp', 'hv_dccpp': True,
                              'fov_width_m': 120.0, 'speed': 18.0})
     assert win.seen == [('hv_dccpp', True)], 'HV 必須走背景執行緒'
-    assert any('HV-DCCPP' in t for t in win.vtol_recon_panel.status)
+    assert any('HARVEST' in t for t in win.vtol_recon_panel.status)
     # 摘要表：兩架、航程與時間都算得出來，而且看得出構型
     rows = win.vtol_recon_panel.rows
     assert len(rows) == 2

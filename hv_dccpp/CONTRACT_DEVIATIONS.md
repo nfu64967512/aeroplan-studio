@@ -820,3 +820,49 @@ status `GO_WITH_WARNINGS`，7 條帶（A 4、B 3），`total_makespan` 1479.4 s�
 | 2 | B（HERO, 相機） | 44 / 387 | 384.0 | 4193.3 | 9344.5 | 4362.5 | 4503.8 | 22788.0 | 48 | 54 |
 
 能量：A1 用 310.8 Wh／餘裕 589.2 Wh；B2 用 111.3 Wh／餘裕 142.7 Wh。最高航點高度（相對 home）A 169.9 m、B 160.4 m。
+
+## 建圖模式 MappingModeConfig（2026-10-14；mission / context / platform / decompose / planner / preflight / aeroplan_adapter）
+
+| 項目 | 原因 | 實際做法 |
+|---|---|---|
+| 設定放哪裡 | `MissionInputs`（表 2）與 `PlannerConfig`（§16.2）的欄位清單都被測試鎖死（test_mission.py::test_table2_fields_present、test_planner_config_defaults_match_spec_16_2） | 新增 `MappingModeConfig`（frozen）與子類別 `MappingMissionInputs(MissionInputs)`（多一個 `mapping_mode` 欄位）；`MissionInputs.mapping_mode` 是恆為 None 的唯讀屬性。`to_dict` 多 `"mapping_mode"` 鍵，`load_mission` 見到非 null 的該鍵就建子類別。未開建圖模式 ⇒ 型別、欄位、輸出逐位元不變 |
+| `DecomposeContext.mapping` | 分解層要讀建圖設定 | 尾端加欄位 `mapping: MappingModeConfig | None = None`，`MissionContext.decompose_ctx()` 填 `inputs.mapping_mode` |
+| `LidarSensor`／`CameraSensor`／`TrapezoidSensor.crab_rad` | 偏流餘裕要改條帶間距 | 尾端加欄位 `crab_rad: float = 0.0`；非 0 時 `strip_spacing_m = (w cosψ − l sinψ)(1 − o_side)`（`crabbed_width_m`）；`context.apply_crab_margin` 只在建圖模式寫入（ψ = asin(W_max/V_a,cruise)），W ≥ V_a 或 w_eff ≤ 0 → MissionInputError |
+| `decompose_area(..., seam_neighbors=)` | 接縫重疊要 ≥ w − s | `area_edge_deltas` 回 `(δ_edge, δ_cell, tie)`：區域外緣仍 δ_edge；胞外擴 max(δ_edge, tie/2)；有鄰區時 Z ← Z ∪ ((Z ⊕ tie/2) ∩ 鄰區)；A/B 殘帶單邊外擴 max(δ_edge, tie)。`plan_mission` 在建圖模式且多區域時傳其他區域之聯集 |
+| `end_extension_for` | 匯出器要在帶起點後 lead_in 才開相機 | 回傳值另加 `mapping.lead_in_m`（含 e_ext 覆寫時） |
+| 不分層 | 建圖要全隊同高 | `plan_mission` 把分層會改高度的胞改成 `time_separation`（不重鋪），警告 `mapping_no_altitude_layering(...)` |
+| 有效值紀錄 | 有效值契約 | 警告 `mapping_mode(...)`、`mapping_crab_margin(...)`、`mapping_small_blocks(...)`、`mapping_altitude_nonuniform(...)`、`mapping_incomplete(...)`；`derived[cls]["mapping"]`、`per_area[aid]["mapping_seam"]`；轉接層 `notes` 的 `mapping_mode_effective(...)`、`on_report` 的 `"mapping_mode"`、`HvDccppCoordinator.mapping_effective` |
+| 快門限速訊息（兩種模式） | 原本只有籠統的 `no_coverable_area` | `analyse_areas` 在方向不可行**且只因 V_cap** 時加 `per_area[..]["classes"][c]["shutter_limit"]` 與警告 `shutter_rate_caps_speed(...)`（需要的觸發率、可行高度、前向重疊上限）；全區 NO_GO 時同字串也附在 `errors`（第一筆仍是原本的 `no_coverable_area`）。判定不變 |
+
+## 建圖模式交叉航帶 cross_strips ＋ 建圖作業風速上限（2026-10-15；mission / geometry / decompose / planner / altitude / preflight / ardupilot / aeroplan_adapter）
+
+依據：`docs/討論_2026-10-15_HARVEST航拍建圖_NotebookLM.md` B1 與使用者 10-15 決定（交叉航帶與加密 GCP 兩者都做、
+由使用者比較；首次建圖風速 ≤ 3 m/s；能量模型重配權暫緩、預設值不動）。文獻只支持「平地、GCP 少」時交叉塊有大效益
+（Gerke & Przybilla 2016 的交叉塊同時換方向與高度 75/105 m、約 20% 面積；料堆區無顯著差異；17–18 GCP 時差異消失），
+同高度垂直重飛只有小幅改善（Štroner 2021）⇒ 這裡只提供可量、可比較的幾何，不宣稱精度。
+
+| 項目 | 原因 | 實際做法 |
+|---|---|---|
+| 設定 | 新功能、預設關 | `MappingModeConfig` 尾端加 `cross_strips=False`、`cross_fraction=0.2`（(0,1]）、`cross_alt_offset_m=0.0`、`cross_angle_offset_deg=90.0`（夾角 mod 180° ∈ [10°,170°]）。**沒開卻給了非預設值 ⇒ MissionInputError**（會被靜默忽略的值不收）。`cross_strips=False` 時 `to_dict` 不列 `cross_*` ⇒ `mapping_mode(...)` 警告與輸入 JSON 與加入前逐位元相同 |
+| 不改分解／配置／IDP | 交叉帶若放進 `Cell.strips`，skip-k、Held-Karp、`turn_band_conflict` 的 v 座標、λ 共飛都假設胞內條帶平行；且同隊多機時 IDP 會把交叉帶分給別架 | 新步驟 6b `planner._insert_cross_strips`（Beam-IDP／RTB／leftover 再拍賣之後、組裝之前）。主條帶、配置、起飛時程完全不變 |
+| 「區塊」的定義 | 殘帶情形一架只飛母胞的一部分（A 的前 k 條掛在母胞 id 上） | 區塊 = 該機在某胞實際飛的主條帶足跡 ∩ 胞多邊形（不連續時取最大一片並註記） |
+| 交叉帶幾何 | 固定翼轉彎半徑 137–267 m：短而多的帶全是轉彎 | 中央**橫帶**：沿交叉方向貫穿整個區塊、在主條帶方向置中於形心、高度以二分法解到面積 = 比例 × 區塊；以 `build_strips`（lay_strips＋局部包絡＋禁區）鋪在交叉方向、交叉高度。⇒ 每條交叉帶橫越該機全部主條帶。比例只需 1 條 ⇒ 放寬到剛好 2 條（w + 0.98 s）並寫出有效比例；放不下 2 條／禁區／包絡不可行 ⇒ 略過該區塊、`mapping_cross_skipped(...)` |
+| 識別 | 不能動 `Strip` 欄位（`MissionPlan.to_dict` 會多鍵、預設路徑不再逐位元相同） | 條帶 id `f"{cell}_{cls}_cross_{uav}_{k}"`（`geometry.cross_strip_id`／`is_cross_strip`）；`Strip.cell_id` 仍是母胞；`index` = 母胞主條帶數 + 序號（同胞多組時累加，不撞號）。⚠ 區域 id 若本身含 `_cross_` 會被誤判（GUI 的區域 id 是 `Z<n>`） |
+| 插入 | 「同一架、緊鄰母區塊」 | 只考慮母區塊每段主條帶之前或之後；交叉帶內部順序 ≤ 12 條用精確 DP（子集 × 末條帶 × 掃向，numpy 向量化），否則 skip-k／折疊蛇形候選＋掃向 DP；取「插入後 − 插入前」時間最小者（同分取「之後」） |
+| 高度 | 有效值契約：不夾限 | h_x = 主條帶 h_op + offset，須 ∈ [max(最低固定翼, 地形淨空), min(h_ceil, 感測器上限)]（＝ `altitude_band` 夾 h_op 的同一組界；**不**用 `AltitudeBand.h_hi_m`＝min(h_ceil − 起伏, …)：主條帶本身就不扣起伏，2×2 km 平地 ENU 曲率使起伏 0.75 m ⇒ h_hi_m 119.25 < 主條帶 120）。preflight 構型層級先擋（`cross_alt_out_of_band(...)` NO_GO），planner 逐區塊再擋（`decompose.CrossStripRefused` ⇒ 空計畫 NO_GO） |
+| 升降不得延伸進交叉帶 | build_3d 不在轉場插盤旋；進入／返航段的 z_des 是過境高度 h_transit（A 120、B 100）；包絡平滑會把升降拖進作業段（修前實測：交叉 100 m 的帶上 100 → 116.6 m） | `altitude.sample_bounds`：交叉帶作業樣本的上界收緊為 z_des + 0.25 m（主條帶不走這裡）。`_cross_order`：前後段路徑短於 \|Δh\|/tanγ（進入／返航段的 Δh 以 h_transit 計）加罰 1e6 s；全部選項都犯規才照選並警告 `mapping_cross_altitude_change(...)` |
+| 206 觸發距離 | 交叉帶可不同高 | 匯出器對交叉帶取「本帶 OPERATE 航點最低 AGL」算 d（保守，前向重疊不低於規劃）；主條帶照舊（帶起點 AGL，0.5 m 內吸附到作業高度） |
+| 能量 | `append_rtb` 的能量安全檢查不含重飛能量 e_MA，validate 有 ⇒ 交叉帶把餘裕吃到兩者之間時規劃器照收、validate 不過（2×2 km、比例 0.2：B3 E(P_tc) 156.7 < 158.5） | 交叉帶進 `CostCache.add_strips`（每構型一次）→ `_rebuild_sequence`（與 IDP 同一套 `_apply_warm`／`_sequences_from` 算術，未插入時逐值相同）→ `append_rtb`；組裝後對有交叉帶的機再跑 `sim.check_energy`。任一不過 ⇒ 自最後插入的一組起逐組退回，退回的條帶留在 `plan.strips`（看得到）並列入 `plan.uncovered`（`cross_energy_infeasible`；找不到可行插入位置 `cross_insert_infeasible`）⇒ `mapping_incomplete` ⇒ 建圖閘門擋上傳 |
+| 去衝突 | `spatially_exclusive` 只看胞 ⊕ 主條帶迴轉帶 | `_cross_skip_filter`：飛交叉帶的機對把「交叉帶足跡 ⊕ 交叉方向迴轉帶」併進團隊帶重判，距離 < d_sep 就取消豁免（只會多檢查）。IDP 重排回呼（D-PL-2）遇到後綴含交叉帶時候選被「覆蓋不得減少」擋掉 ⇒ 該機只剩延後起飛／盤旋兩種修法 |
+| 建圖事後檢查 | 交叉帶不是「區塊」也不是「主作業高度」 | `_mapping_plan_notes` 的 `mapping_small_blocks`／`mapping_altitude_nonuniform` 不算交叉帶；另有 `mapping_cross(...)` 摘要（逐機逐區塊：條數、km、方向、高度與 GSD 比、有效面積比例、成像比例、插入位置、增加時間） |
+| 轉接層 | 掃描角中位數 | `from_mission_plan` 的 `scan_angle_deg` 不算交叉帶（比例大時中位數會翻成交叉方向）；`mapping_effective["cross"]` 收 `mapping_cross*` 警告 |
+| 空域（2026-10-15 審查更正） | 原說法「交叉帶不與他機共用空域」**不成立** | 交叉帶沿交叉方向貫穿區塊、兩端再加 e_ext＋引入段，帶間迴轉也在交叉方向 ⇒ 作業段本身就伸進鄰機獨占區塊（審查探針 `runs/artifacts/HDMAP_CROSS_GCP_2026-10-15/R_review/probes/probe_cross_v2.py`：作業航跡 300–2000 m／架、迴轉 750–4500 m／架；主條帶 0–2.6 m），而且建圖模式不分高度層 ⇒ 與鄰機同高、只靠 4D 時間錯開。固定翼迴轉半徑 137–267 m，區塊寬 300–600 m，把交叉帶連同迴轉裁進「本機區塊 ⊖ d_sep」幾乎一條都放不下 ⇒ **不裁**，改為量化並明講：`_cross_airspace_note` 發 `mapping_cross_airspace(…)`（實際飛的交叉帶足跡 ⊕ 迴轉帶 ∩ 他機主條帶足跡扣本機，逐機列 ha）。validate 不過時 GUI 閘門擋上傳；`scripts/hv_sitl_run.py` 在 HV_CROSS=1 且 validate 不過時 SystemExit（`HV_ALLOW_CONFLICTS=1` 才放行並記錄）。是否要求「交叉帶不得離開本機區塊」（等於多機時不能用交叉航帶）是**使用者決定** |
+| 動態重規劃（未處理） | `dynamic.py` 把 `plan.strips` 當一般條帶 | 失聯／重規劃時交叉帶可能被分給別架（不再保證同一架）；這次不處理，記在此 |
+| 建圖作業風速上限 | 使用者定調首飛 ≤ 3 m/s；引入段依機型 × 風速的函數**這次不做** | `HvDccppCoordinator(mapping_max_wind_mps=…)`（沒開建圖卻給 ⇒ 拒絕）；`mapping_gate(max_wind_mps=None)` 預設用建構值，比 `last_ctx.wind.max_speed()`（規劃實際用的風），> 上限 + 1e-9 ⇒ 不可上傳（3.0 過、3.1 擋）；回傳字典形狀不變，有效值在 `mapping_effective["wind"]`，notes 加 `mapping_wind(...)`（每次提醒「上限指現場實際風速，起飛前實測」）。MainWindow 的 `hv_upload_gate` 不帶參數呼叫 `mapping_gate()` ⇒ 上限一定要放建構參數 |
+
+### 實測（2×2 km 平地、1 Pioneer + 2 HERO、split3、HQ6 2 Hz、120 m、0.70/0.80、引入段 50 m、能量預設值、無風）
+
+見 `runs/artifacts/HDMAP_CROSS_GCP_2026-10-15/X_cross_strips_wind_gate/cost/`（`cross_cost.json`、GUI 路徑 `cross_cost_gui.json`）。
+重點：能量預設值下 HERO 的交叉帶幾乎都排不進（B2 原本餘裕只有 13.4 Wh），**所有開交叉帶的組態都因 `cross_energy_infeasible` 不可上傳**；
+排進去的只有 Pioneer 的一到兩組。makespan 增加的大頭是 4-D 去衝突把 HERO 延後起飛（建圖模式不分層、時間是唯一隔離，
+Pioneer 的交叉帶兩端伸進鄰塊），不是交叉帶本身。

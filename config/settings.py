@@ -10,6 +10,53 @@ from dataclasses import dataclass, asdict, field
 from typing import Dict, Any, Optional
 
 
+def _rebase_saved_paths(saved: Dict[str, Any]) -> Dict[str, Any]:
+    """把存檔裡**搬家前**的絕對路徑校正到目前的專案根目錄。
+
+    ⚠⚠⚠ 為什麼需要：`GlobalSettings.load` 是 `PathSettings(**config_data['paths'])`，
+    也就是**存檔的絕對路徑會蓋掉計算值**。專案一搬家（或換一台機器 clone）之後，
+    settings.json 裡那八條路徑就全部指向不存在的地方，而症狀只有一則
+    「飛行器配置文件不存在」的警告 —— 其餘七條**完全靜默**：
+
+    * `vehicle_profiles` 永遠是 None（載不到任何機型設定）
+    * `icons_dir` / `styles_dir` 指向不存在的目錄
+    * `PathSettings._ensure_dirs` 還會在**舊位置**建出一整組空目錄
+
+    2026-09-09 實際發生：專案從 `Documents/aeroplan-studio` 搬到
+    `Documents/Projects/aeroplan-studio`，八條路徑全部留在舊位置。
+
+    作法：只在存檔的 `project_root` 與實際不同時動作，而且**只校正那些原本就在
+    舊根目錄底下**的路徑 —— 使用者刻意指到別處的（例如把 export_dir 設在 D 槽）
+    保持原樣，不要好心辦壞事。
+    """
+    if not saved:
+        return saved
+    real_root = str(Path(__file__).resolve().parent.parent)
+    old_root = str(saved.get("project_root") or "")
+    if not old_root or os.path.normcase(os.path.normpath(old_root)) ==             os.path.normcase(os.path.normpath(real_root)):
+        return saved
+
+    old_norm = os.path.normcase(os.path.normpath(old_root))
+    out, moved = dict(saved), []
+    for k, v in saved.items():
+        if not isinstance(v, str) or not v:
+            continue
+        norm = os.path.normcase(os.path.normpath(v))
+        if norm == old_norm:
+            out[k] = real_root
+        elif norm.startswith(old_norm + os.sep):
+            rel = os.path.normpath(v)[len(os.path.normpath(old_root)):]
+            out[k] = os.path.join(real_root, rel.lstrip(os.sep).lstrip("/"))
+        else:
+            continue                       # 使用者自訂到別處 ⇒ 不動
+        moved.append(k)
+    if moved:
+        print(f"[settings] ⚠ 專案已搬家（{old_root} → {real_root}）；"
+              f"已校正存檔路徑 {sorted(moved)}。"
+              f"不校正的話飛行器設定、圖示與樣式都會靜靜載不到。")
+    return out
+
+
 @dataclass
 class PathSettings:
     """路徑配置"""
@@ -69,6 +116,10 @@ class MapSettings:
     # 快取設定
     enable_cache: bool = True
     cache_size_mb: int = 500
+
+    # Cesium ion access token（3D 地圖用）。⚠ 這是祕密：只放在 config/settings.json
+    # （已被 .gitignore），不要寫進原始碼。環境變數 CESIUM_ION_TOKEN 優先於這個值。
+    cesium_ion_token: str = ''
     
     def __post_init__(self):
         """初始化地圖伺服器列表"""
@@ -307,7 +358,9 @@ class GlobalSettings:
                 
                 # 更新各項配置
                 if 'paths' in config_data:
-                    self.paths = PathSettings(**config_data['paths'])
+                    # ⚠ 存檔路徑會蓋掉計算值 ⇒ 搬家後必須先校正，
+                    #   否則八條路徑全部指向舊位置（見 _rebase_saved_paths）。
+                    self.paths = PathSettings(**_rebase_saved_paths(config_data['paths']))
                 if 'map' in config_data:
                     self.map = MapSettings(**config_data['map'])
                 if 'export' in config_data:

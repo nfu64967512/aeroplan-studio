@@ -11,6 +11,11 @@ SITL / MAVLink 即時遙測連結
 
 from __future__ import annotations
 
+import copy
+import functools
+import math
+import os
+import struct
 import time
 import queue
 import threading
@@ -146,21 +151,201 @@ def _decode_mode(vehicle_type: str, custom_mode: int) -> str:
     return f'MODE_{custom_mode}'
 
 
+@functools.lru_cache(maxsize=1)
+def _mavlink_enums():
+    """pymavlink 的 MAVLink 常數模組（延遲載入：本檔不在 import 時就拉 pymavlink）。"""
+    from pymavlink import mavutil
+    return mavutil.mavlink
+
+
+def _mav_const(*names):
+    """依名稱取 MAVLink 常數；第一個存在的名字勝出，全都不存在回 None。
+
+    pymavlink 沒有鎖版本（requirements 是 >=），MAVLink 上游又會改名
+    （例如 VTOL_DUOROTOR → VTOL_TAILSITTER_DUOROTOR）—— 名字查不到時寧可讓
+    那一列不存在，也不要讓每一包心跳都丟 AttributeError。
+    """
+    m = _mavlink_enums()
+    for n in names:
+        v = getattr(m, n, None)
+        if v is not None:
+            return int(v)
+    return None
+
+
+@functools.lru_cache(maxsize=1)
+def _vehicle_type_table() -> dict:
+    """MAV_TYPE → 顯示用類型。
+
+    ⚠️ 數字一律取自 pymavlink 的列舉，不手抄。舊版手抄表把三種 VTOL 寫成 20/21/22，
+       實際是 19/20/21（pymavlink 2.4.49：19 VTOL_DUOROTOR、20 VTOL_QUADROTOR、
+       21 VTOL_TILTROTOR、22 VTOL_RESERVED2）—— 整排錯一格：尾座雙旋翼顯示成
+       TYPE_19、尾座四旋翼顯示成 VTOL_DUOROTOR、傾轉旋翼顯示成 VTOL_QUADROTOR。
+    """
+    rows = (
+        (('MAV_TYPE_FIXED_WING',), 'PLANE'),
+        (('MAV_TYPE_QUADROTOR',), 'COPTER'),
+        (('MAV_TYPE_HEXAROTOR',), 'COPTER'),
+        (('MAV_TYPE_OCTOROTOR',), 'COPTER'),
+        (('MAV_TYPE_TRICOPTER',), 'COPTER'),
+        (('MAV_TYPE_GROUND_ROVER',), 'ROVER'),
+        (('MAV_TYPE_SURFACE_BOAT',), 'BOAT'),
+        (('MAV_TYPE_VTOL_DUOROTOR', 'MAV_TYPE_VTOL_TAILSITTER_DUOROTOR'), 'VTOL_DUOROTOR'),
+        (('MAV_TYPE_VTOL_QUADROTOR', 'MAV_TYPE_VTOL_TAILSITTER_QUADROTOR'), 'VTOL_QUADROTOR'),
+        (('MAV_TYPE_VTOL_TILTROTOR',), 'VTOL_TILTROTOR'),
+    )
+    table = {}
+    for names, label in rows:
+        v = _mav_const(*names)
+        if v is not None:
+            table[v] = label
+    return table
+
+
 def _decode_vehicle_type(mav_type: int) -> str:
-    # MAV_TYPE 部分對照
-    table = {
-        1: 'PLANE',         # FIXED_WING
-        2: 'COPTER',        # QUADROTOR
-        13: 'COPTER',       # HEXAROTOR
-        14: 'COPTER',       # OCTOROTOR
-        15: 'COPTER',       # TRICOPTER
-        10: 'ROVER',
-        11: 'BOAT',
-        20: 'VTOL_DUOROTOR',
-        21: 'VTOL_QUADROTOR',
-        22: 'VTOL_TILTROTOR',
-    }
-    return table.get(mav_type, f'TYPE_{mav_type}')
+    return _vehicle_type_table().get(mav_type, f'TYPE_{mav_type}')
+
+
+def _mav_type_name(mav_type) -> str:
+    """MAV_TYPE 數字 → 列舉名（去掉 MAV_TYPE_ 前綴），查不到回 TYPE_n。"""
+    try:
+        return _mavlink_enums().enums['MAV_TYPE'][int(mav_type)].name.replace('MAV_TYPE_', '', 1)
+    except Exception:
+        return f'TYPE_{mav_type}'
+
+
+#: 非載具的 MAV_TYPE（名稱 → 數字由 pymavlink 查）：這些東西會發心跳，但它們不是飛機。
+#: ⚠️ 舊版手抄的數字註解從 30 起整排錯兩格（寫 30=FLARM 31=SERVO 32=ODID 36=LOG
+#:    37=OSD 38=IMU 39=GPS 40=WINCH），實際是 30=CAMERA 31=CHARGING_STATION 32=FLARM
+#:    33=SERVO 34=ODID 36=BATTERY 37=PARACHUTE 38=LOG 39=OSD 40=IMU 41=GPS 42=WINCH
+#:    ⇒ 舊集合裡根本沒有 SERVO/ODID/GPS/WINCH（33/34/41/42）。
+_NON_VEHICLE_TYPE_NAMES = (
+    'ANTENNA_TRACKER', 'GCS', 'ONBOARD_CONTROLLER', 'GIMBAL', 'ADSB', 'CAMERA',
+    'CHARGING_STATION', 'FLARM', 'SERVO', 'ODID', 'BATTERY', 'PARACHUTE',
+    'LOG', 'OSD', 'IMU', 'GPS', 'WINCH',
+)
+
+
+@functools.lru_cache(maxsize=1)
+def _non_vehicle_types() -> frozenset:
+    vals = (_mav_const(f'MAV_TYPE_{n}') for n in _NON_VEHICLE_TYPE_NAMES)
+    return frozenset(v for v in vals if v is not None)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 參數讀回比對（float32 感知）
+# ──────────────────────────────────────────────────────────────────────
+def _as_f32(v: float) -> float:
+    """壓成 float32 實際能表示的那個 double（超出範圍飽和成 ±inf，同 C 的轉型）。"""
+    d = float(v)
+    try:
+        return struct.unpack('<f', struct.pack('<f', d))[0]
+    except OverflowError:
+        return math.inf if d > 0 else -math.inf
+
+
+def _f32_ordinal(f: float) -> int:
+    """float32 的「格點序號」：相鄰的兩個 float32 差 1；+0 與 -0 同為 0。"""
+    i = struct.unpack('<i', struct.pack('<f', f))[0]
+    return i if i >= 0 else -(i & 0x7FFFFFFF)
+
+
+def _param_type_code(ptype) -> Optional[int]:
+    """ptype → MAV_PARAM_TYPE 數字。None / 0 = 不知道型別。
+
+    接受數字或名稱（'INT8'、'REAL32'、'MAV_PARAM_TYPE_UINT16'…，名稱取自 pymavlink
+    列舉）。認不得的名稱**拒收**（ValueError），不可默默當成 REAL32。
+    """
+    if ptype is None:
+        return None
+    if isinstance(ptype, str):
+        key = ptype.strip().upper()
+        if not key.startswith('MAV_PARAM_TYPE_'):
+            key = 'MAV_PARAM_TYPE_' + key
+        v = _mav_const(key)
+        if v is None or key.endswith('_ENUM_END'):
+            raise ValueError(f'不認得的參數型別：{ptype!r}')
+        return v
+    code = int(ptype)
+    return code if code else None
+
+
+def values_match(expected, actual, ptype=None) -> bool:
+    """讀回值 `actual` 是否等於預期值 `expected`（在 MAVLink 的 float32 格上比）。
+
+    PARAM_VALUE.param_value 是 float32；整數型參數由 ArduPilot 以 C 轉型送成 float
+    （不是逐位元編碼）。所以：
+      * 整數型（MAV_PARAM_TYPE 1..8）：兩邊壓成 float32 後**完全相等**。預期 2.4、
+        飛控存 2 ⇒ 不符（使用者給的值沒有生效）。|值| > 2^24 時 float32 本身就分不出
+        相鄰整數，這是協定的極限，不是這裡放水。
+      * REAL32 / REAL64 / 型別未知（None、0）：兩邊壓成 float32 後差 ≤ 1 個 float32
+        格點（ULP）。1 格是給「十進位文字只印 7~8 位有效數字」的往返誤差；
+        `%.6f` 把 4e-07 印成 0 這種錯誤差了上億格，一定會被抓到。
+      * 任一邊是 None / NaN ⇒ 不符；±inf 只等於同號 inf。
+    """
+    if expected is None or actual is None:
+        return False
+    try:
+        e, a = float(expected), float(actual)
+    except (TypeError, ValueError):
+        return False
+    if math.isnan(e) or math.isnan(a):
+        return False
+    code = _param_type_code(ptype)
+    e32, a32 = _as_f32(e), _as_f32(a)
+    if code is not None and 1 <= code <= 8:
+        return e32 == a32
+    if math.isinf(e32) or math.isinf(a32):
+        return e32 == a32
+    return abs(_f32_ordinal(e32) - _f32_ordinal(a32)) <= 1
+
+
+# ──────────────────────────────────────────────────────────────────────
+# 「寫入任務」(upload_mission_items) 用的 ArduPilot 事實表
+#
+# 來源：~/ardupilot-airframe（唯讀）的 libraries/AP_Mission/AP_Mission.cpp。
+# ⚠️ 這些表存在的理由：飛控**不會**把寫進去的東西原樣讀回來。讀回驗證如果
+#    寫成「全欄位嚴格相等」，第一個 NAV_WAYPOINT 就會誤報（Plane 只存 param2/3
+#    的 uint8、非位置指令根本不存 lat/lon/alt/frame）；如果寫成「全部忽略」，
+#    就等於沒有驗證。所以表裡每一條都是讀過原始碼才寫的。
+# ──────────────────────────────────────────────────────────────────────
+
+# AP_Mission::stored_in_location()：只有這些指令會把 x/y/z/frame 存進飛控。
+# 其餘指令（NAV_DELAY 93、RTL 20、DO_* 、CONDITION_*）在
+# mavlink_int_to_mission_cmd() 裡根本不讀 x/y/z/frame，
+# mission_cmd_to_mavlink_int() 讀回時 x=y=z=0、frame=0（MAV_FRAME_GLOBAL）
+# ⇒ 這些欄位「不可驗證」，比對時跳過而不是拿 0 去比。
+_MISSION_CMDS_STORED_IN_LOCATION = frozenset({
+    16, 17, 18, 19, 21, 22, 30, 31, 36, 82, 84, 85, 92, 94,
+    179, 188, 189, 191, 195, 201,
+    5000, 5001, 5002, 5003, 5004, 5100,
+})
+
+# 位置類指令：寫入的 frame → 讀回的 frame
+#   AP_Mission::mavlink_int_to_mission_cmd()  寫入：
+#     MISSION(2)/GLOBAL(0)/GLOBAL_INT(5)                → relative_alt=0
+#     GLOBAL_RELATIVE_ALT(3)/_INT(6)                    → relative_alt=1
+#     GLOBAL_TERRAIN_ALT(10)/_INT(11)                   → relative_alt=1, terrain_alt=1
+#     其他                                              → MAV_MISSION_UNSUPPORTED_FRAME
+#   AP_Mission::mission_cmd_to_mavlink_int()  讀回：
+#     relative_alt=0 → GLOBAL(0)；=1 → GLOBAL_RELATIVE_ALT(3)；terrain → TERRAIN_ALT(10)
+#   ⇒ 「MISSION frame 寫進去、GLOBAL 讀回來」是正常的，但 3 讀回成 0
+#      （相對高度被吃掉）不是 —— 那會讓飛機在 AGL 與 MSL 之間差一個 home 高度。
+_MISSION_LOCATION_FRAME_READBACK = {0: 0, 2: 0, 5: 0, 3: 3, 6: 3, 10: 10, 11: 10}
+
+# 參數在飛控端以整數 / 部分欄位儲存的指令（見 mavlink_int_to_mission_cmd 的
+# 各 case：cmd.p1 是 uint16，Plane 的 NAV_WAYPOINT 只存 param2/3 的 uint8…）。
+# 這些指令的 param 比對採「寬鬆」：讀回 0（該欄位飛控不存）、或差 < 1（整數截斷）、
+# 或被夾到 255/65535，都算相符；差更多就是真的不符。
+# 不在這個集合的指令一律嚴格比對（float32 相對誤差 1e-6）。
+_MISSION_CMDS_LOSSY_PARAMS = frozenset({
+    16, 17, 18, 19, 20, 21, 22, 30, 31, 36, 82, 84, 85, 92, 93, 94,
+    112, 114, 115, 177, 178, 181, 182, 183, 184, 189, 201, 3000,
+})
+
+# 飛控讀回時「不是你寫的那個值」的欄位：NAV_LOITER_TIME 的 param3 讀回固定 ±1
+# （mission_cmd_to_mavlink_int: packet.param3 = ccw ? -1 : 1）。
+_MISSION_PARAMS_NOT_ECHOED = {19: (3,)}
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -185,6 +370,21 @@ class SITLLink(QThread):
     #    空清單是一個合法且常見的答案（飛控裡真的沒有任務），兩者混在同一條
     #    路上，UI 就分不出「沒有航線」與「讀不回來」——而那兩者要做的事相反。
     mission_download_failed = pyqtSignal(int, str)   # sysid, 原因
+    # 任務**寫入**結果（sysid, ok, 訊息）。每次 upload_mission_items() 恰好一次，
+    # 成功或失敗都是；ok=True 只在飛控 ACK(ACCEPTED)（且 verify 時讀回相符）之後。
+    mission_uploaded = pyqtSignal(int, bool, str)
+    # 每一則 PARAM_VALUE（不分來源、不分是誰要的）：
+    #   (sysid, name, value, MAV_PARAM_TYPE, param_index, param_count)
+    # 前四個是對外約定的簽名；後兩個是附加的（ParamService 要靠 count 判斷整表收齊）。
+    # PyQt 對 Python slot 會丟掉多出來的引數 ⇒ 只收 4 個參數的 slot 照樣能接。
+    # ⚠️ 不帶 compid：同 sysid 的相機若也回 PARAM_VALUE，一樣從這裡出去；
+    #    要「飛控的值」請用 read_params()（只收自駕儀元件的回覆）。
+    param_value = pyqtSignal(int, str, float, int, int, int)
+    # CAMERA_FEEDBACK（只收自駕儀元件送的）：(sysid, dict) —— 欄位見 _on_camera_feedback
+    camera_feedback = pyqtSignal(int, dict)
+    # 同 sysid 底下**非自駕儀**元件（相機、雲台、伴隨電腦…）的心跳：(sysid, compid, 資訊)
+    # 這些心跳不會更新機卡；資訊欄位見 _note_component。
+    component_heartbeat = pyqtSignal(int, int, dict)
 
     def __init__(self, conn_str: str = 'udpin:0.0.0.0:14550',
                  sysid_label: int = 1, vehicle_hint: str = '',
@@ -218,6 +418,29 @@ class SITLLink(QThread):
         #    system_id 就失效的守衛等於沒有守衛。
         self._vehicle_srcs: set = set()      # 已確認是飛機的來源 system
         self._nonvehicle_srcs: set = set()   # 已判定不是飛機（log 只記一次）
+        # ── 同一個 sysid 底下的元件（compid）──
+        # ⚠️ 2026-10-14 離線重現：相機 / 伴隨電腦（例如 compid 100、MAV_TYPE_CAMERA）
+        #    與飛控共用 sysid 時，它的心跳搭上「src == sysid_label 永遠放行」這條規則，
+        #    直接寫進機卡 ⇒ 機卡被蓋成 TYPE_30 / MODE_0 / disarmed。
+        #    只有自駕儀元件能更新機卡；其他元件記在 _components，經
+        #    component_heartbeat 信號與 get_components() 對外。
+        self._autopilot_compid: dict = {}    # sysid → 自駕儀 compid
+        self._components: dict = {}          # sysid → {compid → 資訊 dict}
+        self._cam_stats: dict = {}           # (sysid, cam_idx) → CAMERA_FEEDBACK 統計
+        self._state_lock = threading.Lock()  # 保護上面兩個（接收執行緒寫、GUI 執行緒讀）
+        # ── 參數讀回（read_params）：等待者清單，由接收執行緒的 PARAM_VALUE 分支填值 ──
+        self._param_cv = threading.Condition()
+        self._param_waiters: list = []
+        self._recv_thread_ident: Optional[int] = None   # run() 所在執行緒
+        self._link_closed = False
+        # ── tlog（opt-in，預設不寫任何檔案；見 start_tlog）──
+        self._tlog_lock = threading.Lock()
+        self._tlog_file = None
+        self._tlog_path: Optional[str] = None
+        self._tlog_msgs = 0
+        self._tlog_bytes = 0
+        self._tlog_error: Optional[str] = None
+        self._tlog_last_flush = 0.0
 
     # ── 公開控制 ──────────────────────────────────────────────────────
     def stop(self):
@@ -298,6 +521,29 @@ class SITLLink(QThread):
         """waypoints: [(lat, lon, alt_rel), ...]"""
         self._cmd_queue.put(('upload_mission', list(waypoints)))
 
+    def upload_mission_items(self, items, verify: bool = True):
+        """把一份任務**寫入**飛控（= Mission Planner 的 Write WPs）。
+
+        `items`：與 `_recv_mission` 產出相同形狀的 dict 清單
+        （seq/command/frame/lat/lon/alt/param1-4/current/autocontinue；seq 0 是 Home 槽）。
+        結果非同步走 `mission_uploaded(sysid, ok, 訊息)`，**恰好一次**，
+        成功 / 失敗 / 例外都一樣。`verify=True` 時 ACK 之後會讀回逐項比對。
+
+        ⚠️ 只做「深拷貝快照 + 放進 _cmd_queue」，**不碰 socket**（理由同
+           download_mission）。快照讓呼叫端之後改動 / 重用自己的清單不會影響
+           已排隊的寫入 —— 確認對話框顯示的就是實際送出的內容。
+        ⚠️ 與舊的 upload_mission()（收 (lat,lon,alt) 元組、猜 frame、先 clear_all）
+           是兩條不同的路，舊的行為不變。
+        """
+        try:
+            snapshot = copy.deepcopy(list(items))
+        except Exception as e:
+            # 連快照都做不出來（None / 不可迭代 / 不可複製）：仍然要**恰好一次**回報，
+            # 否則 UI 會永遠等一個不會來的結果。
+            self._report_mission_upload(False, f'寫入前檢查失敗：任務資料無法讀取（{e}）')
+            return
+        self._cmd_queue.put(('upload_mission_items', (snapshot, bool(verify))))
+
     def download_mission(self):
         """向飛控索取目前的任務航線（= Mission Planner 的 Ctrl+F → Read WPs）。
 
@@ -367,6 +613,226 @@ class SITLLink(QThread):
     def get_param(self, name: str):
         self._cmd_queue.put(('get_param', name))
 
+    def read_params(self, names, timeout_s: float = 3.0, retries: int = 2,
+                    types_out: Optional[dict] = None) -> dict:
+        """**同步**讀回一批參數：回傳 ``{name: float | None}``，None = 讀不到。
+
+        給工作執行緒（飛前閘門）用，仿 _verify_vtol_q_enable 的作法：以名稱送
+        PARAM_REQUEST_READ（param_index=-1），等名稱相符的 PARAM_VALUE。不同的是
+        這裡**不在呼叫端碰 self._mav**：請求走 _cmd_queue 由接收執行緒送出，回覆由
+        接收執行緒的 PARAM_VALUE 分支交回 —— 讀的期間遙測照常流動，也沒有跟
+        recv_match 搶連線物件的資料競爭（見 download_mission 的說明）。
+
+        * 只收**請求送出之後**、來自目標 sysid 的**自駕儀元件**的回覆；同 sysid 的
+          相機 / 別架飛控回的同名參數一律不算。請求目標是 (target_system, 自駕儀
+          compid)，不是廣播 —— 免得飛控把讀參數請求轉發給伴隨電腦。
+        * ``timeout_s``：每一輪的等待上限（秒）。``retries``：讀不齊時再補送幾輪
+          （只補缺的）。最壞總等待 ≈ timeout_s × (retries + 1)。飛控沒有的參數
+          **不會有任何回覆**（GCS_Param.cpp param_io_timer：找不到就 return），
+          所以它一定會等滿全部輪數後才回 None。
+        * 回覆只收第一則；ArduPilot 送 PARAM_VALUE 不帶「是回哪個請求」，若同名
+          參數剛被別人改過，可能拿到改之前那一則 —— 那只會造成「不符」（再讀一次即可），
+          不會把不符讀成相符。
+        * ``types_out``：給一個 dict 就順便填 ``{name: MAV_PARAM_TYPE}``（只填讀到的），
+          可直接交給 values_match()。
+        * 不用 MAVFTP —— CubeBlack 每次 MAVFTP 永久漏 1.7 KB 記憶體。
+        * ⚠️ 不可在接收執行緒（run() 內）呼叫：那會自己等自己。也別在 GUI 執行緒
+          呼叫（會卡住畫面最多上面那個總時間）。接收執行緒正在做同步交易（任務
+          上傳 / 讀回）時，請求要等交易做完才送得出去 —— 那段時間也算在逾時裡。
+        """
+        if isinstance(names, (str, bytes)):
+            raise TypeError('names 要是參數名稱的清單，不是單一字串')
+        names = list(names)
+        if not names:
+            raise ValueError('names 是空的')
+        for n in names:
+            if not isinstance(n, str) or not n or '\x00' in n:
+                raise ValueError(f'參數名稱不合法：{n!r}')
+            try:
+                nb = n.encode('ascii')
+            except UnicodeEncodeError:
+                raise ValueError(f'參數名稱必須是 ASCII：{n!r}') from None
+            if len(nb) > 16:
+                # MAVLink param_id 只有 16 位元組；送出去會被截斷成另一個名字，
+                # 回覆永遠對不上 —— 直接拒收，不要讓它變成一個「讀不到」。
+                raise ValueError(f'參數名稱超過 16 字元（MAVLink 上限）：{n!r}')
+        timeout_s = float(timeout_s)
+        if not (math.isfinite(timeout_s) and timeout_s > 0):
+            raise ValueError(f'timeout_s 必須是正數：{timeout_s!r}')
+        if isinstance(retries, bool) or int(retries) != retries or retries < 0:
+            raise ValueError(f'retries 必須是 >= 0 的整數：{retries!r}')
+        retries = int(retries)
+        if threading.get_ident() == self._recv_thread_ident:
+            raise RuntimeError('read_params 不可在 SITLLink 的接收執行緒裡呼叫（會自己等自己）')
+
+        uniq = list(dict.fromkeys(names))
+        if self._mav is None:
+            logger.warning(f'[SITL] read_params：尚未連線，{len(uniq)} 個參數全部視為讀不到')
+            return {n: None for n in names}
+
+        waiter = {'want': set(uniq), 'got': {}, 'sysid': None, 'compid': None}
+        with self._param_cv:
+            self._param_waiters.append(waiter)
+        rounds = 0
+        try:
+            for _attempt in range(retries + 1):
+                with self._param_cv:
+                    missing = [n for n in uniq if n not in waiter['got']]
+                if not missing or self._stop or self._link_closed:
+                    break
+                rounds += 1
+                self._cmd_queue.put(('read_params', (waiter, missing)))
+                deadline = time.monotonic() + timeout_s
+                with self._param_cv:
+                    while not all(n in waiter['got'] for n in missing):
+                        remain = deadline - time.monotonic()
+                        if remain <= 0 or self._stop or self._link_closed:
+                            break
+                        self._param_cv.wait(min(remain, 0.25))
+        finally:
+            with self._param_cv:
+                self._param_waiters.remove(waiter)
+                got = dict(waiter['got'])
+        lost = [n for n in uniq if n not in got]
+        if lost:
+            shown = ', '.join(lost[:8]) + ('…' if len(lost) > 8 else '')
+            logger.warning(
+                f'[SITL] read_params：{len(lost)}/{len(uniq)} 個參數讀不到'
+                f'（{rounds} 輪 × {timeout_s:g} s，sysid={waiter["sysid"]}）：{shown}')
+        if types_out is not None:
+            for n, (_v, t) in got.items():
+                types_out[n] = t
+        return {n: (got[n][0] if n in got else None) for n in names}
+
+    def get_components(self, sysid: Optional[int] = None) -> dict:
+        """有發過心跳的元件：``{sysid: {compid: 資訊}}``；給 sysid 就只回 ``{compid: 資訊}``。
+
+        回的是複本。資訊欄位見 _note_component；`autopilot_component=True` 的那一個
+        才會更新機卡。
+        """
+        with self._state_lock:
+            snap = {s: {c: dict(i) for c, i in comps.items()}
+                    for s, comps in self._components.items()}
+        if sysid is None:
+            return snap
+        return snap.get(int(sysid), {})
+
+    def get_camera_stats(self, sysid: Optional[int] = None, cam_idx: int = 0) -> Optional[dict]:
+        """某架（預設本鏈路 sysid_label）某相機的 CAMERA_FEEDBACK 統計複本；沒收過回 None。
+
+        欄位意義見 _on_camera_feedback。
+        """
+        key = (self.sysid_label if sysid is None else int(sysid), int(cam_idx))
+        with self._state_lock:
+            st = self._cam_stats.get(key)
+            if st is None:
+                return None
+            out = dict(st)
+            out['gaps'] = list(st['gaps'])
+        return out
+
+    # ── tlog（opt-in）────────────────────────────────────────────────
+    def start_tlog(self, path) -> str:
+        """開始把**收到的** MAVLink 原始封包記成 tlog；預設不記、不寫任何檔案。
+
+        格式是標準 .tlog（pymavlink / MAVProxy / Mission Planner 都讀得懂）：每則訊息 =
+        8 位元組 big-endian uint64 主機時間（Unix epoch µs，低 2 位清零 —— 與 pymavlink
+        mavfile.recv_msg 自己寫 tlog 的方式相同）＋ 該則訊息收到時的原始位元組。
+        只記收到的，不記我方送出的。以 append 開檔（同路徑再開不會蓋掉舊資料）；
+        已在記錄時換路徑會先關掉舊檔。回傳實際寫入的絕對路徑。
+
+        記錄點是 pymavlink 的 message_hooks（連線建立時就裝好）⇒ 同步交易裡被
+        recv_match(type=...) 濾掉的訊息也會記到。寫檔失敗會停止記錄並大聲報一次
+        （status_text 嚴重度 3），不會把連線帶掉；狀態見 tlog_status()。
+        """
+        p = os.path.abspath(os.fspath(path))
+        parent = os.path.dirname(p)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        fh = open(p, 'ab')
+        with self._tlog_lock:
+            old, old_path = self._tlog_file, self._tlog_path
+            self._tlog_file, self._tlog_path = fh, p
+            self._tlog_msgs = self._tlog_bytes = 0
+            self._tlog_error = None
+            self._tlog_last_flush = time.time()
+        if old is not None:
+            try:
+                old.close()
+            except Exception:
+                pass
+            logger.info(f'[SITL] tlog 換檔：{old_path} → {p}')
+        logger.info(f'[SITL] tlog 開始記錄 (sysid={self.sysid_label})：{p}')
+        return p
+
+    def stop_tlog(self) -> dict:
+        """停止 tlog 並關檔；回傳 tlog_status()（沒在記錄也可以呼叫）。"""
+        with self._tlog_lock:
+            fh = self._tlog_file
+            self._tlog_file = None
+            status = self._tlog_status_locked()
+        if fh is not None:
+            try:
+                fh.close()
+            except Exception as e:
+                logger.error(f'[SITL] tlog 關檔失敗：{e}')
+            logger.info(f'[SITL] tlog 停止：{status["path"]}'
+                        f'（{status["messages"]} 則，{status["bytes"]} B）')
+        return status
+
+    def tlog_status(self) -> dict:
+        """{'active', 'path', 'messages', 'bytes', 'error'} —— 實際生效的 tlog 狀態。"""
+        with self._tlog_lock:
+            return self._tlog_status_locked()
+
+    def _tlog_status_locked(self) -> dict:
+        return {'active': self._tlog_file is not None, 'path': self._tlog_path,
+                'messages': self._tlog_msgs, 'bytes': self._tlog_bytes,
+                'error': self._tlog_error}
+
+    def _tlog_hook(self, _mavfile, msg) -> None:
+        """pymavlink message_hooks：**每一則**解析出來的訊息都會經過這裡。
+
+        ⚠️ 例外絕對不可以往外丟：hook 是在 recv_msg 裡被呼叫的，丟出去會變成主迴圈的
+           「接收錯誤」把整條連線收掉。寫檔失敗 → 停止 tlog、大聲報一次。
+        """
+        if self._tlog_file is None:
+            return
+        try:
+            if msg.get_type() == 'BAD_DATA':
+                return
+            buf = msg.get_msgbuf()
+            if not buf:
+                return
+            rec = struct.pack('>Q', int(time.time() * 1.0e6) & ~3) + bytes(buf)
+        except Exception:
+            return
+        err = None
+        with self._tlog_lock:
+            fh = self._tlog_file
+            if fh is None:
+                return
+            try:
+                fh.write(rec)
+                self._tlog_msgs += 1
+                self._tlog_bytes += len(rec)
+                now = time.time()
+                if now - self._tlog_last_flush >= 1.0:
+                    fh.flush()
+                    self._tlog_last_flush = now
+            except Exception as e:
+                err = f'{type(e).__name__}: {e}'
+                self._tlog_error = err
+                self._tlog_file = None
+                try:
+                    fh.close()
+                except Exception:
+                    pass
+            path = self._tlog_path
+        if err is not None:
+            logger.error(f'[SITL] tlog 寫入失敗，已停止記錄（{path}）：{err}')
+            self.status_text.emit(3, f'⚠️ tlog 寫入失敗，已停止記錄：{err}（{path}）')
+
     # ── VTOL (QuadPlane) 專用指令 ─────────────────────────────────
     def vtol_transition(self, state: int):
         """VTOL 飛行模式轉換。state: 3=多旋翼(MC), 4=固定翼(FW)"""
@@ -396,6 +862,21 @@ class SITLLink(QThread):
 
     # ── 執行緒主迴圈 ──────────────────────────────────────────────────
     def run(self):
+        self._recv_thread_ident = threading.get_ident()
+        self._link_closed = False
+        try:
+            self._run_link()
+        finally:
+            # 連線結束：叫醒還在 read_params 裡等的工作執行緒（別讓它們白等到逾時），
+            # 並關掉 tlog（使用者有開才會有檔案）。
+            self._link_closed = True
+            self._recv_thread_ident = None
+            with self._param_cv:
+                self._param_cv.notify_all()
+            if self._tlog_file is not None:
+                self.stop_tlog()
+
+    def _run_link(self):
         try:
             from pymavlink import mavutil
         except ImportError:
@@ -415,6 +896,12 @@ class SITLLink(QThread):
             logger.error(f'[SITL] 連線失敗: {e}', exc_info=True)
             return
 
+        # tlog 記錄點：裝在 pymavlink 的 message_hooks 上（沒開 tlog 時 hook 立刻返回）。
+        # 越早裝越好 —— 下面的 wait_heartbeat / Q_ENABLE 讀取也會被記到。
+        _hooks = getattr(self._mav, 'message_hooks', None)
+        if isinstance(_hooks, list):
+            _hooks.append(self._tlog_hook)
+
         # ★ 先送一包 GCS heartbeat「破冰」再等對方 heartbeat。
         #   udpout（主動連嵌入式 mavproxy）必須先送，否則：
         #     - Windows udpout socket 未 bind → wait_heartbeat 的 recvfrom
@@ -423,15 +910,44 @@ class SITLLink(QThread):
         #   對 tcp / udpin / serial 連線而言這只是提早送一包心跳，無副作用。
         self._send_gcs_heartbeat()
 
-        # 等 heartbeat
+        # 等 heartbeat —— 要等到**自駕儀元件**的心跳。
+        # ⚠️ wait_heartbeat 不分 compid：同 sysid 的相機（compid 100）若比飛控先開口，
+        #    舊版會拿它的 MAV_TYPE_CAMERA 當機型（機卡 TYPE_30），連下面的 Q_ENABLE
+        #    驗證都因為「不是 PLANE」而被跳過。非自駕儀元件的心跳記進元件表，繼續等。
+        #    （0 / 255 照舊直接收下 —— 下面本來就會跳過，不建卡。）
+        hb = None
+        _hb_deadline = time.time() + 10
         try:
-            hb = self._mav.wait_heartbeat(timeout=10)
+            while True:
+                _remain = _hb_deadline - time.time()
+                if _remain <= 0:
+                    break
+                cand = self._mav.wait_heartbeat(timeout=_remain)
+                if cand is None:
+                    break
+                c_src = int(cand.get_srcSystem())
+                if c_src in (0, 255):
+                    hb = cand
+                    break
+                c_comp = self._src_component(cand)
+                if self._claim_autopilot(c_src, c_comp, cand):
+                    hb = cand
+                    break
+                info = self._note_component(c_src, c_comp, cand, False)
+                self.component_heartbeat.emit(c_src, c_comp, info)
         except Exception as e:
             self.error.emit(f'等待 heartbeat 失敗: {e}')
             return
 
         if hb is None:
-            self.error.emit('10 秒內未收到 heartbeat — 確認 SITL 已啟動')
+            seen = self.get_components()
+            if seen:
+                parts = ', '.join(f'sys{s}/comp{c}={i["type_name"]}'
+                                  for s, comps in seen.items() for c, i in comps.items())
+                self.error.emit(f'10 秒內只收到非自駕儀元件的 heartbeat（{parts}）'
+                                f' — 飛控本身沒有回應')
+            else:
+                self.error.emit('10 秒內未收到 heartbeat — 確認 SITL 已啟動')
             return
 
         primary_type = self._effective_vehicle_type(hb.type)
@@ -440,6 +956,7 @@ class SITLLink(QThread):
         # 以及非飛機節點 —— wait_heartbeat 不分來源，接 WSL 蜂群時很可能先收到
         # MAVROS 的心跳，那會在主迴圈守衛生效之前就先建立一張假卡片）。
         if hb_src not in (0, 255):
+            self._note_component(hb_src, self._src_component(hb), hb, True)
             if self._heartbeat_is_vehicle(hb) or hb_src == self.sysid_label:
                 self._vehicle_srcs.add(hb_src)
                 self._frame_for(hb_src).vehicle_type = primary_type
@@ -636,12 +1153,7 @@ class SITLLink(QThread):
             )
 
     # ── 來源分類：是飛機，還是同一條鏈路上的其他節點 ─────────────────
-    #: 非載具的 MAV_TYPE：這些東西會發心跳，但它們不是飛機。
-    #: 5=ANTENNA_TRACKER 6=GCS 18=ONBOARD_CONTROLLER 26=GIMBAL 27=ADSB
-    #: 30=FLARM 31=SERVO 32=ODID 36=LOG 37=OSD 38=IMU 39=GPS 40=WINCH
-    _NON_VEHICLE_TYPES = frozenset({5, 6, 18, 26, 27, 30, 31, 32,
-                                    36, 37, 38, 39, 40})
-    _MAV_AUTOPILOT_INVALID = 8
+    # 非載具 MAV_TYPE 見模組層的 _NON_VEHICLE_TYPE_NAMES / _non_vehicle_types()。
 
     def _heartbeat_is_vehicle(self, msg) -> bool:
         """這包 HEARTBEAT 是飛機發的嗎？
@@ -657,13 +1169,83 @@ class SITLLink(QThread):
         （兩條都不咬）；MAVROS 是機載電腦節點（兩條都咬）。
         """
         try:
-            if int(msg.autopilot) == self._MAV_AUTOPILOT_INVALID:
+            if int(msg.autopilot) == _mavlink_enums().MAV_AUTOPILOT_INVALID:
                 return False
-            if int(msg.type) in self._NON_VEHICLE_TYPES:
+            if int(msg.type) in _non_vehicle_types():
                 return False
         except Exception:
             return True          # 讀不到欄位就別亂丟資料
         return True
+
+    # ── 元件（compid）分類：同一個 sysid 底下，誰是飛控 ─────────────────
+    @staticmethod
+    def _src_component(msg) -> int:
+        """訊息的來源 compid。拿不到（測試替身等）就當成自駕儀 1 —— 與修正前的行為一致。"""
+        get = getattr(msg, 'get_srcComponent', None)
+        if not callable(get):
+            return 1
+        try:
+            return int(get())
+        except Exception:
+            return 1
+
+    def _claim_autopilot(self, src: int, comp: int, msg) -> bool:
+        """這包 HEARTBEAT 是不是 sysid `src` 的**自駕儀元件**發的？是就登記下來。
+
+          * compid 1（MAV_COMP_ID_AUTOPILOT1）一律算 —— ArduPilot / PX4 飛控都是 1。
+          * 其他 compid：只有在這個 sysid 還沒有自駕儀、而且這包心跳本身像飛機
+            （autopilot ≠ INVALID 且 type 不在非載具清單）時，**第一個**出現的才算。
+          * 之後出現的其他 compid 一律不算 —— 相機（100）、雲台（154）、伴隨電腦
+            都走這條，即使它們把 autopilot 欄位填成 ARDUPILOTMEGA。
+        """
+        ap1 = _mavlink_enums().MAV_COMP_ID_AUTOPILOT1
+        known = self._autopilot_compid.get(src)
+        if comp == ap1:
+            if known is not None and known != ap1:
+                logger.warning(f'[SITL] {self.conn_str} system {src}：compid {ap1} 出現，'
+                               f'取代原先登記的自駕儀 compid {known}')
+            self._autopilot_compid[src] = ap1
+            return True
+        if known is not None:
+            return comp == known
+        if self._heartbeat_is_vehicle(msg):
+            self._autopilot_compid[src] = comp
+            logger.info(f'[SITL] {self.conn_str} system {src}：以 compid {comp} 為自駕儀'
+                        f'（type={getattr(msg, "type", "?")} autopilot={getattr(msg, "autopilot", "?")}）')
+            return True
+        return False
+
+    def _is_autopilot_component(self, src: int, comp: int) -> bool:
+        return comp == _mavlink_enums().MAV_COMP_ID_AUTOPILOT1 or \
+            comp == self._autopilot_compid.get(src)
+
+    def _note_component(self, src: int, comp: int, msg, is_autopilot: bool) -> dict:
+        """把一包心跳記進元件表，回傳該元件資訊的複本：
+
+        {'compid', 'type', 'type_name', 'autopilot', 'system_status',
+         'autopilot_component'（True = 這個 compid 才會更新機卡）,
+         'first_seen', 'last_seen'（主機 time.time()）, 'count'（收到幾包心跳）}
+        """
+        now = time.time()
+        mtype = int(getattr(msg, 'type', -1))
+        with self._state_lock:
+            comps = self._components.setdefault(src, {})
+            info = comps.get(comp)
+            first = info is None
+            if first:
+                info = {'compid': comp, 'first_seen': now, 'count': 0}
+                comps[comp] = info
+            info.update(
+                type=mtype, type_name=_mav_type_name(mtype),
+                autopilot=int(getattr(msg, 'autopilot', -1)),
+                system_status=int(getattr(msg, 'system_status', -1)),
+                autopilot_component=bool(is_autopilot), last_seen=now)
+            info['count'] += 1
+            snap = dict(info)
+        if first and not is_autopilot:
+            logger.info(f'[SITL] {self.conn_str} system {src} 的元件 compid={comp}'
+                        f'（{snap["type_name"]}）不是自駕儀 —— 另外記錄，不更新機卡')
+        return snap
 
     def _note_non_vehicle(self, src: int, msg) -> None:
         """只記一次 —— 1 Hz 心跳會把日誌洗掉。"""
@@ -717,6 +1299,10 @@ class SITLLink(QThread):
                     self.status_text.emit(6, f'PARAM {pname} = {pval:g}')
             except Exception:
                 pass
+            try:
+                self._on_param_value(msg)
+            except Exception as e:
+                logger.error(f'[SITL] PARAM_VALUE 處理失敗: {e}', exc_info=True)
             return
 
         if mtype == 'STATUSTEXT':
@@ -734,12 +1320,26 @@ class SITLLink(QThread):
         # 心跳是唯一帶得出「我是什麼」的訊息，所以分類在這裡做。其餘訊息一律
         # 要等該來源先被確認成飛機才收，否則某個節點只送遙測不送心跳一樣會
         # 生出卡片。sysid_label 是 UI 明確標示的本鏈路機號，永遠放行。
+        # ⚠️ 但「放行的是這個 sysid 的**自駕儀元件**」：同 sysid 的相機 / 伴隨電腦
+        #    心跳先分流到元件表（見 __init__ 的 _components 說明），不碰機卡。
         if mtype == 'HEARTBEAT':
+            comp = self._src_component(msg)
+            is_ap = self._claim_autopilot(src, comp, msg)
+            info = self._note_component(src, comp, msg, is_ap)
+            if not is_ap:
+                self.component_heartbeat.emit(src, comp, info)
+                return
             if not self._heartbeat_is_vehicle(msg) and src != self.sysid_label:
                 self._note_non_vehicle(src, msg)
                 return
             self._vehicle_srcs.add(src)
         elif src not in self._vehicle_srcs and src != self.sysid_label:
+            return
+        elif not self._is_autopilot_component(src, self._src_component(msg)):
+            return   # 同 sysid 非自駕儀元件送的遙測，一樣不寫進機卡
+
+        if mtype == 'CAMERA_FEEDBACK':
+            self._on_camera_feedback(src, msg)
             return
 
         f = self._frame_for(src)
@@ -806,11 +1406,146 @@ class SITLLink(QThread):
             f.last_update = time.time()
             self.telemetry.emit(f)
 
+    # ── PARAM_VALUE → param_value 信號 + read_params 等待者 ─────────────
+    def _on_param_value(self, msg) -> None:
+        raw = msg.param_id
+        name = (raw if isinstance(raw, str) else bytes(raw).decode('utf-8', 'ignore'))
+        name = name.split('\x00', 1)[0].strip()
+        value = float(msg.param_value)
+        ptype = int(getattr(msg, 'param_type', 0) or 0)     # 0 = 訊息沒帶型別
+        pidx = int(getattr(msg, 'param_index', -1))
+        pcount = int(getattr(msg, 'param_count', 0))
+        get_src = getattr(msg, 'get_srcSystem', None)
+        src = int(get_src()) if callable(get_src) else 0
+        comp = self._src_component(msg)
+        self.param_value.emit(src, name, value, ptype, pidx, pcount)
+        with self._param_cv:
+            hit = False
+            for w in self._param_waiters:
+                # sysid 是 None = 這一批請求還沒送出：之前到的值不算這次讀回
+                if w['sysid'] is None or src != w['sysid'] or comp != w['compid']:
+                    continue
+                if name in w['want'] and name not in w['got']:
+                    w['got'][name] = (value, ptype)
+                    hit = True
+            if hit:
+                self._param_cv.notify_all()
+
+    # ── CAMERA_FEEDBACK → 拍照計數 ──────────────────────────────────────
+    def _on_camera_feedback(self, src: int, msg) -> None:
+        """CAMERA_FEEDBACK：更新 (sysid, cam_idx) 的統計並 emit camera_feedback。
+
+        ⚠️ **張數看 img_idx 的跳號，不看訊息則數。** ArduPilot 每條鏈路對
+           CAMERA_FEEDBACK 只有一個待送位元＋一份會被覆寫的內容：鏈路忙時連拍幾張
+           只會送出最後一則（img_idx 跳號）。另外同步交易（任務上傳 / 讀回）期間主迴圈
+           收不到訊息，也會表現成跳號。所以：
+             * triggered：飛控觸發計數（= 最新 img_idx；飛控重開機後接著累加）。
+             * received / missing / gaps：有收到 / 沒收到回饋的 img_idx（gaps 是
+               (第一個缺的, 最後一個缺的) 清單）。**缺回饋 ≠ 漏拍**：飛控照樣觸發了，
+               只是那張的回饋訊息被合併或掉了；真正漏拍要落地後拿 .BIN CAM 與 Pi 的
+               frames.jsonl 對。
+             * completed：completed_captures（回授腳確認的張數）依跳號累加。沒設
+               CAM1_FEEDBAK_PIN 時飛控永遠送 0。鏈路鎖在 MAVLink1 時這個擴充欄位
+               也收不到（恆為 0）。有回授腳時同一個 img_idx 可能出現兩次（第二則帶著
+               新的 completed_captures）⇒ duplicates 不是異常。
+             * img_idx 倒退（且不是 65535→0 的回捲）= 飛控重開機：resets+1，
+               新一輪從 0 起算。
+           first_img_idx > 1 代表連上之前已經拍過（那些不算缺）。
+        """
+        cam = int(getattr(msg, 'cam_idx', 0))
+        img = int(msg.img_idx) & 0xFFFF
+        cc = int(getattr(msg, 'completed_captures', 0) or 0) & 0xFFFF
+        now = time.time()
+        gap = None
+        reset = duplicate = False
+        with self._state_lock:
+            st = self._cam_stats.get((src, cam))
+            if st is None:
+                st = {'sysid': src, 'cam_idx': cam, 'messages': 0,
+                      'first_img_idx': img, 'last_img_idx': img,
+                      'triggered': img, 'received': 1, 'missing': 0, 'gaps': [],
+                      'duplicates': 0, 'resets': 0,
+                      'completed_captures': cc, 'completed': cc}
+                self._cam_stats[(src, cam)] = st
+                new = img
+            else:
+                d = (img - st['last_img_idx']) & 0xFFFF
+                if d == 0:
+                    duplicate = True
+                    st['duplicates'] += 1
+                    new = 0
+                elif d < 0x8000:
+                    new = d
+                    st['received'] += 1
+                    if d > 1:
+                        gap = ((st['last_img_idx'] + 1) & 0xFFFF, (img - 1) & 0xFFFF)
+                else:
+                    reset = True
+                    st['resets'] += 1
+                    new = img
+                    st['received'] += 1
+                    if img > 1:
+                        gap = (1, img - 1)
+                st['triggered'] += new
+                if gap is not None:
+                    st['gaps'].append(gap)
+                    st['missing'] += (gap[1] - gap[0]) % 0x10000 + 1
+                dc = (cc - st['completed_captures']) & 0xFFFF
+                if reset:
+                    st['completed'] += cc
+                elif dc < 0x8000:
+                    st['completed'] += dc
+                st['last_img_idx'] = img
+                st['completed_captures'] = cc
+            st['messages'] += 1
+            st['last_time_usec'] = int(msg.time_usec)
+            st['last_seen'] = now
+            payload = {
+                'sysid': src, 'compid': self._src_component(msg), 'cam_idx': cam,
+                'img_idx': img,
+                'lat': int(msg.lat) / 1e7, 'lng': int(msg.lng) / 1e7,    # 度
+                'lat_e7': int(msg.lat), 'lng_e7': int(msg.lng),
+                'alt_msl': float(msg.alt_msl), 'alt_rel': float(msg.alt_rel),   # m
+                'roll': float(msg.roll), 'pitch': float(msg.pitch),
+                'yaw': float(msg.yaw),                                   # 度
+                'foc_len': float(getattr(msg, 'foc_len', 0.0)),
+                'completed_captures': cc, 'flags': int(msg.flags),
+                # ⚠️ time_usec 原樣轉交、不解讀：沒設 CAM1_FEEDBAK_PIN 時是外推的
+                #    GPS epoch µs（gps.time_epoch_usec()），設了回授腳時是 32 位元
+                #    開機 µs（約 71.6 分鐘回捲）。要用它得先知道那個參數。
+                'time_usec': int(msg.time_usec),
+                'new_photos': new, 'gap': gap, 'reset': reset, 'duplicate': duplicate,
+                'triggered': st['triggered'], 'missing': st['missing'],
+                'completed': st['completed'],
+            }
+        if gap is not None:
+            logger.info(f'[SITL] sysid={src} cam{cam} CAMERA_FEEDBACK 跳號：'
+                        f'img_idx {gap[0]}..{gap[1]} 沒收到回饋（合併或遺失；照樣計入觸發數）')
+        if reset:
+            logger.warning(f'[SITL] sysid={src} cam{cam} img_idx 倒退到 {img}'
+                           f' —— 飛控重開機？觸發計數接著累加')
+            self.status_text.emit(4, f'⚠️ UAV{src} 相機 img_idx 倒退到 {img}（飛控重開機？）')
+        self.camera_feedback.emit(src, payload)
+
     # ─────────────────────────────────────────────────────────────────
     # 命令發送（在接收執行緒中執行，與接收共用 self._mav）
     # ─────────────────────────────────────────────────────────────────
+    @staticmethod
+    def _cmd_arg_summary(cmd: str, arg):
+        """log 用：任務類命令只印點數，不要把整份清單倒進 log。"""
+        if cmd == 'upload_mission':
+            return f'{len(arg)} 點'
+        if cmd == 'upload_mission_items':
+            return f'{len(arg[0])} 項 verify={arg[1]}'
+        if cmd == 'read_params':
+            return f'{len(arg[1])} 個參數'
+        return arg
+
     def _dispatch_command(self, cmd: str, arg):
         if self._mav is None:
+            if cmd == 'upload_mission_items':
+                # ⚠️ 不可以靜默 return：呼叫端在等 mission_uploaded，零次 = 永遠等。
+                self._report_mission_upload(False, '尚未連線到飛控（沒有可用的 MAVLink 連線）')
             return
         try:
             with self._mav_lock:
@@ -824,6 +1559,8 @@ class SITLLink(QThread):
                     self._send_takeoff(float(arg))
                 elif cmd == 'upload_mission':
                     self._send_mission(arg)
+                elif cmd == 'upload_mission_items':
+                    self._send_mission_items(*arg)
                 elif cmd == 'download_mission':
                     self._recv_mission()
                 elif cmd == 'mission_start':
@@ -841,6 +1578,8 @@ class SITLLink(QThread):
                         time.sleep(0.05)
                 elif cmd == 'get_param':
                     self._send_param_request(arg)
+                elif cmd == 'read_params':
+                    self._send_param_read_requests(*arg)
                 elif cmd == 'guided_takeoff':
                     self._send_guided_takeoff(float(arg))
                 elif cmd == 'guided_goto':
@@ -857,7 +1596,7 @@ class SITLLink(QThread):
                     self._send_fence_zones(arg)
                 elif cmd == 'clear_fence':
                     self._send_clear_fence()
-                logger.info(f'[SITL] 已發送命令: {cmd} {arg if cmd != "upload_mission" else f"{len(arg)} 點"}')
+                logger.info(f'[SITL] 已發送命令: {cmd} {self._cmd_arg_summary(cmd, arg)}')
         except Exception as e:
             logger.error(f'[SITL] 命令 {cmd} 失敗: {e}', exc_info=True)
             self.status_text.emit(3, f'命令失敗: {cmd} - {e}')
@@ -949,6 +1688,24 @@ class SITLLink(QThread):
             return
         mode_id = mapping[mode_name]
         self._mav.set_mode(mode_id)
+        self._warn_if_auto_while_disarmed(mode_name)
+
+    def _warn_if_auto_while_disarmed(self, mode_name: str) -> None:
+        """未解鎖就切 AUTO：飛控會照樣印 `Mission: 2 VTOLTakeoff`，但**不會起飛**。
+
+        2026-10-08 使用者回報「進 AUTO 顯示 vtol_takeoff 但飛機沒有起飛」。真正原因是
+        ARMING_REQUIRE=0 讓飛機永遠「已解鎖」卻馬達鎖死；修好之後 VTOL 開機是未解鎖，
+        只按 AUTO 會呈現**同樣的畫面**（訊息有、飛機不動）。所以在這裡明講：要先 ARM
+        （或用「一鍵起飛」）。ArduPilot 在 AUTO 下再解鎖會立刻開始任務，不用再切一次。
+        只警告、不擋：行為與 Mission Planner 一致。
+        """
+        if mode_name != 'AUTO':
+            return
+        f = self._frames.get(self.sysid_label)
+        if f is not None and not f.armed:
+            self.status_text.emit(
+                4, '[System] ⚠ 尚未解鎖：AUTO 不會起飛。請先按 ARM（或用「一鍵起飛」）；'
+                   'AUTO 下解鎖後會立刻開始任務。')
 
     def _send_takeoff(self, alt: float):
         from pymavlink import mavutil
@@ -1148,6 +1905,27 @@ class SITLLink(QThread):
             self._mav.target_system, self._mav.target_component,
             pid, -1,
         )
+
+    def _send_param_read_requests(self, waiter: dict, names) -> None:
+        """read_params 的送出端（接收執行緒、持 _mav_lock）。
+
+        目標 = (target_system, 該 sysid 的自駕儀 compid)，**不是** target_component
+        （pymavlink 預設 0 = 廣播，飛控會把讀參數請求轉發給同 sysid 的伴隨電腦）。
+        送出前先在 waiter 記下「只收誰的回覆」—— 回覆也由這條執行緒處理，所以不會有
+        回覆比記錄先到的競爭。每則間隔 20 ms：ArduPilot 的參數請求佇列只有 20 格，
+        一次塞滿會被丟掉（丟掉的由 read_params 下一輪補送）。
+        """
+        tgt_sys = int(self._mav.target_system or 0) or self.sysid_label
+        tgt_comp = self._autopilot_compid.get(
+            tgt_sys, _mavlink_enums().MAV_COMP_ID_AUTOPILOT1)
+        with self._param_cv:
+            waiter['sysid'], waiter['compid'] = tgt_sys, tgt_comp
+        pump = self._make_heartbeat_pump()
+        for i, n in enumerate(names):
+            if i:
+                time.sleep(0.02)
+            self._mav.mav.param_request_read_send(tgt_sys, tgt_comp, n.encode('ascii'), -1)
+            pump()
 
     def _send_clear_fence(self):
         """清除飛控 EEPROM 中所有 polygon fence 頂點，並強制 FENCE_ENABLE=0。
@@ -1573,42 +2351,107 @@ class SITLLink(QThread):
            整趟下載就會連同它的 ValueError 一起消失。**下載端不可以對飛控
            回來的資料做封閉列舉驗證** —— 那一側的內容不是我們決定的。
         """
-        from pymavlink import mavutil
         sysid = self.sysid_label
-        tgt_sys, tgt_comp = self._mav.target_system, self._mav.target_component
-        MT = mavutil.mavlink.MAV_MISSION_TYPE_MISSION
 
-        def _fail(reason: str):
-            logger.warning(f'[SITL] 任務下載失敗: {reason}')
-            self.status_text.emit(3, f'任務下載失敗：{reason}')
-            self.mission_download_failed.emit(sysid, reason)
+        items, err = self._fetch_mission_items()
+        if err is not None:
+            logger.warning(f'[SITL] 任務下載失敗: {err}')
+            self.status_text.emit(3, f'任務下載失敗：{err}')
+            self.mission_download_failed.emit(sysid, err)
+            return
 
-        # ⚠️ 整段期間主迴圈是停住的 —— 它的 1 Hz GCS heartbeat（run() 裡
-        #    `if _now - _last_hb >= 1.0`）跑不到。航點多時累計阻塞可以到數十秒，
-        #    而沒有 GCS 心跳會觸發 FS_GCS ⇒ 飛控自動 RTL。所以這裡自己補送。
-        #    （上傳路徑有同樣的問題，只是它從沒跑過大任務。）
+        # n == 0 是**合法**答案：飛控裡真的沒有任務。走成功路徑，讓 UI 顯示
+        # 「0 個航點」而不是紅字 —— 那正是 auto_mission=False 時的正常樣子。
+        if not items:
+            self.status_text.emit(6, '飛控目前沒有任務（0 點）')
+            self.mission_downloaded.emit(sysid, [])
+            return
+
+        logger.info(f'[SITL] 任務下載完成：{len(items)} 項 (sysid={sysid})')
+        self.status_text.emit(6, f'任務下載完成（{len(items)} 點）')
+        self.mission_downloaded.emit(sysid, items)
+
+    def _make_heartbeat_pump(self):
+        """回傳一個 `pump()`：距上次 >= 1 s 才補送一包 GCS heartbeat。
+
+        ⚠️ 任務協定（下載 / 寫入 / 讀回驗證）都是在接收執行緒裡同步阻塞地做完，
+           主迴圈自己的 1 Hz heartbeat（run() 裡 `_now - _last_hb >= 1.0`）
+           在這段期間跑不到。航點多時累計阻塞可以到數十秒，而沒有 GCS 心跳
+           會觸發 FS_GCS ⇒ 飛控自動 RTL。所以每個阻塞迴圈都要自己補送。
+        """
         last_hb = time.time()
 
-        def _pump_heartbeat():
+        def _pump():
             nonlocal last_hb
             if time.time() - last_hb >= 1.0:
                 self._send_gcs_heartbeat()
                 last_hb = time.time()
 
+        return _pump
+
+    def _fetch_mission_items(self):
+        """讀一次飛控任務，回傳 `(items | None, error | None)`。
+
+        **不 emit 任何信號、不寫 status_text** —— 呼叫端決定失敗怎麼呈現：
+        `_recv_mission`（使用者按「讀取」）走 mission_download_failed，
+        `_write_mission_items` 的讀回驗證則把它併進 mission_uploaded 的失敗訊息。
+        兩條路共用同一份協定實作，才不會出現「驗證讀回」和「使用者讀取」
+        各自有一份、其中一份默默過期的情況。
+
+        `([], None)` = 飛控裡真的沒有任務（合法答案）；`(None, str)` = 讀不回來。
+        """
+        from pymavlink import mavutil
+        tgt_sys, tgt_comp = self._mav.target_system, self._mav.target_component
+        MT = mavutil.mavlink.MAV_MISSION_TYPE_MISSION
+
+        # ⚠️ 整段期間主迴圈是停住的 —— 見 _make_heartbeat_pump。
+        #    （上傳路徑有同樣的問題，只是它從沒跑過大任務。）
+        _pump_heartbeat = self._make_heartbeat_pump()
+
+        # 0. 清掉還留在接收緩衝裡的舊 MISSION_COUNT / MISSION_ITEM(_INT) / MISSION_ACK：
+        #    _mission_msg_is_for_us() 只濾「哪一架飛控」，不濾「哪一筆交易」——
+        #    同一架飛控、同一個 mission_type 的一則舊回覆（例如使用者上一次按了
+        #    「讀取」但客戶端已經逾時放棄、或上一次讀回驗證被中斷）會跟這次全新
+        #    請求的回覆長得一模一樣，若不先清空就會被當成**這次**的答案：讀取路徑
+        #    會把過期任務當成飛控「目前」的任務顯示成功、零錯誤文字；寫入後的讀回
+        #    驗證則可能拿它跟剛寫入的內容比對，把飛控已經接受的寫入誤判成「不符」，
+        #    或反過來湊巧判成「相符」但其實沒有真的驗到飛控上現在的內容。
+        #    寫入路徑（_write_mission_items）已經對自己用到的訊息種類做過同一件事
+        #    （REQUEST/ACK，見那裡的註解），這裡是讀取路徑自己的一份，不能少。
+        for _ in range(64):
+            stale = self._mav.recv_match(
+                type=['MISSION_COUNT', 'MISSION_ITEM_INT', 'MISSION_ITEM',
+                      'MISSION_ACK'],
+                blocking=False)
+            if stale is None:
+                break
+
         # 1. 要清單
+        #    ⚠️ fan-in 拓樸（見 __init__ docstring／_frame_for）下同一條連線上可能
+        #    同時有別架飛控的流量。recv_match(type=...) 只濾訊息種類、不濾來源，
+        #    這裡要另外用 _mission_msg_is_for_us() 擋掉別架的 MISSION_COUNT，
+        #    否則會把別台飛控剛好在同時間送出的任務清單，讀成「我方」讀回結果
+        #    ——包括寫入路徑拿它做讀回驗證，會把別架的任務誤判成「已驗證相符」。
         self._mav.mav.mission_request_list_send(tgt_sys, tgt_comp, MT)
-        cnt = self._mav.recv_match(type='MISSION_COUNT', blocking=True, timeout=5)
+        cnt = None
+        _cnt_deadline = time.time() + 5
+        while True:
+            _remain = _cnt_deadline - time.time()
+            if _remain <= 0:
+                break
+            cnt = self._mav.recv_match(
+                type='MISSION_COUNT', blocking=True, timeout=_remain)
+            if cnt is None:
+                break
+            if self._mission_msg_is_for_us(cnt, tgt_sys, MT):
+                break
+            cnt = None  # 別架飛控的 MISSION_COUNT：不算數，繼續等
         if cnt is None:
-            _fail('等 MISSION_COUNT 逾時（5 s）')
-            return
+            return None, '等 MISSION_COUNT 逾時（5 s）'
         n = int(cnt.count)
 
-        # n == 0 是**合法**答案：飛控裡真的沒有任務。走成功路徑，讓 UI 顯示
-        # 「0 個航點」而不是紅字 —— 那正是 auto_mission=False 時的正常樣子。
         if n == 0:
-            self.status_text.emit(6, '飛控目前沒有任務（0 點）')
-            self.mission_downloaded.emit(sysid, [])
-            return
+            return [], None
 
         # 2. 逐項索取
         items = []
@@ -1623,6 +2466,11 @@ class SITLLink(QThread):
                 )
                 if msg is None:
                     continue
+                # ⚠️ 同一條 fan-in 連線上別架飛控剛好也在傳任務時，訊息種類會
+                #    一樣（MISSION_ITEM_INT），但來源不是我們要讀的那架 ——
+                #    一樣要擋，否則讀回會混進別台飛控的座標。
+                if not self._mission_msg_is_for_us(msg, tgt_sys, MT):
+                    continue
                 # ⚠️ 飛控可能回別的 seq（重送、亂序）。「收到就算數」會讓航線
                 #    默默錯位 —— 產出一張畫得出來、但**是錯的**地圖，而那比
                 #    畫不出來更糟：它不會有人去查。
@@ -1631,8 +2479,7 @@ class SITLLink(QThread):
                 got = msg
                 break
             if got is None:
-                _fail(f'seq {seq} 讀不回來（重試 3 次；共 {n} 項）')
-                return
+                return None, f'seq {seq} 讀不回來（重試 3 次；共 {n} 項）'
 
             # MISSION_ITEM_INT 的 x/y 是 int×1e7；MISSION_ITEM 是 float 度。
             if got.get_type() == 'MISSION_ITEM_INT':
@@ -1662,6 +2509,416 @@ class SITLLink(QThread):
         except Exception:
             pass
 
-        logger.info(f'[SITL] 任務下載完成：{len(items)} 項 (sysid={sysid})')
-        self.status_text.emit(6, f'任務下載完成（{len(items)} 點）')
-        self.mission_downloaded.emit(sysid, items)
+        return items, None
+
+    # ── 任務寫入（Mission Planner 的「Write WPs」）─────────────────────
+    #
+    # ArduPilot 端的協定（唯讀查證於 ~/ardupilot-airframe，下面每條都有出處）：
+    #
+    # ① 收到 MISSION_COUNT 就**自己截斷**舊任務、然後逐項向我們要
+    #    （MissionItemProtocol_Waypoints.cpp::truncate → AP_Mission::truncate(count)）。
+    #    所以**不可以**先送 MISSION_CLEAR_ALL：
+    #      * 沒有好處 —— 舊任務本來就會被 COUNT 截成新長度；
+    #      * 有壞處 —— AP_Mission::clear() 在「已解鎖且任務執行中」回 false，
+    #        MissionItemProtocol::handle_mission_clear_all 會回 ERROR，
+    #        於是「飛行中改航線」在還沒開始寫之前就先失敗；
+    #      * 且 clear 與 COUNT 之間飛控是空任務，那個空窗裡切 AUTO 會直接完成任務。
+    #    （舊路徑 _send_mission 有 clear，那是舊行為，這裡刻意不沿用。）
+    # ② **請求永遠是 MISSION_REQUEST（非 INT）**：MissionItemProtocol::
+    #    queued_request_send() 只送 mavlink_msg_mission_request_send
+    #    （MissionItemProtocol.cpp）。所以迴圈兩種都要收；我們回的一律是
+    #    MISSION_ITEM_INT（GCS_MAVLINK::handle_mission_item 兩種都收，
+    #    收 MISSION_ITEM 會多印一行 "GCS should send MISSION_ITEM_INT" 警告）。
+    # ③ 飛控自己每 1 s 重送一次請求（MissionItemProtocol::update():
+    #    wp_recv_timeout_ms = 1000 + slowdown），連續 8 s 沒收到項目就取消並送
+    #    ACK(OPERATION_CANCELLED)（upload_timeout_ms = 8000）。
+    #    ⇒ 封包遺失時「同一個 seq 被再問一次」是**正常**的，重答即可；
+    #      項目遺失由飛控重問驅動，客戶端不必自己重送項目；只有 COUNT 本身
+    #      遺失時飛控尚未開始，才需要我們重送 COUNT。
+    # ④ 重複送項目的副作用：MissionItemProtocol::handle_mission_item 對
+    #    seq != request_i 回 ACK(INVALID_SEQUENCE) 但**不中止**傳輸（receiving 維持
+    #    true）。所以「我方剛好重答過某 seq」之後收到的 INVALID_SEQUENCE 是我方
+    #    造成的良性噪音；沒有重答過卻收到，才是真的錯。
+    # ⑤ seq 0（Home）：AP_Mission::replace_cmd(0) 在任務非空時**直接回 true 而不寫入**
+    #    （"Writing index zero is not allowed, it must be home"）。飛控端 Home 由
+    #    自己的 ahrs 決定 ⇒ 我們送的 seq 0 內容不會被採用，但仍會先過
+    #    mavlink_int_to_mission_cmd 的檢查（座標/frame 不合法會被 NAK），所以
+    #    seq 0 必須是合法項目。讀回時 seq 0 是飛控的 Home ⇒ 驗證跳過 seq 0。
+    #    另：空任務時 add_cmd() 會先寫 Home 再把我們的 seq 0 放到 index 1，
+    #    之後被 seq 1 的 replace 蓋掉 ⇒ **只有 seq 0 一項**的任務在空飛控上會讀回 2 項，
+    #    所以寫入要求 >= 2 項（Home + 至少一個航點）。
+    # ⑥ `current` 欄位：GCS_MAVLINK::handle_mission_item 對 MISSION_TYPE_MISSION 的項目，
+    #    current == 2 是「GUIDED 單點」、current == 3 是「只改高度」—— 不入任務、
+    #    立刻 ACK，**即使在上傳途中**！所以 current 一律送 0：
+    #    檔案裡 QGC WPL 的 current=1（Home 行常見）在 mavlink_int_to_mission_cmd
+    #    裡不被讀取，沒有任何好處，而 2/3 會劫持整個傳輸。
+    #    讀回時 current=1 只表示「這是目前執行中的 nav 指令」
+    #    （MissionItemProtocol_Waypoints::get_item），與檔案內容無關 ⇒ 驗證不比對 current。
+    # ⑦ 讀回的 frame：見 _MISSION_LOCATION_FRAME_READBACK。非位置指令的
+    #    frame/lat/lon/alt 飛控不存（stored_in_location），讀回是 0 ⇒ 不比對。
+    # ⑧ MISSION_ACK.type 一律用 pymavlink 的列舉解碼（_mission_result_name）。
+    #    ArduPilot 在寫入路徑上實際會回：ACCEPTED、NO_SPACE（count > num_commands_max）、
+    #    INVALID_SEQUENCE、UNSUPPORTED_FRAME / UNSUPPORTED（指令或 frame 不認得）、
+    #    INVALID_PARAM1..7（NaN/Inf、座標超範圍）、DENIED（別的 GCS 正在傳）、
+    #    ERROR（DO_JUMP 目標不合法、儲存失敗）、OPERATION_CANCELLED（8 s 逾時）。
+    # ⑨ 飛行中改任務：AP_Mission::replace_cmd 的註解 "replacing the current active
+    #    command will have no effect until the command is restarted" —— 寫入**不會**
+    #    停止或重啟正在跑的 AUTO 任務，但內容會被換掉。這裡不替呼叫端做這個決定
+    #    （呼叫端應在 UI 擋 AUTO 中寫入）。
+    @staticmethod
+    def _preflight_mission_items(items):
+        """寫入前的本機檢查，回傳 `(規範化後的 item 清單 | None, 失敗原因 | None)`。
+
+        ⚠️ 全部在碰 socket **之前**做完：壞資料一旦開始傳，飛控端已經被 COUNT
+           截斷了舊任務，傳到一半失敗 = 飛控上是一份半新半舊的任務。
+
+        規則：非空且 >= 2 項（見上面 ⑤）；seq 必須恰為 0..n-1 各一次（順序亂但
+        齊全就依 seq 排序，不重編號；缺號 / 重複 / 超出一律失敗）；每個數值欄位
+        有限；command 在 [2, 65535]（0/1 是 ArduPilot 內部保留，會被 NAK）；
+        frame 在 [0, 255]；|lat| <= 90、|lon| <= 180。
+        """
+        if not isinstance(items, (list, tuple)) or len(items) == 0:
+            return None, '任務是空的（沒有任何項目可寫）'
+
+        def _int_field(it, key, lo, hi, pos):
+            v = it.get(key)
+            if isinstance(v, bool) or v is None:
+                raise ValueError(f'第 {pos} 項的 {key} 不是整數（{v!r}）')
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                raise ValueError(f'第 {pos} 項的 {key} 不是整數（{v!r}）')
+            if not math.isfinite(f) or f != int(f):
+                raise ValueError(f'第 {pos} 項的 {key} 不是整數（{v!r}）')
+            iv = int(f)
+            if not lo <= iv <= hi:
+                raise ValueError(f'第 {pos} 項的 {key}={iv} 超出 {lo}..{hi}')
+            return iv
+
+        def _num_field(it, key, pos):
+            v = it.get(key)
+            if isinstance(v, bool) or v is None:
+                raise ValueError(f'第 {pos} 項的 {key} 缺漏或不是數字（{v!r}）')
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                raise ValueError(f'第 {pos} 項的 {key} 缺漏或不是數字（{v!r}）')
+            if not math.isfinite(f):
+                raise ValueError(f'第 {pos} 項的 {key} 不是有限數（{v!r}）')
+            return f
+
+        norm = []
+        try:
+            for pos, it in enumerate(items):
+                if not isinstance(it, dict):
+                    raise ValueError(f'第 {pos} 項不是 dict')
+                seq = _int_field(it, 'seq', 0, 65534, pos)
+                cmd = _int_field(it, 'command', 2, 65535, pos)
+                frame = _int_field(it, 'frame', 0, 255, pos)
+                lat = _num_field(it, 'lat', pos)
+                lon = _num_field(it, 'lon', pos)
+                alt = _num_field(it, 'alt', pos)
+                p = [_num_field(it, f'param{i}', pos) for i in (1, 2, 3, 4)]
+                if abs(lat) > 90.0:
+                    raise ValueError(f'第 {pos} 項 lat={lat} 超出 ±90')
+                if abs(lon) > 180.0:
+                    raise ValueError(f'第 {pos} 項 lon={lon} 超出 ±180')
+                ac = it.get('autocontinue', 1)
+                ac = 1 if ac is None else _int_field({'autocontinue': ac},
+                                                     'autocontinue', 0, 255, pos)
+                norm.append({
+                    'seq': seq, 'command': cmd, 'frame': frame,
+                    'lat': lat, 'lon': lon, 'alt': alt,
+                    'param1': p[0], 'param2': p[1], 'param3': p[2], 'param4': p[3],
+                    'autocontinue': ac,
+                })
+        except ValueError as e:
+            return None, str(e)
+
+        seqs = sorted(x['seq'] for x in norm)
+        if seqs != list(range(len(norm))):
+            seen, dup = set(), []
+            for s in seqs:
+                if s in seen:
+                    dup.append(s)
+                seen.add(s)
+            missing = [s for s in range(len(norm)) if s not in seen]
+            extra = [s for s in seqs if s >= len(norm)]
+            return None, (f'seq 必須恰為 0..{len(norm) - 1} 各一次'
+                          f'（重複 {dup[:5]}、缺 {missing[:5]}、超出 {extra[:5]}）')
+        norm.sort(key=lambda x: x['seq'])
+        if len(norm) < 2:
+            return None, ('任務只有 Home（seq 0）一項、沒有任何航點；'
+                          'ArduPilot 在空任務上寫入單一 seq 0 會多出一筆而讀回不符')
+        return norm, None
+
+    def _mission_msg_is_for_us(self, msg, tgt_sys: int, mission_type: int) -> bool:
+        """過濾同一條鏈路上不屬於這筆交易的訊息（別架的、fence / rally 的）。"""
+        mt = getattr(msg, 'mission_type', mission_type)
+        if mt is not None and int(mt) != int(mission_type):
+            return False
+        get_src = getattr(msg, 'get_srcSystem', None)
+        if tgt_sys and callable(get_src):
+            try:
+                if int(get_src()) != int(tgt_sys):
+                    return False
+            except Exception:
+                pass
+        return True
+
+    def _write_mission_items(self, items, verify: bool):
+        """做一整筆「寫入任務」交易，回傳 `(ok, 訊息)`。**自己不 emit 任何信號**
+        （由 `_send_mission_items` 統一 emit 一次，見那裡的說明）。
+
+        流程：本機檢查 → MISSION_COUNT → **事件迴圈**回答 MISSION_REQUEST(_INT)
+        → 等 MISSION_ACK(ACCEPTED) →（verify）讀回逐項比對。
+
+        ⚠️ 不是 `for seq in range(n)`：那種寫法假設飛控恰好一次一個、依序來。
+           實際上請求會重複（封包遺失）、可能是 INT 或非 INT、ACK 可能提早到，
+           `for` 迴圈遇到任何一種都會 IndexError、少送、或把「被拒收」當成功。
+
+        seq 0 / current 的規則見上方 ⑤⑥：seq 0 照送（飛控不採用其內容，但要合法），
+        current 一律送 0。
+        """
+        from pymavlink import mavutil
+        norm, err = self._preflight_mission_items(items)
+        if err is not None:
+            return False, f'寫入前檢查失敗：{err}（尚未送出任何資料）'
+        n = len(norm)
+        by_seq = {x['seq']: x for x in norm}
+        tgt_sys, tgt_comp = self._mav.target_system, self._mav.target_component
+        MT = mavutil.mavlink.MAV_MISSION_TYPE_MISSION
+        ACCEPTED = mavutil.mavlink.MAV_MISSION_ACCEPTED
+        INVALID_SEQ = mavutil.mavlink.MAV_MISSION_INVALID_SEQUENCE
+        pump = self._make_heartbeat_pump()
+
+        # 清掉還留在接收緩衝裡的舊 REQUEST / ACK：例如上一次讀取留下的
+        # ACK(ACCEPTED) 若被當成這次的 ACK，會在還沒送任何項目時就宣告成功。
+        for _ in range(64):
+            stale = self._mav.recv_match(
+                type=['MISSION_REQUEST_INT', 'MISSION_REQUEST', 'MISSION_ACK'],
+                blocking=False)
+            if stale is None:
+                break
+
+        t0 = time.time()
+        # 整體期限隨項數放大：每項一來一回，慢速數傳（57600 baud）約 0.2~0.5 s。
+        deadline = t0 + 15.0 + 1.5 * n
+        count_retry_s, max_count_resends = 2.0, 3
+
+        self._mav.mav.mission_count_send(tgt_sys, tgt_comp, n, MT)
+        last_count_t = time.time()
+        count_resends = 0
+        answered = {}           # seq → 已回答次數
+        dup_answers = 0         # 我方重複回答的次數（見 ④）
+        tolerated_inv_seq = 0
+        unexplained_inv_seq = 0  # 見下方「未解釋的 INVALID_SEQUENCE」
+
+        while True:
+            now = time.time()
+            if now >= deadline:
+                # 見下方：一筆「未解釋」的 INVALID_SEQUENCE 不會立刻判定失敗，
+                # 而是留到這裡 —— 逾時訊息要把它帶出來，不能讓失敗看起來
+                # 只是單純沒回應（那樣使用者看不出跟 INVALID_SEQUENCE 有關）。
+                inv_note = (
+                    f'；期間收到過 {unexplained_inv_seq} 次未解釋的 '
+                    'INVALID_SEQUENCE（飛控之後沒有再繼續問下一項，判定為真實'
+                    '失敗，不是純傳輸層重複）'
+                ) if unexplained_inv_seq else ''
+                if not answered:
+                    return False, (f'飛控無回應：{count_resends} 次重送 MISSION_COUNT 後'
+                                   f'仍沒有任何請求（{deadline - t0:.0f} s）{inv_note}')
+                return False, (f'逾時：已回答 {len(answered)}/{n} 項的請求，'
+                               f'但 {deadline - t0:.0f} s 內沒有收到 ACK（未驗證＝失敗）'
+                               f'{inv_note}')
+            pump()
+            msg = self._mav.recv_match(
+                type=['MISSION_REQUEST_INT', 'MISSION_REQUEST', 'MISSION_ACK'],
+                blocking=True, timeout=min(1.0, max(0.05, deadline - now)))
+            if msg is None:
+                # 第一個請求都還沒來 ⇒ 飛控可能沒收到 COUNT（飛控自己會重問項目，
+                # 但不會重問「還沒開始的」傳輸），所以只在這個階段重送 COUNT。
+                if not answered and time.time() - last_count_t >= count_retry_s:
+                    if count_resends >= max_count_resends:
+                        return False, (f'飛控無回應：MISSION_COUNT 送了 {count_resends + 1} 次'
+                                       f'都沒有請求')
+                    count_resends += 1
+                    logger.warning(f'[SITL] 寫入任務：第 {count_resends} 次重送 MISSION_COUNT')
+                    self._mav.mav.mission_count_send(tgt_sys, tgt_comp, n, MT)
+                    last_count_t = time.time()
+                continue
+            if not self._mission_msg_is_for_us(msg, tgt_sys, MT):
+                continue
+
+            mtype = msg.get_type()
+            if mtype == 'MISSION_ACK':
+                res = int(msg.type)
+                if res == ACCEPTED:
+                    if len(answered) < n:
+                        # 「提早 ACK」= 飛控認為傳完了，但我們還沒送完 ⇒ 不是成功。
+                        return False, (f'飛控在只索取 {len(answered)}/{n} 項時就回了 ACK'
+                                       f'（不可信，視為失敗）')
+                    break
+                if res == INVALID_SEQ and tolerated_inv_seq < dup_answers:
+                    tolerated_inv_seq += 1
+                    logger.warning('[SITL] 寫入任務：收到 INVALID_SEQUENCE，'
+                                   '對應我方重複回答的項目（見 ④），繼續等')
+                    continue
+                if res == INVALID_SEQ and answered:
+                    # ⚠️ ArduPilot 對 INVALID_SEQUENCE 的協定語意本來就是
+                    # 「這筆資料是舊的，我略過，但傳輸沒中止」
+                    # （MissionItemProtocol::handle_mission_item：seq!=request_i
+                    # 只回 ACK 就 return，不動 receiving/link；update() 仍會在
+                    # ~1s 內重新要 request_i，直到 upload_timeout_ms 才真的放棄）
+                    # ——不論這筆重複是「我方自己重送」（上面 dup_answers 那支）
+                    # 還是「傳輸層本身把我方送出的同一筆複製了一份」（UDP、或本
+                    # GCS 鎖定的半雙工數傳鏈路常見），飛控端反應完全一樣，客戶端
+                    # 也天生無法區分兩者。所以已經送出至少一項之後收到的
+                    # INVALID_SEQUENCE，不再立刻判失敗，而是繼續等：
+                    #   * 飛控自己沒事 ⇒ 之後還會再問下一項，正常往下走；
+                    #   * 飛控真的壞了/拒收 ⇒ 之後不會再有任何 REQUEST，
+                    #     最終在上面的 deadline 逾時失敗（訊息仍帶著這次的
+                    #     INVALID_SEQUENCE，不會被吃掉、不會看起來像成功）。
+                    # 一項都還沒送出時收到的 INVALID_SEQUENCE 沒有「複製了哪一筆」
+                    # 可以解釋，維持原本「立刻判定為真實錯誤」（見下面）。
+                    unexplained_inv_seq += 1
+                    logger.warning('[SITL] 寫入任務：收到未解釋的 INVALID_SEQUENCE'
+                                   f'（已回答 {len(answered)}/{n} 項），繼續等飛控'
+                                   '是否自行恢復，而非立刻判定失敗')
+                    continue
+                name = self._mission_result_name(res)
+                return False, (f'飛控拒收任務：{name}'
+                               f'（已回答 {len(answered)}/{n} 項）')
+
+            # MISSION_REQUEST / MISSION_REQUEST_INT
+            seq = int(msg.seq)
+            if seq not in by_seq:
+                return False, f'飛控請求了範圍外的 seq {seq}（任務共 {n} 項，合法 0..{n - 1}）'
+            if answered.get(seq, 0) >= 1:
+                dup_answers += 1
+            answered[seq] = answered.get(seq, 0) + 1
+            it = by_seq[seq]
+            # frame 逐項照檔案原樣送（不猜、不改寫）；current 一律 0（見 ⑥）；
+            # 座標 ×1e7 用 round()：int() 會截斷，
+            # 例如 25.0777*1e7 = 250776999.99999997 → int 得 250776999 而不是 250777000。
+            self._mav.mav.mission_item_int_send(
+                tgt_sys, tgt_comp, seq, it['frame'], it['command'],
+                0, it['autocontinue'],
+                it['param1'], it['param2'], it['param3'], it['param4'],
+                int(round(it['lat'] * 1e7)), int(round(it['lon'] * 1e7)),
+                float(it['alt']), MT)
+
+        if not verify:
+            return True, f'已寫入 {n} 項（飛控 ACK 接受；未讀回驗證）'
+
+        got, rerr = self._fetch_mission_items()
+        if rerr is not None:
+            return False, f'飛控已 ACK 接受，但讀回驗證失敗：{rerr}（無法確認內容）'
+        diffs = self._mission_readback_diffs(norm, got)
+        if diffs:
+            shown = '；'.join(diffs[:5])
+            more = f'（共 {len(diffs)} 處，僅列前 5）' if len(diffs) > 5 else ''
+            return False, f'讀回驗證不符：{shown}{more}'
+        return True, f'已寫入並讀回驗證 {n} 項相符'
+
+    @staticmethod
+    def _mission_param_matches(cmd: int, idx: int, sent: float, got: float) -> bool:
+        if idx in _MISSION_PARAMS_NOT_ECHOED.get(cmd, ()):
+            return True
+        if not math.isfinite(got):
+            return False
+        if abs(got - sent) <= 1e-6 * max(1.0, abs(sent)):
+            return True
+        if cmd not in _MISSION_CMDS_LOSSY_PARAMS:
+            return False
+        if got == 0.0:                       # 該欄位飛控不存
+            return True
+        if abs(got - sent) <= max(1.0, 0.1 * abs(sent)):   # 整數截斷 / 定點
+            return True
+        if sent > got > 0 and got in (255.0, 65535.0):     # uint8 / uint16 夾值
+            return True
+        return False
+
+    @staticmethod
+    def _mission_readback_diffs(sent, got):
+        """逐項比對「送出」與「讀回」，回傳人看得懂的差異字串清單（空 = 相符）。
+
+        規則全部來自 ArduPilot 原始碼（見表的註解）：
+          * 筆數必須相同；
+          * seq 0 跳過（飛控自己的 Home，本來就會不同）；
+          * command 必須完全相同；
+          * 位置類指令：lat/lon 差 <= 1 格（1e-7°；x 是 int32×1e7）、alt 差 <= 1.1 cm 加
+            float32 誤差（飛控以 cm 的 int32 存：`alt = z*100.0f` 截斷）、
+            frame 依正規化表；
+          * 非位置類指令：lat/lon/alt/frame 飛控不存，不比；
+          * param1..4：見 _mission_param_matches。
+        `current` 不比（讀回的 1 只表示「正在執行」）。
+        """
+        diffs = []
+        if len(got) != len(sent):
+            diffs.append(f'項數：送出 {len(sent)}、讀回 {len(got)}')
+        got_by_seq = {}
+        for g in got:
+            got_by_seq[int(g['seq'])] = g
+        for s in sent:
+            seq = int(s['seq'])
+            if seq == 0:
+                continue
+            g = got_by_seq.get(seq)
+            if g is None:
+                diffs.append(f'seq {seq} 讀回缺漏')
+                continue
+            cmd = int(s['command'])
+            if int(g['command']) != cmd:
+                diffs.append(f'seq {seq} command（送 {cmd}、讀回 {int(g["command"])}）')
+                continue
+            if cmd in _MISSION_CMDS_STORED_IN_LOCATION:
+                sf = int(s['frame'])
+                exp_frame = _MISSION_LOCATION_FRAME_READBACK.get(sf, sf)
+                if int(g['frame']) != exp_frame:
+                    diffs.append(f'seq {seq} frame（送 {sf}、預期讀回 {exp_frame}、'
+                                 f'實際 {int(g["frame"])}）')
+                for key in ('lat', 'lon'):
+                    # 以 x = int32×1e7 的整數格比：差 1 格（1e-7°）以內算相符。
+                    # 直接比浮點 `> 1e-7` 會在剛好差 1 格時被浮點誤差誤判。
+                    if abs(round(float(g[key]) * 1e7) - round(float(s[key]) * 1e7)) > 1:
+                        diffs.append(f'seq {seq} {key}（送 {s[key]}、讀回 {g[key]}）')
+                tol = 0.011 + 2.4e-7 * abs(float(s['alt']))
+                if abs(float(g['alt']) - float(s['alt'])) > tol:
+                    diffs.append(f'seq {seq} alt（送 {s["alt"]}、讀回 {g["alt"]}）')
+            for i in (1, 2, 3, 4):
+                key = f'param{i}'
+                if not SITLLink._mission_param_matches(
+                        cmd, i, float(s[key]), float(g[key])):
+                    diffs.append(f'seq {seq} {key}（送 {s[key]}、讀回 {g[key]}）')
+        return diffs
+
+    def _report_mission_upload(self, ok: bool, message: str) -> None:
+        """**唯一**發出 mission_uploaded 的地方。
+
+        「每次 upload_mission_items() 恰好一次」靠結構保證，而不是靠各路徑自己
+        記得：`_write_mission_items` 只回傳 (ok, msg)、不碰信號，`_send_mission_items`
+        呼叫這個函式**一次**；例外也在同一個 try/except 裡轉成 (False, msg)。
+        零次 = UI 永遠停在「寫入中…」；兩次 = 先顯示成功又改成失敗（或反過來）。
+        """
+        sysid = self.sysid_label
+        if ok:
+            logger.info(f'[SITL] 任務寫入成功 (sysid={sysid}): {message}')
+            self.status_text.emit(6, f'任務寫入完成：{message}')
+        else:
+            logger.error(f'[SITL] 任務寫入失敗 (sysid={sysid}): {message}')
+            self.status_text.emit(3, f'⚠️ 任務寫入失敗：{message}')
+        self.mission_uploaded.emit(sysid, bool(ok), str(message))
+
+    def _send_mission_items(self, items, verify: bool = True):
+        """`_dispatch_command('upload_mission_items')` 的落點：跑交易、恰好 emit 一次。
+
+        在接收執行緒裡、持著 `_mav_lock`（由 _dispatch_command 取得，with 區塊
+        離開時一定釋放，任何路徑都不會留著鎖）。
+        """
+        try:
+            ok, message = self._write_mission_items(items, bool(verify))
+        except Exception as e:
+            logger.error(f'[SITL] 任務寫入例外: {e}', exc_info=True)
+            ok, message = False, f'寫入過程發生例外：{type(e).__name__}: {e}'
+        self._report_mission_upload(ok, message)

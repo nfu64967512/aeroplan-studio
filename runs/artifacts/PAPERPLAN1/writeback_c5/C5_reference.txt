@@ -1,0 +1,404 @@
+HARVEST：法規高度限制下異質垂直起降無人機隊之續航約束測繪規劃與SITL驗證
+
+作者一a、作者二a、作者三b
+a服務單位（中文）
+b服務單位（中文）
+
+摘要
+本文提出 HARVEST，針對 120 m 法規高度上限下之異質垂直起降（VTOL）無人機隊測繪（轉彎半徑 120–200 m 與條帶間距約 96.6 m 同量級，且每架次皆含起降與場坪排隊之固定成本），整合考慮風場之飛行時間成本、決策級機數配額、Beam-IDP 條帶排序、起降走廊逐坪互斥與具時間不確定度之四維隔離，並匯出至 ArduPilot QuadPlane。1 架 Pioneer 與 2 架 HERO 於 5 m/s 模擬風場之 SITL 閉迴路飛行中皆完成起降，覆蓋率 99.97%（上界），最高 119.68 m AGL，低於 120 m 上限（規劃天花板 119.5 m），最小水平間距 100.43 m（門檻 100 m），參數讀回與韌體正規化後之期望值 102/102 相符。單變因對照中天花板取 120.0 m 則 SITL 飛行累計 354.93 s 高於 120 m；受控對照中走廊豁免以場坪座標而非身分判定時最小水平間距降至 5.0 m，而覆蓋率與規劃驗證均無法察覺。
+關鍵詞：覆蓋路徑規劃、異質無人機隊、垂直起降固定翼、續航約束任務配置、四維隔離
+一、前言
+小型複合翼 VTOL 無人機兼具定點起降與長航程巡航，適合區域測繪；異質機隊之規劃須兼顧轉彎半徑、續航、起降場坪與飛航高度。依民用航空法第99條之14，遙控無人機未經核准時飛航高度不得逾距地面或水面四百呎[1]，本文取 120 m 為作業上限、119.5 m 為規劃天花板。胞分解與來回掃描[2]、DARP 區域分派[3]、固定翼機隊協同覆蓋[4]、考慮風場之飛行時間成本[5]、曲率受限路徑[6]、迴轉與跳帶排序[7,8]、機數閉式界[9]、逐機轉彎半徑[10]、異質機隊多區覆蓋[11]、逐機起降點[12]與 QuadPlane 能量感知覆蓋[13]均已有文獻；本文不主張單一元件為新，而是提出 HARVEST（Heterogeneous Allocation and Routing for VTOL Endurance-constrained Survey Tasks）將其整合並輸出至 ArduPilot 飛控[14]，貢獻為：(i) 以考慮風場之地速計算各構型作業時間，並以決策級機數配額取代僅作為搜尋種子之機數界；(ii) 將 VTOL 起降能量、轉換高度與法規高度帶納入規劃；(iii) 以場坪身分為鍵之起降走廊互斥，搭配具時間不確定度之四維隔離。
+二、研究方法
+2.1 系統架構與規劃流程
+系統架構如下。輸入與介面層由 AeroPlan 地面站或情境腳本提供作業區、機隊、空域上限、風與場坪；HARVEST 規劃層產生每機四維航點，並進行去衝突與整體驗證；ArduPilot 執行與驗證層匯出 QuadPlane 任務與參數並上傳 SITL，逐項讀回參數與模擬風設定、比對任務項數，不符即停飛，飛行後以航跡回算覆蓋率與間距。本文之驗證實驗均經情境腳本路徑執行。
+規劃流程如下。通過前置檢查後，將作業區分解為凸胞並鋪設條帶（兩構型高度差不足時改以時間分離），依決策級配額配置構型與架數，以 Beam-IDP 排序條帶並檢查返場能量；最後組裝起降走廊與三維剖面，偵測並修復四維與走廊衝突後輸出任務檔。
+2.2 核心公式
+規劃目標為最小化機隊完工時間（makespan）Cmax = maxiCi，Ci 為第 i 機起飛、進場、作業、轉移、返場與降落時間之和。條帶刈幅 w = 2htan(αH/2)、間距 s = w(1−os)，作業高度 hop = max(hmin fw,min(htgt,hmax,hceil))。
+取 h = 119.5 m（規劃天花板）、αH = 60°、os = 0.30，得 w = 138.0 m、s = 96.6 m。時間成本以考慮風場之地速[5]與風修正有效轉彎半徑 Reff 之 Dubins 路徑[6]計算，直線與圓弧以同式逐段積分：
+
+
+𝑉
+𝑔
+
+𝜃
+=
+
+𝑉
+𝑎
+2
+−
+𝑊
+⊥
+2
+
++
+𝑊
+∥
+,  𝑡=
+𝑙𝑖𝑛𝑒
+
+𝐿
+
+𝑉
+𝑔
+
+𝜃
+
+
++
+𝑎𝑟𝑐
+
+𝑗=1
+𝑛
+
+
+𝑅
+𝑒𝑓𝑓
+𝛿
+
+𝑉
+𝑔
+
+
+𝜃
+𝑗
+
+
+
+
+#
+1
+
+
+W∥、W⊥ 為風速沿航跡之切向與法向分量（完整風三角），δ 為弧段積分步長（≤5°）。有效轉彎半徑取定常風中轉彎地面軌跡（trochoid，次擺線[5,15]）之順風相位曲率半徑，並以規劃半徑為下限：
+
+
+
+𝑅
+𝑒𝑓𝑓,𝑐
+
+𝑊
+=
+max
+
+
+𝑅
+𝑝𝑙𝑎𝑛,𝑐
+,
+𝑅
+𝑡ℎ𝑒𝑜,𝑐
+
+
+1+
+𝑊
+
+𝑉
+𝑎,𝑐
+
+
+
+2
+
+
+,
+
+𝑅
+𝑡ℎ𝑒𝑜,𝑐
+=
+
+𝑉
+𝑎,𝑐
+2
+
+𝑔
+tan
+
+𝜑
+𝑚𝑎𝑥,𝑐
+
+
+,  
+𝑊
+𝑐
+∗
+=
+𝑉
+𝑎,𝑐
+
+
+
+
+𝑅
+𝑝𝑙𝑎𝑛,𝑐
+
+
+𝑅
+𝑡ℎ𝑒𝑜,𝑐
+
+
+−1
+
+#
+2
+
+
+此式由 trochoid[5,15] 之運動學（順風相位地速 Va+W、同一傾角）直接可得，非本文之貢獻；本文僅取此最壞相位曲率半徑為地面座標之單一 Dubins 半徑，使條帶排序與成本表全程留在地面座標。W 為作業高度帶內最大層風速，W* 為規劃半徑內建裕度可吸收之風速；s < 2Reff 時跳帶數依 span coefficient k = ⌈2Reff/s⌉ 決定[7,8]（本文 W = 5 m/s 低於 W*，Reff = Rplan，k 為 Pioneer 5、HERO 3）。各胞機數以決策級配額決定：
+
+
+𝜆
+𝑓𝑙𝑜𝑜𝑟
+=
+
+
+𝑇
+𝑠𝑖𝑛𝑔𝑙𝑒
+
+
+𝜅
+𝑙𝑜𝑎𝑑
+
+𝑇
+𝑢𝑠𝑒
+−
+𝑡
+𝑖𝑛
+−
+𝑡
+𝑅𝑇𝐵
+
+
+,  
+𝑇
+𝑢𝑠𝑒
+=
+3600 
+𝐸
+𝑢𝑠𝑒
+
+
+𝑃
+𝑐
+
+𝑘
+𝑢𝑛𝑐
+
+#
+3
+
+
+Tsingle 為單機飛完該胞（含全部迴轉）之時間，tin、tRTB 為進場與返場時間，κload = 0.85、kunc = 1.2075，Euse 已扣除 30% 保留與起降能量。不同於 Gong 等人[9]作為搜尋種子之 Klower = Lin/Lmax，本式直接作為配置輸入；因拆分後胞內迴轉次數減少，λfloor 並非機數下界。四維隔離與起降走廊互斥定義為：
+
+
+conflict
+𝑎,𝑏
+⟺
+𝑑
+ℎ
+<
+𝑑
+𝑡ℎ𝑟
+∧
+𝑑
+𝑣
+<𝛥
+ℎ
+𝑠𝑒𝑝
+∧
+
+𝑡
+𝑎
+−
+𝑡
+𝑏
+
+<𝛥𝑡+
+𝜎
+𝑡
+
+
+𝑡
+𝑎
+
++
+𝜎
+𝑡
+
+
+𝑡
+𝑏
+
+,
+
+𝜎
+𝑡
+
+𝑡
+=
+min
+
+
+𝑘
+𝑡
+
+max
+
+0,𝑡−
+𝑡
+𝑠𝑦𝑛𝑐
+
+
+,
+𝜎
+𝑚𝑎𝑥
+
+
+,  site
+
+𝑟
+𝑎
+
+=site
+
+𝑟
+𝑏
+
+∧
+𝑢
+𝑎
+≠
+𝑢
+𝑏
+⇒𝐼
+
+𝑟
+𝑎
+
+∩𝐼
+
+𝑟
+𝑏
+
+=∅
+#
+4
+
+
+dthr 預設 100 m（兩機同向作業時為 60 m）、Δhsep = 50 m、Δt = 2 s、kt = 0.05、σmax = 45 s；I(r) 為場坪預約時窗（起飛 60 s；降落為進場前 30 s 至落地後 90 s）。
+Pioneer／HERO 巡航空速 21.5／19.0 m/s，轉彎半徑 Rtheo／Rplan 為 130／200 m 與 75／120 m（最大傾角 20°／25°；規劃裕度可吸收之風速 W* = 5.1675／5.0333 m/s），可用航程 133–145／79–86 km，兩型共用 HFOV 60° 相機。規格為公開測試值與規劃值；電池能量、相機焦距（16 mm）與像素間距（3.9 μm）為假設值，續航與可用航程為估計值；Rtheo 為廠商值（幾何自洽值 129.46／78.92 m），以此計 HERO 於 W = 5 m/s 之順風相位需傾角 26.07°，略大於 25°。
+三、SITL 驗證與成果
+3.1 實驗設置
+作業區為標稱 1560 m × 800 m 之平地矩形（WGS84 橢球面積 1.2434 km²），由系統自動切為 3 個子區；機隊為 1 架 Pioneer（A1）與 2 架 HERO（B2、B3），起飛坪相距 10 m，共用降落場坪 H；空域上限取法規四百呎（121.92 m）以下之 120 m AGL，不申請豁免，規劃天花板設為 119.5 m 以保留匯出離散化與高度追蹤之裕度（3.3 節）；最低固定翼作業高度 100 m，目標 GSD 0.05 m/px。規劃風與模擬風設為獨立變因（表2），主結果兩者均為 5 m/s、270°；模擬風於解鎖前讀回確認（三機 15 項），紊流為 0、不隨高度變化。飛行採 ArduPlane 4.8.0-dev QuadPlane SITL（內建機體模型、5 倍速），依規劃起飛時刻逐機放行。覆蓋率以航跡加刈幅緩衝回算，為上界；間距以飛控原生 5.1–6.4 Hz 紀錄於 WGS84 橢球座標求連續時間最小值；完工時間以最後一架下穿 2 m 判定。
+3.2 規劃與 SITL 飛行對照
+結果如表1（架次 HV4W55）；最小水平間距 100.43 m（B2–B3）僅餘 0.43 m（見限制 (2)）。參數每機比對 34 項：任務產生器匯出 32 項，另 2 項（ARMING_REQUIRE、SCHED_LOOP_RATE）為 SITL 平台設定而非韌體需求；「相符」指與韌體正規化後期望值之差 ≤ max(0.01, 0.1%)，正規化含 Q_RTL_MODE 刻意覆寫（3 機，韌體不接受其與 RTL_AUTOLAND 同時啟用）與 AIRSPEED_MAX 整數化（2 機）；對原始規劃值（96 項）則到 float32 精度為 91／96、逐位元為 85／96。
+表1 規劃與 SITL 飛行結果對照（1 Pioneer + 2 HERO；架次 HV4W55）
+項目
+規劃
+SITL 飛行
+
+起降完成
+3 架
+3／3
+
+母區覆蓋率（1.2434 km²）
+未覆蓋 0
+99.97%（上界）
+
+全程最高高度 AGL（上限 120 m）
+匯出 ≤119.553 m
+119.622／119.636／119.675 m
+
+航程 A1／B2／B3（km）
+10.29／7.93／12.44
+10.69／8.30／12.91（+4.0%）
+
+完工時間 makespan（s）
+1260.5
+1281.9（+1.70%）
+
+最小水平間距（m；門檻 100）
+105.70
+100.43（垂直 28.4；違規 0/7309）
+
+飛控參數讀回（34 項 × 3 機）
+匯出 32 項 × 3 機
+102／102 相符（原始值：float32 精度 91／96，逐位元 85／96）
+
+任務上傳（項數）
+82／53／84
+讀回一致
+
+表註：規劃風與模擬風均為 5 m/s、270°（解鎖前讀回 15／15，風判準見表2）；百分比對完工時間判準（3.1 節）敏感，引用須連同本註；每機 32 項為本情境之匯出項數；waiver_max_agl_m: 119.5 為天花板設定而非豁免；平面近似之 1.248 km² 高估 0.37%。
+3.3 規劃天花板與風場之對照
+規劃天花板。匯出將圓弧重新離散、新頂點高度以線性內插，而等 AGL 曲面於局部東-北-天座標為拋物面，故迴轉頂點可高出天花板，且規劃驗證器（只檢查規劃航點、容差 1 m）無法察覺。HV4W55R 與 HV4W55 僅天花板不同（同風場、同匯出項數、參數檔逐位元相同）：120.0 m 時 88 個匯出航點高於 120 m，SITL 飛行最高 120.174 m、累計 354.93 s 高於 120 m；119.5 m 時兩者皆為 0（表2），代價為規劃完工時間 +0.0279 s（本作業區之性質，不宜外推）。風場。運動學判準（東減西之地速 − 空速，理論 2W）與 EKF3 風速（4.89–4.97 m/s）證明模擬風生效（表2）。僅模擬風不同之 HV4W05 與 HV4W00 完工時間差 26.90 s；含風規劃之預測誤差較小（+1.70% 對 +2.43%），完工時間卻晚 47.13 s（44.0 s 為刻意延後放行），即買到的是預測準確度而非速度。180° 之 HV4W55S 以北−南判準與側風地速虧損（與 √(Va2−W2)−Va 相差 ≤ 0.041 m/s）驗證側向分量；兩風向為各自重解之計畫，不比較完工時間。
+表2 規劃天花板與風場之對照架次（1 Pioneer + 2 HERO，同一情境）
+架次
+天花板 (m)
+規劃風／模擬風
+高於 120 m (s)
+makespan 規劃→SITL (s)
+SITL 間距 (m)
+風判準 (m/s)
+
+HV4W00
+119.5
+0／0
+0
+1205.5→1207.9
+100.435
+東−西 −0.009 至 +0.009
+
+HV4W05
+119.5
+0／5/270°
+0
+1205.5→1234.8
+100.291
+東−西 +9.915 至 +9.969
+
+HV4W55
+119.5
+5/270°／5/270°
+0
+1260.5→1281.9
+100.426
+東−西 +9.931 至 +9.958
+
+HV4W55R
+120.0
+5/270°／5/270°
+354.93
+1260.4→1282.2
+100.579
+東−西 +9.934 至 +9.960
+
+HV4W55S
+119.5
+5/180°／5/180°
+0
+966.2→996.9
+266.177
+北−南 +9.512 至 +9.853
+
+表註：(a) 風判準＝巡航段逐航向 90° 扇區（地速 − 空速）中位數之差，理論 2W = +10.0 m/s，已消去與航向無關之尺度偏移；180° 架次取相對高度 30 m 以上樣本（其餘 100 m），其東−西為 −0.046 至 +0.014 m/s。(b) HV4W55S 三機解鎖前沿地面偏離起飛站 5.0–5.1 m（剛體平移，間距變化 ≤ 0.022 m；位移方向鎖在機體縱軸，量值未能自模擬器原始碼導出），於明示並記錄之容差覆寫（2.0 → 6.0 m）下放行；其餘七趟 ≤ 0.215 m。(c) 陣風取 1.3 倍風速、場址上限 8.0 m/s，故 W ≥ 6.16 m/s 即 NO_GO。(d) HV4SITL15／16（未列）為模擬未設風之同計畫重飛（完工時間差 0.025 s），與 119.5 m 各趟差兩個變因。(e) 規劃間距為 2 s 網格上界，較 SITL 飛行值高 4.20–5.27 m（HV4W55S 56.20 m）；違規皆 0；每格一趟。
+四、結論與限制
+HARVEST 將考慮風場之飛行時間成本、跳帶迴轉、決策級機數配額、VTOL 起降能量與法規高度帶、起降走廊互斥與四維隔離整合並匯出至 ArduPilot QuadPlane，並以 5 m/s 模擬風場之 SITL 閉迴路飛行與讀回檢核驗證其可執行性；規劃天花板降 0.5 m 即消除超高飛行（代價 +0.0279 s），納入風場換得的是預測準確度而非較短之完工時間，覆蓋率不足以作為唯一驗收條件。另一受控對照中，走廊豁免以場坪座標判定時最小水平間距降至 5.0 m（垂直 19.9 m；2 s 網格上界），以場坪身分判定則為 52.7 m 且無違規，而規劃驗證與覆蓋率兩者皆無法察覺（單一情境、單次執行；原始資料未納管）。
+本研究之限制：(1) 僅以 SITL 內建機體模型、單一作業區、各條件 1 趟（決定性模擬）驗證；風場為單層、定常、無紊流，驗證上限 5 m/s（情境預設值，非場址實測），W ≥ 6.16 m/s 即 NO_GO；W = 5 m/s 低於 W* = 5.1675／5.0333 m/s，Reff 退化為 Rplan（匯出迴轉半徑逐趟為 200／120 m），風修正僅在 W* 至 6.15 m/s 生效，未驗證；條帶方位不隨風向調整，270° 與 180° 架次為各自重解之計畫。(2) 覆蓋率與規劃間距皆為上界，後者不蘊含 SITL 飛行 ≥ 100 m；間距餘裕僅 0.426 m（八趟最緊 0.291 m），最近接時刻垂直差 28.4 m 低於 50 m 門檻，同型 HERO 間無垂直隔離，水平間距為唯一防線。(3) 跳帶排序之觸發條件為單胞條帶數 n > k = ⌈2Reff/s⌉，而非「條帶數少於 3」；表1 情境 n = 1／2 未超過 k = 5／3，四種條帶序之迴轉成本逐項相同，此缺口源自切區結果。另設觸發情境（作業區改為三塊標稱 1600 × 1200 m，其餘同表1；各胞 n = 6–13 > k），以規劃器自身之考慮風場 Dubins 胞內成本評分，全機隊迴轉時間由順序掃描之 1696.88 s 降為 1115.73 s（−34.25%），距 Held–Karp 最佳解仍高 5.24%；此為規劃層模型值，順序掃描對照組無法以 SITL 飛行。(4) 最長單機航程於封閉基準 10 組情境均較團隊既有之 DCCPP 實作長 0.91%–22.87%，本文不主張航程效率；另 2 組 HARVEST 自判不可行而回報未覆蓋（覆蓋率 0.528、0.617），恰為基準航線超出配置器能量預算 12.5% 與 14.4% 者，成因（切區後才計算每胞機數而不再細切）列為後續工作。(5) 圓弧匯出離散化缺陷（3.3 節）以降低天花板迴避而未修正：匯出偏差 +0.014 至 +0.170 m、飛控追蹤另 +0.027 至 +0.148 m，此裕度不可外推（最壞餘裕 0.303 m）。後續將進行硬體上模擬、陣風與分層風對照及轉彎半徑消融實驗。
+誌謝
+本研究由國家科學及技術委員會計畫（計畫編號：NSTC ○○○-○○○○-E-○○○-○○○）補助，特此致謝。
+參考文獻
+[1] 民用航空法，第九章之二「遙控無人機」，第99條之14，總統華總一義字第11200054081號令修正公布，2023年6月28日。
+[2] Choset, H., "Coverage of Known Spaces: The Boustrophedon Cellular Decomposition", Auton. Robots, Vol. 9, No. 3, pp 247-253, 2000.
+[3] Kapoutsis, A. C., Chatzichristofis, S. A., and Kosmatopoulos, E. B., "DARP: Divide Areas Algorithm for Optimal Multi-Robot Coverage Path Planning", J. Intell. Robot. Syst., Vol. 86, No. 3-4, pp 663-680, 2017.
+[4] Wang, M., Zhang, D., Li, C., and Zhang, Z., "Multiple Fixed-Wing UAVs Collaborative Coverage 3D Path Planning Method for Complex Areas", Def. Technol., Vol. 47, pp 197-215, 2025.
+[5] Coombes, M., Fletcher, T., Chen, W.-H., and Liu, C., "Optimal Polygon Decomposition for UAV Survey Coverage Path Planning in Wind", Sensors, Vol. 18, No. 7, Article 2132, 2018.
+[6] Dubins, L. E., "On Curves of Minimal Length with a Constraint on Average Curvature, and with Prescribed Initial and Terminal Positions and Tangents", Am. J. Math., Vol. 79, No. 3, pp 497-516, 1957.
+[7] Bochtis, D. D., and Vougioukas, S. G., "Minimising the Non-Working Distance Travelled by Machines Operating in a Headland Field Pattern", Biosyst. Eng., Vol. 101, No. 1, pp 1-12, 2008.
+[8] Huang, J., Fu, W., Luo, S., Wang, C., Zhang, B., and Bai, Y., "A Practical Interlacing-Based Coverage Path Planning Method for Fixed-Wing UAV Photogrammetry in Convex Polygon Regions", Aerospace, Vol. 9, No. 9, Article 521, 2022.
+[9] Gong, H., Fu, Z., Xu, K., Sun, W., Xu, W., and Du, M., "Bi-Level Optimization for Multi-UAV Collaborative Coverage Path Planning in Irregular Areas", Mathematics, Vol. 14, No. 3, Article 416, 2026.
+[10] Sundar, K., and Rathinam, S., "Algorithms for Heterogeneous, Multiple Depot, Multiple Unmanned Vehicle Path Planning Problems", J. Intell. Robot. Syst., Vol. 88, No. 2-4, pp 513-526, 2017.
+[11] Xiao, P., Li, N., Xie, F., Ni, H., Zhang, M., and Wang, B., "Clustering-Based Multi-Region Coverage-Path Planning of Heterogeneous UAVs", Drones, Vol. 7, No. 11, Article 664, 2023.
+[12] Yakunin, K., Kuchin, Y., Muhamedijeva, E., Symagulov, A., and Mukhamediev, R. I., "An Algorithm for Planning Coverage of an Area with Obstacles with a Heterogeneous Group of Drones Using a Genetic Algorithm and Parameterized Polygon Decomposition", Drones, Vol. 9, No. 9, Article 658, 2025.
+[13] Mathur, A., and Atkins, E., "Multi-Mode Flight Simulation and Energy-Aware Coverage Path Planning for a Lift+Cruise QuadPlane", Drones, Vol. 9, No. 4, Article 287, 2025.
+[14] ArduPilot Dev Team, "QuadPlane Overview", ArduPilot Plane Documentation, https://ardupilot.org/plane/docs/quadplane-overview.html, accessed September 14, 2026.
+[15] Techy, L., and Woolsey, C. A., "Minimum-Time Path Planning for Unmanned Aerial Vehicles in Steady Uniform Winds", J. Guid. Control Dyn., Vol. 32, No. 6, pp 1736-1746, 2009.

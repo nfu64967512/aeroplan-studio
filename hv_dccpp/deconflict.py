@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import inspect
+import itertools
 import math
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Iterable, Literal, Protocol, Sequence
@@ -120,14 +121,40 @@ SITE_CORRIDOR_PHASES: frozenset[Phase] = frozenset({
 **豁免三條件**（缺一不可，見 :func:`_track_from_plan`／:func:`_pair_metrics`）：
 (1) 兩樣本之航點階段皆屬本集合；(2) 兩樣本之時刻皆落在該機「自己的」走廊預約區間內
 （起飛 [t0, t0+Δt_dep]、降落 [t_arr(P_tc)−30, t_land+t_sep,LDG]；:func:`plan_windows`）；
-(3) 兩樣本對應之起降場坪（起飛段 = 首航點、降落段 = 末航點之水平位置）相距 ≤
-:data:`SAME_PAD_TOL_M`（同一站點）。如此每一筆被豁免之樣本對，其兩機在該站必各有一筆預約涵蓋該時刻，
-即必然落入 :meth:`CorridorSchedule.conflicts` 的檢查範圍（見 tests/test_deconflict.py::
-test_site_corridor_exemption_is_covered_by_schedule）。"""
+(3) 兩樣本對應之起降**站點身分**相同（起飛段 = ``UAVPlan.takeoff_site``、降落段 =
+``UAVPlan.landing_site``；vendored 修改 #8）。如此每一筆被豁免之樣本對，其兩機在該站必各有一筆
+預約涵蓋該時刻，即必然落入 :meth:`CorridorSchedule.conflicts` 的檢查範圍。
+
+⚠⚠⚠ 條件 (3) 從前比的是場坪**座標** ≤ :data:`SAME_PAD_TOL_M`，那是**錯的 proxy**：排程以
+``site_id`` 字串為鍵，兩個相距 30 m 的**不同**站不會互斥，卻會被豁免（實測數字見該常數）。
+計畫未帶 ``takeoff_site``（手搭 UAVPlan）時仍退回座標比較，此時該缺陷依然存在。"""
 
 SAME_PAD_TOL_M: float = 50.0
-"""走廊豁免之「同一場坪」判定容差（m）：兩樣本之場坪水平距離 ≤ 此值才視為同站。
-不同站（相距數 km）之走廊樣本仍照常做 4D 檢查。"""
+"""走廊豁免之「同一場坪」判定容差（m）——**僅用於計畫未帶 `takeoff_site` 之退回路徑**。
+
+⚠⚠⚠ 2026-09-09 實測缺陷（vendored 修改 #8 修正）：原本豁免比的是場坪**座標** ≤ 此值，
+而 :class:`CorridorSchedule` 的互斥是以 ``site_id`` **字串**為鍵。兩者不一致 ⇒
+「兩個**不同**的站相距 < 50 m」時，豁免成立但排程**不會**把它們排進同一條隊列，
+於是真違規被靜靜丟掉。4 台、每機一個起飛站的實測（`per_uav_takeoff_sites`）：
+
+===========  ==================  =============  ==============  ==============
+起飛站間距   被豁免的真違規      其中真同站     其中**不同站**  最近的一筆
+===========  ==================  =============  ==============  ==============
+全部同點     0                   0              0               —
+200 m        0                   0              0               —
+100 m        0                   0              0               —
+60 m         496                 **0**          **496**         30.0 m / 6.0 m
+30 m         1037                **0**          **1037**        15.0 m / 3.6 m
+15 m         1062                **0**          **1062**        7.5 m / 22.3 m
+===========  ==================  =============  ==============  ==============
+
+門檻是水平 100 m／垂直 50 m，而 ``validate`` **每一組都回報通過**。失效線正好落在本常數上：
+> 100 m 時豁免根本不觸發，所以問題在 50 m 以下才現形。最嚴重一筆是**一機起飛、一機降落**
+（B2 於 t=756 s 爬過 20 m，B3 於 t=766 s 降到 14 m，水平 30 m），兩個不同的站。
+
+⚠⚠ 舊 docstring 寫「不同站（相距數 km）」—— 那個假設在每機一個起飛站之前都成立，
+所以缺陷潛伏至今。改用身分判定後修復器解得掉：最小水平間距 7.5→101.6 m（15 m 間距），
+代價是 makespan +7%～26%。"""
 
 CASCADE_MAX_UAVS: int = 16
 """走廊連鎖重排（:func:`_cascade_shift`）之最大迭代／最大移動機數。"""
@@ -572,33 +599,66 @@ class _Track:
     oper: np.ndarray               # (M,) bool：OPERATE 段
     is_ghost: bool
     corr_pad: np.ndarray | None = None   # (M,2)：該樣本所屬起降場坪之 (x, y)；非走廊樣本為 nan
+    corr_site: np.ndarray | None = None  # (M,)：該樣本所屬起降站之 site_id；非走廊樣本／未知為 ""
 
     def pad(self) -> np.ndarray:
         if self.corr_pad is not None:
             return self.corr_pad
         return np.full((self.samples.shape[0], 2), np.nan)
 
+    def site(self) -> np.ndarray:
+        """走廊樣本之站點身分（(M,) 物件陣列）；非走廊樣本或計畫未帶站點時為 ""。"""
+        if self.corr_site is not None:
+            return self.corr_site
+        return np.full(self.samples.shape[0], "", dtype=object)
+
     @property
     def n(self) -> int:
         return int(self.samples.shape[0])
 
 
-def _corridor_pads(plan: UAVPlan, cfg: PlannerConfig, t_grid: np.ndarray, seg: np.ndarray) -> np.ndarray:
-    """每一樣本之「起降場坪座標」(M,2)：起飛段取首航點、降落段取末航點；非走廊樣本或落在該機自己的
-    走廊預約區間之外者為 nan（見 :data:`SITE_CORRIDOR_PHASES` 之豁免三條件）。"""
+def _corridor_masks(plan: UAVPlan, cfg: PlannerConfig, t_grid: np.ndarray, seg: np.ndarray
+                    ) -> tuple[np.ndarray, np.ndarray]:
+    """豁免條件 (1)+(2) 之樣本遮罩 ``(起飛段, 降落段)``。
+
+    ⚠ 場坪座標與站點身分**必須**共用同一組遮罩，分開算會漂移（兩者要指同一批樣本）。
+    """
     wps = plan.waypoints
-    pads = np.full((t_grid.size, 2), np.nan)
     phase_wp = [w.phase for w in wps]
     dep_wp = np.array([p in (Phase.TAKEOFF, Phase.TRANS_OUT) for p in phase_wp], dtype=bool)
     arr_wp = np.array([p in (Phase.TRANS_IN, Phase.LAND) for p in phase_wp], dtype=bool)
     (ts0, ts1), (ls0, ls1) = plan_windows(plan, cfg)
     dep = dep_wp[seg] & (t_grid >= ts0 - _EPS) & (t_grid <= ts1 + _EPS)
     arr = arr_wp[seg] & (t_grid >= ls0 - _EPS) & (t_grid <= ls1 + _EPS)
+    return dep, arr
+
+
+def _corridor_pads(plan: UAVPlan, cfg: PlannerConfig, t_grid: np.ndarray, seg: np.ndarray) -> np.ndarray:
+    """每一樣本之「起降場坪座標」(M,2)：起飛段取首航點、降落段取末航點；非走廊樣本或落在該機自己的
+    走廊預約區間之外者為 nan（見 :data:`SITE_CORRIDOR_PHASES` 之豁免三條件）。
+
+    ⚠ 這是**退回路徑**用的：正式判準是 :func:`_corridor_sites` 的站點身分。"""
+    wps = plan.waypoints
+    pads = np.full((t_grid.size, 2), np.nan)
+    dep, arr = _corridor_masks(plan, cfg, t_grid, seg)
     if dep.any():
         pads[dep] = (float(wps[0].x_m), float(wps[0].y_m))
     if arr.any():
         pads[arr] = (float(wps[-1].x_m), float(wps[-1].y_m))
     return pads
+
+
+def _corridor_sites(plan: UAVPlan, cfg: PlannerConfig, t_grid: np.ndarray, seg: np.ndarray) -> np.ndarray:
+    """每一樣本之「起降站 site_id」(M,)：起飛段取 ``takeoff_site``、降落段取 ``landing_site``；
+    非走廊樣本、或該欄為空（手搭 UAVPlan）者為 ``""``（⇒ :func:`_pair_metrics` 退回比座標）。"""
+    sites = np.full(t_grid.size, "", dtype=object)
+    dep, arr = _corridor_masks(plan, cfg, t_grid, seg)
+    to_id, ld_id = str(getattr(plan, "takeoff_site", "") or ""), str(plan.landing_site or "")
+    if to_id and dep.any():
+        sites[dep] = to_id
+    if ld_id and arr.any():
+        sites[arr] = ld_id
+    return sites
 
 
 def _track_from_plan(plan: UAVPlan, dt_s: float, t_sync_s: float, cfg: PlannerConfig) -> _Track:
@@ -611,7 +671,8 @@ def _track_from_plan(plan: UAVPlan, dt_s: float, t_sync_s: float, cfg: PlannerCo
     samples = np.column_stack([xs, ys, zs, t_grid, sigma])
     trk = np.radians(np.array([float(w.track_deg) for w in wps], dtype=np.float64))
     oper_wp = np.array([w.phase is Phase.OPERATE for w in wps], dtype=bool)
-    return _Track(plan.uav_id, samples, trk[seg], oper_wp[seg], False, _corridor_pads(plan, cfg, t_grid, seg))
+    return _Track(plan.uav_id, samples, trk[seg], oper_wp[seg], False,
+                  _corridor_pads(plan, cfg, t_grid, seg), _corridor_sites(plan, cfg, t_grid, seg))
 
 
 def _track_from_ghost(ghost: GhostLike) -> _Track:
@@ -641,7 +702,8 @@ def _pair_metrics(ta: _Track, tb: _Track, ii: np.ndarray, jj: np.ndarray, cfg: P
     """樣本對之 (d_h, d_v, Δt = t_b − t_a, win = Δt_4d + σ_a + σ_b, spatial)；spatial = 水平 < 門檻 且 垂直 < Δh_sep。
 
     水平門檻：兩樣本皆 OPERATE 且航跡差 ≤ 20°（同向平行作業，D18）→ d_sep_lat，否則 d_sep。
-    豁免：(a) 同站起降走廊樣本對（:data:`SITE_CORRIDOR_PHASES`，同場坪 ≤ :data:`SAME_PAD_TOL_M`）；
+    豁免：(a) **同站**起降走廊樣本對（:data:`SITE_CORRIDOR_PHASES`；以 ``site_id`` **身分**判定，
+    計畫未帶 ``takeoff_site`` 時才退回比場坪座標 ≤ :data:`SAME_PAD_TOL_M`）；
     (b) ``skip_oper``（空間互斥機對）時之 OPERATE↔OPERATE 樣本對。
     """
     sa, sb = ta.samples, tb.samples
@@ -654,9 +716,14 @@ def _pair_metrics(ta: _Track, tb: _Track, ii: np.ndarray, jj: np.ndarray, cfg: P
         codir = ta.oper[ii] & tb.oper[jj] & (dtheta <= CODIR_MAX_DIFF_RAD)
     thr = np.where(codir, float(cfg.d_sep_lat_m), float(cfg.d_sep_m))
     spatial = (d_h < thr) & (d_v < float(cfg.dh_sep_m))
-    pa, pb = ta.pad()[ii], tb.pad()[jj]                     # 起降走廊 → 由 CorridorSchedule 管（§13.5）
+    # 起降走廊 → 由 CorridorSchedule 管（§13.5）。⚠⚠⚠ 判準是站點**身分**不是座標距離：
+    #   排程以 site_id 字串為鍵，兩個相距 30 m 的**不同**站不會互斥，比座標會把真違規豁免掉。
+    sa_id, sb_id = ta.site()[ii], tb.site()[jj]
+    known = (sa_id != "") & (sb_id != "")
+    pa, pb = ta.pad()[ii], tb.pad()[jj]
     with np.errstate(invalid="ignore"):
-        same_pad = np.hypot(pa[:, 0] - pb[:, 0], pa[:, 1] - pb[:, 1]) <= SAME_PAD_TOL_M   # nan → False
+        near_pad = np.hypot(pa[:, 0] - pb[:, 0], pa[:, 1] - pb[:, 1]) <= SAME_PAD_TOL_M   # nan → False
+    same_pad = np.where(known, sa_id == sb_id, near_pad)    # 身分未知（手搭計畫）才退回座標
     spatial = spatial & ~same_pad
     if skip_oper:
         spatial = spatial & ~(ta.oper[ii] & tb.oper[jj])
@@ -771,7 +838,8 @@ def check_separation(plans: dict[str, UAVPlan], cfg: PlannerConfig, ghosts: Sequ
     違規 ⇔ 水平 < d_sep（同胞同向平行作業樣本：< d_sep_lat）且垂直 < Δh_sep 且 |t_a − t_b| < Δt + σ_a + σ_b。
 
     **例外 1（起降走廊）**：兩樣本皆屬起降走廊階段（:data:`SITE_CORRIDOR_PHASES`）、皆落在該機自己的走廊
-    預約區間內、且屬**同一場坪**（≤ :data:`SAME_PAD_TOL_M`）時不計 4D 衝突——該處之互斥由
+    預約區間內、且屬**同一站點**（``site_id`` 相同；未帶站點之計畫才退回場坪座標 ≤
+    :data:`SAME_PAD_TOL_M`）時不計 4D 衝突——該處之互斥由
     :class:`CorridorSchedule`（規格 §13.5：起飛間隔 60 s、降落預約 [t_arr−30, t_land+90]、降落優先）保證；
     若也計入 4D，則同站起降在 σ_t = k_t·t 視窗下恆為衝突，且修復所需延遲隨 t 發散（實測 8 機山丘情境
     makespan 7238 s → 18571 s 仍不收斂）。不同站之走廊樣本、或落在預約區間外之走廊樣本仍照常檢查。
@@ -1595,6 +1663,172 @@ def _compact_makespan(R: _Repair, rounds: int = 2) -> set[str]:
     return changed
 
 
+def scan_done_s(plan: UAVPlan) -> float:
+    """該機**掃描完成**時刻＝相機最後一次開著的航點時刻；沒有成像段時退回落地時刻。
+
+    ⚠ 這與 ``t_land_s`` 是兩件事。規格 Eq.(1) 的目標是 min-max **落地**時刻（含返航
+    與降落），而「最快掃完區域」關心的是這一個。實測 HV4SITL9：落地 1799.8 s、
+    掃描完成 1594.6 s，兩者差 205 s，且**排序不同**（最後降落的不一定最後掃完）。
+    """
+    ts = [w.t_s for w in plan.waypoints if getattr(w, "sensor_on", False)]
+    return max(ts) if ts else float(plan.t_land_s)
+
+
+def _objective_of(plans: dict[str, UAVPlan], objective: str) -> float:
+    if objective == "scan":
+        return max((scan_done_s(p) for p in plans.values()), default=0.0)
+    return max((float(p.t_land_s) for p in plans.values()), default=0.0)
+
+
+def _fresh_schedule(R: "_Repair", placed: dict[str, UAVPlan]) -> CorridorSchedule:
+    """只含 ``placed``（與幽靈）之走廊時刻表 —— 供逐機插入時做「與已擺放者是否相容」。"""
+    s2 = CorridorSchedule(R.cfg)
+    for g in R.ghosts.values():
+        s2.reserve_ghost(g)
+    for k, p in placed.items():
+        s2.reserve_plan(p, R.to_site[k])
+    return s2
+
+
+def _global_reschedule(R: "_Repair", *, step_s: float = 10.0, objective: str = "landing",
+                       max_evals: int = 20000) -> set[str]:
+    """**全隊起飛時刻全域重排**（修復＋工期壓縮之後的最後一手）。
+
+    ⚠⚠⚠ 為什麼需要：``repair`` 是逐衝突貪婪（``_repair_one`` 一有候選通過就 return），
+    而 :func:`_compact_makespan` 收尾時**一次只平移一機**（``involved_score(new, {u})``）
+    ⇒ 「A 晚一點起飛好讓 B 早很多」這種協同平移**結構上做不到**。實測 HV4SITL9：
+    起飛時刻被排成 0 / 289.1 / 623.9 / **1265.6** s，而驅動它的 6 筆衝突**全部**是
+    同一個場坪的**降落**走廊排隊 —— 起飛被押後，是為了解 500 s 後才發生的降落衝突。
+    在**同一組門檻、同一個可行性模型**下換個順序重排，同一份計畫可到 1461.3 s。
+
+    作法：對可動機的每一種起飛**順序**，逐機插入其「最早可行」時刻（可行＝ 4D 分離
+    ＋ 走廊時刻表兩者皆與已擺放者相容），取目標函數最小者。套用前再跑一次**全機對**
+    的完整驗證；沒有任何候選全綠就**原樣退回**，所以這一步不可能讓結果變差。
+
+    ⚠⚠ **平移不具不變性，不可以拿「相對時距不變」當可行性的推論**：4D 判準是
+    ``|t_a − t_b| < Δt + σ_a + σ_b``，而 ``σ_t = min(k_t·(t − t_sync), SIGMA_T_MAX_S)``
+    （見 :func:`check_separation` 與 :data:`SIGMA_T_MAX_S`）是**絕對時間**的函數。
+    把全隊同步平移（相對時距一格沒動）實測 Δ=+300 s 就會多出 1 筆衝突。
+    ⇒ 因此本函式**不建立任何鬆弛的逐對可行集**，每一個候選都逐機做真檢查；
+    也因此提早起飛帶來的改善**有一部分來自 σ 變小**（模型餘裕），不是純排程壓縮。
+    要單獨衡量後者，把 ``cfg.k_t`` 設成 0 再比一次。
+
+    永不改變航點 x/y/z、不改變能量（:func:`shift_plan` 在 ``energy_wh=0`` 下只動時間戳）
+    ⇒ 條帶、刈幅、側疊、``uncovered`` 一個都不會變。已起飛者（``R.airborne``）不可動。
+    """
+    movable = [u for u in sorted(R.plans) if not R.airborne(u) and R.plans[u].waypoints]
+    if len(movable) < 2:
+        return set()
+    fixed = {u: p for u, p in R.plans.items() if u not in movable}
+    incumbent = _objective_of(R.plans, objective)
+    # ⚠ 剪枝的界必須與被比較的量**同單位**。`earliest` 用的是落地時刻
+    #   （t_takeoff + dur），所以界要用落地 makespan，不能用 incumbent ——
+    #   objective="scan" 時 incumbent 是掃描時刻（比落地早），拿去剪落地時刻會
+    #   過度剪枝，實測讓 scan 目標的結果（1251.7）反而**輸給** landing 目標（1216.4）。
+    land_cap = _objective_of(R.plans, "landing")
+    base_plans = {u: R.plans[u] for u in movable}
+    dur = {u: float(p.t_land_s) - float(p.t_takeoff_s) for u, p in base_plans.items()}
+    t_floor = max(0.0, R.t_now_s if math.isfinite(R.t_now_s) else 0.0)
+    horizon = max(land_cap - t_floor, step_s)
+    step = max(1.0, float(step_s))
+    evals = 0
+
+    def fits(placed: dict[str, UAVPlan], u: str, cand: UAVPlan) -> bool:
+        nonlocal evals
+        evals += 1
+        merged = dict(placed)
+        merged[u] = cand
+        if check_separation(merged, R.cfg, list(R.ghosts.values()) or None, R.v_ref_mps, R.skip,
+                            t_sync_s=R.t_sync_s, only_uavs={u}):
+            return False
+        return not any(x.involves(u) for x in _fresh_schedule(R, merged).conflicts())
+
+    def earliest(placed: dict[str, UAVPlan], u: str, cap: float) -> UAVPlan | None:
+        """u 在不超過 ``cap``（落地時刻上界）之下的最早可行擺放；找不到回 None。"""
+        p0 = base_plans[u]
+        lo = t_floor - float(p0.t_takeoff_s)
+        s = lo
+        hi = lo + horizon
+        while s <= hi + 1e-9:
+            if float(p0.t_takeoff_s) + s + dur[u] > cap + 1e-9:
+                return None                                  # 再往後只會更差 ⇒ 剪枝
+            if evals >= max_evals:
+                return None
+            cand = shift_plan(p0, s)
+            if fits(placed, u, cand):
+                fine = step / 5.0                            # 往回細找，別停在粗格上
+                t = s
+                while t - fine >= lo - 1e-9:
+                    c2 = shift_plan(p0, t - fine)
+                    if not fits(placed, u, c2):
+                        break
+                    t -= fine
+                    cand = c2
+                return cand
+            s += step
+        return None
+
+    # 順序候選：機數少時全枚舉；多時只走幾個啟發序（|G|^(n−1) 不可全枚舉）
+    if len(movable) <= 6:
+        orders: list[tuple[str, ...]] = sorted(
+            itertools.permutations(movable), key=lambda o: [-dur[u] for u in o])
+    else:
+        orders = [tuple(sorted(movable, key=lambda u: -dur[u])),
+                  tuple(sorted(movable, key=lambda u: dur[u])),
+                  tuple(sorted(movable, key=lambda u: base_plans[u].t_takeoff_s)),
+                  tuple(sorted(movable, key=lambda u: -base_plans[u].t_land_s))]
+
+    best: dict[str, UAVPlan] | None = None
+    for order in orders:
+        if evals >= max_evals:
+            break
+        placed = dict(fixed)
+        ok = True
+        for u in order:
+            # 落地 makespan 不得比現況差（無論目標是哪一個）；目標本身另外比。
+            cand = earliest(placed, u, land_cap - 1e-9)
+            if cand is None:
+                ok = False
+                break
+            placed[u] = cand
+        if not ok:
+            continue
+        score = _objective_of(placed, objective)
+        # ⚠ 同樣誠實說明：這個「嚴格改善」條件也**咬不到突變**（改成 `if True`
+        #   實測輸出逐位相同 1450.8 / 1216.4）。因為上面的 `earliest` 已經用
+        #   `land_cap` 把每個完成的候選都框在「落地 makespan 優於現況」之內。
+        #   保留它是為了「目標＝掃描完成」那條路徑：那時 score 與 land_cap 不同軸，
+        #   沒有這個比較就會挑到落地較早但**掃描較晚**的解。
+        if score < incumbent - 1e-9:
+            incumbent = score
+            best = {u: placed[u] for u in movable}
+
+    if best is None:
+        return set()
+
+    # ── 套用前的**完整**驗證（全機對，不是只看被改動的機）────────────────
+    #   ⚠⚠ 誠實說明：這一道在目前的演算法下**可以證明是多餘的**，所以它
+    #   **沒有**突變臂能咬到（實測拿掉它，10 條測試全綠）。理由是歸納法：
+    #   逐機插入時每擺一台就用 only_uavs={u} 對**所有已擺放者**檢查一次，
+    #   而已擺放者之後不再變動 ⇒ 每一對 (a,b) 都在較晚那一台被擺放時檢查過。
+    #   保留它是**縱深防禦**：只要有人改動上面的插入迴圈（例如改成先全擺再調整、
+    #   或讓已擺放者可回頭平移），那個歸納就不成立，而這一行仍然擋得住。
+    #   ⇒ 不可以因為「突變咬不到」就把它刪掉，但也不可以宣稱它被測試涵蓋。
+    merged = dict(R.plans)
+    merged.update(best)
+    if check_separation(merged, R.cfg, list(R.ghosts.values()) or None, R.v_ref_mps, R.skip,
+                        t_sync_s=R.t_sync_s):
+        return set()
+    if _fresh_schedule(R, merged).conflicts():
+        return set()
+
+    for u, p in best.items():
+        R.plans[u] = p
+        R.sched.release(u)
+        R.sched.reserve_plan(p, R.to_site[u])
+    return set(best)
+
+
 def _takeoff_sites(plans: dict[str, UAVPlan], ctx: MissionContext, takeoff_site: Any) -> dict[str, str]:
     home = ctx.inputs.home.site_id
     if takeoff_site is None:
@@ -1656,4 +1890,12 @@ def repair(plans: dict[str, UAVPlan], conflicts: list[Conflict], ctx: MissionCon
     if _compact_makespan(R):                                    # 工期壓縮（不新增衝突）
         current = _merge_conflicts(
             check_separation(plans, cfg, ghosts, v_ref_mps, skip_pairs, t_sync_s=t_sync_s), schedule.conflicts())
+    # vendored 修改 #3：工期壓縮只能逐機平移，協同平移要靠全域重排（見 _global_reschedule）
+    if getattr(cfg, "global_reschedule", False) and not current:
+        if _global_reschedule(R, step_s=float(getattr(cfg, "reschedule_step_s", 10.0)),
+                              objective=str(getattr(cfg, "reschedule_objective", "landing")),
+                              max_evals=int(getattr(cfg, "reschedule_max_evals", 20000))):
+            current = _merge_conflicts(
+                check_separation(plans, cfg, ghosts, v_ref_mps, skip_pairs, t_sync_s=t_sync_s),
+                schedule.conflicts())
     return plans, current

@@ -1,0 +1,4942 @@
+{
+ "caveats": [
+  "全部為 ArduPilot SITL 飛行（非實飛）；每趟 2 架；plane-jet 低阻改裝（JET_CDP=0.01642）舊剖面基線；契約讀回 THR_MAX=100（設計值 25）；未設 SIM_WIND（推定無風，無讀回值）。",
+  "終端導引為帶視線地板的雙通道純比例導引（契約 pn_los_floor=1.0、pn_nz_min=-1.0；縱向 N=5、橫向 N=4）。",
+  "環上配速（ring_pace）、抵環即放行（release_at_ring）、等待段修正（wait_goto_radius）在 tot_node.py 預設皆為 False，屬非預設實驗開關；以契約讀回為準。",
+  "(b) 母體 86 趟高度異質（27° 72 趟、20° 10 趟、未知 4 趟；多種開關組合），不是單一配方的重複；Δ 的正負取決於機號順序，(x,y) 與 (−x,−y) 同義。",
+  "(b) 超出 ±40 s 的 6 趟畫在軸框內側邊緣（三角形指向界外方向），原值見 items。",
+  "(c) LAT1 與 RA1 契約只差 dive_angle，RA1 與 RB1 為環上配速開關；兩趟之間的俯衝耗時差差異小於逐機俯衝耗時 σ≈3.3 s，只作示意，不作機制證據；SB1、SB2 契約另多 6 個鍵（近同組態重複）。",
+  "單趟觸地時刻差雜訊約 ±10 s；RRB7 目錄無 tot CSV（僅契約）。",
+  "runs/artifacts 被 .gitignore:109 排除、不在版控；inputs_sha256 供核對。"
+ ],
+ "checks": {
+  "duplicate_csv_sha256": [],
+  "n_tot_csv": 132,
+  "release_time_phase_filter_changes_runs": [],
+  "usable_runs_with_n_sys_csv_not_2": [],
+  "usable_touch_datums": [
+   "csv:agl"
+  ],
+  "value_lock_against_verified_material": {
+   "batch": {
+    "RRB": [
+     14,
+     9,
+     2
+    ],
+    "RRD": [
+     16,
+     16,
+     10
+    ],
+    "RRE": [
+     16,
+     16,
+     15
+    ]
+   },
+   "cancel_ids": [
+    "FORMB1",
+    "FORMC1",
+    "FORMD1",
+    "RB1",
+    "RPK2",
+    "RPV1",
+    "RPX3",
+    "RQB2",
+    "RRB5"
+   ],
+   "chain": {
+    "LAT1": [
+     19.1,
+     -2.3,
+     16.8
+    ],
+    "RA1": [
+     -33.9,
+     0.6,
+     -33.3
+    ],
+    "RB1": [
+     -5.6,
+     3.86,
+     -1.74
+    ],
+    "SB1": [
+     1.5,
+     -7.05,
+     -5.55
+    ],
+    "SB2": [
+     -1.1,
+     10.45,
+     9.35
+    ]
+   },
+   "controlled_ids": [
+    "RPK1",
+    "RQA3",
+    "RQD3",
+    "RRD5",
+    "RRE1",
+    "WX2"
+   ],
+   "n_cancel": 9,
+   "n_controlled": 6,
+   "n_csv": 132,
+   "n_not2": 3,
+   "n_notouch": 27,
+   "n_pass": 15,
+   "n_unreleased": 3,
+   "n_unscorable": 13,
+   "n_usable": 86,
+   "out_of_range_ids": [
+    "NZC7",
+    "RPY3",
+    "RQF1",
+    "RQF2",
+    "RQF4",
+    "RQH1"
+   ]
+  }
+ },
+ "criteria": {
+  "classes": {
+   "cancel": "|觸地時刻差|<=3 但兩分量未皆<=3（實心三角）",
+   "controlled": "|放行時刻差|<=3 且 |俯衝耗時差|<=3（圖(b)實心方塊）",
+   "fail": "|觸地時刻差|>3（空心圓）"
+  },
+  "cp95_lower": "Clopper-Pearson 單側 95% 下限 scipy.stats.beta.ppf(0.05, k, n-k+1)（同 batch_tally.py）",
+  "decomposition": "Δ＝第2架−第1架（sysid 由小到大）；放行時刻差＝t_rel2−t_rel1；俯衝耗時差＝(t_imp2−t_rel2)−(t_imp1−t_rel1)；觸地時刻差＝t_imp2−t_imp1＝兩者和",
+  "hit": "impact_miss_m <= 10 m（scripts/wsl/batch_tally.py:39 HIT_ERR_M）",
+  "population_filter_order": [
+   "無幾何檔",
+   "計分器無輸出（無 DIVE 資料或空檔）",
+   "非 2 架",
+   "有機未放行",
+   "有機首航次未觸地"
+  ],
+  "release_time": "tot_<ID>.csv 該 sysid 第一筆 phase==\"DIVE\" 且 mode==\"dive\" 的 t（mode 判準同 scripts/wsl/batch_tally.py:75）",
+  "spread_threshold": "3.0 s（scripts/wsl/stot_score.py:1059 spread_ok = all_touch and summary[\"touch_spread_s\"] <= 3.0）；分類以 |·|<=3+1e-6 比較",
+  "touchdown": "scripts/wsl/stot_score.py main(--json --log tot_standby.log)：首航次窗起點＝第一筆 mode∈{dive,impact,expended}（:223-231）；首次 AGL<=0 無條件收窗（:295-297）；AGL 穿越 0 線性內插（:548-558）；觸地誤差＝per_uav[*].impact_miss_m、觸地時刻＝per_uav[*].impact_t_s；null＝窗內未觸地"
+ },
+ "figure": {
+  "dpi": 300,
+  "height_cm": 6.2,
+  "png": "docs/AASRC2026_STOT_abstract/fig3_results.png",
+  "script": "docs/AASRC2026_STOT_abstract/figures_src/make_fig3_results.py",
+  "svg": "docs/AASRC2026_STOT_abstract/fig3_results.svg",
+  "width_cm": 17.0
+ },
+ "inputs_sha256": {
+  "runs/artifacts/ALIGNW1/contract_ALIGNW1.json": "25f12f9aeda9d26c5816ca51b08d12f750850377607903578ca2d2ec1f790cf9",
+  "runs/artifacts/ALIGNW1/tot_ALIGNW1.csv": "1cdb6576df5631c0d567062cee9a8289ba2417f12f703413586388d8e848318f",
+  "runs/artifacts/ALIGNW1/tot_ALIGNW1_geom.csv": "275847926af0f392198c0e39708a81f64428fad6d146d7325ad53262ca85c9fa",
+  "runs/artifacts/ALIGNW1/tot_standby.log": "18e737777a0aac395920d81e79d360b27c4f82e6329bc13ff97a423e637f141c",
+  "runs/artifacts/AP3/tot_AP3.csv": "d022d516373348eb0330ae6c860e3c8a6942a24f0296114cd305f5b4ef683c84",
+  "runs/artifacts/AP3/tot_standby.log": "34eac2540c2992cebc3a3b056bf19b336def40164c3426a08335175453e621cf",
+  "runs/artifacts/AP5/tot_AP5.csv": "db80c16d1060a35bbdb622834bd22e218c99da12be962a3bbd56dbe4cbf600aa",
+  "runs/artifacts/AP5/tot_standby.log": "2e11085f3b16ba4ad1f38ec26f35866b91f5474f0054186065014242cd78aa35",
+  "runs/artifacts/BASE1/contract_BASE1.json": "083cd941fb272091befffb76871ed8ed8c3e763db512ff30b7486f721c759e2b",
+  "runs/artifacts/BASE1/tot_BASE1.csv": "0497c2bb30a0e254fc1f7d76be8f0c8eca82b3235228cf0f998d0ff0cde2b96f",
+  "runs/artifacts/BASE1/tot_BASE1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/BASE1/tot_standby.log": "8e66e34bfac2fede7975261ab433553a2e0cb057bdfc24854bb1bf942183c9d9",
+  "runs/artifacts/BASE21/contract_BASE21.json": "083cd941fb272091befffb76871ed8ed8c3e763db512ff30b7486f721c759e2b",
+  "runs/artifacts/BASE21/tot_BASE21.csv": "d22d92c6913f774126b946378206a411e002747aa4f28feb77357e8a1e18fa68",
+  "runs/artifacts/BASE21/tot_BASE21_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/BASE21/tot_standby.log": "6e0bc8e89090e07125d3ca5136e07685418748521e6586ae8718185de0c52bfa",
+  "runs/artifacts/FLOG1/contract_FLOG1.json": "8435e6250ab1ae11e613c4a0e72d1d667ddb2b5ec15a1d2f9db1679df3274d45",
+  "runs/artifacts/FLOG1/tot_FLOG1.csv": "1cf99eb40db4c81c31cb83c76ddd68c6c0b828623747315b3b906551d30f62a6",
+  "runs/artifacts/FLOG1/tot_FLOG1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/FLOG1/tot_standby.log": "a90e36dd2b9d684adc52d77576bc998a7ec32b4df2455c1b0bec256df41529bb",
+  "runs/artifacts/FORM1/contract_FORM1.json": "8435e6250ab1ae11e613c4a0e72d1d667ddb2b5ec15a1d2f9db1679df3274d45",
+  "runs/artifacts/FORM1/tot_FORM1.csv": "8f6f9d6d1b1f05b0217b5cb60c6f7b382db1d4ad4f018f663d58ba315053d221",
+  "runs/artifacts/FORM1/tot_FORM1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/FORM1/tot_standby.log": "7b8246c3dc4c8cdcee0f0c261a436b82831c93d56ad22d61c72f1dd5029ac4b3",
+  "runs/artifacts/FORMB1/contract_FORMB1.json": "8435e6250ab1ae11e613c4a0e72d1d667ddb2b5ec15a1d2f9db1679df3274d45",
+  "runs/artifacts/FORMB1/tot_FORMB1.csv": "6fc1407aaaf4840e6ea69847fe5bb8a6d8cff81c4d8f52afdf29a5a5160cb683",
+  "runs/artifacts/FORMB1/tot_FORMB1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/FORMB1/tot_standby.log": "600a3606af6a2ea6347f2c550daa53cafaa4b3f8e10848e5d150da331b112e67",
+  "runs/artifacts/FORMC1/contract_FORMC1.json": "8435e6250ab1ae11e613c4a0e72d1d667ddb2b5ec15a1d2f9db1679df3274d45",
+  "runs/artifacts/FORMC1/tot_FORMC1.csv": "5dbdc9dbaac48d8daf07586585ea5ba85606abf05be8db3d502f7d4149433004",
+  "runs/artifacts/FORMC1/tot_FORMC1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/FORMC1/tot_standby.log": "370adcde7e83f94e05a9cb9f332c2f3dac098d7706e5001dc5244a278adc31e5",
+  "runs/artifacts/FORMD1/contract_FORMD1.json": "8435e6250ab1ae11e613c4a0e72d1d667ddb2b5ec15a1d2f9db1679df3274d45",
+  "runs/artifacts/FORMD1/tot_FORMD1.csv": "72220179efb203fd026e0e780b5ca0ed22f808e41284268fc85c5c9013e68cfe",
+  "runs/artifacts/FORMD1/tot_FORMD1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/FORMD1/tot_standby.log": "9270d6a5e4a0099de6ebfd4e3d41c75c74050780470860dddcbbbcd47fac84dc",
+  "runs/artifacts/FORME1/contract_FORME1.json": "8435e6250ab1ae11e613c4a0e72d1d667ddb2b5ec15a1d2f9db1679df3274d45",
+  "runs/artifacts/FORME1/tot_FORME1.csv": "aed52f8ff0af15c6926a7485cb32f7c8af1d26a67a67c610d26dad3c69e2f458",
+  "runs/artifacts/FORME1/tot_FORME1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/FORME1/tot_standby.log": "accc237e6eb9789b662053b273f9b4e547de32495b84d1efd379d34b4ddf9a0e",
+  "runs/artifacts/GMODE1/contract_GMODE1.json": "6e3941a476c07ad3a67779c8e72dcc4f4b6932d1c61777c105e4ef7728462419",
+  "runs/artifacts/GMODE1/tot_GMODE1.csv": "19f808655301c850087e6510adfdd8c539a5eb6fe15692b687314803f43f9bb2",
+  "runs/artifacts/GMODE1/tot_GMODE1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/GMODE1/tot_standby.log": "404148e8b15e39b8ab797823ff67992214e6930e2a2a802eee1d4310c0b61c4c",
+  "runs/artifacts/LAT1/contract_LAT1.json": "6d897cfde9f056d9728c4892c3dc797a9da9ceb72411a70937e3223c78523b5e",
+  "runs/artifacts/LAT1/tot_LAT1.csv": "59c44d33d5215aa435bf3f1d7f94be4101fb2f469b09b32c4c52a6a13f4320b2",
+  "runs/artifacts/LAT1/tot_LAT1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/LAT1/tot_standby.log": "c9319e982cb4871e8061cc8ae6273e876477f1294e5fb1c9a47e7b908cce96a5",
+  "runs/artifacts/LATOBS1/contract_LATOBS1.json": "4540877fe6aef757f81f922b3fa960536b060d67dedc65fe92947994a42370a6",
+  "runs/artifacts/LATOBS1/tot_LATOBS1.csv": "8d7276f9d1729c468e8396e22c9096a0eaf8f4be6b1b306ed08e015846675347",
+  "runs/artifacts/LATOBS1/tot_LATOBS1_geom.csv": "275847926af0f392198c0e39708a81f64428fad6d146d7325ad53262ca85c9fa",
+  "runs/artifacts/LATOBS1/tot_standby.log": "e2937435a2e021eedca8c5ee7a89cdbf7ae080682e114f76e849bfffffc9746a",
+  "runs/artifacts/NZC1/contract_NZC1.json": "aa572ae9ee616fc9caf019fe2e4c0cfe1550667fb73f633d6f46ebc3e3b3aa6e",
+  "runs/artifacts/NZC1/tot_NZC1.csv": "1304fc1e8ab5a1c3148e59413e42b63f527c38502259c1daf061d842f25a46fb",
+  "runs/artifacts/NZC1/tot_NZC1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/NZC1/tot_standby.log": "76817045deaee7e96fc7ea635b1d750458b9ea9a3f06fe9e9cce6051c042ef59",
+  "runs/artifacts/NZC11/contract_NZC11.json": "1b431c7c0989c833719820e902d9b819ae71ce7007af4916ab5eba1b00bf397c",
+  "runs/artifacts/NZC11/tot_NZC11.csv": "18e069f4c60f6701bbd06ff36ee011d22d4cdda490ffcdf76281b3048577208b",
+  "runs/artifacts/NZC11/tot_NZC11_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/NZC11/tot_standby.log": "4f0539d67a5fdb0f2a929cb3a6bbac5a53e8bc2400e8c35280ddd2cb4ebf1263",
+  "runs/artifacts/NZC2/contract_NZC2.json": "aa572ae9ee616fc9caf019fe2e4c0cfe1550667fb73f633d6f46ebc3e3b3aa6e",
+  "runs/artifacts/NZC2/tot_NZC2.csv": "db3a83c24c11d6ba76a8324447fa310be815e43cdc14421bc5e24477ee1e6e3e",
+  "runs/artifacts/NZC2/tot_NZC2_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/NZC2/tot_standby.log": "b29c7265d3054aad48d989c48898fd0d7a83123d52673bc563f8c55951446943",
+  "runs/artifacts/NZC3/contract_NZC3.json": "aa572ae9ee616fc9caf019fe2e4c0cfe1550667fb73f633d6f46ebc3e3b3aa6e",
+  "runs/artifacts/NZC3/tot_NZC3.csv": "f80af9f8b94a06c40896192f3d9061e3b02ba81ac6a0c5f9c1811fd2b7e9cdaa",
+  "runs/artifacts/NZC3/tot_NZC3_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/NZC3/tot_standby.log": "e3b90b3cb880afa4b937ebfd8f660580bce9cb5a7313415291cd7d539de05452",
+  "runs/artifacts/NZC4/contract_NZC4.json": "aa572ae9ee616fc9caf019fe2e4c0cfe1550667fb73f633d6f46ebc3e3b3aa6e",
+  "runs/artifacts/NZC4/tot_NZC4.csv": "8b4bee8ee50a7f3a3b08c6ce680be67a06f84af2109fb9c302c218ef8cf6d91f",
+  "runs/artifacts/NZC4/tot_NZC4_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/NZC4/tot_standby.log": "5b61dce36cb59f95f315b1351707a01a6f072c8776a91e64eeb6c75d2f428f0b",
+  "runs/artifacts/NZC5/contract_NZC5.json": "aa572ae9ee616fc9caf019fe2e4c0cfe1550667fb73f633d6f46ebc3e3b3aa6e",
+  "runs/artifacts/NZC5/tot_NZC5.csv": "60783aaad3b161688d7e1224eeb48face7f1e770df075ec7caa1f22329bfb845",
+  "runs/artifacts/NZC5/tot_NZC5_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/NZC5/tot_standby.log": "681f69e656d4e4ad722e5ab41a3481e1b2af3e222b95ae027408cb345a23eae0",
+  "runs/artifacts/NZC6/contract_NZC6.json": "aa572ae9ee616fc9caf019fe2e4c0cfe1550667fb73f633d6f46ebc3e3b3aa6e",
+  "runs/artifacts/NZC6/tot_NZC6.csv": "1c4e3de4af1e9f0e1718885c850c4b1d583aaaa61b28d3e96b0f074cfffcba76",
+  "runs/artifacts/NZC6/tot_NZC6_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/NZC6/tot_standby.log": "2a3ba0046493826cbb5d477063975b141ca47927102dd22bcd6b67b1f70e4149",
+  "runs/artifacts/NZC7/contract_NZC7.json": "aa572ae9ee616fc9caf019fe2e4c0cfe1550667fb73f633d6f46ebc3e3b3aa6e",
+  "runs/artifacts/NZC7/tot_NZC7.csv": "42809b696e62b04941a9c4e363210644f1ed76bb3a768e50f85b903a0b4d07b6",
+  "runs/artifacts/NZC7/tot_NZC7_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/NZC7/tot_standby.log": "b3dc8e26b828dc3d434a0b68c4104a97091504c529fd498b0c11368d92334464",
+  "runs/artifacts/NZC8/contract_NZC8.json": "aa572ae9ee616fc9caf019fe2e4c0cfe1550667fb73f633d6f46ebc3e3b3aa6e",
+  "runs/artifacts/NZC8/tot_NZC8.csv": "2fe56427c0594e488fcd84942c41a773715d65b8d74997643d1b6a655ef358fb",
+  "runs/artifacts/NZC8/tot_NZC8_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/NZC8/tot_standby.log": "f5e3b3408b7f41c45a54485fb50194f43a9daf728a1ef176204aae55652b3990",
+  "runs/artifacts/RA1/contract_RA1.json": "38cb0cdc7a89dc542c0c00a05553376909ea95d93783c8625964c11879517d97",
+  "runs/artifacts/RA1/tot_RA1.csv": "fac98315052f965ed23c3213c302eeecd366701b21a349acdd98d6ec59c6541d",
+  "runs/artifacts/RA1/tot_RA1_geom.csv": "5004994c643e7a1ed5c3ee185659a03a7d112bdc4c364e4752f3f1cb412189ec",
+  "runs/artifacts/RA1/tot_standby.log": "55f623ee770b6ed18b058f2a9eb286641f9b53094c0fa4988f7d0b53d0b727ae",
+  "runs/artifacts/RB1/contract_RB1.json": "d717d8fed2e4e09d0e9520f8c865427975b182057b7d9197fb8141df5da19af9",
+  "runs/artifacts/RB1/tot_RB1.csv": "87634d897352e012e83acb8c0026e8ec3c088b01b927e54f1f9d670ed37d0374",
+  "runs/artifacts/RB1/tot_RB1_geom.csv": "5004994c643e7a1ed5c3ee185659a03a7d112bdc4c364e4752f3f1cb412189ec",
+  "runs/artifacts/RB1/tot_standby.log": "3c8d20a7bb9088c28ecdd70cdc44fc79953a4e1050b3857c457c268d3d4595b6",
+  "runs/artifacts/RC1/contract_RC1.json": "e8839adbfcc8fb6caab8d86cfc203eb81af5af6a40149e330484441f3a3c6596",
+  "runs/artifacts/RC1/tot_RC1.csv": "27f60dcfea332f1f27a764838e9e2a747a49b1c7c58fc694801b7a1e5ff77821",
+  "runs/artifacts/RC1/tot_RC1_geom.csv": "5004994c643e7a1ed5c3ee185659a03a7d112bdc4c364e4752f3f1cb412189ec",
+  "runs/artifacts/RC1/tot_standby.log": "47630aa099c8c0fd76b54ca7b049775d09e3627baad73156f227341f89d548b2",
+  "runs/artifacts/RD1/contract_RD1.json": "225de158163f1d3271f7cad83ae8bab012ca1082168818b326f306d67b21da54",
+  "runs/artifacts/RD1/tot_RD1.csv": "b9cdba413706a7ffde9fb7ca40c32ac156fbcf70e932c6efbeaeb9cda35d95d2",
+  "runs/artifacts/RD1/tot_RD1_geom.csv": "5004994c643e7a1ed5c3ee185659a03a7d112bdc4c364e4752f3f1cb412189ec",
+  "runs/artifacts/RD1/tot_standby.log": "e810eb50382c8ad57f3589163a8de57f5141af4a1db02214c0b68a1b12d85244",
+  "runs/artifacts/RE21/contract_RE21.json": "0c11ea1ca791659dac121fad6b8cf427dc163d2e7d87498342daeb63697a876b",
+  "runs/artifacts/RE21/tot_RE21.csv": "ae77c0d74b86045f6f033f228e88c6ad458f2bf3afcf66677a7d8ecd3eebcb3a",
+  "runs/artifacts/RE21/tot_RE21_geom.csv": "5004994c643e7a1ed5c3ee185659a03a7d112bdc4c364e4752f3f1cb412189ec",
+  "runs/artifacts/RE21/tot_standby.log": "ba6eab8284db39ae57969c30df3a1f051eedbcc925ca5b1048273fb9117c238e",
+  "runs/artifacts/REP1/tot_REP1.csv": "1aec20a9fcbcf41e848bab7a1a605cd81fa298b6e2a3f72e61af79de07121216",
+  "runs/artifacts/REP1/tot_standby.log": "66dba0edaad0af83285899f187b9a3f7d20ee06c7cfe4d0b2268e83c5c58fd50",
+  "runs/artifacts/RPE1/tot_RPE1.csv": "f2f24ee5b80f70988658f2c525478dbfaa7e7f810779f221db26dc62b3ea3f55",
+  "runs/artifacts/RPE1/tot_standby.log": "e59805180a54c39d473a2d673c78d114f008af6bb038224c6536697723c6ba2e",
+  "runs/artifacts/RPF1/tot_RPF1.csv": "5da59b2b755829061f2f8842b61a3d1dea6052e871ee06c964b24b3aa6b63ab4",
+  "runs/artifacts/RPF1/tot_standby.log": "7d1aab123e24c79acddaec6dcef2acef8d01c67ee53bacc448f08e826dcaced3",
+  "runs/artifacts/RPJ1/tot_RPJ1.csv": "6f208ab192ca981b08d456a81ee588c0c42d6dd3db7628c8a1f9598604f8b754",
+  "runs/artifacts/RPJ1/tot_RPJ1_geom.csv": "f99a303681eb641cc80040b8b06e8fb83d863a61eeb3d4090bc24c316024ca22",
+  "runs/artifacts/RPJ1/tot_standby.log": "91cc4f360b33d4b7dc4fb5a42eb82ae1af041da3d954e85c9d836ed7d29faa11",
+  "runs/artifacts/RPJ2/tot_RPJ2.csv": "e8bd6fa49fe30d2de58a280d14e4d4728010aaec87e63f02cb2f50871abc354b",
+  "runs/artifacts/RPJ2/tot_RPJ2_geom.csv": "f99a303681eb641cc80040b8b06e8fb83d863a61eeb3d4090bc24c316024ca22",
+  "runs/artifacts/RPJ2/tot_standby.log": "a2418f5a73811d6ce3bdb10975edb238d1781accd2d37dda03f392ec8db96ac9",
+  "runs/artifacts/RPJ3/tot_RPJ3.csv": "058a74b45f3bb6665194e1b35793237c443b3b763a809f27d83a9af259a20400",
+  "runs/artifacts/RPJ3/tot_RPJ3_geom.csv": "f99a303681eb641cc80040b8b06e8fb83d863a61eeb3d4090bc24c316024ca22",
+  "runs/artifacts/RPJ3/tot_standby.log": "cb10f5fc12b1e6b3d2d5a06f75caed79555428bac5c23e2f6089d48c051a52dc",
+  "runs/artifacts/RPK1/tot_RPK1.csv": "56294ab97ae521c3ea74a3fb6fb19865cc527d53f68e09c89336812af6e56754",
+  "runs/artifacts/RPK1/tot_RPK1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPK1/tot_standby.log": "b70fd7c81c33f9a39d545717199467731c4d7bf1effcebdb8091e4c963bcc8de",
+  "runs/artifacts/RPK2/tot_RPK2.csv": "0b76ac51dd0619c97c7f58c9b2b0b5e1f8ce26589e14b05f9ceef51ed11bc297",
+  "runs/artifacts/RPK2/tot_RPK2_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPK2/tot_standby.log": "2f15dd130a84d780c321da1015870e9a8e20075c3d6d17e2d5bf8b65b6d67301",
+  "runs/artifacts/RPK3/tot_RPK3.csv": "6a3083a2d5ea8e08a864b68481b99477159e602a20ce47dd05a3e599ba1bb5ef",
+  "runs/artifacts/RPK3/tot_RPK3_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPK3/tot_standby.log": "0b0d73aded74056aaaa41080fcd85bcb6a0bf4250744293c0a28ee32cd4f2982",
+  "runs/artifacts/RPL1/tot_RPL1.csv": "bc04f400219f603560082a8baf41077e9739153a8aeeef574a1edc7083f44dae",
+  "runs/artifacts/RPL1/tot_RPL1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPL1/tot_standby.log": "45ec686fa9715da619e884cd7e2d74321b21017d63a94284666fc57ee690627b",
+  "runs/artifacts/RPL2/tot_RPL2.csv": "86dd2901158ea21727392ab735e41b01efcd2256a59a30e67768f5b4926698cb",
+  "runs/artifacts/RPL2/tot_RPL2_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPL2/tot_standby.log": "407468e483de5c4be9645a168eb77e9f96fdfe7d7eadfaa749b683b7dbf40ef8",
+  "runs/artifacts/RPL3/tot_RPL3.csv": "329284672a5c52dc04ef281c8700d3f9e93227aa73f1d579ceca42e251c97855",
+  "runs/artifacts/RPL3/tot_RPL3_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPL3/tot_standby.log": "b15afe776fd6d363b188bf0b05b225def3be9ef8299261fc6bc8346028566258",
+  "runs/artifacts/RPM1/tot_RPM1.csv": "62e904f3eccdacd3534964886317afb43a03cd7c59ff5a1d9e70160dd9d67eab",
+  "runs/artifacts/RPM1/tot_RPM1_geom.csv": "cf7693ab58e46e332d8e1ecf63b946fb9e59d5326a9eb03829d738447f2a8fc1",
+  "runs/artifacts/RPM1/tot_standby.log": "477096672b188338a7aa7f317c52faecb2181aa33af1e9712586984d07aa0b58",
+  "runs/artifacts/RPN1/tot_RPN1.csv": "871c183f7318c10b7ad251a9e19a5833bf49ddd665c29b67e7ef239a5fd18ffd",
+  "runs/artifacts/RPN1/tot_RPN1_geom.csv": "cf7693ab58e46e332d8e1ecf63b946fb9e59d5326a9eb03829d738447f2a8fc1",
+  "runs/artifacts/RPN1/tot_standby.log": "54bc4ee5887cc140b6af0e83857f432dd195d6339f89b559f7ba4548c18e5b6d",
+  "runs/artifacts/RPO1/contract_RPO1.json": "a35c7702b0c8fdaee647a2fa12cf00898bd3f90fda4a1ab02eb5ccacfba3b331",
+  "runs/artifacts/RPO1/tot_RPO1.csv": "79c07d52e9d48c5cbabeb6c42f57d62aa5acccbdb86888db0d9909c112e3b84c",
+  "runs/artifacts/RPO1/tot_RPO1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPO1/tot_standby.log": "10a18afacf1dbeab8ab7301122a01fc8d8bc0849621954c1b1f3e617715efb48",
+  "runs/artifacts/RPO2/contract_RPO2.json": "a35c7702b0c8fdaee647a2fa12cf00898bd3f90fda4a1ab02eb5ccacfba3b331",
+  "runs/artifacts/RPO2/tot_RPO2.csv": "e740af5c18ea1bf142de15801fd6ef775d3db3d3006459e217c42f325c50c823",
+  "runs/artifacts/RPO2/tot_RPO2_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPO2/tot_standby.log": "c9c62492c543975c83a882429598c62f45906bd6551741a5bc9ab01cdf828028",
+  "runs/artifacts/RPO3/contract_RPO3.json": "a35c7702b0c8fdaee647a2fa12cf00898bd3f90fda4a1ab02eb5ccacfba3b331",
+  "runs/artifacts/RPO3/tot_RPO3.csv": "e4b3f9deb89352606a7b8f967e89793d1a6dbd9ad57200b14c0007482b914e35",
+  "runs/artifacts/RPO3/tot_RPO3_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPO3/tot_standby.log": "78e8c9c6c31cb4460139028769673998f37480759be7c0a5e89ceca803b27b58",
+  "runs/artifacts/RPQ1/contract_RPQ1.json": "a317200dc2f8c28dd40e48098646559c2f6fbd846a60a6dc98590319107e15f1",
+  "runs/artifacts/RPQ1/tot_RPQ1.csv": "10c216d3bbd691b208c91ac8cc865f3eb41a7fe3e9a43820dc9dac0069d677fa",
+  "runs/artifacts/RPQ1/tot_RPQ1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPQ1/tot_standby.log": "b424b413bfeba84eb6e1bb804640345573bd49934e1f2a6e865a65c0261fe9e4",
+  "runs/artifacts/RPQ2/contract_RPQ2.json": "a317200dc2f8c28dd40e48098646559c2f6fbd846a60a6dc98590319107e15f1",
+  "runs/artifacts/RPQ2/tot_RPQ2.csv": "fa2035fc3e532e8e5551364b60963f7dd3525cec1c36522ed2357c5d5e025c9d",
+  "runs/artifacts/RPQ2/tot_RPQ2_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPQ2/tot_standby.log": "75b7aa4bd2368c74e041ea3159c1bbb3c3e1c8340d51658a049e3008bd3eb508",
+  "runs/artifacts/RPQ3/contract_RPQ3.json": "a317200dc2f8c28dd40e48098646559c2f6fbd846a60a6dc98590319107e15f1",
+  "runs/artifacts/RPQ3/tot_RPQ3.csv": "35c63d1dccb38250d288234d604221f02964f350918cb17ee86d81c3e5872281",
+  "runs/artifacts/RPQ3/tot_RPQ3_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPQ3/tot_standby.log": "7a7bbe6d8063ff40040d0f4b9ccf9160e46495beff22c1643fd3d0fc2f05cc31",
+  "runs/artifacts/RPT1/contract_RPT1.json": "453dc8c8bb091375048b4117fb7e6fff68e0997689dba66156da13dfff4fabae",
+  "runs/artifacts/RPT1/tot_RPT1.csv": "79e7c02c43f2debbfa252be99967244eb66b96aec9278dc21979bb29c2109a6a",
+  "runs/artifacts/RPT1/tot_RPT1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPT1/tot_standby.log": "5225fa78a55ff158c16ff01a85cd126b8083a5ddf413320401b21facabcc36a8",
+  "runs/artifacts/RPT2/contract_RPT2.json": "f046e25b1d6fb762afa85ca0561b43cade040ce4781998aa93175efa0c608804",
+  "runs/artifacts/RPT2/tot_RPT2.csv": "fc3ea3da3a6f9aef42d3e211e5811641b0b29bc7779de9333a6a9e2b0ab835ed",
+  "runs/artifacts/RPT2/tot_RPT2_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPT2/tot_standby.log": "ddac6a48c54523c09a5125049c3c91412dd0775308e2f79808353c79d83fab1c",
+  "runs/artifacts/RPT3/contract_RPT3.json": "453dc8c8bb091375048b4117fb7e6fff68e0997689dba66156da13dfff4fabae",
+  "runs/artifacts/RPT3/tot_RPT3.csv": "32636f280d895d2bbee4b8f008ce1f644a12370b624b403093b0f0975bb7322d",
+  "runs/artifacts/RPT3/tot_RPT3_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPT3/tot_standby.log": "d328c26bc4470786054266773021190c049b9580ea24161d9df4aa0cde556763",
+  "runs/artifacts/RPU1/contract_RPU1.json": "b20f9af1e1edbd941034ef0d3a62f52ac07e2d877cc4f1ef17e5d0e900b2bc45",
+  "runs/artifacts/RPU1/tot_RPU1.csv": "38eccaba669d094052717e2a9e3446e27765e59ecfe3124b2ec15b399e5f00fc",
+  "runs/artifacts/RPU1/tot_RPU1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPU1/tot_standby.log": "8b02259d6820513cd5594bdc702e9b7097fcf2a83af5dbab8d33c36cc0e639d9",
+  "runs/artifacts/RPU2/contract_RPU2.json": "b20f9af1e1edbd941034ef0d3a62f52ac07e2d877cc4f1ef17e5d0e900b2bc45",
+  "runs/artifacts/RPU2/tot_RPU2.csv": "60b6f5b46493ee5cc65446be4cda308855d740f12d352c706b2a3941ca8b4d11",
+  "runs/artifacts/RPU2/tot_RPU2_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPU2/tot_standby.log": "5bf4e5189fc87e12e8d21a7d6bd6ee3583fe3e8b936f7350a80c959c617d6e9b",
+  "runs/artifacts/RPU3/contract_RPU3.json": "b20f9af1e1edbd941034ef0d3a62f52ac07e2d877cc4f1ef17e5d0e900b2bc45",
+  "runs/artifacts/RPU3/tot_RPU3.csv": "5fa1eb614d15c7ed585d86e678b28bfa673f1d6a9091bb231b86e59bfcb1e99e",
+  "runs/artifacts/RPU3/tot_RPU3_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPU3/tot_standby.log": "7519cac4e259499db11a2d910926b52a64cb8ecfe22b2e5776b4380b3791a7c4",
+  "runs/artifacts/RPV1/contract_RPV1.json": "3f7520b9df913f8a7bf5d3a6ffab524249fba531ea979cc6f98061ccdd832f10",
+  "runs/artifacts/RPV1/tot_RPV1.csv": "27c4efc97fb525c7dc31178743ca8a5c22662096742ae6f5dc96389de99a7da1",
+  "runs/artifacts/RPV1/tot_RPV1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPV1/tot_standby.log": "368cd29be62652fa4e3a89d1edb29c877f55b582605386725b03fe8bce7e7aee",
+  "runs/artifacts/RPV2/contract_RPV2.json": "b20f9af1e1edbd941034ef0d3a62f52ac07e2d877cc4f1ef17e5d0e900b2bc45",
+  "runs/artifacts/RPV2/tot_RPV2.csv": "1d96bd997b9ad48c105afdbccddaa0123b61bb690f4e45a69fd46117a7d80d02",
+  "runs/artifacts/RPV2/tot_RPV2_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPV2/tot_standby.log": "e12758158bfa8441aa18daaeb9e7957ee84f8a2a376982212d5b5b5e96c014bf",
+  "runs/artifacts/RPV3/contract_RPV3.json": "b20f9af1e1edbd941034ef0d3a62f52ac07e2d877cc4f1ef17e5d0e900b2bc45",
+  "runs/artifacts/RPV3/tot_RPV3.csv": "62b5d5611113ed52723ca752552adbee05d54f6821a95f514d076fd19afc86e9",
+  "runs/artifacts/RPV3/tot_RPV3_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPV3/tot_standby.log": "4d9149f323b4d1c42e0f7e33d3a2e60d62767002c96c362a103759700710d94d",
+  "runs/artifacts/RPW1/contract_RPW1.json": "b20f9af1e1edbd941034ef0d3a62f52ac07e2d877cc4f1ef17e5d0e900b2bc45",
+  "runs/artifacts/RPW1/tot_RPW1.csv": "20fd7c98cbe992f95b1222a7dacb95fe17cc4da4aeb4d4b61a08bbd429bc47fa",
+  "runs/artifacts/RPW1/tot_RPW1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPW1/tot_standby.log": "b29c3284e20c95bbe1d4f286c40d855e8d956bca5decb529cc2b55b195dad766",
+  "runs/artifacts/RPW2/contract_RPW2.json": "b20f9af1e1edbd941034ef0d3a62f52ac07e2d877cc4f1ef17e5d0e900b2bc45",
+  "runs/artifacts/RPW2/tot_RPW2.csv": "ecdf7ec60adea87c05117cba8fee309d771227b86f236fa29d8204f1848ca5ce",
+  "runs/artifacts/RPW2/tot_RPW2_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPW2/tot_standby.log": "c91af1a13bf6fe702e0b9dc8cd6839cb1093df7e03ac2df40ba92e60e3e5806f",
+  "runs/artifacts/RPW3/contract_RPW3.json": "b20f9af1e1edbd941034ef0d3a62f52ac07e2d877cc4f1ef17e5d0e900b2bc45",
+  "runs/artifacts/RPW3/tot_RPW3.csv": "2e816d8ee55df72ec45b350bcddd922a557b1dfdb05c84ba469ccb5ca671fed3",
+  "runs/artifacts/RPW3/tot_RPW3_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPW3/tot_standby.log": "1eb69704510e62daa631ad2e4f956c7f33ddfbffa1f73e18f7037ffdff2d8ac1",
+  "runs/artifacts/RPW4/contract_RPW4.json": "b20f9af1e1edbd941034ef0d3a62f52ac07e2d877cc4f1ef17e5d0e900b2bc45",
+  "runs/artifacts/RPW4/tot_RPW4.csv": "fb402cf9e92d2ddc2bce18eb652dcb60bc0856c92b7b4aea50b9312284350978",
+  "runs/artifacts/RPW4/tot_RPW4_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPW4/tot_standby.log": "db607b6f475cba7bf7dc14c23c391ebf4402d0e1ed71e33b4429fcbe988446b7",
+  "runs/artifacts/RPX1/contract_RPX1.json": "b20f9af1e1edbd941034ef0d3a62f52ac07e2d877cc4f1ef17e5d0e900b2bc45",
+  "runs/artifacts/RPX1/tot_RPX1.csv": "7a10e9c1676e6cb3455522670cfcac93fb29cc74280d5184db013c5f6a44eab3",
+  "runs/artifacts/RPX1/tot_RPX1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPX1/tot_standby.log": "717d84bc9a3a76c50303fe1d1bb208aebd67e6ad3fafa67145469494520fb5b3",
+  "runs/artifacts/RPX2/contract_RPX2.json": "b20f9af1e1edbd941034ef0d3a62f52ac07e2d877cc4f1ef17e5d0e900b2bc45",
+  "runs/artifacts/RPX2/tot_RPX2.csv": "d7acdbe98e79727070b9928af9ff762fc0d7c660f9c9e8f06daceee33190e052",
+  "runs/artifacts/RPX2/tot_RPX2_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPX2/tot_standby.log": "e9e8f83969a68847f35adc0d4be8268ce91ffb02de7df63602c1e3987802ccbb",
+  "runs/artifacts/RPX3/contract_RPX3.json": "b20f9af1e1edbd941034ef0d3a62f52ac07e2d877cc4f1ef17e5d0e900b2bc45",
+  "runs/artifacts/RPX3/tot_RPX3.csv": "796b428689a6795bd7a8f99a30d11357860cb9ed8f4d82eff9c45d50efb2b30a",
+  "runs/artifacts/RPX3/tot_RPX3_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPX3/tot_standby.log": "029465b32713fe4858698f0e30dba1a9debed8e45f1bc6ec44e3b1e97a57a98c",
+  "runs/artifacts/RPY1/contract_RPY1.json": "3226069a4c5dfec34d96b7c6ff597a8c56930906eda6f163509c6729450b1ef4",
+  "runs/artifacts/RPY1/tot_RPY1.csv": "52e5bd67d1fa61e8f1aeacc8ad74ceba9a99186806774cd87f191c0431ed00b0",
+  "runs/artifacts/RPY1/tot_RPY1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPY1/tot_standby.log": "036d978eba227a0a17cb2046993ac537ad007782e04c0da0361924009a2080f0",
+  "runs/artifacts/RPY2/contract_RPY2.json": "b20f9af1e1edbd941034ef0d3a62f52ac07e2d877cc4f1ef17e5d0e900b2bc45",
+  "runs/artifacts/RPY2/tot_RPY2.csv": "c3af0def593b36f96a0652d980edc8c2f5ba00b7f7b1b4709d75f27ffb4e97cb",
+  "runs/artifacts/RPY2/tot_RPY2_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPY2/tot_standby.log": "776d6b837e50fb7fd76f1f12b06aebe4be5db64d8ad5fa52293a07d9b4ea827f",
+  "runs/artifacts/RPY3/contract_RPY3.json": "b20f9af1e1edbd941034ef0d3a62f52ac07e2d877cc4f1ef17e5d0e900b2bc45",
+  "runs/artifacts/RPY3/tot_RPY3.csv": "b12a168e936a0bacff3f14958b8d200767458bc679f8e42b8db1483e8f9d3553",
+  "runs/artifacts/RPY3/tot_RPY3_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPY3/tot_standby.log": "ccaf5a647849af8d6e57badcc4dc01a6587e9fdfb3549cbaceb76e22bc2783e7",
+  "runs/artifacts/RPZ1/contract_RPZ1.json": "cb6bb1f6123289510d150519ea068f3a84f2aa1b8e39317da923bbb6cde1e85e",
+  "runs/artifacts/RPZ1/tot_RPZ1.csv": "b138aab19c2be41d3b7d10bff1b67a054591c1b8b49bcd6e080a522efe5d9e5f",
+  "runs/artifacts/RPZ1/tot_RPZ1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPZ1/tot_standby.log": "26e1ee98993c6467c184adca6b3231960bc23fccbca19bd866991604e52640a4",
+  "runs/artifacts/RPZ2/contract_RPZ2.json": "cb6bb1f6123289510d150519ea068f3a84f2aa1b8e39317da923bbb6cde1e85e",
+  "runs/artifacts/RPZ2/tot_RPZ2.csv": "1a95277f78320d17fe53c9168f3ce917dfc3df666e4812deef2bc0cb90f48247",
+  "runs/artifacts/RPZ2/tot_RPZ2_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPZ2/tot_standby.log": "4b472a1c0fe603d72119ed37f8047852c87bc2c171683ecda4e8fd032233f97d",
+  "runs/artifacts/RPZ3/contract_RPZ3.json": "cb6bb1f6123289510d150519ea068f3a84f2aa1b8e39317da923bbb6cde1e85e",
+  "runs/artifacts/RPZ3/tot_RPZ3.csv": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "runs/artifacts/RPZ3/tot_RPZ3_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RPZ3/tot_standby.log": "d9d8008607a11db9e019b337f0e0ed5cacf78804e59c7f83bbe2c662051cd3e2",
+  "runs/artifacts/RQA1/contract_RQA1.json": "8a67fab443a54f727859ec4e34358b1d87d92c5c33589b41067a5d19f9ac9fa2",
+  "runs/artifacts/RQA1/tot_RQA1.csv": "aae62bd7c0059d3f1236a765255e1a14284c8067540976b49c96e131ffb58570",
+  "runs/artifacts/RQA1/tot_RQA1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQA1/tot_standby.log": "7e7610266b558adba67b560eaf456a066bb21453e6dd5e174bd3a000afef3f9d",
+  "runs/artifacts/RQA2/contract_RQA2.json": "f31aef6217e7d3b8bdd77d3f21d40bad3a220f881563b9aedd4307e5d3908544",
+  "runs/artifacts/RQA2/tot_RQA2.csv": "ea741f39893e71d1db2f35a8e28f9cff4f4f12e0623931672564175495688dc6",
+  "runs/artifacts/RQA2/tot_RQA2_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQA2/tot_standby.log": "884cfca91587bc45e9001f6c8a8d99ef0b8f463fda04005aa04c58c93b091a23",
+  "runs/artifacts/RQA3/contract_RQA3.json": "f31aef6217e7d3b8bdd77d3f21d40bad3a220f881563b9aedd4307e5d3908544",
+  "runs/artifacts/RQA3/tot_RQA3.csv": "405497fa86c5cfbffee3eb486aaad7c2c71962e24b7abd29ca48d384e95c07a1",
+  "runs/artifacts/RQA3/tot_RQA3_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQA3/tot_standby.log": "78233f9b90c5d07631ae16b74ff411821cfca59f9609a8af47e6b209806bcad9",
+  "runs/artifacts/RQB1/contract_RQB1.json": "f31aef6217e7d3b8bdd77d3f21d40bad3a220f881563b9aedd4307e5d3908544",
+  "runs/artifacts/RQB1/tot_RQB1.csv": "f85c6da669683ddf9c2a7e479801764719d21726632bc17cc697a8ad8a389593",
+  "runs/artifacts/RQB1/tot_RQB1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQB1/tot_standby.log": "d144801274bb7eeadda668b30ee80023391aca491ba0574387bc1e5ebc3521d1",
+  "runs/artifacts/RQB2/contract_RQB2.json": "f31aef6217e7d3b8bdd77d3f21d40bad3a220f881563b9aedd4307e5d3908544",
+  "runs/artifacts/RQB2/tot_RQB2.csv": "aa4c4e122f1c6a58a9d927ef6389999cd58cc25e9cb1657f383dc29e29718efa",
+  "runs/artifacts/RQB2/tot_RQB2_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQB2/tot_standby.log": "2266258d502d609e9f02207f492dc5f3816bfc2922e8ed43af65be5c7ea0c8a9",
+  "runs/artifacts/RQB3/contract_RQB3.json": "f31aef6217e7d3b8bdd77d3f21d40bad3a220f881563b9aedd4307e5d3908544",
+  "runs/artifacts/RQB3/tot_RQB3.csv": "96787f779e01b25c33633577fdd2935aee0b1c956d4103fba8c9a24606342410",
+  "runs/artifacts/RQB3/tot_RQB3_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQB3/tot_standby.log": "e3b179412e3aba3964792ad33c6173721f1797a3348b62d05e85d739a05cb6e6",
+  "runs/artifacts/RQB4/contract_RQB4.json": "f31aef6217e7d3b8bdd77d3f21d40bad3a220f881563b9aedd4307e5d3908544",
+  "runs/artifacts/RQB4/tot_RQB4.csv": "9a540f4c4147bb569be2389c6ab49dee49862b7ae2f3b0cbe3ca139b0e36ff18",
+  "runs/artifacts/RQB4/tot_RQB4_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQB4/tot_standby.log": "07469dceb8b2a2c019bfa1d44bfaf23658a4a71dd35ce3b6a0588db465ce0c42",
+  "runs/artifacts/RQC1/contract_RQC1.json": "d6338a1bb9a5487f074f22269602902239c153fd96d63e8f05306c434b17f403",
+  "runs/artifacts/RQC1/tot_RQC1.csv": "4ce06cabfcd1ad4ffacc1e6207f61997a387586170fe7051ba900e15747c82ce",
+  "runs/artifacts/RQC1/tot_RQC1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQC1/tot_standby.log": "2b9288bc7fdf535d95486b4c18b14d625ca44f0ddd0aa9397b78398afd961517",
+  "runs/artifacts/RQC2/contract_RQC2.json": "d6338a1bb9a5487f074f22269602902239c153fd96d63e8f05306c434b17f403",
+  "runs/artifacts/RQC2/tot_RQC2.csv": "66bea53718925a3a49e65e10f05ecbdc5fe0ad2e5f0e492640b6799f0b971bbc",
+  "runs/artifacts/RQC2/tot_RQC2_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQC2/tot_standby.log": "55c1c080c62bfab071ca01302f3381633d440090b3b94a855ef807c846b53afc",
+  "runs/artifacts/RQC3/contract_RQC3.json": "d6338a1bb9a5487f074f22269602902239c153fd96d63e8f05306c434b17f403",
+  "runs/artifacts/RQC3/tot_RQC3.csv": "6b8c0e456f73a13c6e02e4c13bd12a4ee321fb6df1d8fda6150c8a3bc0c17743",
+  "runs/artifacts/RQC3/tot_RQC3_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQC3/tot_standby.log": "db4abe91a794e130654ea7f5aadeacc92bccbb459477ae5498a6028e0be118b3",
+  "runs/artifacts/RQC4/contract_RQC4.json": "d6338a1bb9a5487f074f22269602902239c153fd96d63e8f05306c434b17f403",
+  "runs/artifacts/RQC4/tot_RQC4.csv": "5554ac67768a43eddc2ef555273d156c895a65d1ba0c24de8482cad03dc22744",
+  "runs/artifacts/RQC4/tot_RQC4_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQC4/tot_standby.log": "e13f0ab2eed696e9f27de069d608650382f5cfd587a2b3740ec2c0d06831cb40",
+  "runs/artifacts/RQD1/contract_RQD1.json": "41cf920d462c88bb764154a320e49137ab2d930943c5183e27460174c64c156b",
+  "runs/artifacts/RQD1/tot_RQD1.csv": "334557cd9a0353edf288f32b21344247099afa438c011f3f55dcf831897c7c89",
+  "runs/artifacts/RQD1/tot_RQD1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQD1/tot_standby.log": "23f53de6e6f9ab1575ca0481430f61b283ee1ace6df07ee8d685e47789c4b5e6",
+  "runs/artifacts/RQD2/contract_RQD2.json": "41cf920d462c88bb764154a320e49137ab2d930943c5183e27460174c64c156b",
+  "runs/artifacts/RQD2/tot_RQD2.csv": "8dd3269f421c7bfdd73e1999bdb92e76dbcc2fb315900c0229f7ca8a6cd6a994",
+  "runs/artifacts/RQD2/tot_RQD2_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQD2/tot_standby.log": "495b18daf89390f2d1ea8a39cfeb337df2be1c2e27cb9cc1383ceb7afdcfc533",
+  "runs/artifacts/RQD3/contract_RQD3.json": "41cf920d462c88bb764154a320e49137ab2d930943c5183e27460174c64c156b",
+  "runs/artifacts/RQD3/tot_RQD3.csv": "1c322cf2c54ca72a7e0c96d9764b71be1209bff3677fa0236974800fc7cc8134",
+  "runs/artifacts/RQD3/tot_RQD3_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQD3/tot_standby.log": "00745d346c97dd6d1bc01821398125890e9a2bf265d5c30f770b22aa8d0229dc",
+  "runs/artifacts/RQE1/contract_RQE1.json": "74eed0746af6f07c344df6135ef6fedf588d795a850bd024287197256cafe71f",
+  "runs/artifacts/RQE1/tot_RQE1.csv": "eb22c7d2e0af07487f8e01a15d4e6f0efe508b546f8c6025e22383f84de29db0",
+  "runs/artifacts/RQE1/tot_RQE1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQE1/tot_standby.log": "99bf43b4ed4353e94727724add4010d9ebb96efd71cd537264b38c8b9e5d153b",
+  "runs/artifacts/RQE2/contract_RQE2.json": "74eed0746af6f07c344df6135ef6fedf588d795a850bd024287197256cafe71f",
+  "runs/artifacts/RQE2/tot_RQE2.csv": "213dc5eec02f53d75789e979856b741cea9efe4295ea0de351b013413f24520c",
+  "runs/artifacts/RQE2/tot_RQE2_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQE2/tot_standby.log": "a4e42f8b80ffa2ad05836f73bd37cac9217ab64c096ad9bfbb59f8cd269681c5",
+  "runs/artifacts/RQE3/contract_RQE3.json": "74eed0746af6f07c344df6135ef6fedf588d795a850bd024287197256cafe71f",
+  "runs/artifacts/RQE3/tot_RQE3.csv": "ba8111252552280c134176f905a704ec82c80216008322992fcbd4bd61001f6b",
+  "runs/artifacts/RQE3/tot_RQE3_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQE3/tot_standby.log": "0c43e3b0e3b550380077218a12ce83ca51f47954debc37ba1753bef0a09c8bfa",
+  "runs/artifacts/RQE4/contract_RQE4.json": "74eed0746af6f07c344df6135ef6fedf588d795a850bd024287197256cafe71f",
+  "runs/artifacts/RQE4/tot_RQE4.csv": "0fdbeef582cb317b1b04af67da5dfddae8050f9eed4c048a43b1e0d513bc2faf",
+  "runs/artifacts/RQE4/tot_RQE4_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQE4/tot_standby.log": "6e4a4c5230dfa12055ea5ecf416ac3c2bb812ba2298d01e6acb21d1c86031bd6",
+  "runs/artifacts/RQF1/contract_RQF1.json": "74eed0746af6f07c344df6135ef6fedf588d795a850bd024287197256cafe71f",
+  "runs/artifacts/RQF1/tot_RQF1.csv": "faf6f3fc7a51697cc929830ab6e3d075acfc512ab05443037ece1f55a694e4c7",
+  "runs/artifacts/RQF1/tot_RQF1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQF1/tot_standby.log": "0862dbe5e1d874ac5c9ec11e15cf6b0aa675bb5ee57f88dcebe1fbc56a1f5f7f",
+  "runs/artifacts/RQF2/contract_RQF2.json": "74eed0746af6f07c344df6135ef6fedf588d795a850bd024287197256cafe71f",
+  "runs/artifacts/RQF2/tot_RQF2.csv": "ae687478d37fb8a8e7320f06c5702d0111cac36e3a7317e982ee0e29cc97fa67",
+  "runs/artifacts/RQF2/tot_RQF2_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQF2/tot_standby.log": "c52d0553ad2a066e1bc4e93bf437179c6364f1058414500a4a3a57ee5441d973",
+  "runs/artifacts/RQF3/contract_RQF3.json": "74eed0746af6f07c344df6135ef6fedf588d795a850bd024287197256cafe71f",
+  "runs/artifacts/RQF3/tot_RQF3.csv": "d8567fd0c8848b99cac23c01c0ae33d010f96e9c677cf7512499523fd3c26024",
+  "runs/artifacts/RQF3/tot_RQF3_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQF3/tot_standby.log": "5f3bed534dc1af92a8cc08caf2d1cc70cdfc47de5e13ee7a5f3328879b1e89c8",
+  "runs/artifacts/RQF4/contract_RQF4.json": "74eed0746af6f07c344df6135ef6fedf588d795a850bd024287197256cafe71f",
+  "runs/artifacts/RQF4/tot_RQF4.csv": "fbfb6a83a146737a64c8645a5b7f5313c64380cb6818126cde97728466273e16",
+  "runs/artifacts/RQF4/tot_RQF4_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQF4/tot_standby.log": "440b8638ac2b3a8253485703a100b082de3de9404328511066dd6e305440e906",
+  "runs/artifacts/RQG1/contract_RQG1.json": "069ea2f50153a49ccf149d0a3e4d9d1881574d8f15b9728b76865a6494922977",
+  "runs/artifacts/RQG1/tot_RQG1.csv": "72d714e12e179ae3ea08c988416d0130351d69632e8397e094749fa72e44a789",
+  "runs/artifacts/RQG1/tot_RQG1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQG1/tot_standby.log": "9e08c06367a00f030c619dbe7244b1f34b22c5376e687dfdf2e13daf14e96ed2",
+  "runs/artifacts/RQG2/contract_RQG2.json": "069ea2f50153a49ccf149d0a3e4d9d1881574d8f15b9728b76865a6494922977",
+  "runs/artifacts/RQG2/tot_RQG2.csv": "3d39c24cb06edb82bb5da7eb3ef20f9d509e77d67db36d64be4a63770862497a",
+  "runs/artifacts/RQG2/tot_RQG2_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQG2/tot_standby.log": "1035668aab35b1f561a55b0a2e36346701f7c5c576c0dba07da31e5f99547d2f",
+  "runs/artifacts/RQH1/contract_RQH1.json": "069ea2f50153a49ccf149d0a3e4d9d1881574d8f15b9728b76865a6494922977",
+  "runs/artifacts/RQH1/tot_RQH1.csv": "3cda05a503d124218d975cf854ccf9a30d4588191641418ff39606be07b73b4b",
+  "runs/artifacts/RQH1/tot_RQH1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQH1/tot_standby.log": "6433a6f940f0f6db583ded41d2349746af1dd45671c8871a399a2f78eae51bde",
+  "runs/artifacts/RQH2/contract_RQH2.json": "069ea2f50153a49ccf149d0a3e4d9d1881574d8f15b9728b76865a6494922977",
+  "runs/artifacts/RQH2/tot_RQH2.csv": "062f403d4e3ccf6a8932a5844f5a4e7aa1bca8f276d17395fdb979a97b868532",
+  "runs/artifacts/RQH2/tot_RQH2_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQH2/tot_standby.log": "bb1aca5a55f7ff6eab5f98e5e0050fdf1164dfbb1060be23108b88ad5fe7b815",
+  "runs/artifacts/RQH3/contract_RQH3.json": "069ea2f50153a49ccf149d0a3e4d9d1881574d8f15b9728b76865a6494922977",
+  "runs/artifacts/RQH3/tot_RQH3.csv": "3eeca0259c35eb03159bf3a2aa505846d1a5d89c72799a9d9c587d7fc64b9c54",
+  "runs/artifacts/RQH3/tot_RQH3_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQH3/tot_standby.log": "3723844965fe3e1cecdab2eab292dfe9757b3f072a55a91bfa7ac0ed61170fdd",
+  "runs/artifacts/RQH4/contract_RQH4.json": "069ea2f50153a49ccf149d0a3e4d9d1881574d8f15b9728b76865a6494922977",
+  "runs/artifacts/RQH4/tot_RQH4.csv": "97d82110ca1cf602fdf5e579817eb4a03447419f1b7ef80d710a3da9a876d075",
+  "runs/artifacts/RQH4/tot_RQH4_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RQH4/tot_standby.log": "ce9955448ae6b8b120d0645a2665bffde32ddee903d39f67240566d0d8171f79",
+  "runs/artifacts/RRB1/contract_RRB1.json": "069ea2f50153a49ccf149d0a3e4d9d1881574d8f15b9728b76865a6494922977",
+  "runs/artifacts/RRB1/tot_RRB1.csv": "c1569f581ee177961ca644d24ba819f58098a597a9fa88556df98ebdde0e9886",
+  "runs/artifacts/RRB1/tot_RRB1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RRB1/tot_standby.log": "c9fe4f660f0bd80423dd12071529316e14d872d5db76e634bbf7c332924bd2b1",
+  "runs/artifacts/RRB2/contract_RRB2.json": "069ea2f50153a49ccf149d0a3e4d9d1881574d8f15b9728b76865a6494922977",
+  "runs/artifacts/RRB2/tot_RRB2.csv": "19bfd9c1d66117229b1d4b514dcf3411e1ec40a2c722ee0501f05d848303d388",
+  "runs/artifacts/RRB2/tot_RRB2_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RRB2/tot_standby.log": "e9b9849ffb6bfc0b245ff82dea94ce2ec455f6ee1ccb0e04e960ecfa5a565180",
+  "runs/artifacts/RRB3/contract_RRB3.json": "069ea2f50153a49ccf149d0a3e4d9d1881574d8f15b9728b76865a6494922977",
+  "runs/artifacts/RRB3/tot_RRB3.csv": "ffdbefd077d4afabeb168c1130fc9bfe3426573932e77ecdd046700b53e53ffc",
+  "runs/artifacts/RRB3/tot_RRB3_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RRB3/tot_standby.log": "93a3c47c2817c30d9133b546ef7656ac716f1a69c3d4249444511db00a6862c5",
+  "runs/artifacts/RRB4/contract_RRB4.json": "069ea2f50153a49ccf149d0a3e4d9d1881574d8f15b9728b76865a6494922977",
+  "runs/artifacts/RRB4/tot_RRB4.csv": "93af2de3da5d3804316a757228424713bd8448161d1e836c0ba7d82f1d3636ca",
+  "runs/artifacts/RRB4/tot_RRB4_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RRB4/tot_standby.log": "9aa6a291417c45bfb82c779b2f4d00cf7b714757048ea19eabc2d4899407739f",
+  "runs/artifacts/RRB5/contract_RRB5.json": "069ea2f50153a49ccf149d0a3e4d9d1881574d8f15b9728b76865a6494922977",
+  "runs/artifacts/RRB5/tot_RRB5.csv": "1179865dfccf9623212eb6a4e5f5a735fae7acf4aeebf203655e3c7771c46160",
+  "runs/artifacts/RRB5/tot_RRB5_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RRB5/tot_standby.log": "96b4bd56bc4fe4eead19065e608d4211ec00fd784f7473b7ac550df511fcff82",
+  "runs/artifacts/RRB6/contract_RRB6.json": "069ea2f50153a49ccf149d0a3e4d9d1881574d8f15b9728b76865a6494922977",
+  "runs/artifacts/RRB6/tot_RRB6.csv": "fca913474707fa086c9059ebab50e26986a65ebfc246891f9135d697f9fba5b1",
+  "runs/artifacts/RRB6/tot_RRB6_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RRB6/tot_standby.log": "d91af15c07c31ea32c449d2b28d6d6d3c9a12bfe47e2e02a171cb9a5710506c6",
+  "runs/artifacts/RRB8/contract_RRB8.json": "069ea2f50153a49ccf149d0a3e4d9d1881574d8f15b9728b76865a6494922977",
+  "runs/artifacts/RRB8/tot_RRB8.csv": "ad8f4fe7ed980c8de252af9507fdbae867fc20a42dc4b055d3b9e54aaececec9",
+  "runs/artifacts/RRB8/tot_RRB8_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RRB8/tot_standby.log": "d6dcf4cd235ef00a5895f55c15bb251ad5eb1ef16ddc32ebacc67b25a421095d",
+  "runs/artifacts/RRC1/contract_RRC1.json": "618a24c605e59fed0ebf628814abc81130dffd113471b2f1daac0acaeb214d19",
+  "runs/artifacts/RRC1/tot_RRC1.csv": "9f589af47e4eba6aff77c12f5f57f48da720c833a5ea3af57d0388e9167bd2d8",
+  "runs/artifacts/RRC1/tot_RRC1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RRC1/tot_standby.log": "4737755ac9892953ba130e377c38e90df85c1ca5fec8cb9b56ad2114f7eb587d",
+  "runs/artifacts/RRD1/contract_RRD1.json": "618a24c605e59fed0ebf628814abc81130dffd113471b2f1daac0acaeb214d19",
+  "runs/artifacts/RRD1/tot_RRD1.csv": "116dc685edfa6df057e28dd7e2ce2d7989a4e671e747810115a96ca8652c591e",
+  "runs/artifacts/RRD1/tot_RRD1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RRD1/tot_standby.log": "57025d80f7d13ae438b5866b2d295b0309668bb2a04b95c12a25e8b5089847f3",
+  "runs/artifacts/RRD2/contract_RRD2.json": "618a24c605e59fed0ebf628814abc81130dffd113471b2f1daac0acaeb214d19",
+  "runs/artifacts/RRD2/tot_RRD2.csv": "d3dc8f0e5d6a5f5dccebc81a72bcc1d6d9ce03670bdc4f833d8fbc4f71867560",
+  "runs/artifacts/RRD2/tot_RRD2_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RRD2/tot_standby.log": "8d8ca5b285b2fdc8bb3d71aa1c189e927fc60dc056217f777c280df28e2cc768",
+  "runs/artifacts/RRD3/contract_RRD3.json": "618a24c605e59fed0ebf628814abc81130dffd113471b2f1daac0acaeb214d19",
+  "runs/artifacts/RRD3/tot_RRD3.csv": "ae01218d90ea27c635a1925b6ada8aedfbb135f4fbb6d419e02efabbc4137a51",
+  "runs/artifacts/RRD3/tot_RRD3_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RRD3/tot_standby.log": "c4874a917e945356c02ca1d13aa92005e0ac76a1de70f04afe3f4f954581c679",
+  "runs/artifacts/RRD4/contract_RRD4.json": "618a24c605e59fed0ebf628814abc81130dffd113471b2f1daac0acaeb214d19",
+  "runs/artifacts/RRD4/tot_RRD4.csv": "e4ae3d88bf3668eb2f58c7d2faad49812f08d537835211d7c389cf96aad9a84d",
+  "runs/artifacts/RRD4/tot_RRD4_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RRD4/tot_standby.log": "81abd57843d8a83cb6f3b035374f191a094304f1d12d82a115242f249e071a09",
+  "runs/artifacts/RRD5/contract_RRD5.json": "618a24c605e59fed0ebf628814abc81130dffd113471b2f1daac0acaeb214d19",
+  "runs/artifacts/RRD5/tot_RRD5.csv": "2552518caf2a35c77ccda19a9f4e0e01d835309d0d33abb87bac9476a7fe1ee9",
+  "runs/artifacts/RRD5/tot_RRD5_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RRD5/tot_standby.log": "6c2b7cdb08c979295df04f5244fc4160545e876b0e2b4a4f20d6354ba9e9f0e8",
+  "runs/artifacts/RRD6/contract_RRD6.json": "618a24c605e59fed0ebf628814abc81130dffd113471b2f1daac0acaeb214d19",
+  "runs/artifacts/RRD6/tot_RRD6.csv": "9a6cb5c051ceefa7a3b0e9a6d1a6848368fdf5f19368e6c0de5a1a237d6a3742",
+  "runs/artifacts/RRD6/tot_RRD6_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RRD6/tot_standby.log": "9dfc43ab0694192d1a1918ae01ea2335a33bfffc0c8d0e347e0d360a52ece0b5",
+  "runs/artifacts/RRD7/contract_RRD7.json": "618a24c605e59fed0ebf628814abc81130dffd113471b2f1daac0acaeb214d19",
+  "runs/artifacts/RRD7/tot_RRD7.csv": "b5eea8aa4637ef9997ae7f87fa1940cef6328e7ce7bf70cbd5f8fda6fd6ef5dc",
+  "runs/artifacts/RRD7/tot_RRD7_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RRD7/tot_standby.log": "9c7a5c25005476d3a48cf5bed4414e0334f0ee16a38a82672a8c1fbce00e5988",
+  "runs/artifacts/RRD8/contract_RRD8.json": "618a24c605e59fed0ebf628814abc81130dffd113471b2f1daac0acaeb214d19",
+  "runs/artifacts/RRD8/tot_RRD8.csv": "7eb389482587a82bfc06a12568abe8c7a78cc66b59adfa8a15eff07669302225",
+  "runs/artifacts/RRD8/tot_RRD8_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RRD8/tot_standby.log": "9c921ce9f43e6595ba7db57c2c4f22005a96be226a9951c72f4b8e70401b05ea",
+  "runs/artifacts/RRE1/contract_RRE1.json": "1d98197536bceb2c3b3f12f26c2cc62b8e3350eb0c77df57a0d53c8d1c8d770f",
+  "runs/artifacts/RRE1/tot_RRE1.csv": "c7acb3529648660ec06d2d89d7819ba37c200916991c1144b5d223145ac161c4",
+  "runs/artifacts/RRE1/tot_RRE1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RRE1/tot_standby.log": "07691eb12bdca310ae07c5079c67bc5deec87c88abdefbc12b70217221639902",
+  "runs/artifacts/RRE2/contract_RRE2.json": "1d98197536bceb2c3b3f12f26c2cc62b8e3350eb0c77df57a0d53c8d1c8d770f",
+  "runs/artifacts/RRE2/tot_RRE2.csv": "245a7d002820366432673317d5462212027b51bc9a380b73bf290fb7479162ca",
+  "runs/artifacts/RRE2/tot_RRE2_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RRE2/tot_standby.log": "5d144294e54ad8be01e1f9746148f7572745e6921a7441703efbc865e9c326b5",
+  "runs/artifacts/RRE3/contract_RRE3.json": "1d98197536bceb2c3b3f12f26c2cc62b8e3350eb0c77df57a0d53c8d1c8d770f",
+  "runs/artifacts/RRE3/tot_RRE3.csv": "33cf330eaa041321ff608b4b743262ac91420d897144b0fbe5c8892ab631adca",
+  "runs/artifacts/RRE3/tot_RRE3_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RRE3/tot_standby.log": "5180125962b0881118cbc030fa0fb890a0dd1b8a0891c9ca2bfd211e7b40b41e",
+  "runs/artifacts/RRE4/contract_RRE4.json": "1d98197536bceb2c3b3f12f26c2cc62b8e3350eb0c77df57a0d53c8d1c8d770f",
+  "runs/artifacts/RRE4/tot_RRE4.csv": "90409fcc476457bf35ed21bd26ab42873baf8ce3cf064908192c6abbe5b99d70",
+  "runs/artifacts/RRE4/tot_RRE4_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RRE4/tot_standby.log": "95ff224010f63cd2e47769aba281a7b12a15f4a8caef1587973b4d25b5d78f09",
+  "runs/artifacts/RRE5/contract_RRE5.json": "1d98197536bceb2c3b3f12f26c2cc62b8e3350eb0c77df57a0d53c8d1c8d770f",
+  "runs/artifacts/RRE5/tot_RRE5.csv": "af6742c923667c72c51f94c684b7526162af0a745c39dc8f63e1a36ce0687ca6",
+  "runs/artifacts/RRE5/tot_RRE5_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RRE5/tot_standby.log": "6583604df1472e17f06d3e6393854297c6c95279a7567723ed15b939919bb72b",
+  "runs/artifacts/RRE6/contract_RRE6.json": "1d98197536bceb2c3b3f12f26c2cc62b8e3350eb0c77df57a0d53c8d1c8d770f",
+  "runs/artifacts/RRE6/tot_RRE6.csv": "be3490b689f54b31d9d1baf9587643bbb057df35c48132ac884baa19bb0c89c9",
+  "runs/artifacts/RRE6/tot_RRE6_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RRE6/tot_standby.log": "0e9a8091a955e0a45d3a9d3e24955a9bfc8f38cc7d774820aed6f489bf9fb41b",
+  "runs/artifacts/RRE7/contract_RRE7.json": "1d98197536bceb2c3b3f12f26c2cc62b8e3350eb0c77df57a0d53c8d1c8d770f",
+  "runs/artifacts/RRE7/tot_RRE7.csv": "26c3359e18fab332ee26eabe6883eb1384b0588b474b352b49e3783d3f7e96b2",
+  "runs/artifacts/RRE7/tot_RRE7_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RRE7/tot_standby.log": "ce8218dad60456effe4b2f95ebb49ff1d6fd9cc928557f5f26a57a9b4084444d",
+  "runs/artifacts/RRE8/contract_RRE8.json": "1d98197536bceb2c3b3f12f26c2cc62b8e3350eb0c77df57a0d53c8d1c8d770f",
+  "runs/artifacts/RRE8/tot_RRE8.csv": "04d8c4f1ae50fa9d05415b1d84dec227e376aa668e52af5c7a405417774b988a",
+  "runs/artifacts/RRE8/tot_RRE8_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/RRE8/tot_standby.log": "5bd8bac13fe0d5e472d84dda1e1d1d886e77e4efdac7b3bfdc52f82cc9b2b1ba",
+  "runs/artifacts/SB1/contract_SB1.json": "aad7da30efed46375016e0d6279eacc1b9a9b041e06e789550f6fc5125189abf",
+  "runs/artifacts/SB1/tot_SB1.csv": "889f2d90007c19a42a0edf68f88cf7b216615cbff4d2306bb8bfaf89cc596603",
+  "runs/artifacts/SB1/tot_SB1_geom.csv": "5004994c643e7a1ed5c3ee185659a03a7d112bdc4c364e4752f3f1cb412189ec",
+  "runs/artifacts/SB1/tot_standby.log": "c41a0532a7ce16a8c303769bad1176b3a1792e30ff5ac434c68b3d38d0ede8cd",
+  "runs/artifacts/SB2/contract_SB2.json": "aad7da30efed46375016e0d6279eacc1b9a9b041e06e789550f6fc5125189abf",
+  "runs/artifacts/SB2/tot_SB2.csv": "377d5104c7dd291a5aadcbed8bfdd2a7afa61731a2378d4b3d3fae4fd7bbb097",
+  "runs/artifacts/SB2/tot_SB2_geom.csv": "5004994c643e7a1ed5c3ee185659a03a7d112bdc4c364e4752f3f1cb412189ec",
+  "runs/artifacts/SB2/tot_standby.log": "3f588f7112a8c1f90a1933f1a27e11f87b1e6ed981818353cb9b2417acd906d4",
+  "runs/artifacts/SB3/contract_SB3.json": "aad7da30efed46375016e0d6279eacc1b9a9b041e06e789550f6fc5125189abf",
+  "runs/artifacts/SB3/tot_SB3.csv": "08e9952fd379725015f265020467c82dec51080cf53ad710a223cfcda53f9bbe",
+  "runs/artifacts/SB3/tot_SB3_geom.csv": "5004994c643e7a1ed5c3ee185659a03a7d112bdc4c364e4752f3f1cb412189ec",
+  "runs/artifacts/SB3/tot_standby.log": "6c007a0147b8393e4ef197bbe0f67b8ddc3197fd9146be58b0eb8f48faef25fc",
+  "runs/artifacts/WEAVEAIM1/contract_WEAVEAIM1.json": "6e3941a476c07ad3a67779c8e72dcc4f4b6932d1c61777c105e4ef7728462419",
+  "runs/artifacts/WEAVEAIM1/tot_WEAVEAIM1.csv": "211646599fbcc1e729f1cb1dddf97cdfc075f34e824ce48ab305b547ee2f1968",
+  "runs/artifacts/WEAVEAIM1/tot_WEAVEAIM1_geom.csv": "8baf497c16628980deeba77fe37fa14934f8ecfd41bcc15ba226c0f8483cd11d",
+  "runs/artifacts/WEAVEAIM1/tot_standby.log": "4f6ca9ed07e211444eab32c131e66c7d8139429eda06c2feed5f9245bda74705",
+  "runs/artifacts/WV1/tot_WV1.csv": "869627f47cc73c0e47c4beceb8cc9856afaafd1443c3d563236cc874e8bdccbb",
+  "runs/artifacts/WV1/tot_WV1_geom.csv": "a14e73f462c89345b69b2e7b037fa4da2613e0b23b5e999fb201b723d3678291",
+  "runs/artifacts/WV2/tot_WV2.csv": "1ed27daf07e7dbca9cad044b59da1d73c8cb16ec7a29db63b55b2c06ea6d4c95",
+  "runs/artifacts/WV2/tot_WV2_geom.csv": "a14e73f462c89345b69b2e7b037fa4da2613e0b23b5e999fb201b723d3678291",
+  "runs/artifacts/WV3/tot_WV3.csv": "7963e3fc8009c717bc4c32b880f30a803c151d9d2b1bcbed133f63c03b2ede5a",
+  "runs/artifacts/WV3/tot_WV3_geom.csv": "a14e73f462c89345b69b2e7b037fa4da2613e0b23b5e999fb201b723d3678291",
+  "runs/artifacts/WX1/contract_WX1.json": "2eaf7381b0031953e6d97ba3845b43d3a7778492cf26e367114998dc78e0f1e1",
+  "runs/artifacts/WX1/tot_WX1.csv": "253c7842178c10ba63672401ab6bc11303193db3e34ecba9ef0a50554d990141",
+  "runs/artifacts/WX1/tot_WX1_geom.csv": "5004994c643e7a1ed5c3ee185659a03a7d112bdc4c364e4752f3f1cb412189ec",
+  "runs/artifacts/WX1/tot_standby.log": "f610145dcc4f8b05fe32960b8305eb14349433a07b4995c18a9c4fcec8948b5c",
+  "runs/artifacts/WX2/contract_WX2.json": "2eaf7381b0031953e6d97ba3845b43d3a7778492cf26e367114998dc78e0f1e1",
+  "runs/artifacts/WX2/tot_WX2.csv": "03e9e861faea26c5bc446fafd79e4dd91a180bb12bce53822965ce5836f4ab32",
+  "runs/artifacts/WX2/tot_WX2_geom.csv": "5004994c643e7a1ed5c3ee185659a03a7d112bdc4c364e4752f3f1cb412189ec",
+  "runs/artifacts/WX2/tot_standby.log": "344d3d4f99ddda9a42a80fe248faf4868948d015d290fe296f6d3f986fda33ec",
+  "runs/artifacts/WX3/contract_WX3.json": "2eaf7381b0031953e6d97ba3845b43d3a7778492cf26e367114998dc78e0f1e1",
+  "runs/artifacts/WX3/tot_WX3.csv": "cdb5f193a46442a68482acc3670ff643e4bae33045c1c78b3f7327b6cbb43d8e",
+  "runs/artifacts/WX3/tot_WX3_geom.csv": "5004994c643e7a1ed5c3ee185659a03a7d112bdc4c364e4752f3f1cb412189ec",
+  "runs/artifacts/WX3/tot_standby.log": "e4505abb8cd3246742004bc6ccddd3cb33290e3f85e346901585127ad8065103",
+  "scripts/wsl/batch_tally.py": "9a39935c6cf1e860c81b75a72b073f26b05038effc1d55a028d1767af5f4aa28",
+  "scripts/wsl/sar_swarm_patches/tot_node.py": "9c065c11690e758e63816d85d8546d1da6705ada4c5361a7487bbee78b7f3609",
+  "scripts/wsl/stot_score.py": "13fff037aaeeb8edd13b81c5cf07d724513fa7c698657f935fa39778a7568ada"
+ },
+ "items": [
+  {
+   "batch": "RRB",
+   "class": "no_touch",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 60000.0,
+   "released": true,
+   "run": "RRB1",
+   "shown_as": "× 於「未觸地」列",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRB1/tot_RRB1.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 1,
+   "value_m": null
+  },
+  {
+   "batch": "RRB",
+   "class": "touch_miss",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 143.13,
+   "released": true,
+   "run": "RRB1",
+   "shown_as": "空心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRB1/tot_RRB1.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 2,
+   "value_m": 143.13
+  },
+  {
+   "batch": "RRB",
+   "class": "no_touch",
+   "first_pass_status": "MISS",
+   "panel": "a",
+   "plot_y": 60000.0,
+   "released": true,
+   "run": "RRB2",
+   "shown_as": "× 於「未觸地」列",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRB2/tot_RRB2.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 1,
+   "value_m": null
+  },
+  {
+   "batch": "RRB",
+   "class": "no_touch",
+   "first_pass_status": "MISS",
+   "panel": "a",
+   "plot_y": 60000.0,
+   "released": true,
+   "run": "RRB2",
+   "shown_as": "× 於「未觸地」列",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRB2/tot_RRB2.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 2,
+   "value_m": null
+  },
+  {
+   "batch": "RRB",
+   "class": "no_touch",
+   "first_pass_status": "MISS",
+   "panel": "a",
+   "plot_y": 60000.0,
+   "released": true,
+   "run": "RRB3",
+   "shown_as": "× 於「未觸地」列",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRB3/tot_RRB3.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 1,
+   "value_m": null
+  },
+  {
+   "batch": "RRB",
+   "class": "touch_miss",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 94.58,
+   "released": true,
+   "run": "RRB3",
+   "shown_as": "空心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRB3/tot_RRB3.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 2,
+   "value_m": 94.58
+  },
+  {
+   "batch": "RRB",
+   "class": "touch_miss",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 69.64,
+   "released": true,
+   "run": "RRB4",
+   "shown_as": "空心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRB4/tot_RRB4.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 1,
+   "value_m": 69.64
+  },
+  {
+   "batch": "RRB",
+   "class": "hit",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 0.41,
+   "released": true,
+   "run": "RRB4",
+   "shown_as": "實心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRB4/tot_RRB4.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 2,
+   "value_m": 0.41
+  },
+  {
+   "batch": "RRB",
+   "class": "hit",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 0.16,
+   "released": true,
+   "run": "RRB5",
+   "shown_as": "實心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRB5/tot_RRB5.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 1,
+   "value_m": 0.16
+  },
+  {
+   "batch": "RRB",
+   "class": "touch_miss",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 46.55,
+   "released": true,
+   "run": "RRB5",
+   "shown_as": "空心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRB5/tot_RRB5.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 2,
+   "value_m": 46.55
+  },
+  {
+   "batch": "RRB",
+   "class": "no_touch",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 60000.0,
+   "released": true,
+   "run": "RRB6",
+   "shown_as": "× 於「未觸地」列",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRB6/tot_RRB6.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 1,
+   "value_m": null
+  },
+  {
+   "batch": "RRB",
+   "class": "touch_miss",
+   "first_pass_status": "MISS",
+   "panel": "a",
+   "plot_y": 9275.42,
+   "released": true,
+   "run": "RRB6",
+   "shown_as": "空心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRB6/tot_RRB6.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 2,
+   "value_m": 9275.42
+  },
+  {
+   "batch": "RRB",
+   "class": "touch_miss",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 436.03,
+   "released": true,
+   "run": "RRB8",
+   "shown_as": "空心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRB8/tot_RRB8.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 1,
+   "value_m": 436.03
+  },
+  {
+   "batch": "RRB",
+   "class": "touch_miss",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 121.18,
+   "released": true,
+   "run": "RRB8",
+   "shown_as": "空心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRB8/tot_RRB8.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 2,
+   "value_m": 121.18
+  },
+  {
+   "batch": "RRB",
+   "criterion": "hit",
+   "label": "RRB 命中數/架次（表列）",
+   "n_touch": 9,
+   "panel": "a",
+   "runs": [
+    "RRB1",
+    "RRB2",
+    "RRB3",
+    "RRB4",
+    "RRB5",
+    "RRB6",
+    "RRB8"
+   ],
+   "runs_without_csv_1_to_8": [
+    "RRB7"
+   ],
+   "shown_as": "2/14",
+   "value": "2/14"
+  },
+  {
+   "batch": "RRB",
+   "criterion": "cp95_lower",
+   "label": "RRB 命中率 Clopper-Pearson 單側 95% 下限（表列）",
+   "panel": "a",
+   "shown_as": "0.026",
+   "value": 0.025999
+  },
+  {
+   "batch": "RRB",
+   "label": "RRB 放行方式標籤依據（契約讀回）",
+   "panel": "a",
+   "shown_as": "環外放行",
+   "source": {
+    "field": "values.release_at_ring, values.wait_goto_radius（缺鍵＝預設 False，scripts/wsl/sar_swarm_patches/tot_node.py:637-639）",
+    "file": "runs/artifacts/<ID>/contract_<ID>.json"
+   },
+   "value": {
+    "RRB1": {
+     "release_at_ring": null,
+     "wait_goto_radius": null
+    },
+    "RRB2": {
+     "release_at_ring": null,
+     "wait_goto_radius": null
+    },
+    "RRB3": {
+     "release_at_ring": null,
+     "wait_goto_radius": null
+    },
+    "RRB4": {
+     "release_at_ring": null,
+     "wait_goto_radius": null
+    },
+    "RRB5": {
+     "release_at_ring": null,
+     "wait_goto_radius": null
+    },
+    "RRB6": {
+     "release_at_ring": null,
+     "wait_goto_radius": null
+    },
+    "RRB8": {
+     "release_at_ring": null,
+     "wait_goto_radius": null
+    }
+   }
+  },
+  {
+   "batch": "RRD",
+   "class": "hit",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 2.79,
+   "released": true,
+   "run": "RRD1",
+   "shown_as": "實心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRD1/tot_RRD1.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 1,
+   "value_m": 2.79
+  },
+  {
+   "batch": "RRD",
+   "class": "touch_miss",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 46.03,
+   "released": true,
+   "run": "RRD1",
+   "shown_as": "空心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRD1/tot_RRD1.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 2,
+   "value_m": 46.03
+  },
+  {
+   "batch": "RRD",
+   "class": "touch_miss",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 42.15,
+   "released": true,
+   "run": "RRD2",
+   "shown_as": "空心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRD2/tot_RRD2.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 1,
+   "value_m": 42.15
+  },
+  {
+   "batch": "RRD",
+   "class": "hit",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 0.65,
+   "released": true,
+   "run": "RRD2",
+   "shown_as": "實心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRD2/tot_RRD2.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 2,
+   "value_m": 0.65
+  },
+  {
+   "batch": "RRD",
+   "class": "hit",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 3.7,
+   "released": true,
+   "run": "RRD3",
+   "shown_as": "實心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRD3/tot_RRD3.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 1,
+   "value_m": 3.7
+  },
+  {
+   "batch": "RRD",
+   "class": "touch_miss",
+   "first_pass_status": "MISS",
+   "panel": "a",
+   "plot_y": 647.88,
+   "released": true,
+   "run": "RRD3",
+   "shown_as": "空心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRD3/tot_RRD3.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 2,
+   "value_m": 647.88
+  },
+  {
+   "batch": "RRD",
+   "class": "touch_miss",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 42.18,
+   "released": true,
+   "run": "RRD4",
+   "shown_as": "空心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRD4/tot_RRD4.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 1,
+   "value_m": 42.18
+  },
+  {
+   "batch": "RRD",
+   "class": "touch_miss",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 12.04,
+   "released": true,
+   "run": "RRD4",
+   "shown_as": "空心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRD4/tot_RRD4.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 2,
+   "value_m": 12.04
+  },
+  {
+   "batch": "RRD",
+   "class": "hit",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 0.98,
+   "released": true,
+   "run": "RRD5",
+   "shown_as": "實心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRD5/tot_RRD5.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 1,
+   "value_m": 0.98
+  },
+  {
+   "batch": "RRD",
+   "class": "hit",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 0.23,
+   "released": true,
+   "run": "RRD5",
+   "shown_as": "實心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRD5/tot_RRD5.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 2,
+   "value_m": 0.23
+  },
+  {
+   "batch": "RRD",
+   "class": "hit",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 0.36,
+   "released": true,
+   "run": "RRD6",
+   "shown_as": "實心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRD6/tot_RRD6.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 1,
+   "value_m": 0.36
+  },
+  {
+   "batch": "RRD",
+   "class": "hit",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 4.73,
+   "released": true,
+   "run": "RRD6",
+   "shown_as": "實心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRD6/tot_RRD6.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 2,
+   "value_m": 4.73
+  },
+  {
+   "batch": "RRD",
+   "class": "touch_miss",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 37.6,
+   "released": true,
+   "run": "RRD7",
+   "shown_as": "空心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRD7/tot_RRD7.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 1,
+   "value_m": 37.6
+  },
+  {
+   "batch": "RRD",
+   "class": "hit",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 0.06,
+   "released": true,
+   "run": "RRD7",
+   "shown_as": "實心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRD7/tot_RRD7.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 2,
+   "value_m": 0.06
+  },
+  {
+   "batch": "RRD",
+   "class": "hit",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 0.4,
+   "released": true,
+   "run": "RRD8",
+   "shown_as": "實心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRD8/tot_RRD8.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 1,
+   "value_m": 0.4
+  },
+  {
+   "batch": "RRD",
+   "class": "hit",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 2.42,
+   "released": true,
+   "run": "RRD8",
+   "shown_as": "實心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRD8/tot_RRD8.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 2,
+   "value_m": 2.42
+  },
+  {
+   "batch": "RRD",
+   "criterion": "hit",
+   "label": "RRD 命中數/架次（表列）",
+   "n_touch": 16,
+   "panel": "a",
+   "runs": [
+    "RRD1",
+    "RRD2",
+    "RRD3",
+    "RRD4",
+    "RRD5",
+    "RRD6",
+    "RRD7",
+    "RRD8"
+   ],
+   "runs_without_csv_1_to_8": [],
+   "shown_as": "10/16",
+   "value": "10/16"
+  },
+  {
+   "batch": "RRD",
+   "criterion": "cp95_lower",
+   "label": "RRD 命中率 Clopper-Pearson 單側 95% 下限（表列）",
+   "panel": "a",
+   "shown_as": "0.391",
+   "value": 0.391012
+  },
+  {
+   "batch": "RRD",
+   "label": "RRD 放行方式標籤依據（契約讀回）",
+   "panel": "a",
+   "shown_as": "抵環即放行",
+   "source": {
+    "field": "values.release_at_ring, values.wait_goto_radius（缺鍵＝預設 False，scripts/wsl/sar_swarm_patches/tot_node.py:637-639）",
+    "file": "runs/artifacts/<ID>/contract_<ID>.json"
+   },
+   "value": {
+    "RRD1": {
+     "release_at_ring": "1.0",
+     "wait_goto_radius": null
+    },
+    "RRD2": {
+     "release_at_ring": "1.0",
+     "wait_goto_radius": null
+    },
+    "RRD3": {
+     "release_at_ring": "1.0",
+     "wait_goto_radius": null
+    },
+    "RRD4": {
+     "release_at_ring": "1.0",
+     "wait_goto_radius": null
+    },
+    "RRD5": {
+     "release_at_ring": "1.0",
+     "wait_goto_radius": null
+    },
+    "RRD6": {
+     "release_at_ring": "1.0",
+     "wait_goto_radius": null
+    },
+    "RRD7": {
+     "release_at_ring": "1.0",
+     "wait_goto_radius": null
+    },
+    "RRD8": {
+     "release_at_ring": "1.0",
+     "wait_goto_radius": null
+    }
+   }
+  },
+  {
+   "batch": "RRE",
+   "class": "hit",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 0.74,
+   "released": true,
+   "run": "RRE1",
+   "shown_as": "實心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRE1/tot_RRE1.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 1,
+   "value_m": 0.74
+  },
+  {
+   "batch": "RRE",
+   "class": "hit",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 0.59,
+   "released": true,
+   "run": "RRE1",
+   "shown_as": "實心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRE1/tot_RRE1.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 2,
+   "value_m": 0.59
+  },
+  {
+   "batch": "RRE",
+   "class": "hit",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 8.54,
+   "released": true,
+   "run": "RRE2",
+   "shown_as": "實心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRE2/tot_RRE2.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 1,
+   "value_m": 8.54
+  },
+  {
+   "batch": "RRE",
+   "class": "hit",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 4.57,
+   "released": true,
+   "run": "RRE2",
+   "shown_as": "實心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRE2/tot_RRE2.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 2,
+   "value_m": 4.57
+  },
+  {
+   "batch": "RRE",
+   "class": "hit",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 0.16,
+   "released": true,
+   "run": "RRE3",
+   "shown_as": "實心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRE3/tot_RRE3.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 1,
+   "value_m": 0.16
+  },
+  {
+   "batch": "RRE",
+   "class": "hit",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 1.1,
+   "released": true,
+   "run": "RRE3",
+   "shown_as": "實心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRE3/tot_RRE3.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 2,
+   "value_m": 1.1
+  },
+  {
+   "batch": "RRE",
+   "class": "hit",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 0.96,
+   "released": true,
+   "run": "RRE4",
+   "shown_as": "實心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRE4/tot_RRE4.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 1,
+   "value_m": 0.96
+  },
+  {
+   "batch": "RRE",
+   "class": "hit",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 0.22,
+   "released": true,
+   "run": "RRE4",
+   "shown_as": "實心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRE4/tot_RRE4.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 2,
+   "value_m": 0.22
+  },
+  {
+   "batch": "RRE",
+   "class": "hit",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 0.44,
+   "released": true,
+   "run": "RRE5",
+   "shown_as": "實心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRE5/tot_RRE5.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 1,
+   "value_m": 0.44
+  },
+  {
+   "batch": "RRE",
+   "class": "hit",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 0.9,
+   "released": true,
+   "run": "RRE5",
+   "shown_as": "實心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRE5/tot_RRE5.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 2,
+   "value_m": 0.9
+  },
+  {
+   "batch": "RRE",
+   "class": "hit",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 0.82,
+   "released": true,
+   "run": "RRE6",
+   "shown_as": "實心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRE6/tot_RRE6.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 1,
+   "value_m": 0.82
+  },
+  {
+   "batch": "RRE",
+   "class": "hit",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 0.67,
+   "released": true,
+   "run": "RRE6",
+   "shown_as": "實心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRE6/tot_RRE6.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 2,
+   "value_m": 0.67
+  },
+  {
+   "batch": "RRE",
+   "class": "hit",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 0.5,
+   "released": true,
+   "run": "RRE7",
+   "shown_as": "實心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRE7/tot_RRE7.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 1,
+   "value_m": 0.5
+  },
+  {
+   "batch": "RRE",
+   "class": "touch_miss",
+   "first_pass_status": "MISS",
+   "panel": "a",
+   "plot_y": 1326.52,
+   "released": true,
+   "run": "RRE7",
+   "shown_as": "空心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRE7/tot_RRE7.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 2,
+   "value_m": 1326.52
+  },
+  {
+   "batch": "RRE",
+   "class": "hit",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 0.79,
+   "released": true,
+   "run": "RRE8",
+   "shown_as": "實心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRE8/tot_RRE8.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 1,
+   "value_m": 0.79
+  },
+  {
+   "batch": "RRE",
+   "class": "hit",
+   "first_pass_status": "HIT",
+   "panel": "a",
+   "plot_y": 0.81,
+   "released": true,
+   "run": "RRE8",
+   "shown_as": "實心圓",
+   "source": {
+    "criterion": "touchdown",
+    "field": "stot_score per_uav[uav].impact_miss_m",
+    "file": "runs/artifacts/RRE8/tot_RRE8.csv"
+   },
+   "touch_datum": "csv:agl",
+   "uav": 2,
+   "value_m": 0.81
+  },
+  {
+   "batch": "RRE",
+   "criterion": "hit",
+   "label": "RRE 命中數/架次（表列）",
+   "n_touch": 16,
+   "panel": "a",
+   "runs": [
+    "RRE1",
+    "RRE2",
+    "RRE3",
+    "RRE4",
+    "RRE5",
+    "RRE6",
+    "RRE7",
+    "RRE8"
+   ],
+   "runs_without_csv_1_to_8": [],
+   "shown_as": "15/16",
+   "value": "15/16"
+  },
+  {
+   "batch": "RRE",
+   "criterion": "cp95_lower",
+   "label": "RRE 命中率 Clopper-Pearson 單側 95% 下限（表列）",
+   "panel": "a",
+   "shown_as": "0.736",
+   "value": 0.736043
+  },
+  {
+   "batch": "RRE",
+   "label": "RRE 放行方式標籤依據（契約讀回）",
+   "panel": "a",
+   "shown_as": "＋等待修正",
+   "source": {
+    "field": "values.release_at_ring, values.wait_goto_radius（缺鍵＝預設 False，scripts/wsl/sar_swarm_patches/tot_node.py:637-639）",
+    "file": "runs/artifacts/<ID>/contract_<ID>.json"
+   },
+   "value": {
+    "RRE1": {
+     "release_at_ring": "1.0",
+     "wait_goto_radius": "1.0"
+    },
+    "RRE2": {
+     "release_at_ring": "1.0",
+     "wait_goto_radius": "1.0"
+    },
+    "RRE3": {
+     "release_at_ring": "1.0",
+     "wait_goto_radius": "1.0"
+    },
+    "RRE4": {
+     "release_at_ring": "1.0",
+     "wait_goto_radius": "1.0"
+    },
+    "RRE5": {
+     "release_at_ring": "1.0",
+     "wait_goto_radius": "1.0"
+    },
+    "RRE6": {
+     "release_at_ring": "1.0",
+     "wait_goto_radius": "1.0"
+    },
+    "RRE7": {
+     "release_at_ring": "1.0",
+     "wait_goto_radius": "1.0"
+    },
+    "RRE8": {
+     "release_at_ring": "1.0",
+     "wait_goto_radius": "1.0"
+    }
+   }
+  },
+  {
+   "criterion": "hit",
+   "label": "命中門檻線",
+   "panel": "a",
+   "shown_as": "虛線與「10 m」",
+   "value_m": 10.0
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "0.0",
+    "ring_pace": null,
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "0.0"
+   },
+   "d_dive_s": 13.7,
+   "d_rel_s": -5.3,
+   "d_touch_s": 8.4,
+   "err1_m": 669.28,
+   "err2_m": 70.22,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -5.3,
+    13.7
+   ],
+   "run": "BASE1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/BASE1/tot_BASE1.csv"
+   },
+   "t_imp1_s": 665.5,
+   "t_imp2_s": 673.9,
+   "t_rel1_s": 624.0,
+   "t_rel2_s": 618.7,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "0.0",
+    "ring_pace": "0.0",
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "0.0"
+   },
+   "d_dive_s": -21.65,
+   "d_rel_s": -10.1,
+   "d_touch_s": -31.75,
+   "err1_m": 15684.55,
+   "err2_m": 1.27,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -10.1,
+    -21.65
+   ],
+   "run": "FLOG1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/FLOG1/tot_FLOG1.csv"
+   },
+   "t_imp1_s": 658.91,
+   "t_imp2_s": 627.16,
+   "t_rel1_s": 570.7,
+   "t_rel2_s": 560.6,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "cancel",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "0.0",
+    "ring_pace": "0.0",
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "0.0"
+   },
+   "d_dive_s": -5.84,
+   "d_rel_s": 4.6,
+   "d_touch_s": -1.24,
+   "err1_m": 1.8,
+   "err2_m": 0.4,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    4.6,
+    -5.84
+   ],
+   "run": "FORMB1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/FORMB1/tot_FORMB1.csv"
+   },
+   "t_imp1_s": 756.54,
+   "t_imp2_s": 755.3,
+   "t_rel1_s": 720.9,
+   "t_rel2_s": 725.5,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "cancel",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "0.0",
+    "ring_pace": "0.0",
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "0.0"
+   },
+   "d_dive_s": 3.7,
+   "d_rel_s": -3.1,
+   "d_touch_s": 0.6,
+   "err1_m": 0.08,
+   "err2_m": 0.7,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -3.1,
+    3.7
+   ],
+   "run": "FORMC1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/FORMC1/tot_FORMC1.csv"
+   },
+   "t_imp1_s": 755.3,
+   "t_imp2_s": 755.9,
+   "t_rel1_s": 724.2,
+   "t_rel2_s": 721.1,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "cancel",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "0.0",
+    "ring_pace": "0.0",
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "0.0"
+   },
+   "d_dive_s": -5.64,
+   "d_rel_s": 5.8,
+   "d_touch_s": 0.16,
+   "err1_m": 0.49,
+   "err2_m": 15.04,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    5.8,
+    -5.64
+   ],
+   "run": "FORMD1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/FORMD1/tot_FORMD1.csv"
+   },
+   "t_imp1_s": 762.29,
+   "t_imp2_s": 762.45,
+   "t_rel1_s": 724.4,
+   "t_rel2_s": 730.2,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "0.0",
+    "ring_pace": "0.0",
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "0.0"
+   },
+   "d_dive_s": -9.72,
+   "d_rel_s": -1.2,
+   "d_touch_s": -10.92,
+   "err1_m": 251.36,
+   "err2_m": 239.17,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -1.2,
+    -9.72
+   ],
+   "run": "GMODE1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/GMODE1/tot_GMODE1.csv"
+   },
+   "t_imp1_s": 747.7,
+   "t_imp2_s": 736.78,
+   "t_rel1_s": 705.9,
+   "t_rel2_s": 704.7,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "1.0",
+    "ring_pace": null,
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "1.0"
+   },
+   "d_dive_s": -2.3,
+   "d_rel_s": 19.1,
+   "d_touch_s": 16.8,
+   "err1_m": 0.85,
+   "err2_m": 0.62,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    19.1,
+    -2.3
+   ],
+   "run": "LAT1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/LAT1/tot_LAT1.csv"
+   },
+   "t_imp1_s": 630.8,
+   "t_imp2_s": 647.6,
+   "t_rel1_s": 592.5,
+   "t_rel2_s": 611.6,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "1.0",
+    "ring_pace": null,
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "1.0"
+   },
+   "d_dive_s": -1.04,
+   "d_rel_s": 16.7,
+   "d_touch_s": 15.66,
+   "err1_m": 0.11,
+   "err2_m": 0.58,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    16.7,
+    -1.04
+   ],
+   "run": "NZC2",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/NZC2/tot_NZC2.csv"
+   },
+   "t_imp1_s": 603.3,
+   "t_imp2_s": 618.96,
+   "t_rel1_s": 561.8,
+   "t_rel2_s": 578.5,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "1.0",
+    "ring_pace": null,
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "1.0"
+   },
+   "d_dive_s": -0.74,
+   "d_rel_s": 27.0,
+   "d_touch_s": 26.26,
+   "err1_m": 10.2,
+   "err2_m": 0.44,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    27.0,
+    -0.74
+   ],
+   "run": "NZC3",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/NZC3/tot_NZC3.csv"
+   },
+   "t_imp1_s": 553.16,
+   "t_imp2_s": 579.42,
+   "t_rel1_s": 512.9,
+   "t_rel2_s": 539.9,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "1.0",
+    "ring_pace": null,
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "1.0"
+   },
+   "d_dive_s": 1.57,
+   "d_rel_s": -15.7,
+   "d_touch_s": -14.13,
+   "err1_m": 100.87,
+   "err2_m": 0.24,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -15.7,
+    1.57
+   ],
+   "run": "NZC5",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/NZC5/tot_NZC5.csv"
+   },
+   "t_imp1_s": 594.1,
+   "t_imp2_s": 579.97,
+   "t_rel1_s": 554.6,
+   "t_rel2_s": 538.9,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "1.0",
+    "ring_pace": null,
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "1.0"
+   },
+   "d_dive_s": -4.1,
+   "d_rel_s": 8.1,
+   "d_touch_s": 4.0,
+   "err1_m": 0.45,
+   "err2_m": 183.58,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    8.1,
+    -4.1
+   ],
+   "run": "NZC6",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/NZC6/tot_NZC6.csv"
+   },
+   "t_imp1_s": 599.5,
+   "t_imp2_s": 603.5,
+   "t_rel1_s": 558.3,
+   "t_rel2_s": 566.4,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "1.0",
+    "ring_pace": null,
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "1.0"
+   },
+   "d_dive_s": 1.87,
+   "d_rel_s": -44.9,
+   "d_touch_s": -43.03,
+   "err1_m": 0.2,
+   "err2_m": 1.73,
+   "n_sys_csv": 2,
+   "out_of_range": true,
+   "panel": "b",
+   "plot_xy": [
+    -37.6,
+    1.87
+   ],
+   "run": "NZC7",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/NZC7/tot_NZC7.csv"
+   },
+   "t_imp1_s": 628.67,
+   "t_imp2_s": 585.64,
+   "t_rel1_s": 590.8,
+   "t_rel2_s": 545.9,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "1.0",
+    "ring_pace": null,
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "1.0"
+   },
+   "d_dive_s": -4.72,
+   "d_rel_s": 39.7,
+   "d_touch_s": 34.98,
+   "err1_m": 0.38,
+   "err2_m": 1.23,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    39.7,
+    -4.72
+   ],
+   "run": "NZC8",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/NZC8/tot_NZC8.csv"
+   },
+   "t_imp1_s": 576.8,
+   "t_imp2_s": 611.78,
+   "t_rel1_s": 534.0,
+   "t_rel2_s": 573.7,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "20.0",
+    "release_at_ring": "1.0",
+    "ring_pace": null,
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "1.0"
+   },
+   "d_dive_s": 0.6,
+   "d_rel_s": -33.9,
+   "d_touch_s": -33.3,
+   "err1_m": 0.36,
+   "err2_m": 0.97,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -33.9,
+    0.6
+   ],
+   "run": "RA1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RA1/tot_RA1.csv"
+   },
+   "t_imp1_s": 585.6,
+   "t_imp2_s": 552.3,
+   "t_rel1_s": 534.1,
+   "t_rel2_s": 500.2,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "cancel",
+   "contract_switches": {
+    "dive_angle": "20.0",
+    "release_at_ring": "1.0",
+    "ring_pace": "1.0",
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "1.0"
+   },
+   "d_dive_s": 3.86,
+   "d_rel_s": -5.6,
+   "d_touch_s": -1.74,
+   "err1_m": 0.42,
+   "err2_m": 0.38,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -5.6,
+    3.86
+   ],
+   "run": "RB1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RB1/tot_RB1.csv"
+   },
+   "t_imp1_s": 583.3,
+   "t_imp2_s": 581.56,
+   "t_rel1_s": 530.9,
+   "t_rel2_s": 525.3,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "20.0",
+    "release_at_ring": "1.0",
+    "ring_pace": "1.0",
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "1.0"
+   },
+   "d_dive_s": 5.42,
+   "d_rel_s": -14.4,
+   "d_touch_s": -8.98,
+   "err1_m": 0.04,
+   "err2_m": 0.59,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -14.4,
+    5.42
+   ],
+   "run": "RC1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RC1/tot_RC1.csv"
+   },
+   "t_imp1_s": 573.97,
+   "t_imp2_s": 564.99,
+   "t_rel1_s": 521.9,
+   "t_rel2_s": 507.5,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "20.0",
+    "release_at_ring": "1.0",
+    "ring_pace": "1.0",
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "1.0"
+   },
+   "d_dive_s": 4.5,
+   "d_rel_s": -12.1,
+   "d_touch_s": -7.6,
+   "err1_m": 0.65,
+   "err2_m": 0.5,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -12.1,
+    4.5
+   ],
+   "run": "RD1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RD1/tot_RD1.csv"
+   },
+   "t_imp1_s": 586.5,
+   "t_imp2_s": 578.9,
+   "t_rel1_s": 538.6,
+   "t_rel2_s": 526.5,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "20.0",
+    "release_at_ring": "1.0",
+    "ring_pace": "1.0",
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "1.0"
+   },
+   "d_dive_s": 8.12,
+   "d_rel_s": -11.2,
+   "d_touch_s": -3.08,
+   "err1_m": 0.75,
+   "err2_m": 0.05,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -11.2,
+    8.12
+   ],
+   "run": "RE21",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RE21/tot_RE21.csv"
+   },
+   "t_imp1_s": 586.53,
+   "t_imp2_s": 583.45,
+   "t_rel1_s": 534.4,
+   "t_rel2_s": 523.2,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": null,
+   "d_dive_s": 14.6,
+   "d_rel_s": 10.4,
+   "d_touch_s": 25.0,
+   "err1_m": 1.07,
+   "err2_m": 0.72,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    10.4,
+    14.6
+   ],
+   "run": "RPJ3",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RPJ3/tot_RPJ3.csv"
+   },
+   "t_imp1_s": 776.6,
+   "t_imp2_s": 801.6,
+   "t_rel1_s": 701.7,
+   "t_rel2_s": 712.1,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "controlled",
+   "contract_switches": null,
+   "d_dive_s": 1.28,
+   "d_rel_s": -0.5,
+   "d_touch_s": 0.78,
+   "err1_m": 24.27,
+   "err2_m": 449.58,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -0.5,
+    1.28
+   ],
+   "run": "RPK1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RPK1/tot_RPK1.csv"
+   },
+   "t_imp1_s": 667.82,
+   "t_imp2_s": 668.6,
+   "t_rel1_s": 616.2,
+   "t_rel2_s": 615.7,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "cancel",
+   "contract_switches": null,
+   "d_dive_s": -10.3,
+   "d_rel_s": 12.7,
+   "d_touch_s": 2.4,
+   "err1_m": 1.97,
+   "err2_m": 581.78,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    12.7,
+    -10.3
+   ],
+   "run": "RPK2",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RPK2/tot_RPK2.csv"
+   },
+   "t_imp1_s": 729.9,
+   "t_imp2_s": 732.3,
+   "t_rel1_s": 673.6,
+   "t_rel2_s": 686.3,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": null,
+   "d_dive_s": -8.0,
+   "d_rel_s": 3.6,
+   "d_touch_s": -4.4,
+   "err1_m": 4.37,
+   "err2_m": 5.72,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    3.6,
+    -8.0
+   ],
+   "run": "RPL3",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RPL3/tot_RPL3.csv"
+   },
+   "t_imp1_s": 749.81,
+   "t_imp2_s": 745.41,
+   "t_rel1_s": 698.5,
+   "t_rel2_s": 702.1,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": null,
+    "wait_goto_radius": null
+   },
+   "d_dive_s": 4.71,
+   "d_rel_s": -15.8,
+   "d_touch_s": -11.09,
+   "err1_m": 5.36,
+   "err2_m": 4.35,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -15.8,
+    4.71
+   ],
+   "run": "RPT1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RPT1/tot_RPT1.csv"
+   },
+   "t_imp1_s": 860.0,
+   "t_imp2_s": 848.91,
+   "t_rel1_s": 818.5,
+   "t_rel2_s": 802.7,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": null,
+    "wait_goto_radius": null
+   },
+   "d_dive_s": 17.69,
+   "d_rel_s": 8.6,
+   "d_touch_s": 26.29,
+   "err1_m": 0.92,
+   "err2_m": 11803.69,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    8.6,
+    17.69
+   ],
+   "run": "RPT3",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RPT3/tot_RPT3.csv"
+   },
+   "t_imp1_s": 799.91,
+   "t_imp2_s": 826.2,
+   "t_rel1_s": 747.0,
+   "t_rel2_s": 755.6,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": null,
+    "wait_goto_radius": null
+   },
+   "d_dive_s": -13.2,
+   "d_rel_s": 25.8,
+   "d_touch_s": 12.6,
+   "err1_m": 115.97,
+   "err2_m": 2.25,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    25.8,
+    -13.2
+   ],
+   "run": "RPU1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RPU1/tot_RPU1.csv"
+   },
+   "t_imp1_s": 701.9,
+   "t_imp2_s": 714.5,
+   "t_rel1_s": 650.9,
+   "t_rel2_s": 676.7,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": null,
+    "wait_goto_radius": null
+   },
+   "d_dive_s": -14.5,
+   "d_rel_s": 7.3,
+   "d_touch_s": -7.2,
+   "err1_m": 1.48,
+   "err2_m": 3.87,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    7.3,
+    -14.5
+   ],
+   "run": "RPU2",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RPU2/tot_RPU2.csv"
+   },
+   "t_imp1_s": 767.8,
+   "t_imp2_s": 760.6,
+   "t_rel1_s": 710.2,
+   "t_rel2_s": 717.5,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": null,
+    "wait_goto_radius": null
+   },
+   "d_dive_s": -10.78,
+   "d_rel_s": 2.9,
+   "d_touch_s": -7.88,
+   "err1_m": 2.34,
+   "err2_m": 0.82,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    2.9,
+    -10.78
+   ],
+   "run": "RPU3",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RPU3/tot_RPU3.csv"
+   },
+   "t_imp1_s": 713.38,
+   "t_imp2_s": 705.5,
+   "t_rel1_s": 660.1,
+   "t_rel2_s": 663.0,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "cancel",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": null,
+    "wait_goto_radius": null
+   },
+   "d_dive_s": 17.3,
+   "d_rel_s": -19.3,
+   "d_touch_s": -2.0,
+   "err1_m": 3.96,
+   "err2_m": 1.02,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -19.3,
+    17.3
+   ],
+   "run": "RPV1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RPV1/tot_RPV1.csv"
+   },
+   "t_imp1_s": 793.5,
+   "t_imp2_s": 791.5,
+   "t_rel1_s": 755.2,
+   "t_rel2_s": 735.9,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": null,
+    "wait_goto_radius": null
+   },
+   "d_dive_s": -3.47,
+   "d_rel_s": -0.4,
+   "d_touch_s": -3.87,
+   "err1_m": 3.71,
+   "err2_m": 451.53,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -0.4,
+    -3.47
+   ],
+   "run": "RPV2",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RPV2/tot_RPV2.csv"
+   },
+   "t_imp1_s": 879.67,
+   "t_imp2_s": 875.8,
+   "t_rel1_s": 829.2,
+   "t_rel2_s": 828.8,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": null,
+    "wait_goto_radius": null
+   },
+   "d_dive_s": 9.69,
+   "d_rel_s": 4.1,
+   "d_touch_s": 13.79,
+   "err1_m": 4.57,
+   "err2_m": 1.41,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    4.1,
+    9.69
+   ],
+   "run": "RPV3",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RPV3/tot_RPV3.csv"
+   },
+   "t_imp1_s": 718.71,
+   "t_imp2_s": 732.5,
+   "t_rel1_s": 670.5,
+   "t_rel2_s": 674.6,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": null,
+    "wait_goto_radius": null
+   },
+   "d_dive_s": -1.71,
+   "d_rel_s": 8.8,
+   "d_touch_s": 7.09,
+   "err1_m": 6.28,
+   "err2_m": 2.94,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    8.8,
+    -1.71
+   ],
+   "run": "RPW1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RPW1/tot_RPW1.csv"
+   },
+   "t_imp1_s": 793.0,
+   "t_imp2_s": 800.09,
+   "t_rel1_s": 753.6,
+   "t_rel2_s": 762.4,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": null,
+    "wait_goto_radius": null
+   },
+   "d_dive_s": -0.49,
+   "d_rel_s": 5.5,
+   "d_touch_s": 5.01,
+   "err1_m": 1.22,
+   "err2_m": 6.84,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    5.5,
+    -0.49
+   ],
+   "run": "RPW2",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RPW2/tot_RPW2.csv"
+   },
+   "t_imp1_s": 669.89,
+   "t_imp2_s": 674.9,
+   "t_rel1_s": 621.7,
+   "t_rel2_s": 627.2,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": null,
+    "wait_goto_radius": null
+   },
+   "d_dive_s": -11.9,
+   "d_rel_s": 3.0,
+   "d_touch_s": -8.9,
+   "err1_m": 1.58,
+   "err2_m": 5.62,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    3.0,
+    -11.9
+   ],
+   "run": "RPW4",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RPW4/tot_RPW4.csv"
+   },
+   "t_imp1_s": 719.5,
+   "t_imp2_s": 710.6,
+   "t_rel1_s": 660.4,
+   "t_rel2_s": 663.4,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": null,
+    "wait_goto_radius": null
+   },
+   "d_dive_s": -12.4,
+   "d_rel_s": -4.2,
+   "d_touch_s": -16.6,
+   "err1_m": 1.98,
+   "err2_m": 6.2,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -4.2,
+    -12.4
+   ],
+   "run": "RPX1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RPX1/tot_RPX1.csv"
+   },
+   "t_imp1_s": 705.4,
+   "t_imp2_s": 688.8,
+   "t_rel1_s": 638.0,
+   "t_rel2_s": 633.8,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": null,
+    "wait_goto_radius": null
+   },
+   "d_dive_s": 4.8,
+   "d_rel_s": 2.3,
+   "d_touch_s": 7.1,
+   "err1_m": 4.53,
+   "err2_m": 0.89,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    2.3,
+    4.8
+   ],
+   "run": "RPX2",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RPX2/tot_RPX2.csv"
+   },
+   "t_imp1_s": 698.8,
+   "t_imp2_s": 705.9,
+   "t_rel1_s": 645.9,
+   "t_rel2_s": 648.2,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "cancel",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": null,
+    "wait_goto_radius": null
+   },
+   "d_dive_s": 6.3,
+   "d_rel_s": -3.6,
+   "d_touch_s": 2.7,
+   "err1_m": 6.65,
+   "err2_m": 1.16,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -3.6,
+    6.3
+   ],
+   "run": "RPX3",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RPX3/tot_RPX3.csv"
+   },
+   "t_imp1_s": 673.0,
+   "t_imp2_s": 675.7,
+   "t_rel1_s": 627.2,
+   "t_rel2_s": 623.6,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": null,
+    "wait_goto_radius": null
+   },
+   "d_dive_s": -8.5,
+   "d_rel_s": -3.6,
+   "d_touch_s": -12.1,
+   "err1_m": 3.13,
+   "err2_m": 4.04,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -3.6,
+    -8.5
+   ],
+   "run": "RPY1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RPY1/tot_RPY1.csv"
+   },
+   "t_imp1_s": 738.9,
+   "t_imp2_s": 726.8,
+   "t_rel1_s": 682.4,
+   "t_rel2_s": 678.8,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": null,
+    "wait_goto_radius": null
+   },
+   "d_dive_s": -66.75,
+   "d_rel_s": -11.7,
+   "d_touch_s": -78.45,
+   "err1_m": 2.65,
+   "err2_m": 5.39,
+   "n_sys_csv": 2,
+   "out_of_range": true,
+   "panel": "b",
+   "plot_xy": [
+    -11.7,
+    -37.6
+   ],
+   "run": "RPY3",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RPY3/tot_RPY3.csv"
+   },
+   "t_imp1_s": 927.35,
+   "t_imp2_s": 848.9,
+   "t_rel1_s": 802.7,
+   "t_rel2_s": 791.0,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": "1.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": -1.02,
+   "d_rel_s": 37.2,
+   "d_touch_s": 36.18,
+   "err1_m": 3.38,
+   "err2_m": 2.63,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    37.2,
+    -1.02
+   ],
+   "run": "RPZ1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RPZ1/tot_RPZ1.csv"
+   },
+   "t_imp1_s": 817.12,
+   "t_imp2_s": 853.3,
+   "t_rel1_s": 772.4,
+   "t_rel2_s": 809.6,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": "1.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": 6.37,
+   "d_rel_s": -2.5,
+   "d_touch_s": 3.87,
+   "err1_m": 4.87,
+   "err2_m": 5.53,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -2.5,
+    6.37
+   ],
+   "run": "RPZ2",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RPZ2/tot_RPZ2.csv"
+   },
+   "t_imp1_s": 714.5,
+   "t_imp2_s": 718.37,
+   "t_rel1_s": 684.0,
+   "t_rel2_s": 681.5,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": "1.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": 3.11,
+   "d_rel_s": -13.6,
+   "d_touch_s": -10.49,
+   "err1_m": 4.56,
+   "err2_m": 4.32,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -13.6,
+    3.11
+   ],
+   "run": "RQA1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RQA1/tot_RQA1.csv"
+   },
+   "t_imp1_s": 750.5,
+   "t_imp2_s": 740.01,
+   "t_rel1_s": 709.0,
+   "t_rel2_s": 695.4,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": "1.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": -21.2,
+   "d_rel_s": -2.5,
+   "d_touch_s": -23.7,
+   "err1_m": 2.12,
+   "err2_m": 3.63,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -2.5,
+    -21.2
+   ],
+   "run": "RQA2",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RQA2/tot_RQA2.csv"
+   },
+   "t_imp1_s": 670.8,
+   "t_imp2_s": 647.1,
+   "t_rel1_s": 616.2,
+   "t_rel2_s": 613.7,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "controlled",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": "1.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": 1.8,
+   "d_rel_s": 0.0,
+   "d_touch_s": 1.8,
+   "err1_m": 3.62,
+   "err2_m": 3.04,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    0.0,
+    1.8
+   ],
+   "run": "RQA3",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RQA3/tot_RQA3.csv"
+   },
+   "t_imp1_s": 710.66,
+   "t_imp2_s": 712.46,
+   "t_rel1_s": 659.3,
+   "t_rel2_s": 659.3,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": "1.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": -7.87,
+   "d_rel_s": 18.5,
+   "d_touch_s": 10.63,
+   "err1_m": 2.23,
+   "err2_m": 2.06,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    18.5,
+    -7.87
+   ],
+   "run": "RQB1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RQB1/tot_RQB1.csv"
+   },
+   "t_imp1_s": 766.01,
+   "t_imp2_s": 776.64,
+   "t_rel1_s": 714.8,
+   "t_rel2_s": 733.3,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "cancel",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": "1.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": -5.4,
+   "d_rel_s": 3.6,
+   "d_touch_s": -1.8,
+   "err1_m": 1.87,
+   "err2_m": 0.53,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    3.6,
+    -5.4
+   ],
+   "run": "RQB2",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RQB2/tot_RQB2.csv"
+   },
+   "t_imp1_s": 749.3,
+   "t_imp2_s": 747.5,
+   "t_rel1_s": 695.4,
+   "t_rel2_s": 699.0,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": "1.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": 11.7,
+   "d_rel_s": -7.1,
+   "d_touch_s": 4.6,
+   "err1_m": 5.11,
+   "err2_m": 0.42,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -7.1,
+    11.7
+   ],
+   "run": "RQB3",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RQB3/tot_RQB3.csv"
+   },
+   "t_imp1_s": 698.5,
+   "t_imp2_s": 703.1,
+   "t_rel1_s": 655.1,
+   "t_rel2_s": 648.0,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": "1.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": 14.2,
+   "d_rel_s": -5.7,
+   "d_touch_s": 8.5,
+   "err1_m": 232.18,
+   "err2_m": 5.18,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -5.7,
+    14.2
+   ],
+   "run": "RQB4",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RQB4/tot_RQB4.csv"
+   },
+   "t_imp1_s": 754.8,
+   "t_imp2_s": 763.3,
+   "t_rel1_s": 706.7,
+   "t_rel2_s": 701.0,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": "1.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": -2.04,
+   "d_rel_s": 34.8,
+   "d_touch_s": 32.76,
+   "err1_m": 0.48,
+   "err2_m": 1.54,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    34.8,
+    -2.04
+   ],
+   "run": "RQC1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RQC1/tot_RQC1.csv"
+   },
+   "t_imp1_s": 669.0,
+   "t_imp2_s": 701.76,
+   "t_rel1_s": 623.7,
+   "t_rel2_s": 658.5,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": "1.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": 15.5,
+   "d_rel_s": -1.0,
+   "d_touch_s": 14.5,
+   "err1_m": 2.18,
+   "err2_m": 1.89,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -1.0,
+    15.5
+   ],
+   "run": "RQC2",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RQC2/tot_RQC2.csv"
+   },
+   "t_imp1_s": 753.2,
+   "t_imp2_s": 767.7,
+   "t_rel1_s": 717.4,
+   "t_rel2_s": 716.4,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": "1.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": -1.52,
+   "d_rel_s": 7.4,
+   "d_touch_s": 5.88,
+   "err1_m": 1.31,
+   "err2_m": 439.58,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    7.4,
+    -1.52
+   ],
+   "run": "RQC3",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RQC3/tot_RQC3.csv"
+   },
+   "t_imp1_s": 673.7,
+   "t_imp2_s": 679.58,
+   "t_rel1_s": 627.4,
+   "t_rel2_s": 634.8,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": "1.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": 5.73,
+   "d_rel_s": 6.5,
+   "d_touch_s": 12.23,
+   "err1_m": 2.67,
+   "err2_m": 5.13,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    6.5,
+    5.73
+   ],
+   "run": "RQC4",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RQC4/tot_RQC4.csv"
+   },
+   "t_imp1_s": 802.79,
+   "t_imp2_s": 815.02,
+   "t_rel1_s": 750.3,
+   "t_rel2_s": 756.8,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": "1.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": 8.03,
+   "d_rel_s": 5.8,
+   "d_touch_s": 13.83,
+   "err1_m": 2.05,
+   "err2_m": 4.06,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    5.8,
+    8.03
+   ],
+   "run": "RQD2",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RQD2/tot_RQD2.csv"
+   },
+   "t_imp1_s": 616.5,
+   "t_imp2_s": 630.33,
+   "t_rel1_s": 573.0,
+   "t_rel2_s": 578.8,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "controlled",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": "1.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": 1.24,
+   "d_rel_s": -1.6,
+   "d_touch_s": -0.36,
+   "err1_m": 1.79,
+   "err2_m": 665.32,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -1.6,
+    1.24
+   ],
+   "run": "RQD3",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RQD3/tot_RQD3.csv"
+   },
+   "t_imp1_s": 735.04,
+   "t_imp2_s": 734.68,
+   "t_rel1_s": 691.3,
+   "t_rel2_s": 689.7,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": "1.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": 5.14,
+   "d_rel_s": -69.7,
+   "d_touch_s": -64.56,
+   "err1_m": 4.18,
+   "err2_m": 270.66,
+   "n_sys_csv": 2,
+   "out_of_range": true,
+   "panel": "b",
+   "plot_xy": [
+    -37.6,
+    5.14
+   ],
+   "run": "RQF1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RQF1/tot_RQF1.csv"
+   },
+   "t_imp1_s": 882.39,
+   "t_imp2_s": 817.83,
+   "t_rel1_s": 837.5,
+   "t_rel2_s": 767.8,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": "1.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": 3.17,
+   "d_rel_s": -60.9,
+   "d_touch_s": -57.73,
+   "err1_m": 6.42,
+   "err2_m": 3.48,
+   "n_sys_csv": 2,
+   "out_of_range": true,
+   "panel": "b",
+   "plot_xy": [
+    -37.6,
+    3.17
+   ],
+   "run": "RQF2",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RQF2/tot_RQF2.csv"
+   },
+   "t_imp1_s": 757.7,
+   "t_imp2_s": 699.97,
+   "t_rel1_s": 710.5,
+   "t_rel2_s": 649.6,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": "1.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": 29.98,
+   "d_rel_s": 10.6,
+   "d_touch_s": 40.58,
+   "err1_m": 4.84,
+   "err2_m": 2.68,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    10.6,
+    29.98
+   ],
+   "run": "RQF3",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RQF3/tot_RQF3.csv"
+   },
+   "t_imp1_s": 823.22,
+   "t_imp2_s": 863.8,
+   "t_rel1_s": 792.9,
+   "t_rel2_s": 803.5,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": "1.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": 20.13,
+   "d_rel_s": -58.4,
+   "d_touch_s": -38.27,
+   "err1_m": 2.01,
+   "err2_m": 2.46,
+   "n_sys_csv": 2,
+   "out_of_range": true,
+   "panel": "b",
+   "plot_xy": [
+    -37.6,
+    20.13
+   ],
+   "run": "RQF4",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RQF4/tot_RQF4.csv"
+   },
+   "t_imp1_s": 728.01,
+   "t_imp2_s": 689.74,
+   "t_rel1_s": 684.1,
+   "t_rel2_s": 625.7,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": "1.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": -2.76,
+   "d_rel_s": -27.6,
+   "d_touch_s": -30.36,
+   "err1_m": 47.3,
+   "err2_m": 36.8,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -27.6,
+    -2.76
+   ],
+   "run": "RQG1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RQG1/tot_RQG1.csv"
+   },
+   "t_imp1_s": 784.66,
+   "t_imp2_s": 754.3,
+   "t_rel1_s": 742.2,
+   "t_rel2_s": 714.6,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": "1.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": -4.5,
+   "d_rel_s": 26.3,
+   "d_touch_s": 21.8,
+   "err1_m": 54.43,
+   "err2_m": 28.87,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    26.3,
+    -4.5
+   ],
+   "run": "RQG2",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RQG2/tot_RQG2.csv"
+   },
+   "t_imp1_s": 677.8,
+   "t_imp2_s": 699.6,
+   "t_rel1_s": 634.6,
+   "t_rel2_s": 660.9,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": "1.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": -12.63,
+   "d_rel_s": -82.9,
+   "d_touch_s": -95.53,
+   "err1_m": 90.07,
+   "err2_m": 389.19,
+   "n_sys_csv": 2,
+   "out_of_range": true,
+   "panel": "b",
+   "plot_xy": [
+    -37.6,
+    -12.63
+   ],
+   "run": "RQH1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RQH1/tot_RQH1.csv"
+   },
+   "t_imp1_s": 700.73,
+   "t_imp2_s": 605.2,
+   "t_rel1_s": 652.8,
+   "t_rel2_s": 569.9,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": "1.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": 6.02,
+   "d_rel_s": 7.5,
+   "d_touch_s": 13.52,
+   "err1_m": 547.68,
+   "err2_m": 128.7,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    7.5,
+    6.02
+   ],
+   "run": "RQH2",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RQH2/tot_RQH2.csv"
+   },
+   "t_imp1_s": 725.05,
+   "t_imp2_s": 738.57,
+   "t_rel1_s": 696.5,
+   "t_rel2_s": 704.0,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": "1.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": 16.89,
+   "d_rel_s": 9.6,
+   "d_touch_s": 26.49,
+   "err1_m": 69.64,
+   "err2_m": 0.41,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    9.6,
+    16.89
+   ],
+   "run": "RRB4",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RRB4/tot_RRB4.csv"
+   },
+   "t_imp1_s": 649.21,
+   "t_imp2_s": 675.7,
+   "t_rel1_s": 588.8,
+   "t_rel2_s": 598.4,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "cancel",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": "1.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": -8.01,
+   "d_rel_s": 6.6,
+   "d_touch_s": -1.41,
+   "err1_m": 0.16,
+   "err2_m": 46.55,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    6.6,
+    -8.01
+   ],
+   "run": "RRB5",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RRB5/tot_RRB5.csv"
+   },
+   "t_imp1_s": 614.4,
+   "t_imp2_s": 612.99,
+   "t_rel1_s": 544.2,
+   "t_rel2_s": 550.8,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": null,
+    "ring_pace": null,
+    "tgo_from_predictor": "1.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": 12.0,
+   "d_rel_s": -2.1,
+   "d_touch_s": 9.9,
+   "err1_m": 436.03,
+   "err2_m": 121.18,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -2.1,
+    12.0
+   ],
+   "run": "RRB8",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RRB8/tot_RRB8.csv"
+   },
+   "t_imp1_s": 582.3,
+   "t_imp2_s": 592.2,
+   "t_rel1_s": 550.6,
+   "t_rel2_s": 548.5,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "1.0",
+    "ring_pace": null,
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": 4.14,
+   "d_rel_s": 6.9,
+   "d_touch_s": 11.04,
+   "err1_m": 0.18,
+   "err2_m": 0.03,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    6.9,
+    4.14
+   ],
+   "run": "RRC1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RRC1/tot_RRC1.csv"
+   },
+   "t_imp1_s": 603.41,
+   "t_imp2_s": 614.45,
+   "t_rel1_s": 563.8,
+   "t_rel2_s": 570.7,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "1.0",
+    "ring_pace": null,
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": -0.8,
+   "d_rel_s": 16.5,
+   "d_touch_s": 15.7,
+   "err1_m": 2.79,
+   "err2_m": 46.03,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    16.5,
+    -0.8
+   ],
+   "run": "RRD1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RRD1/tot_RRD1.csv"
+   },
+   "t_imp1_s": 583.0,
+   "t_imp2_s": 598.7,
+   "t_rel1_s": 540.7,
+   "t_rel2_s": 557.2,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "1.0",
+    "ring_pace": null,
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": -2.25,
+   "d_rel_s": -32.6,
+   "d_touch_s": -34.85,
+   "err1_m": 42.15,
+   "err2_m": 0.65,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -32.6,
+    -2.25
+   ],
+   "run": "RRD2",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RRD2/tot_RRD2.csv"
+   },
+   "t_imp1_s": 636.7,
+   "t_imp2_s": 601.85,
+   "t_rel1_s": 592.1,
+   "t_rel2_s": 559.5,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "1.0",
+    "ring_pace": null,
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": -3.2,
+   "d_rel_s": 28.8,
+   "d_touch_s": 25.6,
+   "err1_m": 3.7,
+   "err2_m": 647.88,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    28.8,
+    -3.2
+   ],
+   "run": "RRD3",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RRD3/tot_RRD3.csv"
+   },
+   "t_imp1_s": 624.3,
+   "t_imp2_s": 649.9,
+   "t_rel1_s": 582.1,
+   "t_rel2_s": 610.9,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "1.0",
+    "ring_pace": null,
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": -7.6,
+   "d_rel_s": -10.8,
+   "d_touch_s": -18.4,
+   "err1_m": 42.18,
+   "err2_m": 12.04,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -10.8,
+    -7.6
+   ],
+   "run": "RRD4",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RRD4/tot_RRD4.csv"
+   },
+   "t_imp1_s": 587.8,
+   "t_imp2_s": 569.4,
+   "t_rel1_s": 539.0,
+   "t_rel2_s": 528.2,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "controlled",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "1.0",
+    "ring_pace": null,
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": 0.26,
+   "d_rel_s": 1.1,
+   "d_touch_s": 1.36,
+   "err1_m": 0.98,
+   "err2_m": 0.23,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    1.1,
+    0.26
+   ],
+   "run": "RRD5",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RRD5/tot_RRD5.csv"
+   },
+   "t_imp1_s": 592.04,
+   "t_imp2_s": 593.4,
+   "t_rel1_s": 551.2,
+   "t_rel2_s": 552.3,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "1.0",
+    "ring_pace": null,
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": 3.1,
+   "d_rel_s": 8.3,
+   "d_touch_s": 11.4,
+   "err1_m": 0.36,
+   "err2_m": 4.73,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    8.3,
+    3.1
+   ],
+   "run": "RRD6",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RRD6/tot_RRD6.csv"
+   },
+   "t_imp1_s": 619.8,
+   "t_imp2_s": 631.2,
+   "t_rel1_s": 581.7,
+   "t_rel2_s": 590.0,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "1.0",
+    "ring_pace": null,
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": 9.02,
+   "d_rel_s": -31.1,
+   "d_touch_s": -22.08,
+   "err1_m": 37.6,
+   "err2_m": 0.06,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -31.1,
+    9.02
+   ],
+   "run": "RRD7",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RRD7/tot_RRD7.csv"
+   },
+   "t_imp1_s": 632.28,
+   "t_imp2_s": 610.2,
+   "t_rel1_s": 594.0,
+   "t_rel2_s": 562.9,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "1.0",
+    "ring_pace": null,
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": null
+   },
+   "d_dive_s": -3.76,
+   "d_rel_s": 37.0,
+   "d_touch_s": 33.24,
+   "err1_m": 0.4,
+   "err2_m": 2.42,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    37.0,
+    -3.76
+   ],
+   "run": "RRD8",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RRD8/tot_RRD8.csv"
+   },
+   "t_imp1_s": 597.86,
+   "t_imp2_s": 631.1,
+   "t_rel1_s": 555.2,
+   "t_rel2_s": 592.2,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "controlled",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "1.0",
+    "ring_pace": null,
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "1.0"
+   },
+   "d_dive_s": 0.24,
+   "d_rel_s": 0.9,
+   "d_touch_s": 1.14,
+   "err1_m": 0.74,
+   "err2_m": 0.59,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    0.9,
+    0.24
+   ],
+   "run": "RRE1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RRE1/tot_RRE1.csv"
+   },
+   "t_imp1_s": 604.6,
+   "t_imp2_s": 605.74,
+   "t_rel1_s": 562.8,
+   "t_rel2_s": 563.7,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "1.0",
+    "ring_pace": null,
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "1.0"
+   },
+   "d_dive_s": -1.2,
+   "d_rel_s": 38.4,
+   "d_touch_s": 37.2,
+   "err1_m": 8.54,
+   "err2_m": 4.57,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    38.4,
+    -1.2
+   ],
+   "run": "RRE2",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RRE2/tot_RRE2.csv"
+   },
+   "t_imp1_s": 636.8,
+   "t_imp2_s": 674.0,
+   "t_rel1_s": 595.1,
+   "t_rel2_s": 633.5,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "1.0",
+    "ring_pace": null,
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "1.0"
+   },
+   "d_dive_s": -8.34,
+   "d_rel_s": 18.9,
+   "d_touch_s": 10.56,
+   "err1_m": 0.16,
+   "err2_m": 1.1,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    18.9,
+    -8.34
+   ],
+   "run": "RRE3",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RRE3/tot_RRE3.csv"
+   },
+   "t_imp1_s": 602.45,
+   "t_imp2_s": 613.01,
+   "t_rel1_s": 555.3,
+   "t_rel2_s": 574.2,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "1.0",
+    "ring_pace": null,
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "1.0"
+   },
+   "d_dive_s": 6.18,
+   "d_rel_s": -11.0,
+   "d_touch_s": -4.82,
+   "err1_m": 0.96,
+   "err2_m": 0.22,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -11.0,
+    6.18
+   ],
+   "run": "RRE4",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RRE4/tot_RRE4.csv"
+   },
+   "t_imp1_s": 573.72,
+   "t_imp2_s": 568.9,
+   "t_rel1_s": 537.8,
+   "t_rel2_s": 526.8,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "1.0",
+    "ring_pace": null,
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "1.0"
+   },
+   "d_dive_s": 2.89,
+   "d_rel_s": -16.0,
+   "d_touch_s": -13.11,
+   "err1_m": 0.44,
+   "err2_m": 0.9,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -16.0,
+    2.89
+   ],
+   "run": "RRE5",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RRE5/tot_RRE5.csv"
+   },
+   "t_imp1_s": 622.91,
+   "t_imp2_s": 609.8,
+   "t_rel1_s": 580.8,
+   "t_rel2_s": 564.8,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "1.0",
+    "ring_pace": null,
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "1.0"
+   },
+   "d_dive_s": 6.83,
+   "d_rel_s": -17.2,
+   "d_touch_s": -10.37,
+   "err1_m": 0.82,
+   "err2_m": 0.67,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -17.2,
+    6.83
+   ],
+   "run": "RRE6",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RRE6/tot_RRE6.csv"
+   },
+   "t_imp1_s": 516.76,
+   "t_imp2_s": 506.39,
+   "t_rel1_s": 483.0,
+   "t_rel2_s": 465.8,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "1.0",
+    "ring_pace": null,
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "1.0"
+   },
+   "d_dive_s": -6.13,
+   "d_rel_s": 2.1,
+   "d_touch_s": -4.03,
+   "err1_m": 0.5,
+   "err2_m": 1326.52,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    2.1,
+    -6.13
+   ],
+   "run": "RRE7",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RRE7/tot_RRE7.csv"
+   },
+   "t_imp1_s": 554.01,
+   "t_imp2_s": 549.98,
+   "t_rel1_s": 515.3,
+   "t_rel2_s": 517.4,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "27.0",
+    "release_at_ring": "1.0",
+    "ring_pace": null,
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "1.0"
+   },
+   "d_dive_s": -3.5,
+   "d_rel_s": -1.4,
+   "d_touch_s": -4.9,
+   "err1_m": 0.79,
+   "err2_m": 0.81,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -1.4,
+    -3.5
+   ],
+   "run": "RRE8",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/RRE8/tot_RRE8.csv"
+   },
+   "t_imp1_s": 560.1,
+   "t_imp2_s": 555.2,
+   "t_rel1_s": 521.1,
+   "t_rel2_s": 519.7,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "20.0",
+    "release_at_ring": "1.0",
+    "ring_pace": "1.0",
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "1.0"
+   },
+   "d_dive_s": -7.05,
+   "d_rel_s": 1.5,
+   "d_touch_s": -5.55,
+   "err1_m": 0.6,
+   "err2_m": 2.23,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    1.5,
+    -7.05
+   ],
+   "run": "SB1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/SB1/tot_SB1.csv"
+   },
+   "t_imp1_s": 581.65,
+   "t_imp2_s": 576.1,
+   "t_rel1_s": 524.6,
+   "t_rel2_s": 526.1,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "20.0",
+    "release_at_ring": "1.0",
+    "ring_pace": "1.0",
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "1.0"
+   },
+   "d_dive_s": 10.45,
+   "d_rel_s": -1.1,
+   "d_touch_s": 9.35,
+   "err1_m": 0.33,
+   "err2_m": 0.36,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -1.1,
+    10.45
+   ],
+   "run": "SB2",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/SB2/tot_SB2.csv"
+   },
+   "t_imp1_s": 562.61,
+   "t_imp2_s": 571.96,
+   "t_rel1_s": 513.4,
+   "t_rel2_s": 512.3,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "20.0",
+    "release_at_ring": "1.0",
+    "ring_pace": "0.0",
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "1.0"
+   },
+   "d_dive_s": 0.4,
+   "d_rel_s": -15.2,
+   "d_touch_s": -14.8,
+   "err1_m": 0.8,
+   "err2_m": 0.62,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -15.2,
+    0.4
+   ],
+   "run": "WX1",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/WX1/tot_WX1.csv"
+   },
+   "t_imp1_s": 576.4,
+   "t_imp2_s": 561.6,
+   "t_rel1_s": 519.3,
+   "t_rel2_s": 504.1,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "controlled",
+   "contract_switches": {
+    "dive_angle": "20.0",
+    "release_at_ring": "1.0",
+    "ring_pace": "0.0",
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "1.0"
+   },
+   "d_dive_s": -0.09,
+   "d_rel_s": -2.4,
+   "d_touch_s": -2.49,
+   "err1_m": 0.2,
+   "err2_m": 0.08,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    -2.4,
+    -0.09
+   ],
+   "run": "WX2",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/WX2/tot_WX2.csv"
+   },
+   "t_imp1_s": 583.12,
+   "t_imp2_s": 580.63,
+   "t_rel1_s": 528.0,
+   "t_rel2_s": 525.6,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "class": "fail",
+   "contract_switches": {
+    "dive_angle": "20.0",
+    "release_at_ring": "1.0",
+    "ring_pace": "0.0",
+    "tgo_from_predictor": "0.0",
+    "wait_goto_radius": "1.0"
+   },
+   "d_dive_s": -1.2,
+   "d_rel_s": 7.6,
+   "d_touch_s": 6.4,
+   "err1_m": 0.28,
+   "err2_m": 0.52,
+   "n_sys_csv": 2,
+   "out_of_range": false,
+   "panel": "b",
+   "plot_xy": [
+    7.6,
+    -1.2
+   ],
+   "run": "WX3",
+   "source": {
+    "criterion": "release_time, touchdown, decomposition, classes",
+    "fields": "t, sysid, phase, mode（放行）；stot_score impact_t_s, impact_miss_m",
+    "file": "runs/artifacts/WX3/tot_WX3.csv"
+   },
+   "t_imp1_s": 568.0,
+   "t_imp2_s": 574.4,
+   "t_rel1_s": 510.7,
+   "t_rel2_s": 518.3,
+   "touch_datum": "csv:agl",
+   "uav1": 1,
+   "uav2": 2
+  },
+  {
+   "label": "可用趟數（標題）",
+   "panel": "b",
+   "shown_as": "86",
+   "value": 86
+  },
+  {
+   "ids": [
+    "RPK1",
+    "RQA3",
+    "RQD3",
+    "RRD5",
+    "RRE1",
+    "WX2"
+   ],
+   "label": "兩分量皆<=3 s 趟數",
+   "panel": "b",
+   "value": 6
+  },
+  {
+   "ids": [
+    "FORMB1",
+    "FORMC1",
+    "FORMD1",
+    "RB1",
+    "RPK2",
+    "RPV1",
+    "RPX3",
+    "RQB2",
+    "RRB5"
+   ],
+   "label": "靠正負抵銷趟數",
+   "panel": "b",
+   "value": 9
+  },
+  {
+   "label": "觸地差>3 s 趟數",
+   "panel": "b",
+   "value": 71
+  },
+  {
+   "ids": [
+    "NZC7",
+    "RPY3",
+    "RQF1",
+    "RQF2",
+    "RQF4",
+    "RQH1"
+   ],
+   "label": "超出 ±40 s 趟數（邊緣三角形）",
+   "panel": "b",
+   "value": 6
+  },
+  {
+   "label": "兩分量皆<=3 s 但觸地差>3 s 的趟數（應為 0）",
+   "panel": "b",
+   "value": 0
+  },
+  {
+   "ids": {
+    "有機未放行": [
+     "RQE3",
+     "RQE4",
+     "SB3"
+    ],
+    "有機首航次未觸地": [
+     "BASE21",
+     "FORME1",
+     "NZC1",
+     "NZC11",
+     "NZC4",
+     "RPJ1",
+     "RPJ2",
+     "RPK3",
+     "RPL1",
+     "RPL2",
+     "RPO1",
+     "RPO2",
+     "RPO3",
+     "RPQ1",
+     "RPQ2",
+     "RPQ3",
+     "RPT2",
+     "RPW3",
+     "RQD1",
+     "RQE2",
+     "RQH3",
+     "RQH4",
+     "RRB1",
+     "RRB2",
+     "RRB3",
+     "RRB6",
+     "WEAVEAIM1"
+    ],
+    "無幾何檔": [
+     "AP3",
+     "AP5",
+     "REP1",
+     "RPE1",
+     "RPF1"
+    ],
+    "計分器無輸出（無 DIVE 資料或空檔）": [
+     "ALIGNW1",
+     "FORM1",
+     "LATOBS1",
+     "RPM1",
+     "RPN1",
+     "RPY2",
+     "RPZ3",
+     "RQE1"
+    ],
+    "非 2 架": [
+     "WV1",
+     "WV2",
+     "WV3"
+    ]
+   },
+   "label": "排除（依篩選順序）",
+   "panel": "b",
+   "value": {
+    "有機未放行": 3,
+    "有機首航次未觸地": 27,
+    "無幾何檔": 5,
+    "計分器無輸出（無 DIVE 資料或空檔）": 8,
+    "非 2 架": 3
+   }
+  },
+  {
+   "class": "fail",
+   "d_dive_s": -2.3,
+   "d_rel_s": 19.1,
+   "d_touch_s": 16.8,
+   "dive_angle_deg": 27.0,
+   "err1_m": 0.85,
+   "err2_m": 0.62,
+   "panel": "c",
+   "ring_pace_on": false,
+   "run": "LAT1",
+   "shown_as": {
+    "bars": "放行時刻差（灰）、俯衝耗時差（斜線）、觸地時刻差（黑）",
+    "row_angle": "27°",
+    "row_pace": "關"
+   },
+   "source": {
+    "criterion": "decomposition",
+    "fields": "同 (b)；values.dive_angle、values.ring_pace（缺鍵＝預設 False，scripts/wsl/sar_swarm_patches/tot_node.py:637）",
+    "file": "runs/artifacts/LAT1/tot_LAT1.csv；contract_LAT1.json"
+   },
+   "t_imp1_s": 630.8,
+   "t_imp2_s": 647.6,
+   "t_rel1_s": 592.5,
+   "t_rel2_s": 611.6
+  },
+  {
+   "class": "fail",
+   "d_dive_s": 0.6,
+   "d_rel_s": -33.9,
+   "d_touch_s": -33.3,
+   "dive_angle_deg": 20.0,
+   "err1_m": 0.36,
+   "err2_m": 0.97,
+   "panel": "c",
+   "ring_pace_on": false,
+   "run": "RA1",
+   "shown_as": {
+    "bars": "放行時刻差（灰）、俯衝耗時差（斜線）、觸地時刻差（黑）",
+    "row_angle": "20°",
+    "row_pace": "關"
+   },
+   "source": {
+    "criterion": "decomposition",
+    "fields": "同 (b)；values.dive_angle、values.ring_pace（缺鍵＝預設 False，scripts/wsl/sar_swarm_patches/tot_node.py:637）",
+    "file": "runs/artifacts/RA1/tot_RA1.csv；contract_RA1.json"
+   },
+   "t_imp1_s": 585.6,
+   "t_imp2_s": 552.3,
+   "t_rel1_s": 534.1,
+   "t_rel2_s": 500.2
+  },
+  {
+   "class": "cancel",
+   "d_dive_s": 3.86,
+   "d_rel_s": -5.6,
+   "d_touch_s": -1.74,
+   "dive_angle_deg": 20.0,
+   "err1_m": 0.42,
+   "err2_m": 0.38,
+   "panel": "c",
+   "ring_pace_on": true,
+   "run": "RB1",
+   "shown_as": {
+    "bars": "放行時刻差（灰）、俯衝耗時差（斜線）、觸地時刻差（黑）",
+    "row_angle": "20°",
+    "row_pace": "開"
+   },
+   "source": {
+    "criterion": "decomposition",
+    "fields": "同 (b)；values.dive_angle、values.ring_pace（缺鍵＝預設 False，scripts/wsl/sar_swarm_patches/tot_node.py:637）",
+    "file": "runs/artifacts/RB1/tot_RB1.csv；contract_RB1.json"
+   },
+   "t_imp1_s": 583.3,
+   "t_imp2_s": 581.56,
+   "t_rel1_s": 530.9,
+   "t_rel2_s": 525.3
+  },
+  {
+   "class": "fail",
+   "d_dive_s": -7.05,
+   "d_rel_s": 1.5,
+   "d_touch_s": -5.55,
+   "dive_angle_deg": 20.0,
+   "err1_m": 0.6,
+   "err2_m": 2.23,
+   "panel": "c",
+   "ring_pace_on": true,
+   "run": "SB1",
+   "shown_as": {
+    "bars": "放行時刻差（灰）、俯衝耗時差（斜線）、觸地時刻差（黑）",
+    "row_angle": "20°",
+    "row_pace": "開"
+   },
+   "source": {
+    "criterion": "decomposition",
+    "fields": "同 (b)；values.dive_angle、values.ring_pace（缺鍵＝預設 False，scripts/wsl/sar_swarm_patches/tot_node.py:637）",
+    "file": "runs/artifacts/SB1/tot_SB1.csv；contract_SB1.json"
+   },
+   "t_imp1_s": 581.65,
+   "t_imp2_s": 576.1,
+   "t_rel1_s": 524.6,
+   "t_rel2_s": 526.1
+  },
+  {
+   "class": "fail",
+   "d_dive_s": 10.45,
+   "d_rel_s": -1.1,
+   "d_touch_s": 9.35,
+   "dive_angle_deg": 20.0,
+   "err1_m": 0.33,
+   "err2_m": 0.36,
+   "panel": "c",
+   "ring_pace_on": true,
+   "run": "SB2",
+   "shown_as": {
+    "bars": "放行時刻差（灰）、俯衝耗時差（斜線）、觸地時刻差（黑）",
+    "row_angle": "20°",
+    "row_pace": "開"
+   },
+   "source": {
+    "criterion": "decomposition",
+    "fields": "同 (b)；values.dive_angle、values.ring_pace（缺鍵＝預設 False，scripts/wsl/sar_swarm_patches/tot_node.py:637）",
+    "file": "runs/artifacts/SB2/tot_SB2.csv；contract_SB2.json"
+   },
+   "t_imp1_s": 562.61,
+   "t_imp2_s": 571.96,
+   "t_rel1_s": 513.4,
+   "t_rel2_s": 512.3
+  },
+  {
+   "criterion": "spread_threshold",
+   "label": "±3 s 帶",
+   "panel": "c",
+   "value_s": 3.0
+  },
+  {
+   "label": "「抵銷」標註",
+   "panel": "c",
+   "run": "RB1",
+   "value": "放行時刻差與俯衝耗時差反號，觸地時刻差 |·|<=3 s 但分量未皆<=3 s"
+  }
+ ]
+}

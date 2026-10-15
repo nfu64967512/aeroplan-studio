@@ -1,0 +1,110 @@
+WALL_PROFILED_SEC 192.47  method=HARVEST scen=S1 n=8
+ntracks=8 self_makespan=5107.916310966237
+self={'self_uncovered': 0, 'self_validate': 'pass'}
+
+         116606317 function calls (116582934 primitive calls) in 191.089 seconds
+
+   Ordered by: cumulative time
+   List reduced from 4114 to 45 due to restriction <45>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1    0.003    0.003  192.468  192.468 C:\Users\joy46\Documents\Projects\aeroplan-studio\research\cpp_benchmark\matrix.py:65(run)
+        1    0.001    0.001  192.466  192.466 C:\Users\joy46\Documents\Projects\aeroplan-studio\research\cpp_benchmark\bench.py:107(run_planner)
+        1    0.000    0.000  192.214  192.214 C:\Users/joy46/Documents/Projects/aeroplan-studio\mission\swarm_coordinator.py:1539(plan_coverage_dccpp)
+        1    0.000    0.000  189.074  189.074 C:\Users/joy46/Documents/Projects/aeroplan-studio\mission\swarm_coordinator.py:2017(_plan_once)
+        1    0.001    0.001  189.074  189.074 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\integration\aeroplan_adapter.py:1843(plan_coverage_dccpp)
+        1    0.003    0.003  188.527  188.527 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\planner.py:1280(plan_mission)
+        1    0.017    0.017  184.082  184.082 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:1841(repair)
+        1    0.006    0.006  157.071  157.071 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:1693(_global_reschedule)
+       32    0.559    0.017  156.996    4.906 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:1746(earliest)
+     4981    2.182    0.000  120.990    0.024 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:832(check_separation)
+     4277    0.251    0.000  103.848    0.024 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:1736(fits)
+     5099    3.082    0.001   60.490    0.012 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:929(shift_plan)
+  3192446    4.132    0.000   56.927    0.000 C:\Program Files\Python314\Lib\dataclasses.py:1754(replace)
+    31619    5.778    0.000   56.084    0.002 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:664(_track_from_plan)
+  3192446   35.496    0.000   50.592    0.000 C:\Program Files\Python314\Lib\dataclasses.py:1773(_replace)
+    30128   25.755    0.001   26.339    0.001 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:699(_pair_metrics)
+    31619    3.219    0.000   25.771    0.001 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:549(_interp_plan)
+    30016    0.395    0.000   24.641    0.001 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:816(_candidate_pairs)
+    30128   17.570    0.001   23.653    0.001 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:691(_cross_pairs)
+       49    0.034    0.001   23.528    0.480 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:1465(_repair_one)
+    31619   15.057    0.000   19.814    0.001 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:539(_waypoint_arrays)
+    63238   12.927    0.000   16.080    0.000 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:620(_corridor_masks)
+      429    0.024    0.000   15.517    0.036 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:1063(involved_score)
+73439920/73439896   13.149    0.000   13.154    0.000 {built-in method builtins.getattr}
+    31619    1.029    0.000   10.104    0.000 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:636(_corridor_pads)
+    26828    7.347    0.000   10.056    0.000 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:733(_forbidden_intervals)
+    31619    0.500    0.000    9.644    0.000 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:651(_corridor_sites)
+     6679    0.124    0.000    8.784    0.001 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:781(_pair_delays)
+   730284    8.527    0.000    8.527    0.000 {built-in method numpy.array}
+       49    0.025    0.001    6.951    0.142 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:1287(_takeoff_actions)
+   519324    6.207    0.000    6.207    0.000 {method 'reduce' of 'numpy.ufunc' objects}
+   132810    0.446    0.000    4.569    0.000 C:\Users\joy46\AppData\Roaming\Python\Python314\site-packages\numpy\_core\fromnumeric.py:69(_wrapreduction)
+        1    0.007    0.007    3.271    3.271 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:1638(_compact_makespan)
+   185334    0.279    0.000    3.039    0.000 C:\Users\joy46\AppData\Roaming\Python\Python314\site-packages\numpy\_core\fromnumeric.py:51(_wrapfunc)
+        8    0.001    0.000    2.649    0.331 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\decompose.py:1139(decompose_area)
+        8    0.009    0.001    2.638    0.330 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\decompose.py:1058(_solve_class)
+    60256    0.172    0.000    2.462    0.000 C:\Users\joy46\AppData\Roaming\Python\Python314\site-packages\numpy\_core\fromnumeric.py:3168(amax)
+    60256    0.103    0.000    2.254    0.000 C:\Users\joy46\AppData\Roaming\Python\Python314\site-packages\numpy\_core\fromnumeric.py:3306(amin)
+  3192446    1.558    0.000    2.203    0.000 C:\Program Files\Python314\Lib\dataclasses.py:1463(_is_dataclass_instance)
+       38    0.007    0.000    2.200    0.058 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:1354(_orbit_actions)
+       16    0.001    0.000    1.966    0.123 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\decompose.py:649(build_strips)
+       16    0.008    0.000    1.923    0.120 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\geometry.py:751(lay_strips)
+ 11898702    1.910    0.000    1.915    0.000 {built-in method builtins.max}
+    90499    0.206    0.000    1.615    0.000 C:\Users\joy46\AppData\Roaming\Python\Python314\site-packages\numpy\_core\fromnumeric.py:2241(clip)
+       49    0.001    0.000    1.578    0.032 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:1418(_cascade_orbit)
+
+
+         116606317 function calls (116582934 primitive calls) in 191.089 seconds
+
+   Ordered by: internal time
+   List reduced from 4114 to 45 due to restriction <45>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+  3192446   35.496    0.000   50.592    0.000 C:\Program Files\Python314\Lib\dataclasses.py:1773(_replace)
+    30128   25.755    0.001   26.339    0.001 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:699(_pair_metrics)
+    30128   17.570    0.001   23.653    0.001 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:691(_cross_pairs)
+    31619   15.057    0.000   19.814    0.001 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:539(_waypoint_arrays)
+73439920/73439896   13.149    0.000   13.154    0.000 {built-in method builtins.getattr}
+    63238   12.927    0.000   16.080    0.000 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:620(_corridor_masks)
+   730284    8.527    0.000    8.527    0.000 {built-in method numpy.array}
+    26828    7.347    0.000   10.056    0.000 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:733(_forbidden_intervals)
+   519324    6.207    0.000    6.207    0.000 {method 'reduce' of 'numpy.ufunc' objects}
+    31619    5.778    0.000   56.084    0.002 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:664(_track_from_plan)
+  3192446    4.132    0.000   56.927    0.000 C:\Program Files\Python314\Lib\dataclasses.py:1754(replace)
+    31619    3.219    0.000   25.771    0.001 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:549(_interp_plan)
+     5099    3.082    0.001   60.490    0.012 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:929(shift_plan)
+     4981    2.182    0.000  120.990    0.024 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:832(check_separation)
+ 11898702    1.910    0.000    1.915    0.000 {built-in method builtins.max}
+  3192446    1.558    0.000    2.203    0.000 C:\Program Files\Python314\Lib\dataclasses.py:1463(_is_dataclass_instance)
+  4257194    1.150    0.000    1.150    0.000 {method 'append' of 'list' objects}
+    31619    1.029    0.000   10.104    0.000 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:636(_corridor_pads)
+    38697    0.919    0.000    1.138    0.000 C:\Users\joy46\AppData\Roaming\Python\Python314\site-packages\numpy\lib\_shape_base_impl.py:628(column_stack)
+    74448    0.912    0.000    1.183    0.000 C:\Users\joy46\AppData\Roaming\Python\Python314\site-packages\numpy\_core\numeric.py:324(full)
+    90499    0.835    0.000    1.149    0.000 C:\Users\joy46\AppData\Roaming\Python\Python314\site-packages\numpy\_core\_methods.py:98(_clip)
+  3204789    0.805    0.000    0.805    0.000 {method 'values' of 'dict' objects}
+    31695    0.777    0.000    0.777    0.000 {method 'searchsorted' of 'numpy.ndarray' objects}
+    39942    0.725    0.000    0.821    0.000 C:\Users\joy46\AppData\Roaming\Python\Python314\site-packages\numpy\lib\_function_base_impl.py:1391(diff)
+3257822/3257275    0.682    0.000    0.989    0.000 {built-in method builtins.hasattr}
+     4821    0.657    0.000    0.657    0.000 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:767(_escape_down)
+   149198    0.631    0.000    0.631    0.000 {method 'astype' of 'numpy.ndarray' objects}
+    31619    0.617    0.000    1.516    0.000 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:526(_time_grid)
+     5786    0.615    0.000    0.804    0.000 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\geo.py:186(_bilinear)
+       32    0.559    0.017  156.996    4.906 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:1746(earliest)
+    27106    0.555    0.000    0.555    0.000 {method 'argsort' of 'numpy.ndarray' objects}
+    31619    0.500    0.000    9.644    0.000 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:651(_corridor_sites)
+    31619    0.449    0.000    0.449    0.000 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:573(_sigma)
+   132810    0.446    0.000    4.569    0.000 C:\Users\joy46\AppData\Roaming\Python\Python314\site-packages\numpy\_core\fromnumeric.py:69(_wrapreduction)
+     6679    0.443    0.000    1.094    0.000 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:802(_events)
+    31634    0.395    0.000    0.638    0.000 C:\Users\joy46\AppData\Roaming\Python\Python314\site-packages\numpy\lib\_function_base_impl.py:5661(append)
+    30016    0.395    0.000   24.641    0.001 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:816(_candidate_pairs)
+      106    0.321    0.003    0.333    0.003 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\geo.py:70(ecef_to_geodetic)
+     4521    0.319    0.000    1.377    0.000 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\geo.py:456(_corridor_z)
+   108730    0.289    0.000    0.547    0.000 C:\Users\joy46\AppData\Roaming\Python\Python314\site-packages\numpy\_core\_ufunc_config.py:448(__enter__)
+    54523    0.286    0.000    0.286    0.000 {built-in method numpy.arange}
+   166779    0.282    0.000    1.375    0.000 {method 'any' of 'numpy.ndarray' objects}
+   185334    0.279    0.000    3.039    0.000 C:\Users\joy46\AppData\Roaming\Python\Python314\site-packages\numpy\_core\fromnumeric.py:51(_wrapfunc)
+     4277    0.251    0.000  103.848    0.024 C:\Users\joy46\Documents\Projects\aeroplan-studio\hv_dccpp\deconflict.py:1736(fits)
+    63518    0.231    0.000    0.231    0.000 C:\Users\joy46\AppData\Roaming\Python\Python314\site-packages\numpy\_core\getlimits.py:698(__init__)
+
+

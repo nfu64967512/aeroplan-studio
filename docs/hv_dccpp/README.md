@@ -1,4 +1,4 @@
-# HV-DCCPP — 異構 VTOL 動態完全覆蓋路徑規劃
+# HARVEST — 異構 VTOL 動態完全覆蓋路徑規劃
 
 **H**eterogeneous-**V**TOL **D**ynamic **C**omplete **C**overage **P**ath **P**lanning：
 以 Wang et al. 2025（*Defence Technology* 47:197–215）的 DCCPP 框架為基礎，擴充為
@@ -133,7 +133,7 @@ print(res.changed_uavs, res.notes, res.plan.makespan_s)
 ## 5. 接到既有系統（`integration/legacy_adapter.py`）
 
 既有 `main_app.py` 呼叫的是 `self.waypoint_generator.generate_complete_mission(...)`，
-把該物件換成 `HVDCCPPGeneratorAdapter` 即可（簽章完全相同，內部改走 HV-DCCPP）：
+把該物件換成 `HVDCCPPGeneratorAdapter` 即可（簽章完全相同，內部改走 HARVEST）：
 
 ```python
 from hv_dccpp import HVDCCPPGeneratorAdapter          # 延遲載入，不需 pymavlink 也能 import
@@ -292,5 +292,5 @@ python -m pytest tests -q --timeout=300        # 需要 pytest-timeout
 
 ---
 
-規格與契約文件：`docs/reference/HV-DCCPP_規格書_v1.1.md`、`docs/reference/模組契約_v1.1.md`、
-`docs/HV-DCCPP_設計文件.md`、`docs/平台參數表.md`、`docs/進度紀錄.md`。
+規格與契約文件：`docs/reference/HARVEST_規格書_v1.1.md`、`docs/reference/模組契約_v1.1.md`、
+`docs/HARVEST_設計文件.md`、`docs/平台參數表.md`、`docs/進度紀錄.md`。

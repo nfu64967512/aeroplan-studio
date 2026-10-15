@@ -33,13 +33,13 @@ def plan_gui(n_a: int, n_b: int, areas, alt: float, *, hfov=60.0, vfov=45.0,
                "fov_width": width}
               for i, (n, _c, _s, v, r) in enumerate(fleet)]
     c = SwarmCoordinator()
-    c.use_hv_dccpp = True
+    c.use_harvest = True
     c.hv_uniform_sensor = uniform
     c.hv_class_of = lambda d: cls_of[int(d["drone_id"])]
     c.hv_home = HOME
     c.hv_wind = (5.0, 270.0)
     c.hv_fence_zones = []
-    c.hv_params = {"hfov_deg": hfov, "vfov_deg": vfov, "hv_c2_range_km": 25.0,
+    c.harvest_params = {"hfov_deg": hfov, "vfov_deg": vfov, "hv_c2_range_km": 25.0,
                    "hv_waiver_max_agl_m": 200.0, "hv_dem_margin_m": 3000.0}
     t0 = time.perf_counter()
     c.plan_coverage_dccpp(areas=areas, drones=drones, coverage_width_m=width,

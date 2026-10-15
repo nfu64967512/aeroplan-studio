@@ -1,4 +1,4 @@
-# HV4SITL2 — HV-DCCPP 1 Pioneer + 3 HERO 真 SITL 實跑
+# HV4SITL2 — HARVEST 1 Pioneer + 3 HERO 真 SITL 實跑
 
 2026-09-07 · ArduPlane 4.8.0-dev QuadPlane SITL ×4 · speedup 5 · 分支 `quad_swarm`
 

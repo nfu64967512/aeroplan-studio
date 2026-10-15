@@ -137,7 +137,7 @@ def test_camera_trigger_pairs_balanced_rgb(mini):
     off = [it for it in cam if it.param1 == 0]
     n_strips = len(mini.mp.plans["B1"].strips)
     assert len(on) == len(off) == n_strips >= 1
-    # 交替：on, off, on, off …；最後為 off；DO_LAND_START 在最後一個 off 之後
+    # 交替：on, off, on, off …；最後為 off（B1 的最後一條帶終點＝RTB 首點，那條帶的 off 就是 DO_LAND_START 後那一個）
     state = False
     for it in cam:
         assert (it.param1 > 0) != state
@@ -147,9 +147,16 @@ def test_camera_trigger_pairs_balanced_rgb(mini):
     land = next(it for it in items if it.command == M.MAV_CMD_NAV_VTOL_LAND)
     assert off[-1].seq < land.seq
     by_seq = {it.seq: it for it in items}
+    # DO_LAND_START 緊接 206(0)：失效保護 RTL（RTL_AUTOLAND=2）跳到此處仍是 AUTO，會略過前面所有條帶的 off；
+    # DO_LAND_START 與 NAV_VTOL_LAND 之間沒有任何 206 開
+    ls = next(it for it in items if it.command == M.MAV_CMD_DO_LAND_START)
+    nxt = by_seq[ls.seq + 1]
+    assert nxt.command == M.MAV_CMD_DO_SET_CAM_TRIGG_DIST and nxt.param1 == 0.0
+    assert not [it for it in on if ls.seq < it.seq < land.seq]
+    assert on[-1].seq < ls.seq
     for it in cam:
         prev = by_seq[it.seq - 1]
-        assert prev.is_nav or prev.command == M.MAV_CMD_DO_SET_CAM_TRIGG_DIST
+        assert prev.is_nav or prev.command in (M.MAV_CMD_DO_SET_CAM_TRIGG_DIST, M.MAV_CMD_DO_LAND_START)
     # 觸發距離 = l(h)(1 − o_fwd)：B @100 m AGL → 97.5 × 0.3 = 29.25 m
     sensor = mini.ctx.sensors[("B", "default_rgb")]
     for it in on:
@@ -503,7 +510,9 @@ def test_recommended_params_and_file(mini, tmp_path):
     # 電壓未知 → 無 mAh 參數；RTB 政策 → RTL；terrain 框架 → TERRAIN_ENABLE
     q = ap.recommended_params(ctx.specs["B"], ctx.models["B1"], cfg, lost_link_policy="RTB", alt_frame="terrain")
     assert "BATT_CAPACITY" not in q and q["FS_LONG_ACTN"] == 1 and q["TERRAIN_ENABLE"] == 1
-    assert q["AIRSPEED_MAX"] == pytest.approx(1.4 * 19.0, abs=0.1)     # HERO max_airspeed None → 暫定
+    # HERO max_airspeed None → 暫定 1.4×19 = 26.6；AIRSPEED_MAX 在 ArduPlane 是 AP_Int16（26.6 會被存成 26）⇒ 匯出
+    # 飛控真正會存的值、上限往下取（2026-10-14 F1 (c)；取整警告另由 tests/test_hdmap_fix_exporter.py 鎖）
+    assert q["AIRSPEED_MAX"] == math.floor(1.4 * 19.0) == 26.0
     assert q["AIRSPEED_MIN"] == 16.0 and q["WP_LOITER_RAD"] == 120.0
     # 檔案格式：NAME,VALUE；註解以 # 開頭；可讀回
     path = tmp_path / "A1.param"

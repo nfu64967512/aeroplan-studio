@@ -718,11 +718,14 @@ def test_describe_rc_covers_the_documented_codes():
 #  7. Qt 那一層 —— 沒有 PyQt6 就 skip,不要在 WSL 爆掉
 # ═══════════════════════════════════════════════════════════════════════
 
-def test_controller_module_compiles():
-    """WSL 沒有 PyQt6,所以只做語法檢查(compile),不 import。"""
+def test_controller_module_compiles(tmp_path):
+    """WSL 沒有 PyQt6,所以只做語法檢查(compile),不 import。
+
+    ⚠ cfile 寫到 tmp_path:以前寫成 src + "c",每跑一次就在原始碼樹裡留一個 .pyc。
+    """
     import py_compile
     src = REPO / "ui" / "controllers" / "stot_ros2_controller.py"
-    py_compile.compile(str(src), doraise=True, cfile=str(src) + "c")
+    py_compile.compile(str(src), doraise=True, cfile=str(tmp_path / "stot_ros2_controller.pyc"))
 
 
 def test_bridge_imports_stdlib_only():

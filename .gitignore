@@ -131,3 +131,11 @@ docs/images/anim/
 nul
 追趕
 ; else echo REAL
+
+# ── 2026-10-15：公開 repo 不放的 MATLAB 內容 ──
+# Zarchan 原書全文（matlab/zarchan/README.md 註明「不散布」）與逐字抄錄的書中程式清單
+matlab/zarchan/_source/
+matlab/zarchan/_listings/
+# Simulink 建置快取與 MATLAB 執行輸出（可重生）
+slprj/
+matlab/out/

@@ -1,0 +1,101 @@
+<?xml version="1.0"?>
+<!--
+  Barracuda500 RATO booster (rocket assisted take off), solid motor.
+
+  aeroplan-studio 2026-08-27.
+
+  WARNING  THIS IS NOT PART OF THE REAL VEHICLE.
+  The real system is CATAPULT launched:
+      ArduPilot libraries/SITL/SIM_Plane.cpp:83   frame "-catapult"
+      ArduPilot libraries/SITL/SIM_Plane.cpp:95   launch_accel = 25 m/s2
+      ArduPilot libraries/SITL/SIM_Plane.cpp:96   launch_time  = 0.4 s
+      ArduPilot libraries/SITL/SIM_Plane.cpp:483  force.x += mass * launch_accel
+  and the phrase "rocket boost" that appears in scripts/wsl/jet_catapult_launch.py:102
+  is a THROTTLE POLICY (hold a high THR_MAX through the climb), not a motor.
+  This booster was added on explicit request to see what a real RATO would do.
+  It is opt in: nothing fires unless the Booster channel latches.
+
+  SIZING (all derived, none measured)
+      airframe mass        22.0 kg
+      stall speed          23.6 m/s   (S 0.45, CLmax 1.4, sea level)
+      target liftoff       40   m/s   in about 2 s from standstill
+      required accel       20   m/s2  ==> net force 440 N
+      jet contributes      150  N static  ==> booster 400 N = 89.9 lbf
+      Isp assumed          200  s     (typical composite solid)
+      mass flow            F / (Isp g) = 400 / (200 * 9.81) = 0.204 kg/s
+      propellant           0.204 * 2.0 = 0.41 kg = 0.90 lb
+      total impulse        800 N s
+
+  WARNING  Isp 200 s is an ASSUMPTION, not a measurement, exactly like the
+  inertia tensor and the lateral derivatives.  See the three tier table in
+  sitl/jsbsim/README.md.  Nothing quantitative from this motor should be
+  quoted as a property of the vehicle.
+
+  UNITS  FGRocket, like FGTurbine, works in bare lbf and lbs.  Do NOT add a
+  unit attribute to the thrust numbers.  A unit attribute on turbine milthrust
+  silently produced zero thrust once already, see the README.
+
+  thrust_table maps PROPELLANT ALREADY BURNED (lb) to THRUST (lbf).
+  It is not a function of time.  Burn duration falls out of the mass flow.
+-->
+<rocket_engine name="Barracuda500 RATO booster">
+
+  <isp> 200 </isp>
+
+  <!-- sine ramp from zero to table thrust over this many seconds -->
+  <builduptime> 0.12 </builduptime>
+
+  <!-- Lot to lot scatter of a solid grain.  2 percent on thrust is typical and
+       it is useful here: it makes repeat runs differ slightly, which is the
+       honest behaviour of a real motor. -->
+  <variation>
+    <thrust> 0.02 </thrust>
+    <total_isp> 0.00 </total_isp>
+  </variation>
+
+  <!--
+    Columns: propellant already burned (lb), thrust (lbf).
+    Separated by WHITESPACE.  Not commas.
+
+    WARNING  NO COMMAS IN tableData.  src/math/FGTable.cpp:291 validates every
+    data line against the character set
+
+        "0123456789.-+eE \t\n"
+
+    and a comma is not in it, so one comma aborts the whole aircraft load with
+
+        Illegal character found in line NN:
+        FATAL ERROR: JSBSim terminated with an exception.
+
+    The line number it prints is the offending data row, which reads like a
+    malformed number and sends you hunting for a bad digit.
+
+    WARNING  DO NOT COPY THE FORMAT FROM engine/Estes_E9.xml.  That shipped
+    sample uses commas and therefore CANNOT LOAD in JSBSim v1.2.2.  We copied
+    it and lost time to it.  Only three files in the whole JSBSim tree use
+    commas in tableData (Estes_E9.xml and two Camel files) and all three are
+    broken; every aircraft that actually flies (c172p, X15, f16, Rascal) uses
+    whitespace.  A shipped example is not evidence that something works.
+
+    Shape of the curve:
+        0.00   ignition, builduptime ramps thrust in over 0.12 s
+        0.05   slight progressive rise as the port opens
+        0.55   neutral burn plateau
+        0.82   grain burning out, regressive tail
+        0.90   propellant exhausted, thrust zero
+  -->
+  <thrust_table name="propulsion/thrust_prop_remain" type="internal">
+    <tableData>
+       0.000   89.9
+       0.050   94.5
+       0.300   93.0
+       0.550   92.0
+       0.700   90.5
+       0.820   68.0
+       0.870   28.0
+       0.895    6.0
+       0.900    0.0
+    </tableData>
+  </thrust_table>
+
+</rocket_engine>

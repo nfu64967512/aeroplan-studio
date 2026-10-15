@@ -1,0 +1,190 @@
+{
+ "pages": 5,
+ "used_cm_per_page": [
+  24.21,
+  25.27,
+  24.89,
+  24.85,
+  14.73
+ ],
+ "content_cm": 113.95,
+ "pages_equiv": 4.434,
+ "last_page_lines": 31,
+ "last_line_top_cm": 16.23,
+ "last_page_used_cm": 14.68,
+ "body_height_cm": 25.7,
+ "last_page_fill_pct": 57.1,
+ "n_paragraphs": 149,
+ "n_paragraphs_snap_to_grid_on": 0,
+ "n_table_row_end_marks_reported_on": 15,
+ "where": [
+  [
+   "一、前言",
+   1,
+   12.2
+  ],
+  [
+   "二、研究方法",
+   1,
+   18.8
+  ],
+  [
+   "2.1 系統架構與規劃流",
+   1,
+   19.4
+  ],
+  [
+   "[圖檔]",
+   1,
+   20.4
+  ],
+  [
+   "圖1 HARVEST 系",
+   1,
+   25.7
+  ],
+  [
+   "2.2 核心公式",
+   2,
+   4.3
+  ],
+  [
+   "三、SITL 驗證與成果",
+   2,
+   23.2
+  ],
+  [
+   "3.1 實驗設置",
+   2,
+   23.8
+  ],
+  [
+   "3.2 規劃與 SITL",
+   3,
+   3.8
+  ],
+  [
+   "表1 規劃與 SITL ",
+   3,
+   6.9
+  ],
+  [
+   "3.3 規劃天花板與風場",
+   3,
+   13.9
+  ],
+  [
+   "表2 規劃天花板與風場之",
+   3,
+   20.0
+  ],
+  [
+   "[圖檔]",
+   4,
+   3.7
+  ],
+  [
+   "圖2 高度合規與 SIT",
+   4,
+   10.1
+  ],
+  [
+   "四、結論與限制",
+   4,
+   11.7
+  ],
+  [
+   "參考文獻",
+   4,
+   24.3
+  ]
+ ],
+ "figures": [
+  {
+   "file": "fig1_architecture_compact.png",
+   "width_cm": 16.992,
+   "height_cm": 5.325,
+   "scale_pct": [
+    100.0,
+    100.0
+   ]
+  },
+  {
+   "file": "fig5_compliance.png",
+   "width_cm": 16.992,
+   "height_cm": 6.392,
+   "scale_pct": [
+    100.0,
+    100.0
+   ]
+  }
+ ],
+ "tables": [
+  {
+   "tnum": "1",
+   "col_cm": [
+    6.51,
+    4.01,
+    6.49
+   ]
+  },
+  {
+   "tnum": "2",
+   "col_cm": [
+    2.11,
+    1.36,
+    3.0,
+    1.63,
+    2.87,
+    1.63,
+    4.39
+   ]
+  }
+ ],
+ "n_omath": 6,
+ "build_s": 4.3,
+ "layout": {
+  "indent": false,
+  "spacing": false,
+  "compress_punct": false,
+  "table_split": false,
+  "no_widow": false
+ },
+ "caveats_missing": [],
+ "caveats_checked": 61,
+ "name": "C2 A＋L2＋R1R2T1X1",
+ "cuts": [
+  1,
+  2,
+  3,
+  4,
+  5,
+  6,
+  7,
+  8
+ ],
+ "candidates": [
+  "L1",
+  "K1",
+  "K2",
+  "K3",
+  "K4",
+  "K5",
+  "K6",
+  "K7",
+  "K8",
+  "K9",
+  "K10",
+  "K11",
+  "K12",
+  "F1",
+  "F2",
+  "L2",
+  "R1",
+  "R2",
+  "T1",
+  "X1"
+ ],
+ "docx": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\PAPERPLAN1\\word_layout\\variants\\C2.docx",
+ "pdf": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\PAPERPLAN1\\word_layout\\variants\\C2.pdf"
+}

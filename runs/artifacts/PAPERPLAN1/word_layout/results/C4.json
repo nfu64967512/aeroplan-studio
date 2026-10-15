@@ -1,0 +1,178 @@
+{
+ "pages": 4,
+ "used_cm_per_page": [
+  23.22,
+  25.21,
+  25.4,
+  25.25
+ ],
+ "content_cm": 99.08,
+ "pages_equiv": 3.855,
+ "last_page_lines": 52,
+ "last_line_top_cm": 26.75,
+ "last_page_used_cm": 25.2,
+ "body_height_cm": 25.7,
+ "last_page_fill_pct": 98.1,
+ "n_paragraphs": 141,
+ "n_paragraphs_snap_to_grid_on": 0,
+ "n_table_row_end_marks_reported_on": 15,
+ "where": [
+  [
+   "一、前言",
+   1,
+   10.7
+  ],
+  [
+   "二、研究方法",
+   1,
+   16.3
+  ],
+  [
+   "2.1 系統架構",
+   1,
+   16.8
+  ],
+  [
+   "2.2 核心公式",
+   1,
+   19.4
+  ],
+  [
+   "三、SITL 驗證與成果",
+   2,
+   12.4
+  ],
+  [
+   "3.1 實驗設置",
+   2,
+   13.0
+  ],
+  [
+   "3.2 規劃與 SITL",
+   2,
+   17.5
+  ],
+  [
+   "表1 規劃與 SITL ",
+   2,
+   20.6
+  ],
+  [
+   "3.3 規劃天花板與風場",
+   3,
+   3.3
+  ],
+  [
+   "[圖檔]",
+   3,
+   8.8
+  ],
+  [
+   "圖1 高度合規與 SIT",
+   3,
+   14.0
+  ],
+  [
+   "表2 規劃天花板與風場之",
+   3,
+   15.5
+  ],
+  [
+   "四、結論與限制",
+   3,
+   23.3
+  ],
+  [
+   "參考文獻",
+   4,
+   10.9
+  ]
+ ],
+ "figures": [
+  {
+   "file": "fig5_compliance.png",
+   "width_cm": 16.992,
+   "height_cm": 5.198,
+   "scale_pct": [
+    100.0,
+    100.0
+   ]
+  }
+ ],
+ "tables": [
+  {
+   "tnum": "1",
+   "col_cm": [
+    6.51,
+    4.01,
+    6.49
+   ]
+  },
+  {
+   "tnum": "2",
+   "col_cm": [
+    2.11,
+    1.36,
+    3.0,
+    1.63,
+    2.87,
+    1.63,
+    4.39
+   ]
+  }
+ ],
+ "n_omath": 4,
+ "build_s": 8.2,
+ "layout": {
+  "indent": false,
+  "spacing": false,
+  "compress_punct": false,
+  "table_split": true,
+  "no_widow": true
+ },
+ "caveats_missing": [],
+ "caveats_checked": 61,
+ "name": "C4 最大刪敘述(保留圖3)",
+ "cuts": [
+  1,
+  2,
+  3,
+  4,
+  5,
+  6,
+  7,
+  8
+ ],
+ "candidates": [
+  "L1",
+  "K1",
+  "K4",
+  "K5",
+  "K7",
+  "K8",
+  "K10",
+  "K11",
+  "K12",
+  "F1",
+  "F2",
+  "P1",
+  "P2",
+  "P4",
+  "P5",
+  "L2",
+  "L3",
+  "L4",
+  "L5",
+  "R1",
+  "R2",
+  "T1",
+  "X1",
+  "D1",
+  "D2",
+  "P6",
+  "P8",
+  "F3"
+ ],
+ "docx": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\PAPERPLAN1\\word_layout\\variants\\C4.docx",
+ "pdf": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\PAPERPLAN1\\word_layout\\variants\\C4.pdf"
+}

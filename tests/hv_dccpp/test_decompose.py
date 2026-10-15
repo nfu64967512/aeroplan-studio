@@ -332,8 +332,13 @@ def test_mini_decompose_w3_numbers(mini, mini_cells):
     assert len(c.strips["A"]) == 7 and len(c.strips["B"]) == 12
     for cls in ("A", "B"):
         assert abs(math.sin(c.alpha_rad[cls])) == pytest.approx(1.0, abs=1e-6)          # 東西向
-        assert c.alpha_rad[cls] == c.alt_dirs[cls][0][0]
-        assert c.T_single_s[cls] == c.alt_dirs[cls][0][1]
+        # ⚠⚠ 前兩條原本是 `alpha_rad == alt_dirs[0][0]` 與 `T_single == alt_dirs[0][1]`，
+        #   那是**建構上必然為真**的（`decompose.py:1129-1130` 同一次排序寫出兩者）
+        #   ⇒ 恆綠、鎖不到東西。改成鎖真的可能壞掉的三件事。
+        alts = c.alt_dirs[cls]
+        assert (c.alpha_rad[cls], c.T_single_s[cls]) == alts[0]                 # 首名即選中者
+        assert [t for _a, t in alts] == sorted(t for _a, t in alts)             # 依 T 遞增
+        assert len({round(a % math.pi, 9) for a, _t in alts}) == len(alts)      # 方向互異（mod π）
         assert all(s.feasible for s in c.strips[cls])
         assert all(s.cell_id == c.cell_id and s.cls == cls for s in c.strips[cls])
         assert 0.0 <= c.fit[cls] <= 1.0

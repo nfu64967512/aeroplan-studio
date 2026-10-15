@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import os
 import math
-from typing import List
+from typing import List, Optional
 
 from utils.file_io import create_waypoint_line, write_waypoints
 from utils.logger import get_logger
@@ -61,10 +61,29 @@ class VTOLMissionExporter:
     def __init__(self,
                  transition_alt_m: float = 40.0,
                  cruise_speed_ms: float = 15.0,
-                 turn_radius_m: float = 50.0):
+                 turn_radius_m: float = 50.0,
+                 explicit_transitions: bool = False):
+        """
+        Parameters
+        ----------
+        explicit_transitions : bool
+            是否在任務裡明確插入兩筆 ``MAV_CMD_DO_VTOL_TRANSITION`` (3000)。
+
+            預設 **False**，依 ArduPilot 官方 QuadPlane AUTO Missions 文件：
+
+              * ``NAV_VTOL_TAKEOFF`` 到達高度後飛向下一航點時，飛控本來就會
+                視需要自行轉固定翼 —— 明確插 param1=4 是多餘的。
+              * ArduPlane 4.1+ 的 ``NAV_VTOL_LAND`` 預設保持固定翼進場、
+                接近才 airbrake 轉多旋翼。提早插 param1=3 會強制轉 MC，
+                抵銷掉那個省電設計。
+
+            留這個開關是為了讓「預設不插」這件事可被對照驗證（沒有對照組的
+            斷言可能只是永遠不可能觸發的假綠燈）。
+        """
         self.transition_alt_m = transition_alt_m
         self.cruise_speed_ms = cruise_speed_ms
         self.turn_radius_m = turn_radius_m
+        self.explicit_transitions = bool(explicit_transitions)
 
     # ─────────────────────────────────────────────────────────────
     #  核心：為單架 UAV 生成 VTOL 航點序列
@@ -74,6 +93,7 @@ class VTOLMissionExporter:
         waypoints: list,
         altitude: float = 100.0,
         uav_id: int = 0,
+        alt_offset_m: float = 0.0,
     ) -> List[str]:
         """為單架 UAV 生成 QGC WPL 110 航點序列。
 
@@ -85,6 +105,9 @@ class VTOLMissionExporter:
             預設巡航高度（公尺），航點自身高度為 0 時使用。
         uav_id : int
             UAV 編號（僅用於日誌）。
+        alt_offset_m : float
+            (飛控 home − 航點高度基準)。HARVEST 路徑的 alt 以規劃 home 為基準，飛控解鎖後 home 是這架的
+            起飛坪 ⇒ 送出的相對高度要減掉這個差（路徑的 ``fc_alt_offset_m``；平地為 0）。
 
         Returns
         -------
@@ -132,19 +155,25 @@ class VTOLMissionExporter:
         seq += 1
 
         # ── (3) DO_VTOL_TRANSITION → 固定翼 (FW, state=4) ──────
-        #   param1=4 (MAV_VTOL_STATE_FW)
-        #   後推馬達啟動，四軸馬達逐步關閉，進入固定翼巡航
-        lines.append(create_waypoint_line(
-            seq=seq, command=_CMD_DO_VTOL_TRANSITION,
-            frame=_FRAME_MISSION,
-            param1=4.0,        # MAV_VTOL_STATE_FW
-            current=0, autocontinue=1,
-        ))
-        seq += 1
+        #   ⚠ 預設**不發**：NAV_VTOL_TAKEOFF 之後飛向下一航點時飛控自己會轉。
+        #   只有 explicit_transitions=True 才插回來（對照組用）。
+        if self.explicit_transitions:
+            lines.append(create_waypoint_line(
+                seq=seq, command=_CMD_DO_VTOL_TRANSITION,
+                frame=_FRAME_MISSION,
+                param1=4.0,        # MAV_VTOL_STATE_FW
+                current=0, autocontinue=1,
+            ))
+            seq += 1
 
         # ── (4) 巡航航點 — NAV_WAYPOINT (16) ───────────────────
         #   跳過第一個 TAKEOFF 地面點（已由 Home + VTOL_TAKEOFF 處理）
         #   param2 = acceptance_radius（轉彎半徑）
+        land_wp = waypoints[-1]
+
+        def _same_spot(a, b) -> bool:
+            return abs(a.lat - b.lat) < 1e-9 and abs(a.lon - b.lon) < 1e-9
+
         for idx, wp in enumerate(waypoints):
             seg_name = getattr(getattr(wp, 'segment_type', None), 'name', '')
 
@@ -156,7 +185,16 @@ class VTOLMissionExporter:
             if seg_name == 'LANDING' and idx == len(waypoints) - 1:
                 continue
 
-            wp_alt = wp.alt if wp.alt > 0 else altitude
+            # ⚠⚠ 起降段的**純垂直**點（與 Home／降落點同經緯度、只差高度）
+            #    不可以發成 NAV_WAYPOINT：垂直爬升由 NAV_VTOL_TAKEOFF 做、
+            #    垂直下降由 NAV_VTOL_LAND 做。發出來的話 NAV_VTOL_LAND 的
+            #    進場段會變成 0 m，真機 PreArm「VTOL land too short」直接
+            #    擋住解鎖。規劃器仍保留這些點，3D 顯示的垂直段才畫得出來。
+            if seg_name in ('TAKEOFF', 'LANDING') and (
+                    _same_spot(wp, home_wp) or _same_spot(wp, land_wp)):
+                continue
+
+            wp_alt = (wp.alt - alt_offset_m) if wp.alt > 0 else altitude
 
             # 作業段密集航點：縮小 acceptance_radius 避免跳點
             accept_r = self.turn_radius_m
@@ -181,15 +219,15 @@ class VTOLMissionExporter:
             seq += 1
 
         # ── (5) DO_VTOL_TRANSITION → 多旋翼 (MC, state=3) ──────
-        #   param1=3 (MAV_VTOL_STATE_MC)
-        #   後推馬達關閉，四軸馬達啟動，進入懸停減速
-        lines.append(create_waypoint_line(
-            seq=seq, command=_CMD_DO_VTOL_TRANSITION,
-            frame=_FRAME_MISSION,
-            param1=3.0,        # MAV_VTOL_STATE_MC
-            current=0, autocontinue=1,
-        ))
-        seq += 1
+        #   ⚠ 預設**不發**：4.1+ 的 NAV_VTOL_LAND 會自己固定翼進場再 airbrake。
+        if self.explicit_transitions:
+            lines.append(create_waypoint_line(
+                seq=seq, command=_CMD_DO_VTOL_TRANSITION,
+                frame=_FRAME_MISSION,
+                param1=3.0,        # MAV_VTOL_STATE_MC
+                current=0, autocontinue=1,
+            ))
+            seq += 1
 
         # ── (6) NAV_VTOL_LAND (85) — VTOL 垂直降落 ─────────────
         #   param5=lat, param6=lon, param7=alt(0 = 觸地)
@@ -252,6 +290,7 @@ class VTOLMissionExporter:
                 waypoints=apath.waypoints,
                 altitude=altitude,
                 uav_id=uav_id,
+                alt_offset_m=float(getattr(apath, 'fc_alt_offset_m', 0.0) or 0.0),
             )
 
             filename = f"VTOL_UAV{uav_id}_高度{altitude:.0f}m.waypoints"
@@ -271,11 +310,19 @@ class VTOLMissionExporter:
             f.write(f"巡航速度：{speed:.1f}m/s\n")
             f.write(f"轉換安全高度：{self.transition_alt_m:.0f}m\n")
             f.write(f"轉彎半徑：{self.turn_radius_m:.0f}m\n\n")
+            # ⚠ 摘要必須描述**實際發出去的**序列。宣稱有插轉換指令而檔案裡
+            #   沒有（或反過來），讀簡報的人會照著錯的流程判讀飛行紀錄。
             f.write("任務流程：\n")
             f.write("  VTOL_TAKEOFF(84) → 垂直爬升至轉換高度\n")
-            f.write("  DO_VTOL_TRANSITION(3000,4) → 切換固定翼巡航\n")
+            if self.explicit_transitions:
+                f.write("  DO_VTOL_TRANSITION(3000,4) → 切換固定翼巡航\n")
+            else:
+                f.write("  （飛往下一航點時飛控自行轉固定翼）\n")
             f.write("  NAV_WAYPOINT(16) × N → 掃描/巡航航點\n")
-            f.write("  DO_VTOL_TRANSITION(3000,3) → 切換多旋翼減速\n")
+            if self.explicit_transitions:
+                f.write("  DO_VTOL_TRANSITION(3000,3) → 切換多旋翼減速\n")
+            else:
+                f.write("  （NAV_VTOL_LAND 自行固定翼進場後 airbrake 轉多旋翼）\n")
             f.write("  VTOL_LAND(85) → 垂直降落\n\n")
 
             for uav_id, apath in assembled_paths.items():
@@ -300,8 +347,13 @@ class VTOLMissionExporter:
         self,
         assembled_paths: dict,
         altitude: float = 100.0,
+        colors: Optional[dict] = None,
     ) -> List[dict]:
         """將群飛路徑轉為 Cesium drawVTOLSwarmPaths 所需資料格式。
+
+        colors: ``{uav_id: '#rrggbb'}``。GUI 要傳 3D 圖例層用的同一份
+                （``cesium_map_widget.swarm_drone_colors``），否則同一架機在圖例與條帶層
+                顏色不同；沒給時退回本函式自己的依機號色表（舊行為）。
 
         每架 UAV 回傳：
         {
@@ -324,7 +376,8 @@ class VTOLMissionExporter:
             if not apath.waypoints:
                 continue
 
-            color = _COLORS[uav_id % len(_COLORS)]
+            color = ((colors or {}).get(uav_id)
+                     or _COLORS[uav_id % len(_COLORS)])
             wps = apath.waypoints
             home = wps[0]
 
@@ -359,26 +412,21 @@ class VTOLMissionExporter:
                 'lat': home.lat, 'lon': home.lon, 'alt': self.transition_alt_m
             }
 
-            # 降落垂直段：最後巡航/降落點 → 地面
+            # 降落段：**最後一條進場腿**（巡航段的最後一點 → 降落點上空）→ 垂直落地。
+            # ⚠ 不可從 landing_pts[0] 起畫：那是 LANDING 段的第一點（= 最後一條條帶的終點，
+            #   HARVEST 實測離降落坪 0.6–1.7 km），直線拉到降落點上空會畫出一條實際不會飛的
+            #   長弦（2026-10-07 截圖裡那三條長黃線）。真正的返場路徑已經在 cruise_segment 裡
+            #   （它收了 landing_pts[:-1]），這裡只接上它的最後一點。
             land_wp = wps[-1]
-            vtol_landing = []
-            if landing_pts:
-                vtol_landing.append(landing_pts[0])
-            vtol_landing.append({
-                'lat': land_wp.lat, 'lon': land_wp.lon,
-                'alt': self.transition_alt_m
-            })
+            land_alt = land_wp.alt if land_wp.alt > 0 else self.transition_alt_m
+            mc_pt = {'lat': land_wp.lat, 'lon': land_wp.lon, 'alt': land_alt}
+            approach_end = (landing_pts[-2] if len(landing_pts) > 1
+                            else (cruise_pts[-1] if cruise_pts else None))
+            vtol_landing = [approach_end] if approach_end else []
+            vtol_landing.append(mc_pt)
             vtol_landing.append({
                 'lat': land_wp.lat, 'lon': land_wp.lon, 'alt': 0
             })
-
-            # MC 轉換點 = 降落段第一點（或最後巡航點）
-            mc_pt = landing_pts[0] if landing_pts else (
-                cruise_pts[-1] if cruise_pts else {
-                    'lat': land_wp.lat, 'lon': land_wp.lon,
-                    'alt': self.transition_alt_m
-                }
-            )
 
             result.append({
                 'uav_id': uav_id,

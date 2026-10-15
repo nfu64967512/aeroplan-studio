@@ -1,0 +1,87 @@
+{
+ "after": {
+  "figure_cm": 20.6,
+  "figures": [
+   "fig1_architecture.png",
+   "fig2_flowchart.png",
+   "fig5_compliance.png"
+  ],
+  "lines_by_section": {
+   "2.1 系統架構": 6.8,
+   "2.2 規劃流程": 5.8,
+   "2.3 核心公式": 51.8,
+   "3.1 實驗設置": 10.3,
+   "3.2 規劃與 SITL": 25.3,
+   "3.3 規劃天花板與風場": 38.8,
+   "3.4 起降走廊判準對照": 12.3,
+   "3.5 跳帶排序之觸發情": 7.3,
+   "一、前言": 16.5,
+   "三、SITL 驗證與成果": 1.5,
+   "二、研究方法": 1.5,
+   "參考文獻": 44.5,
+   "四、結論與限制": 21.5,
+   "封面": 4.3,
+   "摘要": 15.0,
+   "誌謝": 2.5
+  },
+  "pages_no_grid": 5.91,
+  "pages_with_grid": 7.37,
+  "printed_chars": 13808,
+  "text_lines": 265.7
+ },
+ "assumptions": {
+  "cm_per_line": 0.494,
+  "cm_per_line_grid": 0.635,
+  "figure_cm": {
+   "fig1_architecture.png": 6.8,
+   "fig1_architecture_compact.png": 5.33,
+   "fig2_flowchart.png": 7.59,
+   "fig3_results.png": 6.2,
+   "fig4_wind.png": 5.99,
+   "fig5_compliance.png": 6.2
+  },
+  "page_cm": 25.7,
+  "unit": "CJK/fullwidth = 1.0, ASCII = 0.5 (Times New Roman)",
+  "units_per_line": 43.8
+ },
+ "before": {
+  "figure_cm": 20.6,
+  "figures": [
+   "fig1_architecture.png",
+   "fig2_flowchart.png",
+   "fig3_results.png"
+  ],
+  "lines_by_section": {
+   "2.1 系統架構": 6.8,
+   "2.2 規劃流程": 5.8,
+   "2.3 核心公式": 40.3,
+   "3.1 實驗設置": 6.3,
+   "3.2 規劃與 SITL": 18.8,
+   "3.3 起降走廊判準對照": 10.3,
+   "一、前言": 14.5,
+   "三、SITL 驗證與成果": 1.5,
+   "二、研究方法": 1.5,
+   "參考文獻": 41.5,
+   "四、結論與限制": 9.5,
+   "封面": 4.3,
+   "摘要": 13.0,
+   "誌謝": 2.5
+  },
+  "pages_no_grid": 4.2,
+  "pages_with_grid": 5.16,
+  "printed_chars": 9370,
+  "text_lines": 176.6
+ },
+ "cut_scenarios": {
+  "after_cut_items_1_to_1": 5.81,
+  "after_cut_items_1_to_2": 5.58,
+  "after_cut_items_1_to_3": 5.5,
+  "after_cut_items_1_to_4": 5.45,
+  "after_cut_items_1_to_5": 5.37,
+  "after_cut_items_1_to_6": 5.31,
+  "after_cut_items_1_to_7": 4.99,
+  "after_cut_items_1_to_8": 4.91,
+  "as_written": 5.91,
+  "before_after_its_own_cut_items_1_to_3": 3.85
+ }
+}

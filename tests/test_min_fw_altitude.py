@@ -58,7 +58,7 @@ def _plan(*, minfw_a=None, minfw_b=None, band=None, ceil=None,
     NO_GO 時回傳 (None, 0.0, coordinator)。
     """
     coord = SwarmCoordinator()
-    coord.use_hv_dccpp = True
+    coord.use_harvest = True
     coord.hv_class_of = lambda d: {1: "A", 2: "B"}[int(d["drone_id"])]
     coord.hv_home = HOME
     coord.hv_wind = (0.0, 0.0)
@@ -78,7 +78,7 @@ def _plan(*, minfw_a=None, minfw_b=None, band=None, ceil=None,
         params["hv_min_fw_agl_m"] = mf
     if band is not None:
         params["hv_dh_band_min_m"] = band
-    coord.hv_params = params
+    coord.harvest_params = params
     drones = [{"drone_id": 1, "name": "A1", "position": HOME, "speed": 21.5,
                "heading": 0.0, "turn_radius": 200.0, "vehicle_type": "vtol",
                "fov_width": 150.0},

@@ -76,6 +76,7 @@ class DualMapWidget(MapWidgetBase):
         super().__init__(parent)
         self._mode = _MODE_2D
         self._map3d_settling = False     # 剛切到 3D、WebGL 重建中的安定窗口
+        self._survey_ortho = {}          # 航測正射：圖層代號 → 2D 重疊用的 (路徑, scheme, bounds)
         self._init_ui()
         self._connect_signals()
         logger.info('DualMapWidget 初始化完成')
@@ -566,9 +567,12 @@ class DualMapWidget(MapWidgetBase):
 
     # ── Geofence 自動建構 ─────────────────────────────────────────
     def _auto_build_fence(self, paths_list, altitude=None, buffer_m: float = 30.0,
-                          scan_angle_deg=None):
+                          scan_angle_deg=None, method: str = 'hull'):
         """
-        強制飛安：將所有航點包進矩形圍籬並上 3D 地圖渲染。
+        強制飛安：將所有航點包進**貼合航線的凸多邊形**圍籬並上 2D/3D 地圖渲染。
+
+        ⭐ 2026-10-08 使用者定調：規劃器出來的圍籬一律貼合路徑（底層預設 'hull'）。
+        ``scan_angle_deg`` 只有在呼叫端**明確**要矩形（method='aabb'）時才用；預設忽略。
         失敗（航點 <2 個、shapely 計算錯誤等）僅記錄，不阻斷顯示。
 
         ``scan_angle_deg`` 給了就產生**對齊掃描角**的矩形（羅盤慣例：0=北、
@@ -598,8 +602,10 @@ class DualMapWidget(MapWidgetBase):
             self.fence_built.emit(None)
             return
         try:
-            mgr = GeofenceConstraintManager(buffer_radius_m=buffer_m)
-            bundle = mgr.build(waypoints=flat, scan_angle_deg=scan_angle_deg)
+            # method='hull'：貼合航線的凸多邊形（不吃掃描角）；其餘維持矩形＋可選的掃描角對齊
+            mgr = GeofenceConstraintManager(buffer_radius_m=buffer_m, method=method)
+            bundle = mgr.build(waypoints=flat,
+                               scan_angle_deg=None if method == 'hull' else scan_angle_deg)
         except Exception as e:
             # ⚠️⚠️ 舊版只記一行 warning 就 return，**沒有**清掉
             # `_last_fence_bundle`（上面航點不足那一支有清）。結果是建構失敗時
@@ -692,10 +698,15 @@ class DualMapWidget(MapWidgetBase):
         #
         # ⚠ 這裡的圍籬同時包住起降段與轉場段，而那些航段**不是**沿掃描角飛的。
         #   所以對齊掃描角在這條路徑上省下來的面積會比純作業區的 2.06× 少很多。
+        #
+        # ⭐ 2026-10-08 使用者定調：圍籬「隨著我的路徑修正、平均覆蓋全部飛行路徑」⇒ 'hull'
+        #   （貼合航線的凸多邊形，四周平均外擴 buffer）。以前是矩形：HARVEST 不回報掃描角
+        #   ⇒ 退成正南北的軸對齊框；就算轉到條帶方向，起降場在作業區外時角落仍大片空白
+        #   （使用者那份：軸對齊 6.10、對齊條帶 6.43、凸多邊形 4.32 km²）。
+        #   scan_angle_deg 在這條路徑上因此不再用來定圍籬（參數保留給呼叫端相容）。
         try:
             self._auto_build_fence(
-                self._swarm_raw_to_paths(swarm_data), buffer_m=60.0,
-                scan_angle_deg=scan_angle_deg)
+                self._swarm_raw_to_paths(swarm_data), buffer_m=60.0, method='hull')
         except Exception as e:
             logger.warning(f'[Geofence] DCCPP/蜂群圍籬建構略過: {e}')
 
@@ -819,6 +830,98 @@ class DualMapWidget(MapWidgetBase):
             if hasattr(m, 'clear_all'):
                 m.clear_all()
         self.fence_built.emit(None)
+
+    # ── 航測成果：正射瓦片、照片位姿（2D + 3D 都要畫）──────────────────
+    #   ⚠ 這幾個一定要明確寫：`__getattr__` 只會代理到 2D ⇒ 沒有它們時
+    #     add_ortho_layer 直接 AttributeError（2D 沒有這個名字），set_photo_poses
+    #     只畫 2D、3D 靜默空白。
+    def _ortho_registry(self) -> dict:
+        # 用 __dict__ 取：屬性不存在時不能走 __getattr__（會被代理到 2D）
+        return self.__dict__.setdefault('_survey_ortho', {})
+
+    def add_ortho_layer(self, layer_id: str, path_or_url, scheme: str = 'tms',
+                        bounds=None, alpha: float = 1.0) -> dict:
+        """疊正射瓦片：3D ImageryLayer ＋ 2D folium TileLayer。
+
+        回傳 ``{'3d': 3D 實際生效設定, '2d': 2D 實際生效設定}``（bounds_source、層級…）。
+        2D 的 Leaflet 圖層沒有透明度設定 ⇒ ``'2d'['alpha']`` 固定回報 None，alpha ≠ 1 會記 warning。
+        """
+        eff3d = self.map_3d.add_ortho_layer(layer_id, path_or_url, scheme=scheme,
+                                            bounds=bounds, alpha=alpha)
+        eff2d = dict(self.map_2d.add_ortho_tiles(path_or_url, tms=(scheme == 'tms'), bounds=bounds))
+        eff2d['alpha'] = None
+        if float(alpha) != 1.0:
+            logger.warning(f'[Ortho] {layer_id}：alpha={alpha} 只套用在 3D，2D 圖層不透明')
+        self._ortho_registry()[layer_id] = (path_or_url, scheme, bounds)
+        return {'3d': eff3d, '2d': eff2d}
+
+    def remove_ortho_layer(self, layer_id: str) -> bool:
+        """移除一層正射。2D 沒有逐層移除 ⇒ 清掉 2D 正射後把其餘經由本方法加的圖層重疊回去。"""
+        reg = self._ortho_registry()
+        existed = self.map_3d.remove_ortho_layer(layer_id)
+        existed = (reg.pop(layer_id, None) is not None) or existed
+        self.map_2d.clear_ortho_tiles()
+        for path, scheme, bounds in reg.values():
+            self.map_2d.add_ortho_tiles(path, tms=(scheme == 'tms'), bounds=bounds)
+        return existed
+
+    def set_photo_poses(self, layer_id: str, rows, color=None, *, path=None) -> dict:
+        """照片位姿（photos.csv 的列）畫到 2D 與 3D。
+
+        3D 一次內嵌最多 PHOTO_POSES_INLINE_MAX 點；超過時必須給 ``path``（同一份 photos.csv），
+        改由 3D 頁面自己讀檔。2D 超過上限只顯示「請切到 3D」提示（見 MapWidget.set_photo_poses）。
+        回傳 ``{'3d': ..., '2d': ...}``。
+        """
+        from ui.widgets.cesium_map_widget import PHOTO_POSES_INLINE_MAX
+        rows = list(rows)
+        if len(rows) > PHOTO_POSES_INLINE_MAX and path is None:
+            raise ValueError(f'{len(rows)} 點超過 3D 內嵌上限 {PHOTO_POSES_INLINE_MAX}：'
+                             f'請給 photos.csv 路徑（path=）讓 3D 頁面讀檔，否則 3D 會是空的')
+        if len(rows) > PHOTO_POSES_INLINE_MAX:
+            eff3d = self.map_3d.load_photo_poses_file(layer_id, path, color=color)
+        else:
+            eff3d = self.map_3d.set_photo_poses(layer_id, rows, color=color)
+        eff2d = self.map_2d.set_photo_poses(layer_id, rows, color=color)
+        return {'3d': eff3d, '2d': eff2d}
+
+    def load_photo_poses_file(self, layer_id: str, path, color=None) -> dict:
+        """photos.csv（F2）或 JSON（``{"rows": [...]}``）：3D 由頁面讀檔，2D 讀同一份檔案的列。"""
+        import csv
+        import json
+        from pathlib import Path
+        eff3d = self.map_3d.load_photo_poses_file(layer_id, path, color=color)
+        p = Path(path)
+        if p.suffix.lower() == '.json':
+            rows = json.loads(p.read_text(encoding='utf-8')).get('rows') or []
+        else:
+            with open(p, encoding='utf-8-sig', newline='') as fh:
+                rows = list(csv.DictReader(fh))
+        eff2d = self.map_2d.set_photo_poses(layer_id, rows, color=color)
+        return {'3d': eff3d, '2d': eff2d}
+
+    def clear_photo_poses(self, layer_id: str) -> bool:
+        a = self.map_3d.clear_photo_poses(layer_id)
+        b = self.map_2d.clear_photo_poses(layer_id)
+        return bool(a or b)
+
+    def clear_survey_layers(self) -> None:
+        """正射與位姿兩張圖一起清。"""
+        self._ortho_registry().clear()
+        self.map_3d.clear_survey_layers()
+        self.map_2d.clear_survey_layers()
+
+    # ── GCP／檢核點佈設（survey.gcp_plan）：2D + 3D 都要畫（理由同上，不能靠 __getattr__）──
+    def set_survey_points(self, layer_id: str, points) -> dict:
+        """GCP／檢核點畫到 2D 與 3D；回傳 ``{'3d': 統計, '2d': 統計}``。"""
+        points = list(points)
+        eff3d = self.map_3d.set_survey_points(layer_id, points)
+        eff2d = self.map_2d.set_survey_points(layer_id, points)
+        return {'3d': eff3d, '2d': eff2d}
+
+    def clear_survey_points(self, layer_id: str) -> bool:
+        a = self.map_3d.clear_survey_points(layer_id)
+        b = self.map_2d.clear_survey_points(layer_id)
+        return bool(a or b)
 
     # ── 屬性代理（讓 main_window 直接存取 corners 等）─────────────────
     @property

@@ -1,7 +1,14 @@
 """
 相機配置對話框
 提供相機參數設置和航線間距自動計算
+
+「套用到航測建圖」⇒ 對話框關閉並交出 :meth:`CameraConfigDialog.applied_values`；由 MainWindow 把
+焦距／像素／影像尺寸／前向與側向重疊填進 VTOL 偵察頁的「航測建圖」欄位（建圖模式沒開時先問）。
+對話框本身不改任何設定，也不再自稱「已應用」——以前按「應用設定」只跳一句「相機設定已應用」，
+程式碼是 TODO，什麼都沒套用（違反有效值契約）。
 """
+
+import copy
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
@@ -68,7 +75,9 @@ class CameraConfigDialog(QDialog):
         calc_btn.clicked.connect(self.calculate_parameters)
         button_layout.addWidget(calc_btn)
 
-        apply_btn = IconButton('confirm', '應用設定', tone='primary')
+        apply_btn = IconButton('confirm', '套用到航測建圖', tone='primary')
+        apply_btn.setToolTip('把焦距、像素間距、影像尺寸、前向與側向重疊填進 VTOL 偵察頁的「航測建圖」欄位。\n'
+                             '飛行高度與速度不會套用（偵察頁有自己的欄位）。')
         apply_btn.clicked.connect(self.apply_settings)
         button_layout.addWidget(apply_btn)
 
@@ -244,7 +253,9 @@ class CameraConfigDialog(QDialog):
             focal_length = self.focal_length_spin.value()
             
             # 創建相機副本（使用自訂焦距）
-            camera = self.current_camera
+            # ⚠ 一定要複製：current_camera 是 CameraDatabase.CAMERAS 裡的共用物件，
+            #   直接改 focal_length 會把資料庫本身改掉（下次開對話框就是被改過的焦距）。
+            camera = copy.copy(self.current_camera)
             camera.focal_length = focal_length
             
             # 計算 GSD
@@ -313,13 +324,31 @@ class CameraConfigDialog(QDialog):
             logger.error(f"計算失敗: {e}")
             QMessageBox.critical(self, "計算錯誤", f"計算時發生錯誤：\n{str(e)}")
     
+    def applied_values(self) -> dict:
+        """要交給「航測建圖」的值（單位換成面板的：重疊用 0–1）。
+
+        像素間距 = 感光元件寬 ÷ 影像寬（µm）。``not_applied`` 列出對話框有、但**不會**套用的欄位，
+        讓呼叫端照實告訴使用者。
+        """
+        cam = self.current_camera
+        if cam is None:
+            raise ValueError("尚未選擇相機")
+        return {
+            "camera_name": cam.name,
+            "focal_mm": float(self.focal_length_spin.value()),
+            "pixel_um": float(cam.sensor_width) / float(cam.image_width) * 1000.0,
+            "width_px": int(cam.image_width),
+            "height_px": int(cam.image_height),
+            "front_overlap": float(self.front_overlap_spin.value()) / 100.0,
+            "side_overlap": float(self.side_overlap_spin.value()) / 100.0,
+            "not_applied": {"飛行高度": f"{self.altitude_spin.value():.1f} m",
+                            "飛行速度": f"{self.speed_spin.value():.1f} m/s"},
+        }
+
     def apply_settings(self):
-        """應用設定"""
+        """套用到航測建圖：關閉對話框（Accepted），實際填欄位由 MainWindow 依 applied_values() 做並回報有效值。"""
         if not self.current_camera:
-            QMessageBox.warning(self, "錯誤", "請先選擇相機並計算參數")
+            QMessageBox.warning(self, "錯誤", "請先選擇相機")
             return
-        
-        # TODO: 將計算結果應用到主視窗的參數面板
-        QMessageBox.information(self, "成功", "相機設定已應用")
-        logger.info("相機設定已應用")
+        logger.info(f"相機配置：準備套用到航測建圖 {self.applied_values()}")
         self.accept()

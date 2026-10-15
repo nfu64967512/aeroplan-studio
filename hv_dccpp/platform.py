@@ -46,6 +46,7 @@ __all__ = [
     "combine_sensors",
     "sensor_model",
     "trapezoid_footprint",
+    "crabbed_width_m",
     "EnergyModel",
 ]
 
@@ -634,6 +635,16 @@ def _end_extension(v_g_max_mps: float, t_settle_s: float, footprint_len_m: float
     return max(float(v_g_max_mps) * float(t_settle_s), footprint_len_m * (1.0 - forward_overlap))
 
 
+def crabbed_width_m(swath_m: float, footprint_len_m: float, crab_rad: float) -> float:
+    """偏流 ψ 後機身固定足跡（橫 w、縱 l）的保守橫向可用寬 w_eff = w cosψ − l sinψ（建圖模式 crab_margin）。
+
+    足跡隨機頭轉 ψ，航跡法向上「整段航線都看得到」的帶寬只剩 w cosψ − l sinψ。HQ6@120 m（w 125.7、l 94.2）、
+    V_a 19、W 5 → ψ 15.26°、w_eff ≈ 96.5 m。ψ = 0 → 原樣回傳 w（舊行為逐位元不變）。"""
+    if not crab_rad:
+        return float(swath_m)
+    return float(swath_m) * math.cos(crab_rad) - float(footprint_len_m) * math.sin(crab_rad)
+
+
 @dataclass(frozen=True, slots=True)
 class LidarSensor:
     """LiDAR 感測器模型（規格 §4.1）：w = 2h tan(θ_use/2)、s = w(1−o_side)、V_cap = f_p η_ret/(w ρ_req)、
@@ -642,6 +653,7 @@ class LidarSensor:
     hw: LidarHardware
     req: Any
     r: _ResolvedReq
+    crab_rad: float = 0.0          # 建圖模式偏流餘裕 ψ（0 ＝ 舊行為）；見 crabbed_width_m
 
     @property
     def defaults_applied(self) -> frozenset[str]:
@@ -655,6 +667,8 @@ class LidarSensor:
         return 0.0
 
     def strip_spacing_m(self, h_agl_m: float) -> float:
+        if self.crab_rad:
+            return crabbed_width_m(self.swath_m(h_agl_m), 0.0, self.crab_rad) * (1.0 - self.r.side_overlap)
         return self.swath_m(h_agl_m) * (1.0 - self.r.side_overlap)
 
     def max_ground_speed_mps(self, h_agl_m: float) -> float:
@@ -694,6 +708,7 @@ class CameraSensor:
     hw: CameraHardware
     req: Any
     r: _ResolvedReq
+    crab_rad: float = 0.0          # 建圖模式偏流餘裕 ψ（0 ＝ 舊行為）：s = (w cosψ − l sinψ)(1 − o_side)
 
     @property
     def defaults_applied(self) -> frozenset[str]:
@@ -706,6 +721,9 @@ class CameraSensor:
         return float(h_agl_m) * self.hw.sensor_height_mm / self.hw.focal_length_mm
 
     def strip_spacing_m(self, h_agl_m: float) -> float:
+        if self.crab_rad:
+            return crabbed_width_m(self.swath_m(h_agl_m), self.footprint_len_m(h_agl_m),
+                                   self.crab_rad) * (1.0 - self.r.side_overlap)
         return self.swath_m(h_agl_m) * (1.0 - self.r.side_overlap)
 
     def max_ground_speed_mps(self, h_agl_m: float) -> float:
@@ -788,6 +806,7 @@ class TrapezoidSensor:
     hw: TrapezoidFovSpec
     req: Any
     r: _ResolvedReq
+    crab_rad: float = 0.0          # 建圖模式偏流餘裕 ψ（0 ＝ 舊行為）；l 取 footprint_len_m（保守近似）
 
     @property
     def defaults_applied(self) -> frozenset[str]:
@@ -804,6 +823,9 @@ class TrapezoidSensor:
         return self._dims(h_agl_m)[1]
 
     def strip_spacing_m(self, h_agl_m: float) -> float:
+        if self.crab_rad:
+            w, l = self._dims(h_agl_m)
+            return crabbed_width_m(w, l, self.crab_rad) * (1.0 - self.r.side_overlap)
         return self.swath_m(h_agl_m) * (1.0 - self.r.side_overlap)
 
     def max_ground_speed_mps(self, h_agl_m: float) -> float:

@@ -1,0 +1,1427 @@
+                                        Noname manuscript No.
+                                        (will be inserted by the editor)
+
+                                        Cooperative Multi-UAV Coverage Mission Planning Platform
+                                        for Remote Sensing Applications
+
+                                        Savvas D. Apostolidis1,2 · Pavlos Ch. Kapoutsis3 · Athanasios Ch.
+                                        Kapoutsis2 · Elias B. Kosmatopoulos1,2
+
+arXiv:2201.07030v2 [cs.RO] 19 Jan 2022  Received: date / Accepted: date
+
+                                        Abstract This paper proposes a novel mission plan-           it unlocks a wide new range of applications, that was
+                                        ning platform, capable of efficiently deploying a team of    previously not feasible due to the limited battery life
+                                        UAVs to cover complex-shaped areas, in various remote        of UAVs. In order to investigate the actual efficiency
+                                        sensing applications. Under the hood lies a novel opti-      gains that are introduced by the multi-UAV utilization,
+                                        mization scheme for grid-based methods, utilizing Sim-       a simulated study is performed as well. All of these
+                                        ulated Annealing algorithm, that significantly increases     capabilities are packed inside an end-to-end platform
+                                        the achieved percentage of coverage and improves the         that eases the utilization of UAVs' swarms in remote
+                                        qualitative features of the generated paths. Extensive       sensing applications. Its versatility is demonstrated via
+                                        simulated evaluation in comparison with a state-of-the-      two different real-life applications: (i) a photogrametry
+                                        art alternative methodology, for coverage path planning      for precision agriculture and (ii) an indicative search
+                                        (CPP) operations, establishes the performance gains in       and rescue for first responders missions, that were per-
+                                        terms of achieved coverage and overall duration of the       formed utilizing a swarm of commercial UAVs. An im-
+                                        generated missions. On top of that, DARP algorithm is        plementation of the mCPP methodology introduced in
+                                        employed to allocate sub-tasks to each member of the         this work, as well as a link for a demonstrative video
+                                        swarm, taking into account each UAV's sensing and op-        and a link for a fully functional, on-line hosted instance
+                                        erational capabilities, their initial positions and any no-  of the presented platform can be found here: https:
+                                        fly-zones possibly defined inside the operational area.      //github.com/savvas-ap/mCPP-optimized-DARP.
+                                        This feature is of paramount importance in real-life ap-
+                                        plications, as it has the potential to achieve tremen-       Keywords cooperative robots · coverage · motion
+                                        dous performance improvements in terms of time de-           planning · remote sensing · aerial robotics
+                                        manded to complete a mission, while at the same time
+                                                                                                     1 Introduction
+                                             S. D. Apostolidis
+                                        sapostol@ee.duth.gr                                          For the past few years UAVs have attracted the interest
+                                                                                                     of many enterprise fields, becoming a powerful tool for
+                                             P. Ch. Kapoutsis                                        professionals to acquire data in a fast and efficient way.
+                                        pavloskapoutsis@gmail.com                                    Some of the fields that already exploit the use of UAVs
+                                                                                                     for acquiring data are: precision agriculture [1], [2], [3],
+                                             A. Ch. Kapoutsis                                        infrastructure inspection [4], [5], exploration [6], search
+                                        athakapo@iti.gr                                              and rescue [7], [8] and monitoring [9], [10]. As a result
+                                                                                                     of this all the more growing interest on this direction,
+                                             E. B. Kosmatopoulos                                     there are now available a lot of commercial UAVs, spe-
+                                        kosmatop@iti.gr                                              cialized for enterprise use. To cope with all these aerial
+                                                                                                     devices, a range of software platforms that automate
+                                        1 Department of Electrical and Computer Engineering,         the procedure of flying, acquiring and processing data
+                                        Democritus University of Thrace, Xanthi, Greece              has been developed as well.
+                                        2 Information Technologies Institute, The Centre for Re-
+                                        search & Technology, Hellas, Thessaloniki, Greece
+                                        3 School of Electrical and Computer Engineering, National
+                                        Technical University, Athens, Greece
+2                                                            Savvas D. Apostolidis et al.
+
+    Integrated end-to-end platforms, that offer an au-       3. on-line/off-line methods, based on whether or not
+tomated coverage procedure with UAVs, facilitate data            an on-going mission can be adjusted by getting real-
+gathering and make remote sensing with UAVs acces-               time feedback from the operational area
+sible to a wide range of professionals and hobbyists.
+Thanks to such platforms, common, relatively cheap,          4. and energy-aware or not, based on whether some ac-
+commercial UAVs can be turned to powerful tools for              tions are taken in order to provide energy-efficient
+inspection, mapping, monitoring and search and rescue            paths (e.g., reduce turns, avoid redundant scans etc.).
+operations. The introduction of UAVs in the aforemen-
+tioned operations has started to radically change many       In addition to them, there are also different categories
+professions, making the conduction of different tasks        regarding the patterns of paths that come out. The
+easier, safer and more efficient. Despite the advances       most dominant of them are:
+that were introduced by these platforms, there is still
+way to go, to make them more efficient and make the          1. the ones using lawnmower patterns, that are sim-
+most out of the capabilities offered by UAVs.                    ple back and forth patterns with a defined distance
+                                                                 between them,
+    For a wide range of remote sensing operations with
+UAVs, the objective of a mission is to completely cover a    2. Spanning Tree Coverage (STC) [14] patterns, where
+user-defined area and gather data. In general, the path          a Minimum Spanning Tree (MST) [15] is constructed
+generation problem, with the objective to completely             at first and a path that circumnavigates the MST is
+cover a region of interest (ROI), is usually referred as         generated afterwards,
+Coverage Path Planning (CPP) [11] in literature. The
+CPP problem can be stated as follows: given a defined        3. and methods using spiral patterns, navigating from
+ROI and specific coverage capabilities of the sensors            a sided starting point to a centrally-placed ending
+used, provide paths, for one or more mobile robots, in           point of the ROI, or reverse.
+order to completely cover the ROI, taking into account
+spatial and motion constraints.                                  Table 1 presents an overview of the following related
+                                                             works, comparing the support and implementation of
+    This paper addresses the problem of designing multi-     some major features for a CPP method, in a succinct
+UAV missions to cooperatively cover a single region of       way.
+interest, oriented to the real world remote sensing ap-
+plication. Such a problem set-up contains both a NP-             One of the most popular approaches in the CPP
+hard variation [12] of the original CPP, called mCPP         problem is the boustrophedon cellular decomposition
+(multi-robot Coverage Path Planning), and the chal-          [16]. This method generates lawnmower patterns and
+lenging task of translating grid-based solutions to real-    was initially designed in an attempt to minimize the
+world navigation paths. The following subsection sum-        number of excess lengthwise motions of the robot. An
+marizes the related works that have been developed           important advantage of the method, making it so pop-
+around these axes.                                           ular, is the fact that it can be used for complex-shaped
+                                                             ROIs with no-fly-zone (NFZs) inside them, providing
+1.1 Related Works                                            very high percentage of coverage. Many works so far
+                                                             are based on it, exploiting certain aspects, improving
+Given that the CPP problem provides a powerful tool          and extending this approach. Some recent examples
+for a wide range of domains and applications, it has         that exploit boustrophedon cellular decomposition are:
+attracted a great interest over the years and there are      [18] where the authors present a method to define and
+many research works about it. The state-of-the-art on        calculate flight times in a boustrophedon aerial survey
+CPP methods for robotics in general is summarized in         coverage path in wind, for precision agriculture appli-
+[11] and works tailored to UAVs are presented in [13].       cations and [19] which is introduced by the authors
+CPP methods can be divided in categories according           as a semi-boustrophedon method, because, while they
+to different criteria that focus on specific aspects of the  use boustrophedon cellular decomposition, they do not
+problem. The most important of them are:                     limit coverage strictly to boustrophedon paths in or-
+                                                             der to reduce run-time, while maintaining near-optimal
+1. cellular decomposition/grid-based methods, based on       path length. This family of approaches is the most com-
+    how the method discretizes the ROI in order to cal-      monly used for real-life operations, at the moment, be-
+    culate paths,                                            cause of its incorporated advantages and its out-of-the-
+                                                             box adaptability to complex-shaped ROIs. However, it
+2. single/multi-robot methods, regarding the number          is not the most energy-efficient one, as it many times in-
+    of robots that can participate in a mission,             cludes redundant movements that do not contribute to
+                                                             the scanning procedure (e.g., from the starting/ending
+                                                             points to the home position of the vehicles) and multiple
+Cooperative Multi-UAV Coverage Mission Planning Platform for Remote Sensing Applications                                                          3
+
+ Method         Real-life  Multi-robot          Task allocation         Integrated platform     Supported shape of ROI            Support of
+             experiments      support                                                                                          NFZ/Obstacles
+ [16], [17]                                                 -                                   Convex & Concave polygons
+     [18]                                                   -                                   Convex & Concave polygons                 
+     [19]                                                                                                                                *
+     [20]                                                   -            ROS implementation           Convex & Concave                    
+     [21]                                                                                            Non-connective ROIs                  
+     [22]                                                   -                                   Convex & Concave polygons                 
+                                                            -                                                                             
+ [14], [23]                                Exclusive & Proportional                                     Convex polygons         - obstacle cells
+ [24], [25]                                                 -                                           Convex polygons         - obstacle cells
+                                             Single path allocation                                Grid with obstacle cells
+     [26]                                  based on initial positions                              Grid with obstacle cells     - obstacle cells
+                                                   Non-exclusive                       
+     [27]                                     single path allocation                               Grid with obstacle cells     - obstacle cells
+     [28]                                             Exclusive                                                                 - obstacle cells
+     [29]                                                Equal                                     Grid with obstacle cells
+     [30]                                       Exclusive & Equal                             Multi-scale grid with obstacles             
+Proposed                                      Minimum overlap &                                 Convex & Concave polygons               **
+                                        Proportional after negotiation                          Convex & Concave polygons                 
+                                                Minimum overlap                              Convex & Concave polygons
+                                                   Exclusive &
+                                             Equal/Proportional
+
+                                                  Table 1: Overview of Related Works
+
+*Not explicitly mentioned in the paper, but this feature is supported inherently by the method used.
+
+**In the paper NFZs are only included between the home position of the UAVs and the first mission's waypoint, but not
+inside the ROI.
+
+times re visitation of certain points, to ensure complete               not, planners available at the moment (such as Ardupi-
+coverage.                                                               lot Mission Planner1, Pix4DCapture2, Drone Harmony3
+                                                                        and DJI Flight Planner4). A point that this work falls
+    In [17] exact cellular decomposition method is used                 short, is that it cannot handle multiple UAVs missions.
+in order to provide turn-minimized paths for UAVs in-
+side a polygon ROI. It is shown that this kind of paths                     In [21] a CPP method tailored to UAVs, having in
+is more efficient, as turns are time and energy consum-                 mind real-life problems and limitations faced in pho-
+ing for UAV missions. In this work, convex or con-                      togrammetry applications, is presented. In this work
+cave polygon regions are decomposed to convex sub-                      an energy model derived from real measurements is in-
+regions. After that, the optimal path orientation for                   troduced, that is used to provide a power consumption
+every sub-region is calculated and sub-regions get con-                 estimation for the UAV. After that, an energy aware
+nected again, to provide the overall path. While this                   algorithm is proposed, that provides path with reduced
+work becomes a lot more energy-efficient by signifi-                    energy consumption, while taking into account image
+cantly reducing the number of turns, it still inherits                  resolution constraints. On the top of that, two safety
+the issues mentioned in the previous paragraph.                         mechanisms are presented. The first one, executed off-
+                                                                        line, checks if the available energy is enough to complete
+    [20] presents one of the most recent works on the                   a calculated mission, while the second, on-line mecha-
+CPP problem. In this work, boustrophedon CPP [16] is                    nism, reassures safe return for the UAV to the take-
+extended in order to find the optimal sweeping direction                off location, in case the remaining battery energy is
+for every sub-region of a user-defined ROI, including ob-               not enough to complete a mission and return to home.
+stacles and NFZs. This method exploits already exist-                   While this work manages to efficiently face some of the
+ing approaches on combination and manages to attract                    challenges that are met in real-life operations, it still
+the interest as one of the most appropriate for real-                   remains limited by the UAV's battery life, as it cannot
+life use implementations of coverage mission planners.                  handle multiple UAVs in the same mission.
+It was developed for low-altitude flights of UAVs, and
+is available in an open source robot operating system                     1 http://ardupilot.org/planner
+(ROS) implementation. The mission planner presented                       2 https://www.pix4d.com/product/pix4dcapture
+in this work, outperforms in terms of time-efficiency and                 3 https://droneharmony.com
+ability to handle NFZs many existing, commercial or                       4 https://www.djiflightplanner.com
+4                                                            Savvas D. Apostolidis et al.
+
+    [22] presents a mCPP method for UAVs. The pre-           number-of-robots single-robot CPP problems. This is
+sented algorithm divides the ROI into smaller, exclu-        achieved by the division of the overall ROI to equal,
+sive sub-regions for every UAV and computes a turn-          exclusive sub-regions for each vehicle, based on their
+minimized back and forth path for every UAV, inside          initial positions. The proposed methodology promises
+their exclusive sub-regions. Although this work presents     to always converge to a solution, at least in cases where
+an interesting approach, it can only handle convex poly-     one exists and also offers a significantly reduced com-
+gon areas and does not support NFZs inside them.             plexity compared to other state-of-the-art-approaches
+                                                             of that time. While [27] presents a really promising ap-
+    Another popular approach in the CPP domain is            proach, it does not contain any real-life experiments
+the STC method [14]. The proposed algorithm sub-             that would validate its real-world efficiency.
+divides the operational area into disjoint cells, which
+are used for the generation of a spanning tree. As a             Based on a different approach, where an overall re-
+next step, a path is generated around this spanning tree     gion is divided in exclusive sub-regions and then allo-
+and the method guarantees that every point of the grid       cated to a group of UAVs, [28] identifies the gap of
+is covered precisely once. This circumnavigating path        coverage path planning in complex geographic envi-
+has the advantage of avoiding redundant movements of         ronments and proposes an STC-based mCPP method,
+the robot, that do not contribute in the scanning pro-       called MCCP-MLCT. This method constructs a grid
+cedure. A mission starts and ends in the same position       with multiple scales (different sizes of cells), based on
+and every cell is visited only once. This way, the paths     the complexity and topology of the environment that
+generated are highly appropriate for energy-efficient ap-    will be applied. The key idea is that different parts of a
+plications. Defining obstacles inside a ROI is also sup-     ROI that should be covered, should be faced in different
+ported, by removing connections of nodes that repre-         ways, e.g., in a search and rescue task, more complex
+sent them, during the MST generation. However, being         parts of the region should be scanned in more detail, so
+a grid based method, it can turn out to be inefficient       smaller-sized cells should be used for the construction
+for covering complex-shaped ROIs, because of common          of MSTs. This work introduces an idea that makes it
+discretization issues [31], [32]. As in boustrophedon ap-    highly appropriate for specific types of missions, where
+proach, there are also a lot of works based on STC,          the detail of collected data should vary depending on
+exploiting certain aspects and extending this approach,      the environment characteristics. While an application
+such as [23] where the authors attempt to extended           of the CPP method is presented for a real remote sens-
+spanning tree based coverage (X-STC) algorithm, in           ing image, this work does not include any real-life ex-
+order to cover even the partially occupied cells, which      periments.
+helps in the better coverage of complex-shaped polygon
+regions.                                                         An integrated platform for managing missions for
+                                                             precision agriculture, utilizing multiple UAVs, is pre-
+    In addition, [24], [25], [26] present some approaches    sented in [29]. This work contains a complete top to
+expanding the STC for multi-robot use. [24] is the first     down approach, as it describes a tool containing every-
+approach utilizing STC for the mCPP problem, and             thing from a graphic user interface (GUI) on a ground
+[25], [26] introduce ideas to solve it more efficiently. In  station, to a robust flight controller for the UAVs, to
+all of these works, a single MST is constructed and the      improve their maneuverability. The main contribution
+generated path around it gets allocated proportionally       here is the practical experimentation with an integrated
+to the multiple robots. This approach for multi-robot        tool, however a new one-phase task partitioning man-
+coverage though, is not the most efficient one, as the       ager is presented and a CPP method that minimizes
+portion of the area that will be allocated to each robot is  turns and times of revisiting a specific cell is used as
+dependent on their initial positions, ignoring the oper-     well. It is worth pointing out that this setup is able
+ational capabilities of each member of the team. More-       to handle non-convex ROIs with NFZs inside them as
+over, there are cases where the same cell of the grid        well. Even if there are available more energy-efficient
+has to be scanned multiple times by different members.       approaches for the coverage paths generation, this work
+Finally, it should be noted that none of these works         is one of the most complete, in terms of integration level
+include real-life applications.                              for the presented platform.
+
+    [27] is also a STC-based approach that deals with            A recent work, including real-life, multi-UAV opera-
+the mCPP problem, for grids with prior-defined obsta-        tions, under very harsh weather conditions, is presented
+cles. However, this work approaches the problem from a       in [30]. The authors have developed a mCPP methodol-
+completely different point of view, compared to [24],[26],   ogy based on a completely different approach, in order
+[25]. Specifically, [27] deals with the multiple vehicles,   to face a set of challenges that are faced in surveys of
+by reducing the mCPP problem to, as-many-as-the-             penguin colonies in Antarctica. The main objective of
+Cooperative Multi-UAV Coverage Mission Planning Platform for Remote Sensing Applications  5
+
+this work is to minimize the time duration of the mis-         aware features. The proposed platform, as depicted in
+sions, a factor that is critical for this type of operations.  the last row of table 1, intends to provide a tool that
+The proposed methodology, named Path Optimization              can ease the planning and execution of coverage mis-
+for Population Counting with Overhead Robotic Net-             sions with multiple commercial, or custom UAVs, while
+works (POPCORN), generates paths for multiple UAVs             at the same time provide state-of-the-art performance
+by solving a series of satisfiability modulo theory (SMT)      guarantees. For this purpose:
+instances (high-level objectives are defined at this step,
+e.g., same or almost same starting and ending positions        1. A previous work from our lab [27] for multi-robot
+for the paths). By iteratively reducing the maximum al-            task allocation and coverage path planning, is ad-
+lowed path's length, this methodology manages to cal-              justed and applied for real-life use with UAVs. Specif-
+culate the shortest possible paths to completely cover             ically, [27] is extended to also support proportional
+a ROI. The backtracking of paths and the places re-                allocation of the ROI to the vehicles, and great ef-
+visited by multiple UAVs is minimal, but still not null,           fort has been given to address some of the efficiency
+however in missions where detecting moving targets is              issues that arise, when applying grid-based CPP
+desired, this could not be considered as a disadvantage.           methodologies in real-life operations.
+
+    From the works presented above, many suffer in             2. A novel optimization procedure that significantly in-
+handling concave ROIs and NFZs, not all of them are                creases the percentage of coverage and improves the
+capable of utilizing multiple robots and only [20], [29]           qualitative features of the generated paths, for STC-
+are presented as an integrated platform for real-life use.         based methods, is implemented and evaluated.
+In addition, especially for the STC-based methods, none
+of them presents real-life experiments.                        3. An approach to further reduce the path turns and
+                                                                   increase the energy-awareness of the proposed method
+    On the other hand, regarding the majority of the               is applied.
+software platforms for mission planning, that are cur-
+rently available, they mostly use simple back and forth        4. A comparison with a recent, powerful in terms of
+patterns. Some of them, also allow the user to select              complete coverage and support of complex-shaped
+a rotation angle for the generated path. While these               ROIs, state-of-the-art approach is performed, in or-
+patterns are efficient in terms of computation and pro-            der to quantify and evaluate the achieved perfor-
+vide a very high percentage of coverage for a defined              mance of the resulting path planning scheme.
+ROI, they usually suffer in managing efficiently mis-
+sion's resources. Most of high-level, ready-to-use mis-        5. A multi-robot marginal utility study is performed,
+sion planners available, do not support multi-robot cov-           in order to investigate the actual efficiency gains
+erage path generation, or the definition of NFZs inside            that are introduced by the utilization of multiple
+the user-defined ROI as well.                                      UAVs, in coverage missions.
+
+    Overall, in the CPP domain there is a clear gap            6. A new, end-to-end interface is developed, to provide
+between the integrated end-to-end platforms that can               a user-friendly interaction layer to create, perform
+easily deploy coverage missions in real-world conditions           and manage missions.
+and the state-of-the-art, literature approaches that in-
+corporate novel, efficient functionalities. On the one         7. A robust communication interface to integrate with
+hand, most of the integrated platforms manage to suc-              ease commercial UAVs to the platform is developed.
+cessfully deploy coverage missions, easing the whole pro-
+cedure by offering user-friendly environments and ro-          8. Two real-life experiments are performed, to demon-
+bust implementations. On the other hand, while various             strate the applicability and robustness of the devel-
+literature approaches manage to solve very efficiently             oped platform in some indicative use cases.
+specific problems faced in the CPP domain, most of
+them are not developed with the intention of getting               The result of this work is a powerful multi-UAV
+applied in real-life operations and thus cannot easily be      mission planner, that supports no-fly-zones and obsta-
+used in real-world conditions.                                 cles, manages wisely the operational resources, supports
+                                                               both fair and proportional task allocation for the UAVs,
+1.2 Contributions                                              depending on their operational capabilities, is easy to
+                                                               use and is compatible with almost any commercial UAV,
+In this work is presented a high-level, user-friendly plat-    not demanding special and expensive equipment. Based
+form, developed to perform multi-UAV coverage mis-             on the categories that were mentioned in 1.1, the pro-
+sions, optimized for real-life use and integrating energy-     posed CPP methodology can be described as a grid-
+                                                               based, off-line, STC-pattern, multi-robot, energy aware
+                                                               solution. Figure 1 shows a mission example from the
+                                                               proposed platform, involving 10 UAVs, in a non-convex,
+                                                               complex-shaped polygon ROI with 2 NFZs and the ob-
+6                                                          Savvas D. Apostolidis et al.
+
+                                  Fig. 1: Coverage mission with the proposed mCPP platform
+
+The objective of this mission is to completely cover a non-convex, complex-shaped polygon ROI, that includes two separate
+  NFZs inside it (marked with light-red color), involving 10 UAVs, that all contribute equally to the scanning procedure.
+
+jective to completely cover the defined region, utilizing  method, based on a previous work of our lab [27], is
+all UAVs equally.                                          proposed. In this section, the overall proposed method
+                                                           is described in detail, along with the optimizations that
+1.3 Paper outline                                          take place to make it appropriate and efficient for the
+                                                           multi-UAV domain.
+The work in this paper is organized as follows: section 2
+presents the task allocation and coverage path planning        The proposed mCPP method deals with the prob-
+methods, along with the optimization procedure that is     lem of designing paths for a team of UAVs, participat-
+implemented, in section 3 is performed a simulated eval-   ing in a mission, given:
+uation of the proposed methodology, to assess the op-
+timization procedure and the overall CPP efficiency, as     ­ a user-defined polygon ROI, probably including smaller
+well as a simulated multi-robot study, section 4 presents      polygon sub-regions representing NFZs/obstacles (O),
+an overview of the overall software platform, section 5        formatted in the WGS84 (World Geodetic System -
+includes two different applications of the proposed plat-      1984) coordinate system [33], as follows:
+form in real-life experiments, along with visual results,
+and finally in section 6 this work is summarized and       ROI = {(lat1, lon1), ...(latn, lonn)}  (1)
+future plans to improve it are discussed.
+                                                              O = {{(latob1|1, lonob1|1), ...(latob1|n1 , lonob1|n1 )},
+2 Multi-robot Coverage Path Planning                          ...{(latobm|1, lonobm|1), ...(latobm|nm , lonobm|nm )}}
+
+In order to cope with the challenges that are faced in                                                                        (2)
+real-life, multi-UAV, coverage missions, it is essential
+to utilize an approach that (i) provides safe and ef-         where n is the count of polygon vertices, obi (i =
+ficient paths, (ii) respects the operational capabilities     0, ...m) stands for the obstacle number (pointer), ni
+and motion-limitations of the vehicles and (iii) ensures      (i = 0, ...m) is the count of vertices for each NFZ
+a high percentage of coverage, so as to gather sufficient     region and m the count of NFZs/obstacles.
+information for any operational area. To efficiently ad-   ­ the desired scanning density (ds) for the mission, in
+dress these issues, an optimized for real-life use mCPP       meters, representing the distance between two se-
+                                                              quential trajectories,
+                                                           ­ the number of UAVs (vn) that will participate in
+                                                              the mission
+Cooperative Multi-UAV Coverage Mission Planning Platform for Remote Sensing Applications  7
+
+Fig. 2: Data-flow of the mCPP method
+
+­ and the initial positions of the UAVs in the opera-          2.1.2 Nodes Placement
+   tional area (could be real, user-defined, or random),
+   formatted in WGS84 as well:                                 As a first step, the user-defined ROI must be repre-
+                                                               sented on a grid. The grid size needs to be propor-
+initpos = {(latv1 , lonv1 ), ...(latvvn , lonvvn }  (3)        tional to the user-defined scanning density - ds. The
+                                                               center of every grid's cell represents a node which will
+    where vi (i = 1, ...vn) stands for the UAV number          be later used for the MST construction, with the actual
+    (pointer).                                                 path being laid around the constructed spanning tree.
+                                                               Therefore, the nodes in the grid should be placed with
+As an output of the method, a set of paths, one path           a distance of dn = 2 × ds between each other, in order
+for each UAV participating in the mission, is produced,        to achieve the desired distance between trajectories.
+so as to provide complete coverage of the ROI:
+                                                                   To define the size of the grid, a bounding box around
+paths = {{(latv1|1, lonv1|1), ...(latv1|m1 , lonv1|m1 )}, (4)  the polygon is constructed, as shown in 3(a) (red box).
+...{(latvvn |1, lonvvn |1), ...(latvvn |mvn , lonvvn |mvn )}}  According to this, the grid size will be x × y, where:
+
+where mi (i = 1, ...vn) is the count of waypoints for each     x = xmaxp - xminp          (5)
+UAV. Figure 2 presents the data-flow of the method.            dn
+
+                                                               y = ymaxp - yminp          (6)
+                                                               dn
+
+2.1 Field Representation on Grid                               and r denotes the floor of r (largest integer below the
+                                                               given real number).
+2.1.1 Transformation of Coordinates
+                                                                   After that, the x × y nodes are placed inside the
+As a first step, the input coordinates of the polygon          bounding box with a dn distance between each other.
+ROI (1), the obstacles (2) and the UAVs' positions (3),
+are transformed from the WGS84 system, to a local              2.1.3 Grid Representation
+NED (North East Down) system [33], with a common
+reference point inside the ROI. The reason why NED             At this point, each one of the previously placed nodes
+coordinate system is preferable, is because coordinates        should obtain a state that describes how it should be
+are represented in a local Cartesian system with the           treated during the path generation procedure. The three
+metric system being straight in meters. NED coordi-            possible states for every node are:
+nates facilitate in the node placement and optimization
+procedures that are described below. The paths are also         ­ Obstacle, used to represent areas that are outside of
+calculated in NED coordinates, and have to be trans-               polygon, or inside NFZs. These nodes will not be
+formed back to the WGS84 coordinate system, before                 used for the MST construction and no path will be
+given as output.                                                   laid around them.
+
+                                                                ­ Free Space, used to represent nodes that will be used
+                                                                   for MST construction and path generation.
+8                                                             Savvas D. Apostolidis et al.
+
+­ UAV, used to represent the initial UAVs' position. 2.2 Node Placement Optimization
+
+    Two different approaches are implemented to de-           One of the main issues that grid-based methods usually
+cide whether a node will be labeled as Obstacle or Free       face when used for complex-shaped polygons, is that
+Space. Figures 3(b), 3(c) shown a example of a polygon        due to discretization issues the representation of the
+ROI representation on grid, using both approaches. The        ROI ends up being a lot different and smaller in com-
+first one intends to provide paths strictly inside the poly-  parison with the actual region. That gets translated to
+gon handling the boundaries of the polygon as a strict        incomplete coverage of the ROI. A common practice to
+geo-fencing zone, while the second one allows paths to        overcome this problem is to use a smaller discretization
+get outside of polygon, in order to provide even better       scale. However, as mentioned above, the grid size should
+coverage of the ROI. For the first approach, the char-        be proportional to the user-defined ds. Forcing a ds that
+acterization of a node comes out of the area around           is smaller than the indicated one, in order to provide a
+the node. Specifically, a check is performed, regarding       descent coverage is a waste of resources, as it increases
+whether the centers of all sub-cells, that will be de-        time and energy demands for a mission to be carried
+scribed in subsection 2.3.2, are inside the polygon, or       out. Moreover, large grid dimensions are translated to
+not. For the second approach, the same check is per-          bigger demands in memory and computational power
+formed, however, only for nodes themselves, ignoring          for the path planning method. In this work, in order to
+the area around them.                                         overcome this issue an optimization procedure is pro-
+                                                              posed, that intends to optimize the nodes' placement,
+                                                              given the user-defined ds.
+
+                                                                  The key idea is that by rotating and shifting the
+                                                              polygon over a grid that respects the defined ds, more
+                                                              favorable configurations may appear, where the count
+                                                              of nodes that are annotated as Free Space is greater. An
+                                                              example where these transformations are applied to a
+                                                              specific ROI is presented in figure 4, for the better un-
+                                                              derstanding of this idea. Such configurations are more
+                                                              likely to provide paths that achieve a high percentage
+                                                              of coverage for the given ROI. Based on this idea, an
+                                                              optimization process utilizing the Simulated Annealing
+                                                              [34] algorithm is proceeded, in order to maximize the
+                                                              overall coverage of the ROI. The control variables for
+                                                              the aforementioned optimization problem are selected
+                                                              as follows:
+
+   (a) Standard and augmented bounding boxes                  ­ sx, which controls the shifting of the polygon over
+                                                                 the grid in X axis, in a range [0, dn],
+
+                                                              ­ sy, which controls the shifting of the polygon over
+                                                                 the grid in Y axis, in a range [0, dn],
+
+                                                              ­ , which controls the rotation of the polygon over
+                                                                 the grid, in a range [0, 90].
+
+   (b) Nodes placed over        (c) Nodes placed over             It should be noted that the control variables and
+   polygon - Paths Strictly in  polygon - Provide Better      their ranges are selected so as to provide all the avail-
+   Polygon approach             Coverage approach             able configurations of node positioning inside the poly-
+                                                              gon. Combining these three variables in the selected
+   Fig. 3: Representation of polygon ROI on grid              ranges and allowing values for them in a continuous
+                                                              space, ensures the availability of every possible configu-
+                                                              ration. For the implementation of the optimization pro-
+                                                              cedure, an augmented grid (figure 3(a)) that does not
+                                                              restrict the rotation and shifting for the given polygon,
+                                                              in the given control variables ranges, is constructed.
+Cooperative Multi-UAV Coverage Mission Planning Platform for Remote Sensing Applications                    9
+
+     (a) Initial placement                       (b) Rotation over grid   (c) Shift and rotation over grid
+
+                                     Fig. 4: Node placement optimization
+
+2.2.1 Optimization Index                                      In addition, J2 term intends to provide a better
+                                                          placement of the nodes inside the polygon, so as to
+The optimization index J intends to represent a quan-     provide increased coverage for the marginal areas of the
+tity directly matched with the coverage potential of a    ROI, and is defined as follows:
+polygon ROI, given a fixed scanning density and is for-
+mulated as follows:                                              Ap ,
+                                                                 Abb
+                                                          J2  =                                             (9)
+
+J = a · J1 + b · J2 - c · J3         (7)                  where Abb stands for the area of the augmented bound-
+                                                          ing box. In the example of figure 3(a), Ap represents the
+J is consisted of three separate, normalized Ji terms,    cyan-colored area of the polygon and Abb represents the
+so that:                                                  area of the green, rectangle bounding box. Since Ap is
+                                                          constant for a specific ROI, by maximizing the overall
+                 0  Ji  1  , i  {1, 2, 3},                J2 term, Abb is minimized. In practice, the addition of
+                                                          this term mostly controls the rotation angle , in order
+each aiming to control a specific aspect of the optimal   to be optimal for the given polygon. Apparently,
+node placement.
+                                                                          Ap < Abb,
+    J1 term expresses the fundamental objective of the
+overall optimization procedure, which is to fit the max-  thus J2 term is normalized as well.
+imum count of nodes possible inside the given ROI, and        Finally, J3 term aims to improve the placement of
+is defined as follows:
+                                                          the nodes inside the given ROI, attempting to equally
+s                                                         align the paths from the ROI's borders and provide
+J1 = Ap ,                            (8)                  increased coverage for the marginal areas as well. J3 is
+                                                          defined as follows:
+dn2
+
+where s stands for the count of nodes placed inside the   J3 =   |xmaxbb - xmaxp | - |xminp - xminbb | +
+polygon, that will be used for the MST construction                        2 · |xmaxbb - xminbb |
+and Ap stands for the area of the polygon. Denomina-                                                        (10)
+tor represents the theoretical maximum count of nodes            + |ymaxbb - ymaxp | - |yminp - yminbb | ,
+that could fit inside the given polygon and is used to                         2 · |ymaxbb - yminbb |
+normalize J1. Thus,
+
+           s                    Ap                        where {xmaxbb , xminbb , ymaxbb , yminbb } are the vertices
+                                d2n                       of the augmented bounding box (green box in figure
+
+Both Ap and dn are constant for a specific mission, so,   3(a)) and {xmaxp , xminp , ymaxp , yminp } are the vertices
+maximizing J1 term, also maximizes the count of nodes     of the standard bounding box (red box in figure 3(a)).
+that will be placed inside the polygon.
+                                                          This term quantifies the absolute difference of margins
+10                                                                                        Savvas D. Apostolidis et al.
+
+between the polygon and the augmented bounding box,        objective, in simpler cases, such as the one presented in
+for each axis. J3 is normalized as well, with both frac-   figure 5, the role of the other two optimization terms
+tions contributing equally to the overall term. The min-   is of critical importance for the achieved coverage and
+imization of J3 aligns the standard bounding box in the    the overall qualitative features of the paths.
+center of the augmented bounding box and in practice
+performs micro-adjustments mostly in the sx and sy         2.3 Task Allocation & Path Calculation
+control variables, in order to provide the best possible
+nodes' placement for the coverage paths.                   Having an optimized representation of the ROI on a
+                                                           grid, DARP algorithm [27] takes over to divide the com-
+    Finding a tuple of {sx, sy, } that maximizes J         plete region to sub-regions, exclusive for each UAV, and
+leads to an optimized nodes' setup for the given ROI       provide independent paths for all of them utilizing STC
+and ds. J1 and J2 have a positive contribution and act     [14]. The generated paths have energy efficient charac-
+as a reward to the overall optimization index, while J3    teristics, as they respect UAVs' initial positions, avoid-
+acts as a penalty. The percentage of influence for every   ing redundant movements that do not contribute to the
+term, is regulated by the constants a, b, c. The overall   coverage process and reduce the number of unnecessary
+optimization index J is normalized as well, with the       turns.
+constants allowed to take values in the following ranges:
+                                                           2.3.1 DARP - Area Division
+                          0J<1 ,
+                                                           DARP algorithm solves the mCPP problem by divid-
+            for 0  a, b, c  1  , a + b = 1                 ing it into multiple single-robot CPP problems. It is
+                                                           an iterative process implemented to construct an as-
+The normalization of J helps to make it independent of     signment matrix, labeling all cells to correspond to a
+polygon's size and shape, i.e. no extra effort is needed   unique UAV. More information regarding DARP's im-
+to adjust the constants a,b,c on each different polygon    plementation details, along with a complexity analysis,
+topology.                                                  can be found in [27].
+
+    Figure 5 intends to visually explain the contribution      After the area division, every UAV undertakes a
+of each of the Ji terms (i  [1, 2, 3]) to the overall op-  specific part of the grid to cover. Having exclusive sub-
+timization procedure, using an example of a fixed ROI      regions ensures the generation of non-intersecting paths,
+and ds and showing the effect of the sequential addition   making them safe for multiple UAVs to operate at same
+of each term. All of these three cases manage to include   time, avoiding potential collisions among them.
+the same number of nodes in the ROI (54 nodes), thus
+they are optimal with respect to the J1 term's objec-          Figure 6 shows the allocation of an area to four
+tive. The addition of J2 term (figure 5(b)), facilitates   robots, for the initial positions shown, over the exe-
+the calculation of the optimal for this grid rotation an-  cution time of DARP. 6(a) shows the initial Voronoi
+gle , affecting also significantly the number of turns     allocation, while 6(f) shows the final solution that the
+in the generated path. Finally, J3 term's role (figure     algorithm has converged to.
+5(c)) is to center the generated path in the ROI, pro-
+viding a better coverage for the marginal areas. Overall,      The original version of DARP [27] provides a fair
+it should be noted that the simpler the shape of a ROI     area division, meaning that all UAVs will be assigned
+is, the greater the contribution of J2 and J3 terms get.   with exactly the same percentage of the area to cover.
+While in complex-shaped, concave ROIs J1 term car-         However, in the context of this work, DARP has been
+ries the greatest load of this optimization procedure's    extended and is now able to perform a proportional
+                                                           area division as well. The percentages in this case are
+                                                           user-defined and facilitate the simultaneous operation
+                                                           of heterogeneous UAVs, with different energy and op-
+                                                           erational capabilities in the same mission. To achieve
+                                                           this, the equation 14 of [27] for the overall cost func-
+                                                           tion, presented below:
+
+    (a) J1 term  (b) J1+J2 terms  (c) J1+J2+J3                            J=      1      vn
+                                  terms                                           2
+                                                                                            (ki - f )2
+
+                                                                                     i=1
+
+    Fig. 5: Contribution of each optimization term         where ki and f denote the current portion for the i-th
+
+                                                           UAV  and  the  global  "fair  share":  f  =   l  (#unoccupied
+                                                                                                        vn
+Cooperative Multi-UAV Coverage Mission Planning Platform for Remote Sensing Applications                    11
+
+      (a) Progress 0% - initial state  (b) Progress 20%                                   (c) Progress 40%
+
+           (d) Progress 60%            (e) Progress 80%    (f) Progress 100% - converged state
+
+                            Fig. 6: Area allocation during different time-steps of DARP execution
+
+The ROI is a plain orthogonal area without obstacles and the initial positions of the UAVs are marked with dark blue dots
+
+cells devided by the #UAVs) respectively, is altered as
+follows:
+
+J  =  1  vn
+      2
+            (ki - pi)2,
+
+         i=1                           (11)
+
+              vn
+
+                   pi = 1
+
+              i=1
+
+where pi denotes the target portion for the i-th UAV.
+Figure 7 shows an example of paths' generation for a
+
+proportional area allocation based on user-defined per-
+
+centages.
+
+2.3.2 Reduced Turns MSTs & Path Generation                             Fig. 7: Proportional area allocation
+
+Once every robot gets assigned with its exclusive part     flight time and the consumed energy. In order to deal
+of the overall area, a single-robot STC problem is solved  with this problem, the idea is to (i) test a set of n differ-
+for every sub-region. For the path generation the stan-    ent combinations of weights, to control the connections
+dard approach used in the STC algorithm [14] is fol-       of nodes in the generated MSTs, for every sub-region,
+lowed. Specifically, a MST is constructed for every sub-   and out of them to (ii) select the setup that generates
+region and a path that circumnavigates it is generated     the MST, which produces the minimum-turns path. In
+afterwards.                                                the context of this work, for every sub-region four dif-
+                                                           ferent combinations are tested, which correspond to the
+    Due to the spanning-tree nature of the algorithm, it   ones that create MSTs connected in the upper, lower,
+is likely that paths will end up having a lot of unneces-
+sary turns, if no action is taken to avoid them. The num-
+ber of turns is one of the major factors that affect the
+12                                                                                   Savvas D. Apostolidis et al.
+
+most right and most left levels available. Figure 8 shows  subsections. Specifically, subsection 3.1 presents an eval-
+an example with the four MSTs on a 3x3 grid for a bet-     uation of the introduced optimization procedure, by
+ter understanding.                                         analyzing the contribution of each term to the over-
+                                                           all quality of the generated paths. In addition to that,
+(a) Upper  (b) Lower  (c) Most             (d) Most        a comparison of the proposed method with one of the
+                      right                left            most powerful, in terms of complete coverage and sup-
+                                                           port of very complex-shaped ROIs, state-of-the-art al-
+Fig. 8: MSTs connections tested for turn reduction         ternative CPP methods [20] is performed. Building on
+                                                           top of that, subsection 3.2 includes a study in order to
+    Figure 9 presents an indicative example of the effect  assess the multi-robot feature of the proposed method-
+that the turn reduction mechanism has on the overall       ology, comparing the results acquired for two fixed ROIs
+performance of the system. Without taking care of the      of different size, when increasing the number of UAVs
+path orientation the robot will have to follow a path      used for coverage. For reproducibility reasons, all of the
+with 84 turns, as shown in figure 9(a), whereas figure     ROIs used for the simulated evaluations, along with the
+9(b) shows that for the same operational environment       extensive list of results produced, are publicly accessible
+there is a path that completely covers the ROI with        on-line5.
+only 42 turns.
+                                                           3.1 Single-Robot Paths Evaluation
+           (a) ROI coverage with 84 turns
+                                                           For the evaluations performed in subsections 3.1.1 and
+                                                           3.1.2, a set of 20 randomly generated polygons is used.
+                                                           This set includes convex and concave polygons, with
+                                                           and without obstacles and a wide range of areas. Both
+                                                           the proposed method and [20] were executed with a
+                                                           fixed scanning density of 40 meters for all ROIs. The
+                                                           simulations were carried out with an also fixed altitude
+                                                           of 40 meters. Moreover, there was made the assumption
+                                                           that the UAV was equipped with an RGB sensor with a
+                                                           HFOV of 73.46, in order to perceive the environment.
+                                                           The selected mission parameters, for this sensor, lead
+                                                           to collection of images with a percentage of overlap of
+                                                           50%, with their neighbor images.
+
+                                                               In order to better understand the meaning of over-
+                                                           lap, let's imagine two UAVs flying on the same altitude
+                                                           (h), the one next to the other, as shown in figure 10.
+                                                           Considering that the two UAVs are equipped with sen-
+                                                           sors with the same HFOV, the length of the ground
+                                                           covered by each, is:
+
+                                                           d=2·  h · sin(HF OV /2)   
+
+                                                                 sin(90 - HF OV /2)    (12)
+
+                                                           d = 2 · h · tan(HF OV /2)
+
+                    (b) ROI coverage with 42 turns             Now, lets imagine that these two UAVs fly in an alti-
+                                                           tude and a distance between them, so that the ground
+Fig. 9: Turn reduction using the best MST orientation      covered by each of them, has a part that is also cov-
+                                                           ered by the other one. In this case, it is considered that
+3 Simulated Evaluation
+This section presents a simulated evaluation of the pro-     5 https://github.com/savvas-ap/
+posed methodology, that is organized in two separate       cpp-simulated-evaluations
+
+                                                             6 This HFOV was selected as a typical specification for
+                                                           commercial UAVs, based on the sensor that one of the most
+                                                           popular commercial UAVs is equiped with (DJI phantom 4
+                                                           pro: https://www.dji.com/phantom-4-pro/info#specs)
+Cooperative Multi-UAV Coverage Mission Planning Platform for Remote Sensing Applications                                 13
+
+Fig. 10: Land covered and overlap in the captured im-               Table 2 describes all metrics that were used for the
+ages                                                            performance evaluation of the algorithms, on each dif-
+                                                                ferent ROI. Out of these metrics, the PoOC, the num-
+there is an overlap of information between the collected        ber of Turns and the overall path Length are considered
+images. In the context of this paper, the term sidelap          to mainly describe the qualitative features of a gener-
+refers to the overlapping information between an image          ated path. In addition to them, there were created a
+with its neighbor, in one of the two sides, while the term      heatmap of coverage visualizing the number of visita-
+overlap refers to the overall overlapping information in        tions at each cell of a ROI and a normalized histogram
+both sides of the collected image, so that:                     of coverage, showing the distribution of coverage cells
+                                                                according to the number of visitations performed. To
+overlap = 2 · sidelap                                     (13)  better conceptualize the formation of these histograms,
+                                                                consider that for each coverage cell of a ROI, the num-
+In addition, there should be a separation of the terms          ber of scans performed at it, by multiple passages of the
+overlap and percentage of overlap (po). The term over-          UAV, is counted. After the path simulation, a column
+lap refers to distance, as explained above, while the           is created for every count of performed scans (0, 1, 2,
+term po refers to the percentage of overall overlapping         ...), with a height proportional to the number of cells
+information at both sides of an image. The terms ds,            that were visited that many times. To make the scale
+h, po and HF OV can be related with the following for-          for the y axis independent of the size of the ROI, the
+mula:                                                           histograms got normalized (the sum of all columns and
+                                                                the maximum possible value for the y axis is always 1).
+                                                                The results out of all ROIs are combined for the overall
+                                                                evaluation of the methods. Specifically, for the metrics
+                                                                presented in table 2 are computed averages and, in addi-
+                                                                tion, an aggregate histogram of coverage for every path
+                                                                planning method is created, by the combination of all
+                                                                coverage cells, out of all regions.
+
+ds  =  d  - sidelap  =  d  -  overlap  =  d  -  po · d    (14)    Short                               Metric              Unit
+                                  2               2                PoC             Percentage of Coverage (Scans  1)
+                                                                  PoOC    Percentage of Overlapping Coverage (Scans  2)     %
+          ds = (2 - po) · h · tan(HF OV /2)                       Turns
+                                                                N-Turns                Number of Turns/Waypoints            %
+                                                                 Length                Normalized Number of Turns
+                                                                N-Length                                                     -
+                                                                                                   Path Length
+                                                                                          Normalized Path Length         T urns
+                                                                                                                         1000m2
+
+                                                                                                                           km
+
+                                                                                                                             m
+                                                                                                                         1000m2
+
+    This way, the selected po of 50%, for the simulations,      Table 2: Evaluation metrics for subsection 3.1
+corresponds to a 50% of unique information in every
+collected image and 25%, at each side, that is included         3.1.1 Optimization Terms Importance Analysis
+in one of the two neighbor images. It is important to
+note that po should be selected based on the targeted           In order to assess the contribution of each optimization
+application (e.g., generation of orthomosaics, 3D maps,         term to the quantity of coverage and the overall quality
+elevation models etc.).                                         of paths, an ablation study was performed. The goal
+                                                                was to realize how much and in which way, the addition
+    For evaluation purposes, every ROI is considered            of each term affects the ROI coverage task, by studying
+to be consisted of discrete coverage cells, with an area        their effects on the evaluation metrics.
+of 0.25 - 4m2, depending on the area of the overall
+ROI. After the simulation of a generated plan, for each             The first 4 columns of table 3 and the figures 11(a)-
+coverage cell is counted the number of scans that was           11(d), present the overall results of this study, as an
+performed during the mission. Based on the number of            average out of all ROIs. As the results make clear, the
+scans performed, each cell gets assigned in one of the          introduction of each term of the optimization proce-
+following categories:                                           dure, helps to significantly increase the PoC and im-
+                                                                prove the quality of the generated paths. At this point,
+­ 0: Not covered                                                it is important to notice that the turn reduction pro-
+­ 1: Covered - unique coverage                                  cedure described in section 2.3.2, is applied in all the
+­  2: Covered - overlapping coverage
+14                                                          Savvas D. Apostolidis et al.
+
+approaches of STC presented below, independently of         number of average turns 2.56 and 1.16 times smaller
+the node placement optimization. Comparing the re-          than the length reduction and turns reduction modes
+sults of the non-optimized STC with those of the pro-       of [20]. In addition, it also achieved an average path's
+posed approach (J1+J2+J3 terms optimization), the           length 1.41 and 1.79 times smaller than the two, afore-
+average PoC is increased by 8.64%, the average PoOC         mentioned versions of [20], respectively. This way, the
+gets, in all cases, a value close to the user-defined po    proposed approach combines the advantages of both
+(50%), the average number of turns is reduced in com-       these dedicated versions, in a more efficient way. More-
+parison with the non-optimized STC, while the average       over, the PoOC is a lot closer to the user-selected po,
+length of paths does not get significantly increased, tak-  meaning that there are not performed redundant scans
+ing into account the benefit in terms of coverage.          that waste operational resources. Finally, figures 11(d)-
+                                                            11(f) show that, with the proposed approach, most of
+    Figure 12 and table 4 present the results for a spe-    the coverage cells are scanned 1 to 2 times and the max-
+cific ROI - testbed #1. In testbed #1, the implemen-        imum number of scans for the same cell is 8, while with
+tation of the original STC algorithm [14] could not run     [20] most of the coverage cells are scanned 1 to 4 times
+for the selected scanning density, without the proposed     and the maximum number of scans for the same cell is
+optimization scheme. However, the introduction of the       14 (figure 11(e)) and 16 (figure 11(f)) respectively.
+proposed optimization procedure managed to find a
+grid tailored to the ROI's topology, so as to calculate         Figure 13 and table 5 present the results for a spe-
+paths, with the defined specifications, that provide de-    cific ROI - testbed #2. [20] manages to achieve an av-
+cent coverage for the ROI. The first term, J1, is critical  erage PoC over 99%, with both cost functions. The av-
+for the maximization of the length of paths that will       erage PoC achieved by the proposed method is smaller,
+fit in the ROI. At the same time, the other two terms,      but still descent and appropriate for real-life use (over
+J2 and J3, are responsible for the optimal placement of     95%). However, once again, the paths generated by the
+paths inside the ROI. As a result, for this mission, that   proposed method are a lot more energy-aware. To be
+without optimization was considered non-executable,         more specific, the number of turns is 3.17 and 1.29 times
+the proposed approach achieves a PoC larger than 94%        smaller, and the overall path length is 1.65 and 2.21
+and PoOC pretty close to the user-selected po (50%).        times smaller, than the length reduction and the turns
+                                                            reduction modes of [20], respectively. In addition, the
+3.1.2 Comparison with State-of-the-Art                      count of redundant scans performed with the proposed
+                                                            methodology is significantly smaller as well, managing
+3.1.1 shows that the proposed optimization procedure        to keep a percentage of overlapping coverage close to
+significantly improves the effectiveness of the method      the user-defined po (50%).
+in comparison with the non-optimized one, in terms of
+coverage. The goal of this subsection is to investigate         While the difference in the average PoC between the
+how the proposed approach stands next to one of the         proposed method and [20] is not negligible, the PoC
+most powerful, in terms of complete coverage, state-of-     achieved by the proposed methodology is more than
+the-art methods. For this reason, coverage plans follow-    high-enough to face the majority of challenges faced in
+ing the procedure described in [20] are also calculated     real-life operations (e.g., [35], [36], [37], [38]). In con-
+for all ROIs, with two different objectives (cost func-     trast, it is also worth noting for [20] that in order to
+tions), one intending to minimize the length of paths       achieve almost complete coverage, it forces the vehicles
+and one intending to minimize the number of turns.          to revisit multiple times specific parts of the ROIs, as
+                                                            shown in figures 13(b) and 13(c). In addition, both the
+    The overall results of this comparison are presented    energy-efficiency features and the multi-UAV capabil-
+in figures 11(d)-11(f) and the three last coloumns of       ity, that can significantly reduce the operational time,
+table 3. The method proposed in [20] achieved almost        provided by the proposed method, are strong incentives
+complete coverage for all ROIs, with both cost func-        to prefer it in real-life operations.
+tions, with an average close to 100%. On the other
+hand, the proposed method achieves a smaller, but still     3.2 Multi-Robot Marginal Utility Study
+descent PoC (96.37% - i.e. 3.54% smaller than the turn
+reduction mode and 3.49% smaller than the length re-        In order to study the effects of using multiple-UAVs in
+duction mode of [20]). However, both the number of          coverage missions with the proposed algorithm, a series
+turns and the length of produced paths, by the pro-         of simulations was performed. The performed study in-
+posed method, are significantly smaller in comparison       cludes two ROIs with strategically different areas, for
+with both, dedicated to these purposes versions of [20].    a varying number of UAVs, starting from 1 and up to
+To be more precise, the proposed approach achieved a
+Cooperative Multi-UAV Coverage Mission Planning Platform for Remote Sensing Applications                      15
+
+(a) Non-Optimized STC                   (b) J1 Term Optimization             (c) J1+J2 Terms Optimization
+
+(d) J1+J2+J3 Terms Optimization         (e) [20] Length Reduction                   (f) [20] Turns Reduction
+
+                              Fig. 11: Aggregate normalized histograms of coverage
+
+Average   Non-Optimized STC   J1 Term   J1+J2 Terms   J1+J2+J3 Terms  [20] Length Reduction  [20] Turns Reduction
+   PoC               87.73%    96.19%        96.02%           96.37%               99.86%                99.91%
+  PoOC               47.93%    51.96%        51.76%           51.74%               64.85%                71.49%
+  Turns                85.28     81.83         80.61           82.06               210.39                 95.72
+                       0.09      0.09           0.09            0.09                 0.21                  0.11
+N-Turns                22.24     24.12         24.12           24.04                33.95                 43.15
+ Length                20.81     23.95         23.93           23.90                33.77                 40.94
+N-Length
+
+                                        Table 3: Average evaluation metrics
+
+             PoC    Non-Optimized STC   J1 Term       J1+J2 Terms            J1+J2+J3 Terms
+            PoOC                    -    89.84%            92.54%                    94.19%
+            Turns                   -    48.72%            48.78%                    49.68%
+          N-Turns                   -         8                 8                         8
+           Length                   -      0.21               0.21                     0.21
+          N-Length                  -      0.80               0.80                     0.80
+                                    -      21.44             21.44                    21.44
+
+          Table 4: Optimization parameters importance analysis - Testbet #1
+
+             PoC    J1+J2+J3 Terms      [20] Length Reduction                [20] Turns Reduction
+            PoOC            95.18%                   99.97%                              99.05%
+            Turns           56.97%                   75.41%                              81.15%
+          N-Turns               84                     266                                 109
+           Length             0.15                     0.48                                0.20
+          N-Length           13.12                    21.68                               28.99
+                             23.90                    39.49                               52.79
+
+                              Table 5: Comparison with state-of-the-art - Testbed #2
+16                                                                                   Savvas D. Apostolidis et al.
+
+    (a) Non-Optimized STC  (b) J1 Term Optimization       (c) J1+J2 Terms Opti-      (d) J1+J2+J3 Terms Opti-
+                                                          mization                   mization
+
+    (e) Non-Optimized STC  (f) J1 Term Optimization       (g) J1+J2 Terms Optimiza-  (h) J1+J2+J3 Terms Opti-
+                                                          tion                       mization
+
+      Fig. 12: Optimization terms importance analysis - Testbet #1
+
+    12(a)-12(d): Heatmaps of coverage, 12(e)-12(h): Histograms of coverage
+
+(a) J1+J2+J3 Terms Optimization  (b) [20] Length Reduction                           (c) [20] Turns Reduction
+
+(d) J1+J2+J3 Terms Optimization  (e) [20] Length Reduction                           (f) [20] Turns Reduction
+
+                                 Fig. 13: Comparison with state-of-the-art - Testbed #2
+
+                           13(a)-13(c): Heatmaps of coverage, 13(d)-13(f): Histograms of coverage
+
+15. The simulations were carried out with fixed scan-         Table 6 shows the metrics that were calculated for
+ning density of 47 meters, altitude of 60 meters and the  the multi-robot study. PoC and PoOC are calculated
+same assumption regarding the RGB sensor of all UAVs      just as described in subsection 3.1. The rest of them
+was made (73.4 HFOV). As a result, the percentage of      are explained below.
+overlap with the adjacent images was 90%. Finally, the
+speed for all the UAVs was set to be constant at 3m/s.        In order to calculate the #Bat/UAV and the Flight
+                                                          Time (FT), Flight Duration is calculated first, as fol-
+Cooperative Multi-UAV Coverage Mission Planning Platform for Remote Sensing Applications                            17
+
+                  Short                                                  Metric                     Unit
+                   PoC                                Percentage of Coverage (Scans  1)               %
+                  PoOC                       Percentage of Overlapping Coverage (Scans  2)            %
+              #Bat/UAV          Number of batteries needed for each UAV to complete the mission        -
+              Flight Time                 Theoretical time demanded to complete the mission          min
+          Deployment Time                             Time demanded to deploy the gear               min
+       Change Battery Delay   Time needed to leave a spot, change battery and continue the mission   min
+               Total time          Flight Time, including gear deployment and batteries changes      min
+              Flight Cost
+                                                            Estimated cost of the flight            Euro
+
+                              Table 6: Evaluation metrics for subsection 3.2
+
+lows:                                                      an indicative distance, proportional to the area of the
+
+                   Length            c1 · Speed            ROI, for each battery change that should take place
+
+F lightDuration =  Speed   +T urns·  c2 + |Speed|  (15)    (#Bat/U AV > 1) and that the battery change would
+
+                                                           also add 3 minutes of delay. Specifically:
+
+The first term corresponds to the time that would be                                            areaROI
+needed in case that the mission was executed with a                                             Speed · 60
+constant speed, while the second term corresponds to       CBD  =  (#Bat/U AV  -1)·(2·    3  ·              +3·vn)  (19)
+a delay added to this time, for each of the turns in the
+path. c1, c2 have constant values and they should be           The Total Time comes out from the sum of the
+chosen accordingly, in order to fine-tune this sigmoid     Flight Time, Deployment Time and Change Battery
+function based on each UAV's type and flight behavior.     Delay.
+
+    The #Bat/UAV refers to the number of the batter-       T otalT ime = F T + DT + CBD                             (20)
+ies needed for each UAV in order to complete its path,
+considering that a single battery can provide 25 minutes       Finally, the Flight Cost (FC) refers to the estimated
+of flight duration.                                        cost of a flight. Given the KW price of the national
+                                                           power supplier of Greece, the battery capacity and the
+#Bat/U AV =  F lightDuration  ,                    (16)    flight duration of a common commercial UAV7, the
+                                                           Flight Cost per Minute (FCM) is considered to be:
+                   25
+
+where and r denotes the ceiling of r (smallest integer     F CM = 0.017228 Euro/min                                 (21)
+that is not smaller than r).
+                                                           For the calculation of the Flight Cost, FCM is mul-
+    Flight Time refers to the maximum of the Flight        tiplied by the Total Time, excluding the Deployment
+Durations', for all UAVs participating in a mission. This  Time and the time needed to change batteries (how-
+way:                                                       ever not the time needed to cross the distance in order
+                                                           to change batteries), for each UAV. Specifically:
+F lightT ime = argmax[F lightDuration(vi)], (17)
+
+where i  [1, vn].                                          F lightCost = (T otalT ime - DT -
+    Deployment Time (DT) refers to the indicative time                                                                        (22)
+
+needed to deploy the gear for an experiment (e.g., GCS,     (#Bat/U AV - 1) · 3) · vn · F CM
+UAVs, etc.), from a single human operator. The Deploy-
+ment Time is considered to be 5 minutes, increased by          It should be noted that the Flight Cost calculation
+3 minutes for each of the UAVs participating, and is       does not intend to provide a thorough, or precise eco-
+calculated as follows:                                     nomic analysis. The intention of calculating this quan-
+                                                           tity is to provide an indicative measurable clue, about
+DeploymentT ime = 5 + 3 · vn                       (18)    the productivity gain compared to the increasing oper-
+                                                           ational cost of deploying multiple UAVs. However, one
+    The Change Battery Delay (CBD) refers to the time      should always have in mind that this operational cost,
+that would be needed if, when a path for a UAV could       most of the times is minimal compared to the invest-
+not be executed with a single battery, the UAV would       ment cost that is demanded for multiple UAVs. For
+stop the execution of the mission, fly back to the home    a proper economic analysis to take place, many other
+position to change battery and return back to the point    factors should be specified, with the most important
+it stopped the mission to continue. For this delay it is   of them being the field of application. For example,
+considered that each UAV would need to cross twice
+                                                             7 https://www.dji.com/phantom-4-pro
+18                                                         Savvas D. Apostolidis et al.
+
+depending on the specific needs of a type of mission,      ROI, as shown in figure 16. The generated mission for
+the investment cost for a single UAV, along with the       a single UAV, in this ROI, was executable with a single
+appropriate sensors, could significantly vary (approxi-    battery (Flight Time<25 min). As expected, the Flight
+mately 500-30.000 euros). In addition, there are cases     Time constantly decreases when deploying additional
+where the significant time reduction will also reduce      vehicles for the coverage mission, however, the Total
+the demanded human-hours to perform a task (e.g.,          Time, which also includes the Deployment Time, has
+scan huge agricultural fields), having a great impact      a minimum value when performing the mission with 3
+on the human-cost and as a result on the investment's      UAVs. The addition of the second and the third UAV
+payback time as well. On the contrary, there are cases     cause an increase on the Flight Cost by 0.04 Euro, in
+where the performance gains could not justify the in-      both cases, compared to the single-UAV deployment.
+vestment cost, such as mapping missions deployed by        Overall, the Flight Cost for this ROI has a global mini-
+hobbyists, or even professionals who rarely perform cov-   mum value when the mission is performed with a single
+erage tasks. Finally, there are also cases where the per-  UAV and an increasing tendency when adding multi-
+formance gains cannot be directly contradicted to a        ple vehicles (with a local minimum for 12 UAVs). The
+mission's cost, such as the search and rescue missions.    efficiency gains do not justify the deployment of more
+In this specific application, the increasing number of     than 3 UAVs for this mission, while the Total Time de-
+UAVs does not only reduces the demanded time to scan       crease by 8.77 min, could easily justify the Flight Cost
+a ROI and probably detect objects of interest (e.g., in-   increase by 0.04 Euro, for this purpose.
+jured humans), but also increases the probability of de-
+tecting moving targets (e.g., wandering humans in risk)        The results of this study for testbed #4 are pre-
+and saving human lives. Overall, this part of the multi-   sented in table 8 and figures 15 and 17. In this case, the
+robot study intends to provide a clue about the value      area of the ROI is 1.814.063 m2, which is considered to
+of deploying multiple UAVs in coverage missions, how-      be of a large size for coverage missions, given the spe-
+ever, it cannot be considered in any case as a proper      cific mission parameters. Regarding the PoC, as also
+economic analysis.                                         noticed from the results for testbed #3, there are no
+                                                           significant discrepancies with respect to the number of
+    Table 7 and figures 14 and 16 include the results of   UAVs. A slightly increasing tendency in the PoOC was
+this multi-robot study for testbed #3. The area of this    observed, however, smaller than the one observed for
+ROI is 222.720 m2, which given the selected mission pa-    testbed #3. The same increase in the maximum times
+rameters, is considered to be of a small-average size for  of revisiting certain points of the ROI was observed here
+coverage missions. From the acquired results, it is clear  as well, as shown in figure 17. It is worth noting that
+that increasing the number of UAVs does not signifi-       in order to perform this mission with a single UAV, 8
+cantly affect the achieved PoC. However, it has a slight   batteries are demanded (Flight Time>>25 min). Over-
+impact on the PoOC, which has an increasing tendency,      all, the Flight Time decreases constantly, by increasing
+when increasing the number of vehicles. In addition, in-   the number of UAVs. Regarding the Total Time of the
+creasing the UAV's number has also a slight impact to      mission, it has a global minimum when the mission is
+the maximum times of revisiting certain points of the      performed with 9 UAVs, which is the minimum number
+
+Fig. 14: Mission times and flights' cost - Testbed #3 Fig. 15: Mission times and flights' cost - Testbed #4
+Cooperative Multi-UAV Coverage Mission Planning Platform for Remote Sensing Applications              19
+
+#UAVs   PoC    PoOC    #Bat/UAV   Flight Time  Deployment Time  Change Battery Delay      Total Time  Flight Cost
+        (%)     (%)                    (min)             (min)               (min)            (min)      (Euro)
+     1  95.28   74.01          1       23.25              8.00                 0.00            31.25        0.40
+     2  95.31   77.01          1       12.70             11.00                 0.00            23.70        0.44
+     3  95.22   81.43          1        8.48             14.00                 0.00            22.48        0.44
+     5  95.76   78.39          1        5.32             20.00                 0.00            25.32        0.46
+     7  95.28   84.96          1        4.28             26.00                 0.00            30.28        0.52
+     9  95.30   84.68          1        3.21             32.00                 0.00            35.21        0.50
+    12  95.62   86.99          1        2.15             41.00                 0.00            43.15        0.44
+    15  95.30   90.52          1        2.15             50.00                 0.00            52.15        0.56
+
+                         Table 7: Multi-robot evaluation results - Testbed #3
+
+#UAVs   PoC    PoOC    #Bat/UAV   Flight Time  Deployment Time  Change Battery Delay      Total Time  Flight Cost
+        (%)     (%)                    (min)             (min)               (min)            (min)      (Euro)
+     1  97.66   83.95          8       193.13             8.00                55.92           257.05        3.93
+     2  97.68   83.57          4       96.50             11.00                32.97           140.47        4.15
+     3  97.53   85.17          3       65.07             14.00                27.98           107.05        4.50
+     5  97.67   85.64          2       39.98             20.00                19.99            79.97        4.91
+     7  97.50   86.44          2       28.46             26.00                25.99            80.45        6.20
+     9  97.86   88.31          1       22.28             32.00                 0.00            54.28        3.45
+    12  97.68   88.46          1       16.97             41.00                 0.00            57.97        3.51
+    15  97.52   86.64          1       13.78             50.00                 0.00            63.78        3.56
+
+                         Table 8: Multi-robot evaluation results - Testbed #4
+
+(a) Coverage with 1 UAV           (b) Coverage with 3 UAVs           (c) Coverage with 15 UAVs
+
+                         Fig. 16: Heatmaps of coverage - Testbed #3
+
+(a) Coverage with 1 UAV           (b) Coverage with 9 UAVs           (c) Coverage with 15 UAVs
+
+                         Fig. 17: Heatmaps of coverage - Testbed #4
+
+of UAVs demanded to perform the mission with a sin-    performed with a single UAV, is an impressive amount
+gle battery per UAV. The Total Time reduction for the  of 202.77 min. The even more impressive fact, is that
+mission performed with 9 UAVs, compared to the one     the estimated Flight Cost has a steep increasing ten-
+20                                                                                        Savvas D. Apostolidis et al.
+
+#UAVs    Optimization Time  Overall Execution Time            #UAVs    Optimization Time  Overall Execution Time
+                    (sec)                  (sec)                                  (sec)                  (sec)
+     1               2.87                   2.88                   1              16.47                  16.49
+     2               2.69                   2.69                   2              16.70                  16.72
+     3               2.74                   2.75                   3              16.17                  16.19
+     5               2.73                   2.73                   5              16.30                  16.34
+     7               2.78                   2.78                   7              16.35                  16.42
+     9               2.77                   2.77                   9              16.02                  16.08
+    12               2.95                   2.96                  12              15.91                  16.34
+    15               2.75                   2.75                  15              16.30                  16.70
+Average              2.79                   2.79              Average             16.28                  16.41
+
+    Table 9: Execution times - Testbed #3                     Table 10: Execution times - Testbed #4
+
+                                                              3.2.1 Algorithm's Execution Time
+
+dency till the point that the mission is not executable       For all of the executions of the proposed, optimized
+with a single battery per UAV (7 UAVs), and a global          mCPP algorithm in the context of this multi-robot study,
+minimum value right after it, for the mission performed       the needed computation time was logged and included
+with 9 UAVs. From that point on, both the Total Time          in tables 9 and 10. As an overall comment, for both
+and the Flight Cost slightly increase, however the esti-      testbeds the optimization procedure consumes the great-
+mated values suggest that performing the mission with         est amount of the execution time. In addition, the time
+more UAVs, is still far more efficient than performing        demanded to run the optimization procedure for all
+it with less than 9. Overall, for such a big ROI it is        cases of each testbed is approximately the same, as this
+clear that it is not efficient, by any means, to deploy a     task is dependent only on the generated grid's dimen-
+mission with less vehicles than the number demanded           sions, and not on the number of vehicles. In general,
+to perform it with a single battery per vehicle. In addi-     the optimization procedure inherits the same complex-
+tion, it is worth noting that with most of the available      ity with simulated annealing algorithm [39]. In addi-
+tools that do not support multi-robot operations, this        tion, more specific information about the run time of
+mission could not be executed at all, as they do not          the path planning and the area allocation procedures,
+also support to pause and continue the mission from a         as well as a thorough computational and memory com-
+certain point.                                                plexity analysis of DARP algorithm can be found in the
+                                                              original paper [27].
+
+    As a general conclusion of this multi-robot study,        4 Software Platform Architecture
+the deployment of multiple unmanned vehicles in cov-
+erage tasks can introduce huge efficiency benefits under      In order to provide an end-to-end solution able to per-
+specific conditions. When the objective of such missions      form coverage missions on-field, along with the path
+is to scan very large areas, or in cases where the mis-       planning methodology presented and evaluated above,
+sions' duration is critical, such as in the search and res-   has been developed a custom software platform includ-
+cue domain, the multi-robot feature can not only intro-       ing everything needed to deploy real-life missions. Fig-
+duce tremendous benefits, regarding both the missions'        ure 18 presents the architecture of the overall developed
+duration and operational cost, but can also unlock a          system, along with the technologies used.
+whole new range of possible applications. However, as
+in most cases, here as well, there is a marginal utility          Specifically, in the context of this work has been
+point where the addition of any further vehicle does          developed from scratch a web-based software applica-
+not only stops offering benefits, but on the contrary         tion, including (i) a user-friendly GUI, (ii) the pro-
+increases cost and decreases the mission's efficiency. A      posed mCPP methodology and (iii) a database to store,
+good starting point when considering the number of            manage and retrieve missions. In addition, a messaging
+UAVs that should participate in a mission, is the count       mechanism and a custom-developed android applica-
+of vehicles that makes possible the execution of a mis-       tion for the UAVs' controllers have been developed as
+sion with a single battery per vehicle, something that        well, in order to ensure the real-time communication
+is advisable if the application justifies this extra invest-  with the UAVs.
+ment cost.
+                                                                  As this section mostly describes work that required
+                                                              software development and regards specific technologies,
+Cooperative Multi-UAV Coverage Mission Planning Platform for Remote Sensing Applications     21
+
+Fig. 18: Software platform architecture and technologies used
+
+protocols and APIs (Application Programming Inter-        user. Through it, the user is able to define, process,
+faces), in order to avoid an unclear, highly abbreviated  store, manage, execute and supervise missions. In the
+description, it was decided to present the work at a      right side of the GUI is placed a map, in order to locate
+glance and focus mainly on parts that could be useful     and define the ROI, check the generated paths and su-
+for the platform's end-user.                              pervise the progress of missions during the execution.
+                                                          Additionally, in the left side of GUI there is a toolbar,
+4.1 Backend/Frontend Interraction                         organized in three separate tabs. From the first tab of
+                                                          the toolbar, the user can access the database to retrieve
+For the platform development has been employed a          stored missions or select to create new ones. As a next
+client-server architecture, a common paradigm for the     step, in the second tab the user can define the param-
+web, meaning that the server delivers and manages most    eters for a new mission, or edit the ones of an already
+of the multi-UAV mission data and related computa-        stored. At this step the user is able to define a ROI (and
+tions that are going to be consumed by the client. In     optionally some obstacles inside it) and the rest of the
+the client side (web browser), a modern and intuitive     mission's parameters (number of UAVs, altitude, per-
+user interface powered by Material-UI framework and       centage of overlap, percentage of the ROI that should
+ReactJS (JavaScript library) has been implemented,        be assigned to each UAV and strictly-in-poly/better-
+that is supported by most browsers. In order to en-       coverage mode) in order to calculate coverage paths.
+sure real-time communication for the UAVs' positions      Given the selected altitude and overlap, the user can
+and statuses between the client and the server, Web-      also inspect the mission's scanning density ds and the
+Sockets protocol has been used, which is a popular        ground sampling distance (GSD). GSD is calculated us-
+technology used when servers need to push a lot of        ing equation 12 and the resolution of the sensor that will
+data, or frequently update the browser. In addition,      be used8, a value that is retrieved from the database:
+the server exposes a RESTful (REpresentational State
+Transfer) API for computational requests and CRUD         GSD =  d 2 · h · tan(HF OV /2)  ,  (23)
+operations (Create, Read/retrieve, Update and Delete)                  =
+for the database. The server side (backend) has been             hRes     hRes
+developed utilizing the Spring Framework for the Java
+Platform. Finally, the interaction between backend and    where hRes is the resolution of the horizontal dimen-
+the MySQL (Structured Query Language) database oc-        sion of the sensor. The final step to deploy a mission
+curs with the Hibernate framework, an object-related      is included in the third tab, where the user can define
+mapping (ORM) library for the Java language.              the operational parameters (camera gimbal pitch and
+                                                          speed), select the UAVs that will participate (stored in
+
+4.2 User Interface - Interaction and Visualization          8 GSD is calculated from the take off position, considering
+                                                          that the whole ROI has an almost flat topology. In order to
+The GUI developed for the ground control station (GCS),   have a constant GSD for ROIs with altitude variations, the
+is the main interaction layer of the platform with the    flight altitude should be adjusted based on the actual distance
+                                                          from the ground, at each point of the region (see also[40]).
+22                                                         Savvas D. Apostolidis et al.
+
+    Fig. 19: Mission execution as presented from the Graphical User Inteface
+
+the database) and supervise the progress of the mis-       formation and operational parameters, that could be
+sion. Figure 19 presents the GUI visualization during      useful for the operator.
+the real-time operation for a mission with 3 UAVs.
+                                                               The overall system has been setup with the objec-
+4.3 Communication with UAVs - Android Application          tive to provide a high-level of autonomy for the mis-
+In the controller of each UAV is connected a smart-        sions. Based on this logic, the interaction of the plat-
+phone, running a mobile application that works as a        form's user with the whole system can be done entirely
+user interface and interaction layer of the UAV with       from the GCS, with no need to directly control the
+their operator. In the context of this work, a custom      UAVs with the controllers or the smartphones' applica-
+android application has been developed with the use        tions. However, at any time, based on the user's judg-
+of the DJI API (figure 20), that takes the role of an      ment, it is possible to take control and directly operate
+intermediate communication layer of the overall plat-      any of the UAVs, if needed.
+form with each UAV. This application is responsible
+to gather information (telemetry, photographs, statuses    5 Real Life Experiments
+and mission logs) and transmit them to the backend
+of the platform. In addition, it visualizes mission's in-  In this section are presented some indicative examples
+                                                           of real-life applications, where the proposed platform
+     Fig. 20: Custom-developed android application         can be used to obtain data, along with results that are
+                                                           usually desired in such tasks. This way, the functionali-
+                                                           ties and efficiency of the platform are evaluated through
+                                                           the quality of the acquired data and the produced re-
+                                                           sults, i.e. through the reason why such platforms are
+                                                           developed and used. To acquire the desired photogram-
+                                                           metry results, the gathered data were processed with
+                                                           the use of the web platform of OpenDroneMap, We-
+                                                           bODM9. WebODM is a powerful, open source solution
+                                                           for processing UAV imagery and acquiring results in a
+                                                           wide range of applications. The objective of this section
+                                                           is to present the applicability and the robust operation
+                                                           of the proposed platform, in real-world coverage mis-
+                                                           sions.
+
+                                                             9 https://www.opendronemap.org/webodm/
+Cooperative Multi-UAV Coverage Mission Planning Platform for Remote Sensing Applications  23
+
+5.1 Experimental Setup                                       updated image of the field on map, in order to facil-
+For the real-life experiments were used:                     itate the planning of various works, (ii) acquire some
+ ­ a common commercial laptop10, as a portable GCS,          kind of plant health information, that could give indi-
+ ­ a swarm of common commercial UAVs11,                      cations on the year's harvest and possible actions that
+ ­ a set of android smartphone devices12, to run the         should be taken to improve it and (iii) acquire some
+                                                             kind of bio-mass estimation that is in general useful to
+    custom-developed application, described in section       monitor plant and weeds growth, as well as organize a
+    4 and                                                    wide range of agricultural tasks.
+ ­ a portable 4G router13, as an intermediate com-
+    munication layer between the smartphones and the             Depending on the type of operations and the ac-
+    portable GCS.                                            curacy of data required, UAVs used in precision agri-
+The hardware setup used, is shown in figure 21.              culture are usually equipped with RGB, multi-spectral
+                                                             or hyper-spectral cameras. In this experiment partic-
+           Fig. 21: Experimental hardware setup              ipated two UAVs, equipped with RGB cameras. The
+                                                             mission altitude was selected to be 18 meters and the
+5.2 Precision Agriculture Application                        percentage of overlap (po) 90%, as advised from the
+As reported in [41] remote sensing from unmanned air-        WebODM documentation for a decent 3D reconstruc-
+craft systems is a very important new technology that        tion. The selected altitude and po resulted in a ds of
+introduced many benefits for the farmers in the field        about 14 meters and the GSD in the collected images
+of precision agriculture, especially crop nutrient man-      gets a value of 0.49 cm/px. In addition, the operational
+agement. According to [42], some of the advances that        speed was selected to be 2 m/s, which is low enough to
+the use of UAVs introduced in agriculture are (i) the        not spoil the quality of the collected images, and the
+affordable crop mapping, (ii) the early identification       gimbal pitch was selected to be 45 degrees, an angle
+of problems through vegetation indices, that prevents        that usually contributes in the quality of an area's 3D
+yield losses and (iii) the better planning of crop man-      reconstruction. Overall, for this ROI were collected 525
+agement operations.                                          images, that were later used for the reconstruction of
+                                                             the results presented below.
+    In order to prove the efficiency of the developed plat-
+form in the collection of data for such tasks, an exper-         Figure 22 illustrates the key outcomes of this ex-
+iment was performed in a field with olive trees. The         periment, which are usually desired in this type of pre-
+main objectives of this experiment were to (i) get an        cision agriculture applications. It is important to note
+                                                             here that all results depicted in figure 22 were created
+10 Dell XPS 9570                                             from the data gathered in a single run, with the mission
+11 https://www.dji.com/phantom-4-pro                         parameters described above.
+12 Xiaomi Mi Max 2
+13 tp-link M7350                                                 Figure 22(a) shows the area that was actually cov-
+                                                             ered, along with the polygon ROI and the calculated
+                                                             paths. It is clear from the result that almost the whole
+                                                             user-defined ROI was successfully covered and that the
+                                                             data gathered are sufficient for a qualitative represen-
+                                                             tation of the desired area. This 2D reconstruction of
+                                                             the ROI is called orthomosaic and it was was ceated to
+                                                             satisfy the objective (i) of this experiment. Orthomo-
+                                                             saics are high-resolution maps created by aerial images,
+                                                             geometrically corrected ("orthorectified") such that the
+                                                             scale is uniform. Orthomosaics can be used for an over-
+                                                             all monitoring of the ROI, as the information on the
+                                                             existing map gets updated, and for making useful mea-
+                                                             surement (e.g., planting lines and distances, percent-
+                                                             age of ground covered by vegetation etc.). In 22(b) the
+                                                             created orthomosaic is used to produce a plant health
+                                                             map, to satisfy the objective (ii) of the experiment.
+                                                             Such maps, are specifically targeted towards agricul-
+                                                             ture. Their main purpose is to allow an exploration of
+                                                             the agricultural data even more deeply. Once the rele-
+                                                             vant plant health ranges have been identified, the color
+24                                                             Savvas D. Apostolidis et al.
+
+    (a) Orthomosaic overlaid by the ROI and generated paths  (b) Plant health
+
+    (c) Point cloud                                          (d) Elevation model
+
+    Fig. 22: Photogrammetry results for precision agriculture
+
+map provides a thresholding tool, able to quantify dam-      is covered almost completely and the gathered data are
+age and predict yields by showing the areas within spe-      sufficient to produce a qualitative representation of the
+cific ranges. Finally, 22(c) and 22(d) show a pointcloud     field, proving that the developed platform is appropri-
+and an elevation map of the ROI, respectively, that were     ate for such operations. Finally, the ability to use mul-
+created to satisfy the objective (iii) of the experiment.    tiple UAVs, allows (i) the faster conduction of tasks
+Pointclouds are created by the combination of visual         and (ii) the coverage of large areas with a single mis-
+and depth information in order to produce a 3D repre-        sion, something that is not always possible with a sin-
+sentation of the scenery. On the other hand, elevation       gle UAV. For the mission presented here, the execution
+maps use only depth information, in order to create a        time was 7.56 minutes, while the estimated time to exe-
+color map that visualizes the altitude differences in a      cute the same mission, with a single UAV, is about 14.6
+ROI. Both of them are useful for the biomass estimation      minutes.
+and a more efficient planning of tasks in the agricultural
+fields.                                                      5.3 Search and Rescue Application
+
+    Overall, the results created for the scanned ROI         According to [43], the introduction of UAVs in search
+are satisfactory and correspond to the actual condi-         and rescue operations, has managed to face one of the
+tion and topology of the field. The user-defined ROI
+Cooperative Multi-UAV Coverage Mission Planning Platform for Remote Sensing Applications                          25
+
+very significant problems in this kind of missions. Specif-       For this mission, in an attempt to minimize the time
+ically, the resources and time that were required to de-      from deployment, to the detection of vehicle(s) of inter-
+ploy rescue teams before, were major bottleneck that          est, all of the available UAVs were utilized. This way,
+decreased the victim's chance of survival. Thanks to the      the mission was performed with 3 UAVs, however, due
+advances in the field of UAVs, now the assessment of          to the lower battery level on one of them, the tasks
+the situation, or the damage caused by natural or man-        were allocated proportionally, with this UAV undertak-
+made disasters, and the location of victims in the debris,    ing only the 15% of the overall region, and the other
+can be done with these small, unmanned vehicles, re-          two undertaking 40% and 45% respectively. In addi-
+ducing both the deployment time and the operational           tion, due to the direct visual contact, the area around
+risk to the the minimum. As reported in [44], UAVs            the point of deployment was excluded from the ROI.
+also offer increased precision and the capability of long     The mission altitude was selected to be 50 meters, in
+duration missions, that are both critical in some cases.      order to fly over the buildings in the field and the po
+In addition, both equipment and operational costs are         160%, so as to cover all points multiple times and re-
+significantly reduced, making aerial search and rescue        duce the risk of losing the detection of possible targets,
+missions more affordable and available to a wider range       because of their movement. The selected altitude and
+incidents.                                                    po resulted in a ds of about 28.5 meters and the GSD
+                                                              in the collected images gets a value of 1.36cm/px. As
+    For the evaluation of the proposed platform in this       in the previous experiment, the operational speed was
+kind of operations, was performed a mission with the          selected to be 2 m/s and the gimbal pitch 45 degrees,
+following imaginary scenario: In a complex of business        to ease the detection of the vehicles from the object de-
+buildings, on a public holiday, there was an information      tection algorithm [45]. From this mission were collected
+about a suspicious meeting for smuggling, where a blue        432 images in total, that were used for the acquirement
+or a silver vehicle could be involved. A team of first re-    results presented bellow.
+sponders deployed a swarm of UAVs in the region with
+the objective to completely cover the ROI and detect              Figure 23(a) shows the defined ROI and the mis-
+any possible vehicle in the area, that fits the available     sion generated with these specifications, along with the
+description. The images delivered in the GCS, in real         area that was actually covered and the location of the
+time, were fed to an object detection algorithm (YOLO         detected objects of interest. As in the previous experi-
+v3 [45]) in order to detect the vehicles of interest, during  ment, the whole ROI was successfully covered and the
+the execution of the mission, and locate them on map.         gathered data are sufficient for a qualitative represen-
+Finally, an orthomosaic was created with the collected        tation of the area. Figure 23(b) shows the output of the
+photographs to update the image on map and provide            detection algorithm for the vehicles of interest (zoomed
+better overall situational awareness.                         image).
+
+(a) Area covered and location of detected objects             (b) Cars of interest detected in the mission's ROI
+
+Fig. 23: Search and rescue coverage mission
+26                                                            Savvas D. Apostolidis et al.
+
+    Regarding the execution time, this mission needed         moment, constrains the deployment of UAVs in specific
+8.7 minutes to be completed, while for a single-UAV           types of missions.
+mission with the same specifications the estimated time
+for completion is more than 21. The utilization of mul-           Future research endeavors will focus on the integra-
+tiple UAVs, also increased the probability to detect the      tion of UAVs that have available on-board processing
+objects of interest earlier. Indeed, the time needed from     units. In such an approach, the proposed navigation
+the beginning of the mission to the detection of the ve-      platform should be enriched to be able to handle cases,
+hicles was just about 3.5 minutes.                            where information about the environment (e.g., obsta-
+                                                              cles, other UAVs, etc.) comes also during the opera-
+    Overall, the features and functionalities of the pro-     tion. This work may consider more complicated sce-
+posed mCPP approach and the end-to-end platform,              narios where UAVs cooperate with other autonomous
+seemed to be extremely useful in real-life operational        devices or even humans in the same environment.
+conditions. The results achieved in both cases, presented
+in this section, were very satisfactory for this type of op-  Acknowledgment
+erations. In addition, the multi-robot capability and the
+energy efficiency features provided, are strong incen-        This project has received funding from the European
+tives to prefer the proposed solution over other mission      Commission under the European Union's Horizon 2020
+planners, commercial or not, that are currently avail-        research and innovation programme under grant agree-
+able.                                                         ment no 833805 (ARESIBO).
+
+6 Conclusions and Future Work                                 References
+
+This paper aims at bridging the gap between the al-            1. Lei Deng, Zhihui Mao, Xiaojuan Li, Zhuowei Hu, Fuzhou
+ready existing, powerful UAVs platforms and the effec-             Duan, and Yanan Yan. Uav-based multispectral remote
+tive utilization of multiple UAVs, in the coverage path            sensing for precision agriculture: A comparison between
+planning domain. Towards that purpose, first, the orig-            different cameras. ISPRS Journal of Photogrammetry
+inal grid-based STC algorithm [14] was revisited to en-            and Remote Sensing, 146:124­136, 2018.
+able the grid's adjustment on the specific geometrical
+characteristics of the region of interest. To achieve that,    2. Wouter H Maes and Kathy Steppe. Perspectives for re-
+an optimization approach, based on Simulated Anneal-               mote sensing with unmanned aerial vehicles in precision
+ing algorithm [34], was put in charge of the discretiza-           agriculture. Trends in plant science, 24(2):152­164, 2019.
+tion strategy that ultimately controls the coverage per-
+formance. The efficiency of the optimization scheme is         3. Lorenzo Comba, Alessandro Biglia, Davide Ricauda Ai-
+validated through an extensive series of simulations,              monino, and Paolo Gay. Unsupervised detection of vine-
+in comparison with a state-of-the-art CPP alternative              yards by 3d point-cloud uav photogrammetry for preci-
+methodology [20]. Then, DARP algorithm [27] takes                  sion agriculture. Computers and Electronics in Agricul-
+over to divide the previously optimized grid into as-              ture, 155:84­95, 2018.
+many-as-the-number-of-UAVs exclusive areas, with re-
+spect to their operational capabilities.                       4. Youngjib Ham, Kevin K Han, Jacob J Lin, and Mani
+                                                                   Golparvar-Fard. Visual monitoring of civil infrastructure
+    The realization of the aforedescribed methodology              systems via camera-equipped unmanned aerial vehicles
+is achieved through a production-ready software plat-              (uavs): a review of related works. Visualization in Engi-
+form, that respects all the modern-software best prac-             neering, 4(1):1, 2016.
+tices. Two field experiments with different objectives
+were performed to prove the robustness of the platform:        5. Abdulla Al-Kaff, Francisco Miguel Moreno, Luis Javier
+(i) a precision agriculture application, and (ii) a search         San Jos´e, Fernando Garc´ia, David Mart´in, Arturo de la
+and rescue mission. In both real-life demonstrations,              Escalera, Alberto Nieva, and Jos´e Luis Meana Garc´ea.
+the proposed platform preserved all the desired features           Vbii-uav: Vision-based infrastructure inspection-uav. In
+of the commercial UAVs platforms, while at the same                World Conference on Information Systems and Tech-
+time, it achieved tremendous mission-duration improve-             nologies, pages 221­231. Springer, 2017.
+ments, that were directly proportional to the number
+of UAVs deployed in each mission. Such a feature is of         6. Alessandro Renzaglia, Jilles Dibangoye, Vincent Le Doze,
+paramount importance, as it enables the seamless uti-              and Olivier Simonin. A common optimization framework
+lization of more UAVs to trade-off their battery limita-           for multi-robot exploration and coverage in 3d environ-
+tions, which is the one of the major factors that, at the          ments. Journal of Intelligent & Robotic Systems, pages
+                                                                   1­16, 2020.
+
+                                                               7. Jingxuan Sun, Boyang Li, Yifan Jiang, and Chih-yung
+                                                                   Wen. A camera-based target detection and positioning
+                                                                   uav system for search and rescue (sar) purposes. Sensors,
+                                                                   16(11):1778, 2016.
+
+                                                               8. Juntong Qi, Dalei Song, Hong Shang, Nianfa Wang,
+                                                                   Chunsheng Hua, Chong Wu, Xin Qi, and Jianda Han.
+                                                                   Search and rescue rotary-wing uav and its application to
+                                                                   the lushan ms 7.0 earthquake. Journal of Field Robotics,
+                                                                   33(3):290­321, 2016.
+Cooperative Multi-UAV Coverage Mission Planning Platform for Remote Sensing Applications  27
+
+ 9. Dimitrios Koutras, Athanasios Kapoutsis, and Elias Kos-      25. Noa Agmon, Noam Hazon, and Gal A Kaminka. Con-
+     matopoulos. Autonomous and cooperative design of the             structing spanning trees for efficient multi-robot cover-
+     monitor positions for a team of uavs to maximize the             age. In Proceedings 2006 IEEE International Conference
+     quantity and quality of detected objects. IEEE Robotics          on Robotics and Automation, 2006. ICRA 2006., pages
+     and Automation Letters, 5(3):4986­4993, 2020.                    1698­1703. IEEE, 2006.
+
+10. Athanasios Ch Kapoutsis, Savvas A Chatzichristofis, and      26. Xiaoming Zheng, Sonal Jain, Sven Koenig, and David
+     Elias B Kosmatopoulos. A distributed, plug-n-play al-            Kempe. Multi-robot forest coverage. In 2005 IEEE/RSJ
+     gorithm for multi-robot applications with a priori non-          International Conference on Intelligent Robots and Sys-
+     computable objective functions. The International Jour-          tems, pages 3852­3857. IEEE, 2005.
+     nal of Robotics Research, 38(7):813­832, 2019.
+                                                                 27. Athanasios Ch Kapoutsis, Savvas A Chatzichristofis, and
+11. Enric Galceran and Marc Carreras. A survey on coverage            Elias B Kosmatopoulos. Darp: Divide areas algorithm for
+     path planning for robotics. Robotics and Autonomous              optimal multi-robot coverage path planning. Journal of
+     Systems, 61(12):1258­1276, dec 2013.                             Intelligent & Robotic Systems, 86(3-4):663­680, 2017.
+
+12. Ioannis Rekleitis, Ai Peng New, Edward Samuel Rankin,        28. Xiang Huang, Min Sun, Hang Zhou, and Shuai Liu. A
+     and Howie Choset. Efficient boustrophedon multi-robot            multi-robot coverage path planning algorithm for the en-
+     coverage: an algorithmic approach. Annals of Mathemat-           vironment with multiple land cover types. IEEE Access,
+     ics and Artificial Intelligence, 52(2):109­142, 2008.            2020.
+
+13. Taua~ Cabreira, Lisane Brisolara, and Paulo R. Ferreira      29. Antonio Barrientos, Julian Colorado, Jaime del Cerro,
+     Jr. Survey on coverage path planning with unmanned               Alexander Martinez, Claudio Rossi, David Sanz, and
+     aerial vehicles. Drones, 3(1):4, jan 2019.                       Jo~ao Valente. Aerial remote sensing in agriculture: A
+                                                                      practical approach to area coverage and path planning
+14. Yoav Gabriely and Elon Rimon. Spanning-tree based                 for fleets of mini aerial robots. Journal of Field Robotics,
+     coverage of continuous areas by a mobile robot. Annals           28(5):667­689, 2011.
+     of mathematics and artificial intelligence, 31(1-4):77­98,
+     2001.                                                       30. Kunal Shah, Grant Ballard, Annie Schmidt, and Mac
+                                                                      Schwager. Multidrone aerial surveys of penguin colonies
+15. J. C. Gower and G. J. S. Ross. Minimum spanning trees             in antarctica. Science Robotics, 5(47), 2020.
+     and single linkage cluster analysis. Applied Statistics,
+     18(1):54, 1969.                                             31. Howie Choset. Coverage for robotics­a survey of recent
+                                                                      results. Annals of mathematics and artificial intelligence,
+16. Howie Choset and Philippe Pignon. Coverage path plan-             31(1-4):113­126, 2001.
+     ning: The boustrophedon cellular decomposition. In Field
+     and service robotics, pages 203­209. Springer, 1998.        32. Sina Ghaemi, Payam Rahimi, and David S Nobes. Evalu-
+                                                                      ation of digital image discretization error in droplet shape
+17. Yan Li, Hai Chen, Meng Joo Er, and Xinmin Wang. Cov-              measurement using simulation. Particle & Particle Sys-
+     erage path planning for uavs based on enhanced exact             tems Characterization, 26(5-6):243­255, 2009.
+     cellular decomposition method. Mechatronics, 21(5):876­
+     885, 2011.                                                  33. Guowei Cai, Ben M Chen, and Tong Heng Lee. Coordi-
+                                                                      nate systems and transformations. In Unmanned rotor-
+18. Matthew Coombes, Wen-Hua Chen, and Cunjia Liu.                    craft systems, pages 23­34. Springer, 2011.
+     Boustrophedon coverage path planning for uav aerial
+     surveys in wind. In 2017 International Conference on        34. Scott Kirkpatrick, C. D. Gelatt, and Mario P. Vec-
+     Unmanned Aircraft Systems (ICUAS), pages 1563­1571.              chi. Optimization by simulated annealing. Science, 220
+     IEEE, 2017.                                                      4598:671­80, 1983.
+
+19. Jeremy S Lewis, William Edwards, Kelly Benson, Ioan-         35. Stanislav Bochkarev and Stephen L Smith. On mini-
+     nis Rekleitis, and Jason M O'Kane. Semi-boustrophedon            mizing turns in robot coverage path planning. In 2016
+     coverage with a dubins vehicle. In 2017 IEEE/RSJ Inter-          IEEE International Conference on Automation Science
+     national Conference on Intelligent Robots and Systems            and Engineering (CASE), pages 1237­1242. IEEE, 2016.
+     (IROS), pages 5630­5637. IEEE, 2017.
+                                                                 36. Daniel H Stolfi, Matthias R Brust, Gr´egoire Danoy, and
+20. Rik Ba¨hnemann, Nicholas Lawrance, Jen Jen Chung,                 Pascal Bouvry. A cooperative coevolutionary approach
+     Michael Pantic, Roland Siegwart, and Juan Nieto. Re-             to maximise surveillance coverage of uav swarms. In 2020
+     visiting boustrophedon coverage path planning as a gen-          IEEE 17th Annual Consumer Communications & Net-
+     eralized traveling salesman problem. arXiv preprint              working Conference (CCNC), pages 1­6. IEEE, 2020.
+     arXiv:1907.09224, 2019.
+                                                                 37. Matej Paradzik and Go¨khan Ince. Multi-agent search
+21. Carmelo Di Franco and Giorgio Buttazzo. Coverage path             strategy based on digital pheromones for uavs. In 2016
+     planning for uavs photogrammetry with energy and reso-           24th Signal Processing and Communication Application
+     lution constraints. Journal of Intelligent & Robotic Sys-        Conference (SIU), pages 233­236. IEEE, 2016.
+     tems, 83(3-4):445­462, 2016.
+                                                                 38. Athanasios Ch Kapoutsis, Savvas A Chatzichristofis, Lef-
+22. Ivan Maza and Anibal Ollero. Multiple uav coopera-                teris Doitsidis, Jo~ao Borges de Sousa, Jose Pinto, Jose
+     tive searching operation using polygon area decomposi-           Braga, and Elias B Kosmatopoulos. Real-time adaptive
+     tion and efficient coverage algorithms. In Distributed Au-       multi-robot exploration with application to underwater
+     tonomous Robotic Systems 6, pages 221­230. Springer,             map construction. Autonomous Robots, page 1­29, 2015.
+     2007.
+                                                                 39. Avrim Blum, Chen Dan, and Saeed Seddighin. Learning
+23. KR Guruprasad. X-stc: An extended spanning tree-based             complexity of simulated annealing. In International Con-
+     coverage algorithm for mobile robots. In Proceedings of          ference on Artificial Intelligence and Statistics, pages
+     the Advances in Robotics 2019, pages 1­6. 2019.                  1540­1548. PMLR, 2021.
+
+24. Noam Hazon and Gal A Kaminka. Redundancy, effi-              40. Jos´e Miguel Go´mez-L´opez, Jos´e Luis P´erez-Garc´ia, An-
+     ciency and robustness in multi-robot coverage. In Pro-           tonio Tom´as Mozas-Calvache, and Jorge Delgado-Garc´ia.
+     ceedings of the 2005 IEEE International Conference on            Mission flight planning of rpas for photogrammetric stud-
+     Robotics and Automation, pages 735­741. IEEE, 2005.              ies in complex scenes. ISPRS International Journal of
+                                                                      Geo-Information, 9(6):392, 2020.
+28                                                             Savvas D. Apostolidis et al.
+
+41. E Raymond Hunt Jr and Craig ST Daughtry. What good
+     are unmanned aircraft systems for agricultural remote
+     sensing and precision agriculture? International journal
+     of remote sensing, 39(15-16):5345­5376, 2018.
+
+42. Georgios D Karatzinis, Savvas D Apostolidis, Athana-
+     sios Ch Kapoutsis, Liza Panagiotopoulou, Yiannis S
+     Boutalis, and Elias B Kosmatopoulos. Towards an in-
+     tegrated low-cost agricultural monitoring system with
+     unmanned aircraft system. In 2020 International Con-
+     ference on Unmanned Aircraft Systems (ICUAS), pages
+     1131­1138. IEEE, 2020.
+
+43. Mesay Belete Bejiga, Abdallah Zeggada, Abdelhamid
+     Nouffidj, and Farid Melgani. A convolutional neural net-
+     work approach for assisting avalanche search and rescue
+     operations with uav imagery. Remote Sensing, 9(2):100,
+     2017.
+
+44. Piotr Rudol and Patrick Doherty. Human body detection
+     and geolocalization for uav search and rescue missions
+     using color and thermal imagery. In 2008 IEEE aerospace
+     conference, pages 1­8. Ieee, 2008.
+
+45. Joseph Redmon and Ali Farhadi. Yolov3: An incremental
+     improvement. arXiv preprint arXiv:1804.02767, 2018.
+

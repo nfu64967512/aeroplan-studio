@@ -1,0 +1,572 @@
+<title>VTOL 偵察交接說明書</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --paper:#f2f4f7; --surface:#ffffff; --surface-2:#e9edf2;
+  --ink:#12171d; --ink-2:#3d4753; --neutral:#5c6673; --faint:#8b95a3;
+  --rule:#d4dae2; --rule-strong:#aab4c0;
+  --accent:#0b4f6c; --accent-soft:#e2eef4;
+  --ok:#1a6d46; --ok-soft:#e0f0e8;
+  --gone:#a51f18; --gone-soft:#fae7e5;
+  --warn:#96581a; --warn-soft:#faeddc;
+  --code-bg:#eceff4;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#0e1217; --surface:#151a21; --surface-2:#1b222b;
+    --ink:#e7ebf1; --ink-2:#b9c2cd; --neutral:#8d97a4; --faint:#6b7684;
+    --rule:#28313c; --rule-strong:#3b4756;
+    --accent:#71bcd9; --accent-soft:#16303c;
+    --ok:#5fc294; --ok-soft:#14291f;
+    --gone:#f08279; --gone-soft:#2e1715;
+    --warn:#e0a760; --warn-soft:#2b2013;
+    --code-bg:#1a212a;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#0e1217; --surface:#151a21; --surface-2:#1b222b;
+  --ink:#e7ebf1; --ink-2:#b9c2cd; --neutral:#8d97a4; --faint:#6b7684;
+  --rule:#28313c; --rule-strong:#3b4756;
+  --accent:#71bcd9; --accent-soft:#16303c;
+  --ok:#5fc294; --ok-soft:#14291f;
+  --gone:#f08279; --gone-soft:#2e1715;
+  --warn:#e0a760; --warn-soft:#2b2013;
+  --code-bg:#1a212a;
+}
+
+*{box-sizing:border-box}
+body{
+  background:var(--paper); color:var(--ink);
+  font-family:"IBM Plex Sans","Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif;
+  font-size:15.5px; line-height:1.72;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1080px; margin:0 auto; padding:0 24px 96px}
+h1,h2,h3,h4{font-family:"IBM Plex Sans Condensed","Noto Sans TC",system-ui,sans-serif;
+  text-wrap:balance; margin:0; line-height:1.25; letter-spacing:.005em}
+p{margin:0}
+code,kbd{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:.87em;
+  background:var(--code-bg); padding:.1em .34em; border-radius:3px; word-break:break-word}
+pre{font-family:"IBM Plex Mono",ui-monospace,monospace; font-size:13px; line-height:1.6;
+  background:var(--code-bg); color:var(--ink); padding:14px 16px; border-radius:5px;
+  overflow-x:auto; margin:0; border-left:3px solid var(--rule-strong)}
+pre code{background:none; padding:0}
+a{color:var(--accent)}
+
+/* ── masthead ─────────────────────────────── */
+header.mast{
+  border-top:5px solid var(--accent);
+  background:var(--surface);
+  margin:0 -24px 0; padding:34px 24px 30px;
+  border-bottom:1px solid var(--rule);
+}
+.mast-inner{max-width:1032px; margin:0 auto; display:flex; flex-direction:column; gap:16px}
+.eyebrow{font-family:"IBM Plex Mono",monospace; font-size:11.5px; letter-spacing:.14em;
+  text-transform:uppercase; color:var(--neutral)}
+h1{font-size:clamp(28px,4.4vw,42px); font-weight:700}
+.subtitle{font-size:17px; color:var(--ink-2); max-width:62ch}
+.meta-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:2px 22px;
+  margin-top:6px; border-top:1px solid var(--rule); padding-top:14px}
+.meta-grid div{display:flex; gap:10px; font-size:13.5px; padding:2px 0}
+.meta-grid dt{color:var(--neutral); min-width:64px; flex:none}
+.meta-grid dd{margin:0; font-family:"IBM Plex Mono",monospace; font-size:12.5px; color:var(--ink-2)}
+
+/* ── verdict ──────────────────────────────── */
+.verdict{
+  margin:30px 0 0; padding:22px 24px; background:var(--surface);
+  border:1px solid var(--rule); border-left:5px solid var(--gone); border-radius:4px;
+}
+.verdict h2{font-size:20px; margin-bottom:10px; color:var(--gone)}
+.verdict p{color:var(--ink-2); max-width:74ch}
+.verdict p + p{margin-top:10px}
+.tally{display:flex; flex-wrap:wrap; gap:0; margin-top:18px; border:1px solid var(--rule);
+  border-radius:4px; overflow:hidden}
+.tally > div{flex:1 1 128px; padding:11px 14px; background:var(--surface-2);
+  border-right:1px solid var(--rule)}
+.tally > div:last-child{border-right:none}
+.tally b{display:block; font-family:"IBM Plex Mono",monospace; font-size:21px; font-weight:500;
+  font-variant-numeric:tabular-nums; line-height:1.2}
+.tally span{font-size:12px; color:var(--neutral)}
+.t-bad b{color:var(--gone)} .t-good b{color:var(--ok)} .t-warn b{color:var(--warn)}
+
+/* ── sections ─────────────────────────────── */
+section{margin-top:52px}
+h2.sec{font-size:13px; font-weight:700; letter-spacing:.13em; text-transform:uppercase;
+  color:var(--accent); padding-bottom:9px; border-bottom:2px solid var(--accent); margin-bottom:22px}
+h3{font-size:20px; font-weight:600; margin:30px 0 10px}
+h4{font-size:15.5px; font-weight:600; margin:20px 0 7px; color:var(--ink)}
+.prose{max-width:74ch}
+.prose p + p{margin-top:12px}
+ul,ol{margin:11px 0; padding-left:22px; max-width:74ch}
+li{margin:5px 0}
+li::marker{color:var(--faint)}
+
+/* ── tables ───────────────────────────────── */
+.tw{overflow-x:auto; border:1px solid var(--rule); border-radius:4px; background:var(--surface)}
+table{border-collapse:collapse; width:100%; font-size:13.5px; min-width:600px}
+th{text-align:left; font-family:"IBM Plex Sans Condensed",sans-serif; font-weight:700;
+  font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--neutral);
+  padding:11px 14px; border-bottom:1.5px solid var(--rule-strong); background:var(--surface-2);
+  white-space:nowrap}
+td{padding:10px 14px; border-bottom:1px solid var(--rule); vertical-align:top; color:var(--ink-2)}
+tbody tr:last-child td{border-bottom:none}
+td:first-child{color:var(--ink)}
+td code{font-size:12px}
+.num{font-variant-numeric:tabular-nums; font-family:"IBM Plex Mono",monospace; font-size:12.5px}
+
+.chip{display:inline-block; font-family:"IBM Plex Mono",monospace; font-size:11px;
+  font-weight:500; padding:2px 8px; border-radius:3px; white-space:nowrap; letter-spacing:.03em}
+.c-ok{background:var(--ok-soft); color:var(--ok)}
+.c-gone{background:var(--gone-soft); color:var(--gone)}
+.c-warn{background:var(--warn-soft); color:var(--warn)}
+
+/* ── callouts ─────────────────────────────── */
+.note{margin:18px 0; padding:14px 18px; border-radius:4px; font-size:14px;
+  background:var(--warn-soft); border-left:4px solid var(--warn); color:var(--ink-2); max-width:80ch}
+.note.crit{background:var(--gone-soft); border-left-color:var(--gone)}
+.note.good{background:var(--ok-soft); border-left-color:var(--ok)}
+.note strong{color:var(--ink)}
+.note p + p{margin-top:8px}
+
+/* ── work packages ────────────────────────── */
+.wp{background:var(--surface); border:1px solid var(--rule); border-radius:5px;
+  padding:22px 24px; margin-bottom:18px}
+.wp-head{display:flex; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:6px}
+.wp-id{font-family:"IBM Plex Mono",monospace; font-size:12px; font-weight:500;
+  background:var(--accent-soft); color:var(--accent); padding:3px 9px; border-radius:3px;
+  letter-spacing:.05em}
+.wp-head h3{margin:0; font-size:19px}
+.wp-files{font-size:13px; color:var(--neutral); margin-bottom:14px}
+.wp-files code{font-size:12px}
+.wp-sig{margin:14px 0}
+.wp-sig-label{font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.1em;
+  text-transform:uppercase; color:var(--neutral); margin-bottom:6px}
+.wp .prose{max-width:none}
+.accept{margin-top:16px; padding-top:14px; border-top:1px dashed var(--rule)}
+.accept .wp-sig-label{color:var(--ok)}
+
+/* ── flow ─────────────────────────────────── */
+.flow{display:grid; gap:1px; background:var(--rule); border:1px solid var(--rule);
+  border-radius:4px; overflow:hidden; margin-top:6px}
+.flow-row{display:grid; grid-template-columns:38px 1fr 1.35fr; background:var(--surface);
+  padding:11px 14px; gap:14px; align-items:baseline; font-size:13.5px}
+.flow-row .n{font-family:"IBM Plex Mono",monospace; color:var(--accent); font-weight:500}
+.flow-row .what{color:var(--ink)}
+.flow-row .where{color:var(--neutral); font-family:"IBM Plex Mono",monospace; font-size:11.8px;
+  word-break:break-word}
+
+footer{margin-top:64px; padding-top:20px; border-top:1px solid var(--rule);
+  font-size:12.5px; color:var(--faint); max-width:74ch}
+@media (max-width:640px){
+  .flow-row{grid-template-columns:26px 1fr; }
+  .flow-row .where{grid-column:2}
+}
+</style>
+
+<header class="mast">
+  <div class="mast-inner">
+    <div class="eyebrow">實作交接說明書 · 2026-09-09</div>
+    <h1>VTOL 多機協同區域偵察</h1>
+    <p class="subtitle">垂直起降無人機多機協同區域偵察的航線規劃與飛行驗證。本文把研究報告的每一條主張對照 repo 實際程式碼、測試與航次產物落地，供接手者直接動工。</p>
+    <div class="meta-grid">
+      <div><dt>Repo</dt><dd>aeroplan-studio</dd></div>
+      <div><dt>分支</dt><dd>quad_swarm @ 5e0295f</dd></div>
+      <div><dt>上位計畫</dt><dd>VIO 無 GNSS 定位與任務飛行</dd></div>
+      <div><dt>落地方式</dt><dd>7 面向 × (落地 + 對抗性複查)</dd></div>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+
+<div class="verdict">
+  <h2>報告描述的六塊工作，只有一半在現行工作樹上</h2>
+  <p>另一半的產品程式碼不在樹上，也不在任何 branch、stash 或 worktree 上。<code>git log --all -S</code> 在所有 ref 上都是 0 個 commit。</p>
+  <p><strong>但它們的測試還在，而且是紅的。</strong>所以這份交接的核心工作不是從零實作，而是把那些紅色測試變綠 —— 規格已經寫好了，就在測試檔裡。</p>
+  <div class="tally">
+    <div class="t-bad"><b>96</b><span>failed</span></div>
+    <div class="t-good"><b>415</b><span>passed</span></div>
+    <div class="t-warn"><b>2</b><span>檔收集 0 項</span></div>
+    <div><b>20</b><span>相關測試檔</span></div>
+    <div><b>14.08</b><span>秒</span></div>
+  </div>
+</div>
+
+<section>
+<h2 class="sec">先決條件 · 這個 repo 裡有兩套規劃器</h2>
+<div class="prose">
+<p>接手者最容易踩的第一個坑。兩套平行存在、共用同一個 GUI 入口，由「VTOL 偵察」分頁「5. 規劃」的下拉選單切換。唯一接縫是 <code>mission/swarm_coordinator.py::plan_coverage_dccpp</code>。</p>
+</div>
+<div class="tw" style="margin-top:16px">
+<table>
+<thead><tr><th></th><th>既有 DCCPP — 本報告的主體</th><th>HARVEST</th></tr></thead>
+<tbody>
+<tr><td>位置</td><td><code>core/dccpp/</code></td><td><code>hv_dccpp/</code>（vendor 函式庫）</td></tr>
+<tr><td>機隊</td><td>同構，本報告用 3 架</td><td>異構雙構型 Pioneer / HERO</td></tr>
+<tr><td>匯出</td><td><code>mission/vtol_mission_exporter.py</code></td><td><code>hv_dccpp/ardupilot.py</code></td></tr>
+<tr><td>避撞</td><td><code>core/dccpp/collision_avoidance.py</code></td><td><code>hv_dccpp/deconflict.py</code></td></tr>
+<tr><td>航次產物</td><td><code>exports/vtol_recon_run1</code>、<code>run2</code></td><td><code>runs/artifacts/HV4SITL2…13</code></td></tr>
+<tr><td>資料型別</td><td>純 dict</td><td>真 dataclass</td></tr>
+</tbody></table>
+</div>
+<div class="note crit"><strong>本報告講的是左欄。</strong><code>runs/artifacts/HV4SITL*</code> 那十幾趟航次是右欄的證據，它的數字（4 機、120.1 m、32.43 km）不可以拿來當本報告成果的佐證。</div>
+</section>
+
+<section>
+<h2 class="sec">動手前必讀 · 工作樹現況</h2>
+<div class="tw">
+<table>
+<thead><tr><th>報告裡的工作</th><th>現況</th><th>硬證據</th></tr></thead>
+<tbody>
+<tr><td>多機偵察操作頁面</td><td><span class="chip c-ok">在</span></td><td><code>ui/widgets/vtol_recon_panel.py</code>　7 個編號群組、19 個信號</td></tr>
+<tr><td>相機覆蓋換算模組</td><td><span class="chip c-ok">在</span></td><td><code>core/recon/sensor_footprint.py</code></td></tr>
+<tr><td>覆蓋率驗算模組</td><td><span class="chip c-ok">在</span></td><td><code>core/recon/coverage_verifier.py::verify_coverage</code></td></tr>
+<tr><td>VTOL 垂直起降剖面　<span style="color:var(--faint)">缺陷②</span></td><td><span class="chip c-ok">在</span></td><td><code>core/dccpp/vtol_profile.py</code> + <code>prepend_vtol_takeoff</code></td></tr>
+<tr><td>掃描方向可自訂</td><td><span class="chip c-ok">在</span></td><td><code>area_processor.width_along_direction:228</code></td></tr>
+<tr><td>上傳側速度修正　<span style="color:var(--faint)">缺陷③後半</span></td><td><span class="chip c-ok">在</span></td><td><code>ui/main_window.py::resolve_upload_speed_radius</code></td></tr>
+<tr><td>重疊率修正　<span style="color:var(--faint)">缺陷①</span></td><td><span class="chip c-gone">不在</span></td><td><code>area_processor.py:351</code> 仍 <code>step = w_i + w_ovl</code>；<code>:359</code> 仍 <code>+</code></td></tr>
+<tr><td>匯出側速度型別　<span style="color:var(--faint)">缺陷③前半</span></td><td><span class="chip c-gone">不在</span></td><td><code>vtol_mission_exporter.py:135</code> 仍 <code>param1=1.0</code>（＝地速）</td></tr>
+<tr><td>ARMING_REQUIRE 注入　<span style="color:var(--faint)">缺陷④</span></td><td><span class="chip c-gone">不在</span></td><td><code>mission/sitl_launcher.py</code> 無 <code>VTOL_ENFORCED_PARAMS</code></td></tr>
+<tr><td>聯合分派 joint / balance_load</td><td><span class="chip c-gone">不在</span></td><td><code>IDP_Solver.__init__()</code> 不收 <code>balance_load</code></td></tr>
+<tr><td>避撞迭代收斂 + 高度上限</td><td><span class="chip c-gone">不在</span></td><td><code>CollisionAvoidance.__init__()</code> 不收 <code>max_rounds</code></td></tr>
+<tr><td>逐機轉彎半徑　<span style="color:var(--faint)">報告未提</span></td><td><span class="chip c-gone">不在</span></td><td><code>ImportError: TurnRadiusUnusable</code></td></tr>
+</tbody></table>
+</div>
+
+<h3>這不是「還沒做」，是「做過但不在樹上」</h3>
+<div class="prose">
+<ol>
+<li><strong>測試還在，而且比程式碼舊。</strong><code>test_dccpp_strip_pitch.py</code>（08-24）、<code>test_collision_alt_cap.py</code>（08-25）、<code>test_idp_load_balance.py</code>（09-04）、<code>test_per_aircraft_turn_radius.py</code>（09-05）都逐條描述了預期行為。</li>
+<li><strong>產品檔的 mtime 全部撞在同一刻。</strong><code>area_processor.py</code>、<code>collision_avoidance.py</code>、<code>vtol_mission_exporter.py</code> 三個檔 mtime 都是 <span class="num">2026-09-06 21:24</span>，而測試檔全部早於它。像一次批次還原，不是逐檔開發。</li>
+<li><strong>從沒進過版控。</strong>HEAD 版的 <code>area_processor.py:296</code> 一樣是 <code>step = w_i + w_ovl</code>。</li>
+<li><strong>新增檔活下來、修改檔沒活下來。</strong>全部相關檔案都是 untracked。git 不碰 untracked 檔，所以新建模組與測試都在；而對已納管檔案的修改被 checkout 蓋掉了。</li>
+</ol>
+</div>
+
+<div class="note good"><strong>唯一的復原線索。</strong><code>core/dccpp/__pycache__/idp_solver.cpython-310.pyc</code>（22,281 bytes，2026-09-02 17:16）<strong>是 joint 版的位元碼</strong>，內含 <code>balance_load</code> ×1、<code>joint</code> ×15、<code>contiguous</code> ×4、<code>minmax</code> ×4。對應的 <code>.py</code> 在任何地方都沒有。見 WP-C。</div>
+
+<div class="note crit"><strong>有另一個 session 正在改同一棵樹。</strong>過去 6 小時內 <code>mission/sitl_launcher.py</code>（15:08）、<code>swarm_coordinator.py</code>、<code>ui/main_window.py</code> 與 <code>hv_dccpp/</code> 六個檔都被改過。落地過程中就直接觀測到一次：<code>aeroplan_adapter.py</code> 在 18:05:14 被改，害一條源碼字串鎖從綠變紅。<p><strong>動手前先比對 mtime，不要只看 <code>git status</code>。</strong>兩個 session 同時改同一個檔會互相覆蓋，而且不會有任何錯誤訊息。</p></div>
+</section>
+
+<section>
+<h2 class="sec">一站式資料流</h2>
+<div class="prose"><p>面板本身<strong>不做任何副作用</strong>，只發 19 個 <code>pyqtSignal</code>，由 <code>ui/main_window.py</code> 的 handler 執行。這個設計要保留：它是面板可以被離線測試的原因。</p></div>
+<div class="flow">
+  <div class="flow-row"><span class="n">①</span><span class="what">圈區 —— 地圖點擊產生角點</span><span class="where">dual_map_widget.py → MainWindow.on_corner_added</span></div>
+  <div class="flow-row"><span class="n">②</span><span class="what">相機換算 —— 航高 ↔ 刈幅 ↔ GSD</span><span class="where">core/recon/sensor_footprint.py::compute_footprint</span></div>
+  <div class="flow-row"><span class="n">③</span><span class="what">分配 —— 條帶分給各機</span><span class="where">core/dccpp/task_allocator.py → idp_solver.py</span></div>
+  <div class="flow-row"><span class="n">④</span><span class="what">避撞 —— 時空衝突偵測與解衝突</span><span class="where">core/dccpp/collision_avoidance.py::run</span></div>
+  <div class="flow-row"><span class="n">⑤</span><span class="what">覆蓋率驗算 —— 規劃之後獨立再驗一次</span><span class="where">core/recon/coverage_verifier.py::verify_coverage</span></div>
+  <div class="flow-row"><span class="n">⑥</span><span class="what">任務匯出 —— QGC WPL 110 + 簡報</span><span class="where">mission/vtol_mission_exporter.py::export_all</span></div>
+  <div class="flow-row"><span class="n">⑦</span><span class="what">上傳飛控 —— MAVLink</span><span class="where">MainWindow.on_sitl_upload_mission</span></div>
+  <div class="flow-row"><span class="n">⑧</span><span class="what">SITL —— 起 N 台 ArduPilot</span><span class="where">mission/sitl_launcher.py::start_multi</span></div>
+</div>
+<div class="prose" style="margin-top:16px">
+<p>要看懂資料結構，先讀 <code>core/dccpp/dccpp_path_builder.py</code>（<code>BuiltWaypoint</code> / <code>BuiltPath</code> / <code>SegmentLabel</code>）、<code>vtol_recon_panel.py::get_params</code>（約 35 個鍵）、<code>hv_dccpp/mission.py</code>。</p>
+<p><strong>CLI 現況：</strong><code>cli/</code> 只有 <code>sitl</code> 與 <code>demo</code> 兩個子指令，沒有跑完整條鏈的 CLI。無頭跑法是 <code>scratchpad/acceptance_vtol_recon.py</code>，走產品路徑。它未被 git 追蹤。</p>
+</div>
+</section>
+
+<section>
+<h2 class="sec">演算法 · 論文沒有而本研究補上的兩件事</h2>
+<div class="prose">
+<p>四個步驟：決定掃描方向 → 切掃描帶（實作 Wang et al. 2025, <em>Defence Technology</em> 47:197–215 的 Eq.7）→ 分配給各機（min-max makespan）→ Dubins 串接起飛／掃描／轉場三段。</p>
+
+<h4>相機模組　<code>core/recon/sensor_footprint.py</code></h4>
+<p>讓「影像要看多細」與「飛多高、一趟掃多寬」可以互相換算。公開 API：<code>compute_footprint</code>、<code>swath_width_m</code>、<code>gsd_m_per_px</code>、<code>altitude_for_gsd_m</code>、<code>effective_sweep_width_m</code>。掛載角上限硬編在 <code>_MAX_LOOK_ANGLE_DEG = 85.0</code>。</p>
+<p>HARVEST 側是<strong>另一套</strong>相機模型（<code>hv_dccpp/platform.py</code>，用焦距與像素間距，不是 FOV）。兩套並存，改一邊不會影響另一邊。</p>
+
+<h4>獨立覆蓋率驗算　<code>core/recon/coverage_verifier.py</code></h4>
+<p>規劃完之後把作業段航點網格化重算一次覆蓋率與漏掃格，<strong>不讓規劃程式自己說自己對</strong>。</p>
+</div>
+<div class="note"><strong>已知結構性缺口（未修）。</strong>驗算只吃 <code>(lat, lon)</code>，<strong>從不讀航點的 <code>alt</code></strong>，再配一個由面板航高算出的單一 <code>sweep_width_m</code>。所以當各機實際高度不同時，它回報的覆蓋率是對「假設全隊都飛設定高度」成立，不是對實際任務成立。這正是高度被抬高卻躲過驗算的原因 —— 修高度問題時要順手補這個。</div>
+</section>
+
+<section>
+<h2 class="sec">四個靜默缺陷</h2>
+<div class="prose"><p>四個都屬於同一類：<strong>不會報錯、log 看起來正常、但結果是錯的</strong>。</p></div>
+
+<h3>缺陷① 掃描帶重疊率失效</h3>
+<div class="prose">
+<p>中線 =（<code>dw_top</code> + <code>dw_bot</code>）/ 2 時 <code>w_ovl</code> 項剛好對消：</p>
+</div>
+<pre><code>dw_mid(l) = ½[(l−1)(w_i−w_ovl) + l·w_i + (l−1)·w_ovl] = ½·w_i·(2l−1)</code></pre>
+<div class="prose"><p style="margin-top:12px">⇒ 中線間距恆等於 <code>w_i</code>，與重疊率無關。</p></div>
+
+<div class="note crit"><strong>訂正報告的措辭。</strong>報告寫「怎麼調結果都一樣」，只對了一半。中線<em>間距</em>確實不變，但條帶<em>數量</em>會隨重疊率遞減（<code>:351</code> 的 <code>step</code> 是 <code>+</code>），所以調高重疊率會讓覆蓋率<strong>變差</strong>，方向是反的。</div>
+
+<div class="tw">
+<table><thead><tr><th>w_ovl</th><th>條帶數</th><th>覆蓋率</th></tr></thead>
+<tbody>
+<tr><td class="num">0</td><td class="num">13</td><td class="num">97.00%</td></tr>
+<tr><td class="num">20</td><td class="num">12</td><td class="num">90.00%</td></tr>
+<tr><td class="num">40</td><td class="num">11</td><td class="num">82.00%</td></tr>
+</tbody></table>
+</div>
+<div class="prose"><p style="margin-top:12px">實測條件 2.0×1.5 km、w_i = 110.88。只修中線公式而不修 <code>:351</code> 的 <code>step</code>，<code>n_layers</code> 仍然是錯的。這個錯誤措辭同時存在於報告與 <code>test_dccpp_strip_pitch.py:14</code> 的 docstring，修的時候一起更正。</p>
+<p>論文印的是 <code>+</code>；無法斷定是原文誤植或 PDF 抽取損壞，<strong>以物理自洽為準</strong>。</p></div>
+
+<h3>缺陷② 規劃器不認得 VTOL　<span class="chip c-ok">已在樹上</span></h3>
+<div class="prose">
+<p>真正的判別式是 <code>if u.turn_radius &gt; 0</code>，不是 <code>vehicle_type</code>；而 <code>vehicle_type='vtol'</code> 被降級成 <code>VehicleType.MULTIROTOR</code>（那個 enum 根本沒有 VTOL 成員）。QuadPlane 的 <code>turn_radius</code> 合法地大於 0 ⇒ 被當固定翼。<code>plan_coverage_dccpp()</code> 當時連 <code>transition_alt</code> 這個參數都沒有，起降參數是 <code>runway_length_m</code> 那一組，而 VTOL 偵察頁沒有跑道欄位 ⇒ 吃預設值。</p>
+</div>
+<pre><code>Home（地面） ──純垂直──&gt; 轉換高度 ──前向過渡──&gt; 固定翼爬升 ──&gt; 巡航高度</code></pre>
+<div class="note"><strong>垂直段會弄壞三個下游</strong>（都已修，接手時不要退回去）：<p>① SITL 生成朝向只比對 <code>waypoints[1]</code>，同經緯度算不出方位 ⇒ 靜靜退回 0°。② NFZ 避障後用<em>水平</em>弧長比例重採樣高度 ⇒ 垂直段佔比 0，整段爬升被擠掉。③ 避撞的高度偏移窗是純索引式，沒有起降段守衛 ⇒ 會把地面點抬高 ⇒「在半空中降落」。</p></div>
+<div class="note"><strong>仍未修：</strong><code>BuiltPath.total_length_m</code> = entry + operation + transfer，<strong>沒有 takeoff / landing</strong> ⇒ <code>total_makespan</code> 系統性低估。修它會同時踩紅 <code>test_dccpp_pipeline.py</code> 的兩條特徵化測試。</div>
+
+<h3>缺陷③ 匯出與上傳是兩條路，各錯一半</h3>
+<div class="tw">
+<table><thead><tr><th>項目</th><th>匯出檔</th><th>上傳飛控（讀回）</th></tr></thead>
+<tbody>
+<tr><td><code>DO_CHANGE_SPEED</code> param1</td><td><strong style="color:var(--gone)">1.0 = 地速</strong></td><td>0.0 = 空速</td></tr>
+<tr><td><code>DO_CHANGE_SPEED</code> param2</td><td class="num">18.0 m/s</td><td><strong style="color:var(--gone)">3.0 m/s</strong></td></tr>
+<tr><td><code>NAV_WAYPOINT</code> param2</td><td class="num">60 m</td><td class="num">50 m</td></tr>
+</tbody></table>
+</div>
+<div class="prose" style="margin-top:14px">
+<p>MAVLink <code>common.xml</code> 的 <code>enum SPEED_TYPE</code>：<strong>0 = Airspeed、1 = Groundspeed</strong>。匯出檔設的是地速下限，根本沒設巡航空速；上傳側型別對但值是 3.0，遠低於 QuadPlane 的 <code>AIRSPEED_MIN</code> ⇒ 會被夾掉。<strong>兩條路都沒有真的設到巡航空速。</strong></p>
+<p><strong>上傳側根因（已修）：</strong>上傳路徑讀的是「基本演算法」分頁的 <code>parameter_panel.get_parameters()</code>，不是 VTOL 偵察頁；那個 panel 的 <code>speed</code> 從頭到尾沒被動過，還是初始預設 3.0。</p>
+<p><strong>匯出側（未修）：</strong><code>vtol_mission_exporter.py:135</code> 仍是 <code>param1=1.0</code>，而 <code>:131</code> 的註解寫「param1=1.0 (空速)」<strong>是錯的</strong> —— 同一個檔 <code>:39</code> 自己就寫著 <code>param1=速度類型(0=AS,1=GS)</code>。</p>
+</div>
+
+<h3>缺陷④ QuadPlane 在 SITL 飛不起來</h3>
+<div class="prose">
+<p>根因是 <code>sitl/default_params/plane.parm:84</code> 的 <code>ARMING_REQUIRE 0</code>，讓四軸馬達一直停在最低油門。</p>
+<p><strong>判別法：</strong>PWM <strong>0</strong> = 該通道沒指派馬達功能；PWM <strong>1000</strong> = 有指派但被命令關掉。兩者意義完全不同。另一個錯誤直覺：<code>--model quadplane</code> 只決定物理模型，QuadPlane 功能要靠參數開 —— <code>--model quadplane</code> ≠ <code>Q_ENABLE=1</code>。</p>
+<p><strong>修法：注入，不是檢查。</strong>對 <code>vehicle == 'VTOL'</code> 產生 <code>vtol_enforced.parm</code> 並掛進 <code>--defaults</code> 鏈：</p>
+</div>
+<pre><code>Q_ENABLE 1 / Q_FRAME_CLASS 1 / Q_FRAME_TYPE 1
+SERVO5~8_FUNCTION 33~36
+ARMING_REQUIRE 1        ← 覆蓋 plane.parm 的 0</code></pre>
+<div class="prose" style="margin-top:12px"><p>關鍵是<strong>注入</strong>不是檢查：檢查只會事後告訴你壞了；注入直接讓它是對的，而且不依賴任何人維護 <code>plane.parm</code>。</p></div>
+
+<div class="note"><strong>排序有實質意義。</strong><code>--defaults</code> 後面覆蓋前面。目前唯一真的在注入的地方是 <code>scripts/hv_sitl_flight.py:176-189</code>，六份的順序是 <code>plane.parm → vtol_default.parm → identity.parm → <strong>vtol_enforced.parm</strong> → &lt;UAV&gt;.param → firmware_override.parm</code> —— 強制檔排第 4，<code>&lt;UAV&gt;.param</code> 排在它<em>後面</em>。今天安全（那些 <code>.param</code> 只有 <code>Q_ENABLE,1</code>），但只要哪天含 <code>ARMING_REQUIRE</code> 就會被蓋掉。<code>hv_sitl_flight.py:19</code> 的 docstring 只列五份，已過時，不要照抄。</div>
+
+<div class="note crit"><strong>產品啟動器沒有這個。</strong><code>mission/sitl_launcher.py</code> 完全沒有 <code>VTOL_ENFORCED_PARAMS</code>，<code>:571</code> 寫的 <code>SCHED_LOOP_RATE=50</code>（測試期待 200）。<code>hv_sitl_flight.py:14</code> 自己就逐字寫著「那一版 launcher 不會掛上去」。<p>⇒ 走 GUI 產品路徑起 SITL，<strong>現在仍然會踩到這個 bug</strong>。</p></div>
+
+<h4>順帶三個 PreArm 修正</h4>
+<div class="prose"><ol>
+<li><strong>VTOL land too short</strong> —— 飛控用<em>它自己的</em> <code>AIRSPEED_CRUISE</code> 算煞停距離，<strong>跟面板速度無關</strong>。修法是把 <code>land_approach_m</code> 取 <code>max(back_transition, 飛控煞停距離 × 1.25)</code>。</li>
+<li><strong>Gyro rate</strong> —— SITL 模擬陀螺儀 400 Hz，<code>300 × 1.8 = 540 &gt; 400</code> 恆擋 ⇒ loop rate 300 → 200。<span class="chip c-gone">現行 launcher 是 50</span></li>
+<li><strong>真解鎖優先</strong> <span class="chip c-ok">已在樹上</span> —— <code>sitl_link.py:865 _arm_with_prearm</code> 先發正常 ARM 吃真 PreArm，被擋才 force(21196) 並大聲警告。但產品呼叫點目前全部傳 <code>force_fallback=True</code>，所以「0 次強制解鎖」是那一趟的<em>觀測結果</em>，不是結構保證。</li>
+</ol></div>
+</section>
+
+<section>
+<h2 class="sec">驗證方法論 · 本研究最可複製的部分</h2>
+<div class="prose">
+<p>四條紀律，寫在 <code>docs/design_2026-09-05_heterogeneous_vtol_planning.md</code> §四：</p>
+<ol>
+<li><strong>值層級鎖，不是源碼層級鎖。</strong>量「實際產生的中線間距是多少」，不是 grep「那一行有沒有寫 <code>w_ovl</code>」。源碼鎖驗的是那一行長什麼樣，改上游、下游、旁路全部免疫，補鎖是軍備競賽。</li>
+<li><strong>可觸發性前置斷言。</strong>每條測試先斷言「這個設定真的能讓 X 發生」，再斷言 X 的值。否則「量到 0 次」與「量測器根本不可能觸發」長得一模一樣。</li>
+<li><strong>突變驗證。</strong>故意把程式改壞，確認測試真的會轉紅。臂數不夠不算數，要涵蓋<em>靜默失效</em>臂。</li>
+<li><strong>逐檔 <code>--collect-only</code>。</strong>防「收集 0 項卻不報錯」的假測試。</li>
+</ol>
+<h4>突變測試怎麼跑</h4>
+<p><code>scratchpad/bite_*.py</code> 共 16 個檔，其中 <code>bite_lock.py</code> 是檔案鎖本身，實際突變臂腳本 15 支，合計約 224 臂。</p>
+</div>
+<pre><code>ARMS = [(名稱, 檔案路徑, old 片段, new 片段), ...]
+拿 BiteLock → 逐臂就地改寫源碼 → subprocess 跑 pytest → finally 還原
+→ anchor 命中次數 != 1 就 SKIP → rc 非 0 記 BITES，否則 SURVIVED</code></pre>
+
+<div class="note crit"><strong>三個必須知道的陷阱。</strong>
+<p><strong>①　突變腳本會就地改寫生產源碼。</strong>同時跑兩份會把突變留在樹上，其中有些不會報錯只會靜靜飛錯。<code>bite_lock.py</code> 是為此加的互斥鎖 —— 一定要透過它跑。</p>
+<p><strong>②　對照組不綠就不要跑突變。</strong>對照組本來就紅的話，每一臂都會「看起來被咬到」，全部是假陽性。今天 <code>bite_alt_cap.py</code> 的對照組是 20 紅 ⇒ 它的 17 個可套臂會產生 17 個假陽性，現在不要跑它。</p>
+<p><strong>③　anchor 會失效。</strong><code>bite_alt_cap.py</code> 的 23 臂裡有 6 臂的 anchor 在現行 <code>collision_avoidance.py</code> 命中 0 次 ⇒ 會 SKIP。今天唯一安全可重跑的是 <code>bite_fov_cone.py</code>（17/17 臂齊全，對照組 117 passed / 0 failed）。</p></div>
+
+<div class="note"><strong>已知的假測試：</strong><code>tests/test_heterogeneous_nfz_planner.py</code> 被 git 追蹤、檔名符合 <code>test_*.py</code>、pytest 收集 <strong>0 項</strong>且不報任何錯（rc=5）。整檔 0 個 <code>def test_</code>，實際是 <code>if __name__ == '__main__'</code> 的腳本。</div>
+</section>
+
+<section>
+<h2 class="sec">工作包</h2>
+<div class="prose"><p>六個工作包互相獨立，可以並行。<strong>每一包的驗收標準都是「那些測試變綠」。</strong></p>
+<p><code>pytest.ini</code> 的 <code>addopts</code> 含 <code>-v</code>，會蓋掉命令列的 <code>-q</code>。所以每條指令都帶 <code>-o addopts=""</code>。</p></div>
+
+<div class="wp">
+  <div class="wp-head"><span class="wp-id">WP-A</span><h3>條帶重疊率</h3><span class="chip c-gone">11 failed / 18</span></div>
+  <div class="wp-files">要改 <code>core/dccpp/area_processor.py:351</code>、<code>:359</code></div>
+  <div class="wp-sig"><div class="wp-sig-label">失敗訊息</div>
+  <pre><code>AssertionError: 條帶寬度應該 100.0，實際出現 140.0（w_ovl=20.0）
+AssertionError: 重疊率 20% 沒有讓條帶變密（20 → 17）</code></pre></div>
+  <div class="prose">
+  <p><code>:359</code> 的 <code>dw_bot = li*w_i + (li-1)*w_ovl</code> 改成 <code>−</code>；<code>:351</code> 的 <code>step = w_i + w_ovl</code> 改成 <code>w_i - w_ovl</code>。<strong>兩處都要改。</strong></p>
+  <p><code>test_dccpp_pipeline.py</code> 是特徵化測試，黃金值會跟著變，改完要重跑並更新。VTOL 偵察面板<em>不受</em>這個 bug 影響：它把重疊折進 <code>fov_width_m</code> 並送 <code>overlap_rate=0</code>，歪打正著避開了；受影響的是 DCCPP 分頁（預設重疊 0.1）。</p></div>
+  <div class="accept"><div class="wp-sig-label">驗收</div>
+  <pre><code>python -m pytest tests/test_dccpp_strip_pitch.py tests/test_dccpp_pipeline.py -q -o addopts=""</code></pre></div>
+</div>
+
+<div class="wp">
+  <div class="wp-head"><span class="wp-id">WP-B</span><h3>逐機轉彎半徑</h3><span class="chip c-gone">24 failed / 30</span></div>
+  <div class="wp-files">要改 <code>core/dccpp/idp_solver.py</code>、<code>core/dccpp/dccpp_path_builder.py</code>　·　報告未提，但測試已寫好</div>
+  <div class="wp-sig"><div class="wp-sig-label">失敗訊息聚類</div>
+  <pre><code>ImportError: cannot import name 'TurnRadiusUnusable' from 'core.dccpp.idp_solver'   ×10
+AttributeError: 'UAVPlan' object has no attribute 'turn_radius_m'                    ×6
+AttributeError: 'BuiltPath' object has no attribute 'turn_radius_m'                  ×6
+AttributeError: 'DCCPPPathBuilder' object has no attribute '_dubins_for'             ×4
+AttributeError: 'IDP_Solver' object has no attribute 'cost_cache_for'                ×4
+TypeError: DCCPPPathBuilder.build() got an unexpected keyword argument 'turn_radius' ×2</code></pre></div>
+  <div class="prose"><p>背景：全隊共用單一轉彎半徑，用 200 m 規劃小機過度保守、用 120 m 規劃大機直接飛不出來（<code>docs/adr/0007</code> 有完整論述）。要新增的是逐機半徑、一個 <code>TurnRadiusUnusable</code> 例外、逐半徑的成本快取。</p></div>
+  <div class="accept"><div class="wp-sig-label">驗收</div>
+  <pre><code>python -m pytest tests/test_per_aircraft_turn_radius.py -q -o addopts=""</code></pre></div>
+</div>
+
+<div class="wp">
+  <div class="wp-head"><span class="wp-id">WP-C</span><h3>聯合分派 joint / balance_load</h3><span class="chip c-gone">24 + 15 failed</span></div>
+  <div class="wp-files">要改 <code>core/dccpp/idp_solver.py</code>　·　<code>test_idp_load_balance.py</code> 24/24 紅、<code>test_solver_wallclock_independence.py</code> 15/19 紅</div>
+  <div class="wp-sig"><div class="wp-sig-label">先做這件事 —— 從位元碼復原</div>
+  <pre><code>ls -la core/dccpp/__pycache__/idp_solver.cpython-310.pyc   # 22281 bytes, 2026-09-02 17:16
+python -c "import dis,marshal; f=open('core/dccpp/__pycache__/idp_solver.cpython-310.pyc','rb'); f.read(16); dis.dis(marshal.load(f))"</code></pre></div>
+  <div class="prose">
+  <p>它是 Python <strong>3.10</strong> 位元碼（本機 3.14），不能直接 import，但可以 <code>dis</code> 讀出結構，或用 <code>decompyle3</code> / <code>pycdc</code> 反編譯。裡面完整保留了設計說明：以連續切塊的平衡解為起點 → 反覆針對瓶頸那架做搬移／交換 → 只接受嚴格下降。</p>
+  <p>設計上是三級，以 <code>assignment=</code> 切換，逐級以前一級為起點 ⇒ 保證 <code>joint ≤ contiguous ≤ index</code>：<code>index</code>（最舊的等索引切塊）、<code>contiguous</code>（連續切塊 + 邊界爬山 + 區塊↔UAV 窮舉）、<code>joint</code>（論文 §3.3 聯合 MDTSP，放棄連續限制，局部搜尋逼近 minmax）。</p>
+  <p><code>core/dccpp/idp_solver.py.bak</code> 是 4 月的舊 numpy 版，<strong>沒有</strong> joint，不是復原來源。</p></div>
+  <div class="note crit"><strong>做完 WP-C 一定要接著做 WP-D。</strong>joint 會產生<em>交錯</em>指派（例如 UAV3 拿 [6,8,10]、UAV4 拿 [7,9,11]），兩架因此同時飛在相鄰條帶上，間距會掉到 1.6 m。<strong>單獨上 joint 而不修避撞，是把安全問題引進來。</strong></div>
+  <div class="prose"><p>牆鐘預算要用<strong>確定性</strong>預算（評估次數），不要用秒數 —— <code>test_solver_wallclock_independence.py</code> 鎖的就是這件事。</p></div>
+  <div class="accept"><div class="wp-sig-label">驗收</div>
+  <pre><code>python -m pytest tests/test_idp_load_balance.py tests/test_solver_wallclock_independence.py -q -o addopts=""</code></pre></div>
+</div>
+
+<div class="wp">
+  <div class="wp-head"><span class="wp-id">WP-D</span><h3>避撞迭代收斂 + 高度上限</h3><span class="chip c-gone">16 + 4 failed</span></div>
+  <div class="wp-files">要改 <code>core/dccpp/collision_avoidance.py</code>　·　現行 <code>run()</code>（<code>:456</code>）只做一輪：detect → resolve → 結束</div>
+  <div class="wp-sig"><div class="wp-sig-label">失敗訊息</div>
+  <pre><code>TypeError: CollisionAvoidance.__init__() got an unexpected keyword argument 'max_alt_offset_m'  ×24
+TypeError: CollisionAvoidance.__init__() got an unexpected keyword argument 'max_rounds'         ×2
+AttributeError: 'CollisionAvoidance' object has no attribute '_effective_cap'                    ×8</code></pre></div>
+  <div class="prose">
+  <h4>要做四件事，缺一不可</h4>
+  <ol>
+  <li><strong>迭代到收斂</strong>（加 <code>max_rounds</code>）。單輪解不完。</li>
+  <li><strong>高度累加上限</strong>（加 <code>max_alt_offset_m</code> / <code>_effective_cap</code>）。沒有上限時每輪再抬一次，<code>120 + 10×30 = 360</code> m 就是這樣來的。</li>
+  <li><strong>停滯保險絲要真的能燒斷。</strong>原本 <code>_resolve_altitude</code> 先無條件 <code>actions.append(...)</code>，之後才在套用迴圈裡對起降段 <code>continue</code> 跳過 —— 而 t=0 的衝突正好就在那些地面點上 ⇒ <code>new_actions</code> 永遠非空 ⇒ 停滯判斷<strong>永遠不會觸發</strong>。修法：在迴圈<em>一開頭</em>就跳過「衝突點本身在起降段」的衝突。只在事後過濾「動作有沒有動到航點」不夠 —— 判準必須是<strong>衝突點本身</strong>動不動得了。</li>
+  <li><strong>撞到上限要大聲。</strong>靜靜停下來和靜靜飛到 360 m 一樣糟。</li>
+  </ol>
+  <h4>另外三個獨立的坑</h4>
+  <p><strong>生成點間距不能等於門檻。</strong>生成點用 <code>111320.0</code> m/deg 排，而 <code>_haversine</code> 用 <code>EARTH_RADIUS_M = 6378137</code> ⇒ <code>2πR/360 = 111319.4908</code> m/deg。50.0 m 名目間距被量成 <span class="num">49.999771 m</span>，比門檻低 0.23 mm ⇒ <code>if dist &lt; min_sep</code> 在 t=0 對每一組相鄰機<strong>必定</strong>成立，而且 cos(緯度) 在兩邊約掉 ⇒ 與緯度無關、必然發生。衝突本身是假的。修法：間距改 <code>max(50, min_sep × 1.2)</code>，且排點與量距改用<em>同一個</em>地球半徑常數 —— 兩件都要做，只換常數仍會壓在刀鋒上。</p>
+  <p><strong><code>alt_offset_m &lt; min_separation_m</code> 是無解組態。</strong>面板的 <code>get_params()</code> 沒有 <code>alt_offset_m</code> 這個鍵 ⇒ 永遠退回預設 30，而 <code>min_separation_m</code> 送的是 50。30 &lt; 50 ⇒ 純高度錯開在數學上解不開。</p>
+  <p><strong><code>temporal</code> 策略原本是完全 no-op：</strong>它插入的 loiter 航點與參考航點同經緯度同高度，而時間由「累積距離 / 速度」推出 ⇒ 零長度線段貢獻 0 秒延遲；<code>AvoidanceAction.delay_s</code> 沒有任何下游會消費。已改為大聲報錯並退回 altitude。</p>
+  <p>避撞目前<strong>只在 GUI 路徑跑</strong>，headless／匯出路徑沒有保護。這是待解項。</p></div>
+  <div class="accept"><div class="wp-sig-label">驗收</div>
+  <pre><code>python -m pytest tests/test_collision_alt_cap.py tests/test_collision_avoidance_rounds.py -q -o addopts=""</code></pre>
+  <div class="prose" style="margin-top:10px"><p>另外做端到端比對：重跑規劃並匯出，三架 <code>.waypoints</code> 的最大高度應全部等於設定航高。對照 <code>exports/vtol_recon_run1</code>（壞：120/360/360）與 <code>run2</code>（好：三架全 120）。</p></div></div>
+</div>
+
+<div class="wp">
+  <div class="wp-head"><span class="wp-id">WP-E</span><h3>SITL 機體參數注入</h3><span class="chip c-gone">14 + 3 failed，1 檔收集 0 項</span></div>
+  <div class="wp-files">要改 <code>mission/sitl_launcher.py</code></div>
+  <div class="wp-sig"><div class="wp-sig-label">失敗訊息</div>
+  <pre><code>TypeError: generate_vtol_params() got an unexpected keyword argument 'airframe'    ×24
+ImportError: cannot import name '_SCHED_LOOP_RATE' from 'mission.sitl_launcher'    ×4
+ImportError: cannot import name 'identity_parm_text' from 'mission.sitl_launcher'  ×2
+ImportError: cannot import name 'VTOL_ENFORCED_PARAMS'   （test_vtol_sitl_enforced 整檔）</code></pre></div>
+  <div class="prose">
+  <p>由測試反推要新增的 API：<code>VTOL_ENFORCED_PARAMS</code>、<code>vtol_enforced_parm_text()</code>、<code>write_vtol_enforced_parm()</code>、<code>build_defaults_list()</code>、<code>identity_parm_text()</code>、<code>_SCHED_LOOP_RATE</code>（VTOL 要 200，現行 <code>:571</code> 是 50），以及 <code>generate_vtol_params(airframe=...)</code>。</p>
+  <p>強制檔必須排在 <code>--defaults</code> 鏈的最後，並保留兩條對照組測試：「<code>plane.parm</code> 本身沒有 <code>Q_ENABLE</code>」與「<code>plane.parm</code> 仍寫著 <code>ARMING_REQUIRE 0</code>」—— 它們證明「排最後覆蓋」不是多餘的。</p></div>
+  <div class="note crit"><code>mission/sitl_launcher.py</code> <strong>今天 15:08 才被另一個 session 改過</strong>，動手前先看 diff。<p>ArduPilot 4.7/4.8 對 <code>--defaults</code> 裡的未知參數名是<strong>靜默略過</strong>的，參數名寫錯不會有任何錯誤訊息。務必用讀回式驗證（範本 <code>scripts/hv_sitl_run.py:61-69</code> 的 <code>CHECK_PARAMS</code>／<code>EXPECT_EXTRA</code>，產物格式見 <code>runs/artifacts/HV4SITL13/params_readback.csv</code>）。</p></div>
+  <div class="accept"><div class="wp-sig-label">驗收</div>
+  <pre><code>python -m pytest tests/test_sitl_airframe_params.py tests/test_vtol_prearm_real.py \
+  tests/test_vtol_sitl_enforced.py -q -o addopts="" --continue-on-collection-errors
+python scratchpad/acceptance_vtol_sitl.py</code></pre></div>
+</div>
+
+<div class="wp">
+  <div class="wp-head"><span class="wp-id">WP-F</span><h3>匯出側速度型別</h3><span class="chip c-warn">整檔收集 0 項</span></div>
+  <div class="wp-files">要改 <code>mission/vtol_mission_exporter.py:131</code>、<code>:135</code></div>
+  <div class="prose">
+  <p>最小改動：新增常數 <code>_SPEED_TYPE_AIRSPEED = 0</code>（與 <code>_SPEED_TYPE_GROUNDSPEED = 1</code>），<code>:135</code> 的 <code>param1=1.0</code> 改成 <code>param1=float(_SPEED_TYPE_AIRSPEED)</code>，<code>:131</code> 那行寫錯的註解一起改對。</p>
+  <p><code>test_vtol_recon_fixes.py</code> 是 50 條的檔，還鎖了其他四件事（生成點間距、避撞不抬起降段、上傳速度來源、3D 守衛），所以它變綠需要 <strong>WP-D 一起完成</strong>；它用的 <code>_ca(max_rounds=...)</code> 也依賴 WP-D 的新簽章。可以先讓它能被收集，再逐條轉綠。</p></div>
+  <div class="accept"><div class="wp-sig-label">驗收</div>
+  <pre><code>python -m pytest tests/test_vtol_recon_fixes.py -q -o addopts=""</code></pre>
+  <div class="prose" style="margin-top:10px"><p>另外重新匯出一次，檢查 <code>.waypoints</code> 第 2 行的 <code>param1</code> 應為 <code>0.0</code>。</p></div></div>
+</div>
+
+<div class="note good"><strong>全部做完之後，把這些工作 commit 進版控。</strong>這次的資料遺失就是因為全部是 untracked 或未提交的修改。今日基準線 96 failed / 415 passed / 2 errors，目標 0 / 0。</div>
+</section>
+
+<section>
+<h2 class="sec">證據對照表 · 只列查得到出處的</h2>
+<div class="tw">
+<table>
+<thead><tr><th>主張</th><th>數字</th><th>出處</th><th>可重跑</th></tr></thead>
+<tbody>
+<tr><td>高度被靜默放大（修正前）</td><td class="num">UAV1 120 m<br>UAV2 360 / 240 m<br>UAV3 360 m</td><td><code>exports/vtol_recon_run1/*.waypoints</code><br>2026-08-25 00:31，逐筆可讀</td><td><span class="chip c-gone">需 WP-D</span></td></tr>
+<tr><td>高度修正後</td><td class="num">三架最大高度全 120.00</td><td><code>exports/vtol_recon_run2/*.waypoints</code>　01:55</td><td><span class="chip c-gone">需 WP-D</span></td></tr>
+<tr><td>刈幅與地面解析度</td><td class="num">120 m ⇒ 138.6 m / 3.46 cm/px</td><td><code>tests/test_collision_alt_cap.py:10</code></td><td><span class="chip c-ok">可</span></td></tr>
+<tr><td>條帶間距缺陷的量化</td><td class="num">2.0×1.5 km 覆蓋率卡在 97.0%</td><td><code>tests/test_dccpp_strip_pitch.py:123</code><br>該測試實跑印出 9700/10000 格</td><td><span class="chip c-ok">可</span></td></tr>
+<tr><td>重疊率完全失效</td><td class="num">w_ovl=20 應得 80，實測 100<br>w_ovl=40 應得 60，實測 100</td><td><code>tests/test_dccpp_strip_pitch.py:6-13</code></td><td><span class="chip c-ok">可</span></td></tr>
+<tr><td>交錯指派的近距接觸</td><td class="num">1.6 m → 32.4 m → 60.2 m<br>6 架、2.0×1.5 km、門檻 50 m</td><td><code>test_collision_avoidance_rounds.py:6-17</code> docstring；pptx slide 5</td><td><span class="chip c-gone">需 WP-C + D</span></td></tr>
+<tr><td>VTOL 剖面真的是垂直的</td><td class="num">第一段水平位移 == 0<br>固定翼版 &gt; 50 m</td><td><code>tests/test_vtol_profile.py:222</code></td><td><span class="chip c-ok">43 條全過</span></td></tr>
+<tr><td>掃描方向可自訂</td><td>手動填入自動角 ⇒ 逐點重現</td><td><code>tests/test_dccpp_scan_angle.py</code>　25 條全過</td><td><span class="chip c-ok">可</span></td></tr>
+<tr><td>匯出產物</td><td class="num">3 架 · 120 m · 轉換 40 m<br>巡航 18 m/s · 轉彎半徑 60 m<br>每架 15 原始航點<br>1691 / 1618 / 1530 m</td><td><code>exports/vtol_recon_run2/VTOL_briefing.txt</code></td><td><span class="chip c-ok">檔案在</span></td></tr>
+<tr><td>任務上傳</td><td class="num">13/13 ACCEPTED · 0 次強制解鎖</td><td><code>exports/vtol_progress_report_2026-08-25.pptx</code> slide 5</td><td><span class="chip c-warn">見下方</span></td></tr>
+</tbody></table>
+</div>
+
+<div class="note crit"><strong>關於「13 筆 ACCEPTED」的三條註記，寫論文或報告時必須帶上。</strong>
+<p><strong>①　不是真實飛控。</strong>產生腳本 <code>scratchpad/mission_accept_test.py:45-49</code> 起的是 <code>sitl/ArduPlane.exe --model quadplane</code>。pptx 自己也寫「SITL 實測」。報告寫「真的 ArduPilot 飛控」要改口。</p>
+<p><strong>②　13 這個數字在本分支重現不出來。</strong>用該腳本的夾具離線重跑，<code>generate_waypoint_lines</code> 回 19 行 = 18 個任務項目。</p>
+<p><strong>③　航點數有兩個口徑，不要互相驗證。</strong><code>.waypoints</code> 檔是 1 行標頭 + <strong>16</strong> 列（index 0..15）；briefing 說的「15 原始航點」是規劃器層的原始航點數，匯出時會再加上 <code>DO_SET_HOME</code>。</p></div>
+
+<div class="prose">
+<h4>其他今日親自量到的數字</h4>
+<ul>
+<li>20 個相關測試檔：96 failed / 415 passed / 2 collect errors，14.08 s。</li>
+<li><code>tests/hv_dccpp/</code>（vendor 自帶）：832 passed。<code>docs/PROJECT_STATUS.md:224</code> 寫「約 72 s」，實測 559–654 s，高估效能約 8–9 倍。</li>
+<li><code>exports/vtol_recon_run2</code> 三架航點的合併包絡：南北 480 m × 東西 428 m，home 在 25.077923 / 121.231859（桃園）。</li>
+</ul>
+</div>
+</section>
+
+<section>
+<h2 class="sec">環境與重跑</h2>
+<pre><code>cd /c/Users/joy46/Documents/Projects/aeroplan-studio
+
+# 開 GUI（左側分頁：基本演算法 / DCCPP / 戰術模組 / 蜂群打擊 / VTOL 偵察 / SITL）
+python main.py
+
+# 面板本身與相機、覆蓋模組的離線測試（今日 131 passed，約 3 s）
+python -m pytest tests/test_vtol_recon_panel.py tests/test_recon_coverage.py -q -o addopts=""
+
+# 無頭端到端（走產品路徑：get_params → plan_coverage_dccpp → verify_coverage）
+python scratchpad/acceptance_vtol_recon.py
+
+# SITL 階段驗收（起 3 台，讀回參數再試 ARM）
+python scratchpad/acceptance_vtol_sitl.py
+
+# 突變測試（一定要透過 bite_lock；先確認對照組是綠的）
+python scratchpad/bite_fov_cone.py</code></pre>
+<div class="note"><code>scratchpad/</code> 底下的驗收與突變腳本<strong>全部未被 git 追蹤</strong>。做這批工作時順手納管。</div>
+</section>
+
+<section>
+<h2 class="sec">附錄 · 原報告中查不到出處的數字</h2>
+<div class="prose"><p>以下九項全 repo grep 只命中報告草稿自己，沒有任何程式、測試或產物佐證，因此不寫進正文。列在這裡是為了讓接手者知道它們<strong>被刻意拿掉了</strong>，而不是被遺漏；要用就必須先重跑產生證據。</p></div>
+<div class="tw">
+<table>
+<thead><tr><th>數字</th><th>報告中的說法</th><th>狀況</th></tr></thead>
+<tbody>
+<tr><td class="num">38.7 m</td><td>測試區有一條從未被掃到</td><td>無出處。測試只寫「最寬達 <code>w_i/2</code>」，對面板預設 138.6 是 69.3 m，對不上</td></tr>
+<tr><td class="num">37.4 m</td><td>邊緣漏掃帶消失</td><td>無出處。全樹的 37.4 都是別的量（航點通過誤差、傾斜角）</td></tr>
+<tr><td class="num">100.0%</td><td>覆蓋率 97.0% → 100.0%</td><td>前半有出處，<strong>後半沒有</strong>。全樹覆蓋驗算紀錄裡沒有任何一筆是 2.0×1.5 km 的 100%</td></tr>
+<tr><td class="num">2245.9 / 1897.0</td><td>全隊完成時間，快 15.5%</td><td>無出處，且產生它所需的 joint 求解器不在樹上</td></tr>
+<tr><td class="num">187.2 / 145.6 s</td><td>規劃時間</td><td>無出處</td></tr>
+<tr><td class="num">439 / 420 條</td><td>測試 439 條、420 條離線全過</td><td>無出處，且<strong>今天是假的</strong>：實測 96 failed、兩個檔收集 0 項</td></tr>
+<tr><td class="num">121.6 m</td><td>航次最高高度</td><td>無出處。<code>data/logs/</code> 與 <code>runs/artifacts/</code> 都沒有這趟的紀錄</td></tr>
+<tr><td class="num">0.46 m/s</td><td>落地速度</td><td>無出處</td></tr>
+<tr><td class="num">1.1 × 0.9 km</td><td>桃園作業區尺寸</td><td>無出處。三架航點的合併包絡實測只有 480 m × 428 m</td></tr>
+</tbody></table>
+</div>
+<div class="prose" style="margin-top:18px">
+<h4>另有兩處措辭需要修正</h4>
+<ul>
+<li>「重疊率怎麼調結果都一樣」→ 應為「中線間距不變，但條帶數量反向遞減，調高重疊率反而讓覆蓋率下降」。</li>
+<li>「上傳到真的 ArduPilot 飛控」→ 應為「上傳到 ArduPlane SITL（<code>--model quadplane</code>）」。</li>
+</ul>
+</div>
+</section>
+
+<footer>
+本頁由 Claude Opus 5 於 2026-09-09 產生。落地方式：7 個面向各派一個代理找程式碼證據，再各由一個對抗性代理逐條複查，共 14 個代理、996 次工具呼叫；所有測試數字由主線親自重跑確認。完整版：<code>docs/handoff_2026-09-09_vtol_recon_cowork.md</code>。
+</footer>
+
+</div>

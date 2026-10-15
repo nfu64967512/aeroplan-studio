@@ -153,10 +153,16 @@ def _approx_len(value: float):
 
 class TestPipelineStructure:
     def test_runs_without_error_and_has_keys(self, pipeline_result):
-        """管線應正常完成並回傳所有約定鍵。"""
+        """管線應正常完成並回傳所有約定鍵。
+
+        `effective_scan_angles` 是掃描角修正（2026-08-25）加的：面板要拿它當
+        「取消自動勾選」時的起跳值，否則畫面一取消勾選就跳掉。
+        契約見 tests/test_dccpp_scan_angle.py 的 D 節。
+        """
         assert set(pipeline_result.keys()) == {
             'results', 'allocation', 'coverage_paths',
             'uav_states', 'total_makespan', 'assembled_paths',
+            'effective_scan_angles',
         }
 
     def test_v2_passthrough_taken(self, pipeline_result):

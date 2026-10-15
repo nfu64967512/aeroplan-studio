@@ -111,7 +111,9 @@
 <div id="legend" id="legend"></div>
 
 <script>
-// ── Cesium Ion Token（使用者可設定，空字串 = 免費基本模式）────────────
+// ── Cesium Ion Token（config/settings.json 的 map.cesium_ion_token 或環境變數 CESIUM_ION_TOKEN；
+//    空字串 = 免費基本模式）。Python 端 `resolve_cesium_ion_token` 只放行 JWT 字元集，所以塞進這個
+//    字串字面量是安全的。
 Cesium.Ion.defaultAccessToken = '__CESIUM_TOKEN__';
 
 // ── 初始化 Viewer ─────────────────────────────────────────────────────
@@ -186,6 +188,15 @@ viewer.imageryLayers.layerAdded.addEventListener(function(layer){
 });
 
 // 嘗試載入世界地形（需要 Cesium Ion Token）
+// ⚠⚠ 這個分支**從來沒有生效過，而且現在也不該直接打開**（2026-10-09 設了 token 時查到）：
+//   1. 守衛 `!== '__CESIUM_TOKEN__'` 的字串跟上面那行**一起被 .replace 換成 token** ⇒ 變成
+//      `token !== token`，永遠 false（沒設 token 時則是 '' 為 false）。
+//   2. Cesium 1.115 已經沒有 `createWorldTerrain`（要用 `Cesium.Terrain.fromWorldTerrain()`）；
+//      就算守衛通過，也會被 try/catch 吞成「地形載入失敗，使用平面模式」。
+//   3. 真的打開世界地形會讓 3D 圖整個錯位：路徑、起飛柱、SITL 飛機的高度都是「相對起降場、以橢球面
+//      為 0」，而 SITL 世界是平的 0 m。實測 Cesium World Terrain 在起降場（25.0720, 121.2115）是橢球面
+//      上 36.4 m、桃園機場（25.0777, 121.2325）47.4 m ⇒ 起降場與起飛柱會埋進地面幾十公尺。
+//      要用真實地形得先決定高度基準（見 `_terrain_follow_agl` / DEM 路徑），不是開關一打就好。
 if (Cesium.Ion.defaultAccessToken && Cesium.Ion.defaultAccessToken !== '__CESIUM_TOKEN__') {
   try {
     viewer.terrainProvider = Cesium.createWorldTerrain({ requestWaterMask: false });
@@ -1012,12 +1023,12 @@ function setGeofence(jsonStr) {
   try { g = JSON.parse(jsonStr); } catch(_) { return; }
   if (!g || !g.vertices || g.vertices.length < 3) return;
 
-  const verts = g.vertices;             // [{lat,lon}, ...] 4 點
+  const verts = g.vertices;             // [{lat,lon}, ...] N 點（預設貼合航線的凸多邊形）
   const altMin = g.alt_min || 0;
   const altMax = g.alt_max || 100;
   const fenceColor = '#FFB703';         // WARNING 琥珀（caution boundary）
 
-  // 1) 地面投影矩形（半透明填充 + 黃色實線外框）
+  // 1) 地面投影多邊形（半透明填充 + 黃色實線外框）
   const flatDegs = verts.flatMap(v => [v.lon, v.lat]);
   geofenceEntities.push(viewer.entities.add({
     name: 'Geofence-floor',
@@ -1031,7 +1042,7 @@ function setGeofence(jsonStr) {
     },
   }));
 
-  // 2) 4 個側牆 (vertical wall) — 從 altMin 到 altMax
+  // 2) 每條邊一面側牆 (vertical wall) — 從 altMin 到 altMax
   const ring = [...verts, verts[0]];
   for (let i = 0; i < ring.length - 1; i++) {
     const v0 = ring[i], v1 = ring[i+1];
@@ -5186,10 +5197,61 @@ function drawVTOLSwarmPaths(uavDataJson) {
       });
     }
 
-    // ── 3. 垂直降落段：黃色粗實線 + 向下箭頭標記 ─────────────────
+    // ── 3. 降落：進場腿（機色 + 箭頭，頭在落地點上空）＋ 垂直落地（黃色粗實線）──
+    //   ⚠ 2026-10-08 使用者問「轉換後的直線為什麼還在 UAV2 的航線上、方向完全不同」：
+    //   那條粗黃線其實是**降落進場腿**（全隊降同一個起降場，從正南進場），舊畫法把它
+    //   和起飛垂直段畫成一模一樣的黃色粗線、又沒有方向 ⇒ 讀起來像「起飛後往南飛的線」，
+    //   而實機起飛後是往北。現在進場腿用機色 + 箭頭畫、起點標「降落進場」，垂直落地仍是黃線。
+    //   landing_segment = [進場起點, 落地點上空, 地面]（沒有進場腿時只有後兩點）。
     if (uav.landing_segment && uav.landing_segment.length >= 2) {
+      var ld = uav.landing_segment;
+      var hasApproach = ld.length >= 3;
+      var vert = hasApproach ? ld.slice(1) : ld;     // 垂直落地段
+
+      if (hasApproach) {
+        var apPts = [];
+        [ld[0], ld[1]].forEach(function(p) {
+          apPts.push(p.lon, p.lat, p.alt || 0);
+        });
+        var apEntity = viewer.entities.add({
+          name: uavLabel + ' 降落進場',
+          polyline: {
+            positions: Cesium.Cartesian3.fromDegreesArrayHeights(apPts),
+            width: 14,
+            material: new Cesium.PolylineArrowMaterialProperty(color),
+            clampToGround: false,
+          },
+        });
+        _vtolEntities.push(apEntity);
+
+        // 進場起點：機色圓點 + 文字（讀得出這條線屬於誰、從哪裡開始降）
+        var apStart = ld[0];
+        var apLabel = viewer.entities.add({
+          name: uavLabel + ' 降落進場起點',
+          position: Cesium.Cartesian3.fromDegrees(apStart.lon, apStart.lat, apStart.alt || 0),
+          point: {
+            pixelSize: 8,
+            color: color,
+            outlineColor: Cesium.Color.WHITE,
+            outlineWidth: 1,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+          label: {
+            text: uavLabel + ' 降落進場',
+            font: 'bold 11px sans-serif',
+            fillColor: color,
+            outlineColor: Cesium.Color.BLACK,
+            outlineWidth: 2,
+            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+            pixelOffset: new Cesium.Cartesian2(0, -16),
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+        });
+        _vtolEntities.push(apLabel);
+      }
+
       var ldPts = [];
-      uav.landing_segment.forEach(function(p) {
+      vert.forEach(function(p) {
         ldPts.push(p.lon, p.lat, p.alt || 0);
       });
       var ldEntity = viewer.entities.add({
@@ -5752,6 +5814,447 @@ function clearAllTerminalDives() {
   });
   console.log('[TerminalDive] 已清除所有末端俯衝');
 }
+
+// ══════════════════════════════════════════════════════════════════
+//  航測成果圖層：正射瓦片（TMS／XYZ）＋照片位姿（BillboardCollection）
+//  SURVEY_LAYERS_BEGIN —— tests/test_survey_map_layers.py 靠這兩個標記把本段抽出來單獨測，勿刪
+//
+//  * 正射：ODM --tiles 呼叫自帶的 gdal2tiles.py（預設 mercator、沒有 --xyz）⇒ 產出的是 **TMS**
+//    （y 由南往北數）並附 tilemapresource.xml。TMS 走 TileMapServiceImageryProvider.fromUrl
+//    （1.107 起建構子不再吃 url，只能用 fromUrl）；XYZ（y 由北往南）走 UrlTemplateImageryProvider。
+//    兩種都包成 ImageryLayer.fromProviderAsync：圖層當下就進 imageryLayers，
+//    在 provider 還沒好之前呼叫 removeOrthoLayer 也移得掉（不會晚一步又冒出來）。
+//  * 位姿：每點一個 Entity 在 10 萬點只剩 13 fps；BillboardCollection＋共用一張圖（同一個
+//    data URL 字串 ⇒ 材質圖集只放一份）在 30 萬點仍 60 fps。⚠ 不可每點各畫一個 canvas
+//    （10 萬點要 221 秒）。大量資料由頁面自己讀本機檔（loadPhotoPosesUrl），不走 runJavaScript 字串。
+// ══════════════════════════════════════════════════════════════════
+var _orthoLayers = {};          // id → { layer, scheme, url, alpha, rectangle, state, tileErrors }
+var _photoPoseLayers = {};      // id → { coll, ids[], yaws[], srcs[], drawn, skipped, noHeading, noHeight, url }
+var _photoPoseLoadSeq = {};     // id → 遞增序號；較舊的 loadPhotoPosesUrl 讀完後若序號已變就丟掉
+var _photoPoseHover = null;     // 懸停拾取用的 ScreenSpaceEventHandler（第一次畫位姿才建）
+var _photoPoseTip = null;
+var _photoPoseImages = null;
+
+// 位姿依來源上色（與 Python 端 cesium_map_widget.PHOTO_POSE_SOURCE_COLORS 同一份，測試鎖兩邊相等）
+var _PHOTO_POSE_COLORS = { fc_interp: '#FFB300', ppk: '#00E676', sfm: '#29B6F6' };
+var _PHOTO_POSE_OTHER_COLOR = '#FFFFFF';
+
+/**
+ * addOrthoLayer — 疊一層正射瓦片
+ * @param {string} id   圖層代號（同 id 再加一次 = 先移除舊的）
+ * @param {string} url  瓦片根目錄 URL（file:///…/orthophoto_tiles），XYZ 也可直接給含 {z}{x}{y} 的樣板
+ * @param {object} opts { scheme:'tms'|'xyz', rectangle:[西,南,東,北]（度，可省）, alpha:0–1,
+ *                        minimumLevel, maximumLevel, fileExtension:'png' }
+ * @returns {boolean} 是否已加入
+ */
+function addOrthoLayer(id, url, opts) {
+  opts = opts || {};
+  removeOrthoLayer(id);
+  var scheme = opts.scheme || 'tms';
+  if (scheme !== 'tms' && scheme !== 'xyz') {
+    console.error('[Ortho] ' + id + '：不認得的瓦片編號方式 ' + scheme + '（只收 tms / xyz）');
+    return false;
+  }
+  var ext = opts.fileExtension || 'png';
+  var p = {};
+  if (opts.rectangle && opts.rectangle.length === 4) {
+    p.rectangle = Cesium.Rectangle.fromDegrees(opts.rectangle[0], opts.rectangle[1],
+                                               opts.rectangle[2], opts.rectangle[3]);
+  }
+  if (opts.minimumLevel !== undefined && opts.minimumLevel !== null) p.minimumLevel = opts.minimumLevel;
+  if (opts.maximumLevel !== undefined && opts.maximumLevel !== null) p.maximumLevel = opts.maximumLevel;
+  var base = String(url).replace(/\/+$/, '');
+  var providerPromise, effUrl;
+  if (scheme === 'tms') {
+    // 會先讀 <base>/tilemapresource.xml（範圍、層級）；讀不到就用 opts 與預設值，瓦片照樣是 {z}/{x}/{reverseY}
+    p.fileExtension = ext;
+    effUrl = base;
+    providerPromise = Cesium.TileMapServiceImageryProvider.fromUrl(base, p);
+  } else {
+    effUrl = /\{z\}/.test(base) ? base : base + '/{z}/{x}/{y}.' + ext;
+    p.url = effUrl;
+    providerPromise = Promise.resolve(new Cesium.UrlTemplateImageryProvider(p));
+  }
+  var alpha = (opts.alpha === undefined || opts.alpha === null) ? 1.0 : Number(opts.alpha);
+  var layer = Cesium.ImageryLayer.fromProviderAsync(providerPromise, { alpha: alpha });
+  var rec = { layer: layer, scheme: scheme, url: effUrl, alpha: alpha,
+              rectangle: opts.rectangle || null, state: 'loading', tileErrors: 0 };
+  layer.readyEvent.addEventListener(function (provider) {
+    rec.state = 'ready';
+    // 範圍外／缺層的瓦片讀不到很正常：只計數、警告一次，不洗版
+    if (provider && provider.errorEvent) {
+      provider.errorEvent.addEventListener(function () {
+        rec.tileErrors++;
+        if (rec.tileErrors === 1) console.warn('[Ortho] ' + id + '：有瓦片讀不到（範圍外或缺層），之後只計數');
+      });
+    }
+    console.log('[Ortho] ' + id + ' 已載入（' + scheme + '）：' + effUrl);
+  });
+  layer.errorEvent.addEventListener(function (err) {
+    rec.state = 'error';
+    console.error('[Ortho] ' + id + ' 載入失敗：' + (err && err.message ? err.message : err));
+  });
+  viewer.imageryLayers.add(layer);
+  _orthoLayers[id] = rec;
+  return true;
+}
+
+/** removeOrthoLayer — 移除正射圖層；回傳是否真的有移除 */
+function removeOrthoLayer(id) {
+  var rec = _orthoLayers[id];
+  if (!rec) return false;
+  try { viewer.imageryLayers.remove(rec.layer, true); } catch (_) {}
+  delete _orthoLayers[id];
+  return true;
+}
+
+function _surveyNum(v) {
+  // null / undefined / '' 都算「沒有值」（Number('') 是 0，會把空欄位畫成赤道或正北）
+  if (v === null || v === undefined || v === '') return NaN;
+  return Number(v);
+}
+
+// 共用圖：箭頭尖端朝上（= rotation 0 時指向北），尖端是離中心最遠的點；沒有航向的點用圓點
+function _photoPoseImageUrls() {
+  if (_photoPoseImages) return _photoPoseImages;
+  function draw(fn) {
+    var c = document.createElement('canvas');
+    c.width = 32; c.height = 32;
+    var g = c.getContext('2d');
+    fn(g);
+    g.fillStyle = '#FFFFFF'; g.fill();
+    g.lineWidth = 1.5; g.strokeStyle = 'rgba(0,0,0,0.85)'; g.stroke();
+    return c.toDataURL('image/png');
+  }
+  _photoPoseImages = {
+    arrow: draw(function (g) {
+      g.beginPath();
+      g.moveTo(16, 1); g.lineTo(25, 13); g.lineTo(18.5, 13); g.lineTo(18.5, 27);
+      g.lineTo(13.5, 27); g.lineTo(13.5, 13); g.lineTo(7, 13); g.closePath();
+    }),
+    dot: draw(function (g) {
+      g.beginPath(); g.arc(16, 16, 6, 0, 2 * Math.PI); g.closePath();
+    }),
+  };
+  return _photoPoseImages;
+}
+
+/**
+ * setPhotoPoses — 以 BillboardCollection 畫照片位姿
+ * @param {string} id
+ * @param {object|Array} data  {rows:[...]} 或直接 [...]；每列 [lat, lon, h_ell_m, yaw_deg, source, image_id]
+ *                             （yaw = 機頭／相機自**真北順時針**的航向，不是航跡角；可為 null）
+ * @param {object} opts { color:'#RRGGBB'（整層單色；省略 = 依來源上色）, size:像素, url }
+ * @returns {{drawn, skipped, noHeading, noHeight}}
+ */
+function setPhotoPoses(id, data, opts) {
+  opts = opts || {};
+  clearPhotoPoses(id);
+  var rows = Array.isArray(data) ? data : ((data && data.rows) || []);
+  var img = _photoPoseImageUrls();
+  var size = Number(opts.size) > 0 ? Number(opts.size) : 20;
+  var fixed = opts.color ? Cesium.Color.fromCssColorString(opts.color) : null;
+  var colorBySrc = {};
+  var coll = new Cesium.BillboardCollection();
+  var rec = { coll: coll, ids: [], yaws: [], srcs: [], drawn: 0, skipped: 0,
+              noHeading: 0, noHeight: 0, url: opts.url || null };
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var lat = _surveyNum(r[0]), lon = _surveyNum(r[1]);
+    if (!isFinite(lat) || !isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+      rec.skipped++;
+      continue;
+    }
+    var h = _surveyNum(r[2]);
+    if (!isFinite(h)) { h = 0; rec.noHeight++; }      // 沒有高度 ⇒ 放橢球面上，計數回報
+    var yaw = _surveyNum(r[3]);
+    var hasYaw = isFinite(yaw);
+    if (!hasYaw) rec.noHeading++;
+    var src = (r[4] === null || r[4] === undefined) ? '' : String(r[4]);
+    var col = fixed;
+    if (!col) {
+      col = colorBySrc[src];
+      if (!col) {
+        col = colorBySrc[src] = Cesium.Color.fromCssColorString(
+          _PHOTO_POSE_COLORS[src] || _PHOTO_POSE_OTHER_COLOR);
+      }
+    }
+    coll.add({
+      position: Cesium.Cartesian3.fromDegrees(lon, lat, h),
+      image: hasYaw ? img.arrow : img.dot,
+      // Cesium billboard 的 rotation 在螢幕上**逆時針為正**（BillboardCollectionVS：
+      // mat2(cos,sin,-sin,cos)）；alignedAxis = UNIT_Z（地軸）讓 rotation 0 的「上」= 北。
+      // 航向是自真北**順時針** ⇒ 要取負號（航向 90° → −π/2 → 箭頭指東）。
+      rotation: hasYaw ? -Cesium.Math.toRadians(yaw) : 0,
+      alignedAxis: hasYaw ? Cesium.Cartesian3.UNIT_Z : Cesium.Cartesian3.ZERO,
+      color: col,
+      width: size,
+      height: size,
+      id: rec.drawn,                       // 拾取時用這個索引回查 image_id／航向
+    });
+    rec.ids.push((r[5] === null || r[5] === undefined) ? '' : String(r[5]));
+    rec.yaws.push(hasYaw ? yaw : null);
+    rec.srcs.push(src);
+    rec.drawn++;
+  }
+  viewer.scene.primitives.add(coll);
+  _photoPoseLayers[id] = rec;
+  _ensurePhotoPoseHover();
+  console.log('[PhotoPoses] ' + id + '：畫了 ' + rec.drawn + ' 點'
+              + (rec.skipped ? '，略過 ' + rec.skipped + ' 點（經緯度無效）' : '')
+              + (rec.noHeading ? '，' + rec.noHeading + ' 點沒有航向（以圓點顯示）' : '')
+              + (rec.noHeight ? '，' + rec.noHeight + ' 點沒有高度（放在橢球面 0 m）' : ''));
+  return { drawn: rec.drawn, skipped: rec.skipped, noHeading: rec.noHeading, noHeight: rec.noHeight };
+}
+
+/** clearPhotoPoses — 移除一層位姿（也取消這個 id 還在讀檔中的 loadPhotoPosesUrl） */
+function clearPhotoPoses(id) {
+  _photoPoseLoadSeq[id] = (_photoPoseLoadSeq[id] || 0) + 1;
+  var rec = _photoPoseLayers[id];
+  if (!rec) return false;
+  try { viewer.scene.primitives.remove(rec.coll); } catch (_) {}
+  delete _photoPoseLayers[id];
+  if (_photoPoseTip) _photoPoseTip.style.display = 'none';
+  return true;
+}
+
+// 單行 CSV 切欄（處理雙引號欄位；不支援欄位內換行 —— photos.csv 沒有這種欄位）
+function _surveyCsvSplit(line) {
+  var out = [], cur = '', q = false;
+  for (var i = 0; i < line.length; i++) {
+    var ch = line.charAt(i);
+    if (q) {
+      if (ch === '"') {
+        if (line.charAt(i + 1) === '"') { cur += '"'; i++; } else { q = false; }
+      } else { cur += ch; }
+    } else if (ch === '"') { q = true; }
+    else if (ch === ',') { out.push(cur); cur = ''; }
+    else { cur += ch; }
+  }
+  out.push(cur);
+  return out;
+}
+
+/**
+ * parsePhotoPosesText — 把 photos.csv（F2 欄位）或 JSON（{rows:[...]} / [...]）轉成 setPhotoPoses 的列
+ * CSV 只取 lat_deg, lon_deg, h_ell_m, yaw_deg, source, image_id；缺經緯度欄直接丟錯。
+ */
+function parsePhotoPosesText(text) {
+  var t = String(text).replace(/^﻿/, '');
+  var first = t.replace(/^\s+/, '').charAt(0);
+  if (first === '{' || first === '[') {
+    var d = JSON.parse(t);
+    return Array.isArray(d) ? d : (d.rows || []);
+  }
+  var lines = t.split(/\r?\n/);
+  var head = _surveyCsvSplit(lines[0] || '').map(function (s) { return s.trim(); });
+  var iLat = head.indexOf('lat_deg'), iLon = head.indexOf('lon_deg');
+  if (iLat < 0 || iLon < 0) throw new Error('CSV 缺少 lat_deg / lon_deg 欄位（表頭：' + head.join(',') + '）');
+  var iH = head.indexOf('h_ell_m'), iYaw = head.indexOf('yaw_deg');
+  var iSrc = head.indexOf('source'), iId = head.indexOf('image_id');
+  var rows = [];
+  for (var k = 1; k < lines.length; k++) {
+    var L = lines[k];
+    if (!L) continue;
+    var f = L.indexOf('"') < 0 ? L.split(',') : _surveyCsvSplit(L);
+    rows.push([f[iLat], f[iLon], iH < 0 ? null : f[iH], iYaw < 0 ? null : f[iYaw],
+               iSrc < 0 ? null : f[iSrc], iId < 0 ? null : f[iId]]);
+  }
+  return rows;
+}
+
+// 讀本機檔：Chromium 的 fetch() 不支援 file://，要用 XHR（file:// 成功時 status 是 0）
+function _surveyFetchText(url) {
+  return new Promise(function (resolve, reject) {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', url, true);
+    xhr.onload = function () {
+      if ((xhr.status >= 200 && xhr.status < 300) || (xhr.status === 0 && xhr.responseText)) {
+        resolve(xhr.responseText);
+      } else {
+        reject(new Error('讀檔失敗（status ' + xhr.status + '）：' + url));
+      }
+    };
+    xhr.onerror = function () { reject(new Error('讀不到 ' + url)); };
+    xhr.send();
+  });
+}
+
+/**
+ * loadPhotoPosesUrl — 頁面自己讀本機 photos.csv / JSON 再畫（大量位姿用這條，不經 runJavaScript）
+ * @returns {Promise<object>} setPhotoPoses 的統計；失敗時 {error}；被較新的呼叫取代時 {superseded:true}
+ */
+function loadPhotoPosesUrl(id, url, opts) {
+  var seq = _photoPoseLoadSeq[id] = (_photoPoseLoadSeq[id] || 0) + 1;
+  var o = Object.assign({}, opts || {}, { url: url });
+  return _surveyFetchText(url).then(function (text) {
+    if (_photoPoseLoadSeq[id] !== seq) return { superseded: true };
+    return setPhotoPoses(id, parsePhotoPosesText(text), o);
+  }).catch(function (e) {
+    console.error('[PhotoPoses] ' + id + ' 載入失敗：' + (e && e.message ? e.message : e));
+    return { error: String(e && e.message ? e.message : e) };
+  });
+}
+
+/** photoPoseAt — 螢幕座標拾取位姿；沒點到回 null */
+function photoPoseAt(windowPosition) {
+  var picked = viewer.scene.pick(windowPosition);
+  if (!picked || !picked.collection) return null;
+  for (var k in _photoPoseLayers) {
+    var rec = _photoPoseLayers[k];
+    if (rec.coll === picked.collection && typeof picked.id === 'number') {
+      var i = picked.id;
+      return { layer: k, index: i, image_id: rec.ids[i], yaw: rec.yaws[i], source: rec.srcs[i] };
+    }
+  }
+  return null;
+}
+
+function photoPoseLabel(hit) {
+  return (hit.image_id || '(無影像代號)') + '｜'
+       + (hit.yaw === null ? '航向未知' : '航向 ' + Number(hit.yaw).toFixed(1) + '°')
+       + (hit.source ? '（' + hit.source + '）' : '');
+}
+
+// 懸停顯示 image_id／航向。用另一個 handler、只聽 MOUSE_MOVE：左鍵既有語意是「加角點」，不能搶。
+function _ensurePhotoPoseHover() {
+  if (_photoPoseHover) return;
+  _photoPoseTip = document.createElement('div');
+  _photoPoseTip.style.cssText = 'position:fixed;display:none;pointer-events:none;z-index:50;'
+    + 'background:rgba(13,17,23,0.88);color:#fff;font:12px "Segoe UI",sans-serif;'
+    + 'padding:3px 7px;border-radius:4px;white-space:nowrap;';
+  document.body.appendChild(_photoPoseTip);
+  var pending = null;
+  _photoPoseHover = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+  _photoPoseHover.setInputAction(function (e) {
+    var first = (pending === null);
+    pending = Cesium.Cartesian2.clone(e.endPosition);
+    if (!first) return;                   // 一個畫格只拾取一次
+    requestAnimationFrame(function () {
+      var pos = pending;
+      pending = null;
+      var hit = Object.keys(_photoPoseLayers).length ? photoPoseAt(pos) : null;
+      if (!hit) { _photoPoseTip.style.display = 'none'; return; }
+      var r = viewer.scene.canvas.getBoundingClientRect();
+      _photoPoseTip.textContent = photoPoseLabel(hit);
+      _photoPoseTip.style.left = (r.left + pos.x + 14) + 'px';
+      _photoPoseTip.style.top = (r.top + pos.y + 10) + 'px';
+      _photoPoseTip.style.display = 'block';
+    });
+  }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+}
+
+/** clearSurveyLayers — 移除所有正射與位姿圖層 */
+function clearSurveyLayers() {
+  Object.keys(_orthoLayers).forEach(removeOrthoLayer);
+  Object.keys(_photoPoseLayers).forEach(clearPhotoPoses);
+}
+
+/** surveyLayersInfo — 目前的航測圖層（給 Python 查詢與測試用） */
+function surveyLayersInfo() {
+  var o = {}, p = {};
+  Object.keys(_orthoLayers).forEach(function (k) {
+    var r = _orthoLayers[k];
+    o[k] = { scheme: r.scheme, url: r.url, alpha: r.layer.alpha, rectangle: r.rectangle,
+             state: r.state, tileErrors: r.tileErrors,
+             inCollection: viewer.imageryLayers.contains(r.layer) };
+  });
+  Object.keys(_photoPoseLayers).forEach(function (k) {
+    var r = _photoPoseLayers[k];
+    p[k] = { drawn: r.drawn, skipped: r.skipped, noHeading: r.noHeading, noHeight: r.noHeight,
+             length: r.coll.length, url: r.url };
+  });
+  return { ortho: o, poses: p };
+}
+// SURVEY_LAYERS_END
+// ══════════════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════════════
+//  SURVEY_POINTS_BEGIN —— tests/test_gcp_plan_dialog.py 靠這兩個標記把本段抽出來單獨測，勿刪
+//
+//  GCP／檢核點佈設（survey.gcp_plan）：數十點、每點一個 Entity（點＋編號標籤，貼地），依類型上色。
+//  與正射／位姿分開管理：clearSurveyLayers() 不清它，只有 clearSurveyPoints(id) 會清。
+// ══════════════════════════════════════════════════════════════════
+var _surveyPointLayers = {};   // id → { entities: [], drawn, skipped, byType }
+// 依類型上色（與 Python 端 cesium_map_widget.SURVEY_POINT_COLORS 同一份，測試鎖兩邊相等）
+var _SURVEY_POINT_COLORS = { GCP: '#FF3D00', CHK: '#2979FF' };
+var _SURVEY_POINT_OTHER_COLOR = '#FFFFFF';
+
+/**
+ * setSurveyPoints — 畫一層 GCP／檢核點
+ * @param {string} id
+ * @param {object|Array} data  {rows:[...]} 或直接 [...]；每列 [lat, lon, type, label]
+ * @returns {{drawn, skipped, byType}}
+ */
+function setSurveyPoints(id, data) {
+  clearSurveyPoints(id);
+  var rows = Array.isArray(data) ? data : ((data && data.rows) || []);
+  var rec = { entities: [], drawn: 0, skipped: 0, byType: {} };
+  var black = Cesium.Color.BLACK;
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var lat = _surveyNum(r[0]), lon = _surveyNum(r[1]);
+    if (!isFinite(lat) || !isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+      rec.skipped++;
+      continue;
+    }
+    var type = (r[2] === null || r[2] === undefined) ? '' : String(r[2]);
+    var label = (r[3] === null || r[3] === undefined) ? '' : String(r[3]);
+    var col = Cesium.Color.fromCssColorString(_SURVEY_POINT_COLORS[type] || _SURVEY_POINT_OTHER_COLOR);
+    var e = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(lon, lat, 0),
+      point: {
+        pixelSize: type === 'GCP' ? 13 : 10,
+        color: col,
+        outlineColor: black,
+        outlineWidth: 2,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,   // 不被地形／建物擋住
+      },
+      label: {
+        text: label,
+        font: '13px "Microsoft JhengHei", "Segoe UI", sans-serif',
+        fillColor: col,
+        outlineColor: black,
+        outlineWidth: 3,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        pixelOffset: new Cesium.Cartesian2(0, -18),
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+    rec.entities.push(e);
+    rec.drawn++;
+    rec.byType[type] = (rec.byType[type] || 0) + 1;
+  }
+  _surveyPointLayers[id] = rec;
+  console.log('[SurveyPoints] ' + id + '：畫了 ' + rec.drawn + ' 點'
+              + (rec.skipped ? '，略過 ' + rec.skipped + ' 點（經緯度無效）' : ''));
+  return { drawn: rec.drawn, skipped: rec.skipped, byType: rec.byType };
+}
+
+/** clearSurveyPoints — 移除一層 GCP／檢核點；回傳是否真的有移除 */
+function clearSurveyPoints(id) {
+  var rec = _surveyPointLayers[id];
+  if (!rec) return false;
+  for (var i = 0; i < rec.entities.length; i++) {
+    try { viewer.entities.remove(rec.entities[i]); } catch (_) {}
+  }
+  delete _surveyPointLayers[id];
+  return true;
+}
+
+/** surveyPointsInfo — 目前的 GCP／檢核點圖層（給 Python 查詢與測試用） */
+function surveyPointsInfo() {
+  var o = {};
+  Object.keys(_surveyPointLayers).forEach(function (k) {
+    var r = _surveyPointLayers[k];
+    o[k] = { drawn: r.drawn, skipped: r.skipped, byType: r.byType, entities: r.entities.length };
+  });
+  return o;
+}
+// SURVEY_POINTS_END
+// ══════════════════════════════════════════════════════════════════
 
 
 console.log('[Cesium 3D] 初始化完成（含戰術視覺化 + 蜂群打擊 + VTOL 軌跡 + 末端俯衝模組）');

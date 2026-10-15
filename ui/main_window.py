@@ -4,12 +4,14 @@
 """
 
 import math
+import re
+from pathlib import Path
 from typing import Optional, Tuple
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QSplitter, QStatusBar, QToolBar, QMessageBox,
     QFileDialog, QLabel, QScrollArea, QApplication
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QKeySequence, QShortcut
 
 # 修正導入路徑
@@ -18,6 +20,7 @@ from utils.logger import get_logger
 from utils.file_io import write_waypoints, create_waypoint_line
 from utils.math_utils import (  # 0-2 標準化：WGS84 單一來源
     EARTH_RADIUS_M, point_at_distance_bearing,
+    spawn_positions as _spawn_positions,
 )
 
 
@@ -104,6 +107,28 @@ HEATMAP_M_PER_DEG = 111320.0
 #: 超過這個格數就提醒重繪成本。每格一個 Cesium Entity,且改色會讓整批
 #: primitive 重建(非 per-instance 屬性路徑),所以成本隨格數**超線性**成長。
 HEATMAP_HEAVY_CELLS = 4000
+
+
+def looks_like_real_board_connection(conn_str: str) -> bool:
+    """這條連線字串背後看起來是不是**真實飛控**（序列埠），而不是 SITL / 網路連線。
+
+    給 Write WPs 的確認對話框用來加重措辭、把預設鈕從「是」換成「取消」——
+    純粹是**提示**用的啟發式，判斷錯了不影響安全（寫入前一律要求明確按
+    「是」），但判斷對了能讓使用者在對著真板子按下去之前多想一秒。
+
+    判準：Windows 的 COMx、Linux/macOS 的 /dev/tty*、或字面含 'serial'
+    （pymavlink 的 'serial:' scheme）。udp*/tcp* 一律視為 SITL/網路連線。
+    """
+    s = (conn_str or '').strip().lower()
+    if not s:
+        return False
+    if s.startswith('com') and len(s) > 3 and s[3].isdigit():
+        return True
+    if '/dev/tty' in s:
+        return True
+    if 'serial' in s:
+        return True
+    return False
 
 
 def heatmap_cell_size_m(lat_min, lat_max, lon_min, lon_max, grid):
@@ -199,6 +224,76 @@ def build_avoidance_kwargs(params: dict, cruise_speed_mps: float) -> dict:
     )
 
 
+def describe_avoidance_problem(error=None, remaining=None, min_sep_m=None):
+    """把「避撞沒做成」翻成要給使用者看的文字;一切正常回傳 None。
+
+    ⚠⚠ 為什麼是獨立函式:避撞出問題的兩種形狀 —— 丟例外、或跑完仍有衝突 ——
+    過去都**只進日誌**。2026-10-08 實測 `CollisionAvoidance.__init__()` 少一個
+    參數,每次規劃 TypeError,被 `except Exception` 吞成一行 WARNING,使用者
+    拿到沒做過避撞的路徑還以為有。這裡只負責「說什麼」,「怎麼彈出來」在
+    `MainWindow._notify_avoidance_problem`。
+
+    Args:
+        error: 避撞模組丟出的例外(None = 沒丟)
+        remaining: `CollisionAvoidance.remaining_conflicts`(跑完仍存在的衝突)
+        min_sep_m: 最小間距門檻,只用來說明
+    """
+    if error is not None:
+        return (
+            "避撞模組執行失敗,這份規劃**沒有**做避撞處理 —— 目前顯示的路徑"
+            "可能有機與機之間距離不足的位置。\n\n"
+            f"錯誤:{type(error).__name__}: {error}\n\n"
+            "請不要直接用這份路徑飛行;詳情見日誌。")
+    if not remaining:
+        return None
+    thr = f"(門檻 {min_sep_m:.0f} m)" if min_sep_m else ""
+    lines = [f"避撞跑完後仍有 {len(remaining)} 個衝突沒有解掉{thr}:"]
+    shown = sorted(remaining, key=lambda c: c.min_dist_m)[:5]
+    for c in shown:
+        lines.append(f"  • UAV-{c.uav_a} / UAV-{c.uav_b}:最近只有 {c.min_dist_m:.1f} m"
+                     f"(t={c.time_s:.0f} s)")
+    if len(remaining) > len(shown):
+        lines.append(f"  …另外還有 {len(remaining) - len(shown)} 個")
+    lines.append("")
+    lines.append("常見原因:已達「抬升上限」,或衝突落在起降段(高度錯開動不了)。"
+                 "可加大抬升上限/高度錯開量,或拉開起飛間距後重新規劃。")
+    return "\n".join(lines)
+
+
+def run_collision_avoidance(params: dict, speed: float, assembled_paths, *,
+                            status, notify):
+    """跑避撞,回傳 (第一輪偵測到的衝突, 累計動作)。
+
+    ⚠⚠ 失敗不可以只進日誌:丟例外、或跑完仍有衝突,都要讓使用者**看見**。
+    對話框用 `QTimer.singleShot(0, ...)` 延後到這一輪顯示做完才彈 —— 否則模態
+    對話框會蓋在還沒畫出來的舊地圖上。
+
+    Args:
+        status: callable(text, ms) —— 顯示一般狀態列訊息
+        notify: callable(text) —— 讓使用者看見的警告(狀態列 + 對話框)
+    """
+    conflicts, actions = [], []
+    if not (bool(params.get('collision_avoidance', False))
+            and assembled_paths and len(assembled_paths) >= 2):
+        return conflicts, actions
+    problem = None
+    try:
+        from core.dccpp.collision_avoidance import CollisionAvoidance
+        ca = CollisionAvoidance(**build_avoidance_kwargs(params, speed))
+        conflicts, actions = ca.run(assembled_paths)
+        problem = describe_avoidance_problem(
+            remaining=ca.remaining_conflicts, min_sep_m=ca.min_sep)
+        if conflicts and problem is None:
+            status(f"避撞偵測: {len(conflicts)} 個衝突, "
+                   f"已執行 {len(actions)} 個避撞動作", 5000)
+    except Exception as err:
+        logger.error(f"避撞模組失敗: {err}", exc_info=True)
+        problem = describe_avoidance_problem(error=err)
+    if problem is not None:
+        QTimer.singleShot(0, lambda t=problem: notify(t))
+    return conflicts, actions
+
+
 def resolve_spawn_spacing_m(params: dict, logger_=None) -> float:
     """決定多機生成點的間距（公尺）。
 
@@ -221,25 +316,50 @@ def resolve_spawn_spacing_m(params: dict, logger_=None) -> float:
     return spacing
 
 
-def spawn_positions(base_lat: float, base_lon: float, num_drones: int,
-                    takeoff_bearing_deg: float, spacing_m: float) -> list:
-    """沿起飛方向的垂直方向、以起飛點為中心對稱排開 N 個生成點。
+#: 生成點排列。⚠ 2026-09-09 搬到 ``utils.math_utils``（SITL 情境也要用，而那條路徑
+#: 完全不碰 Qt）。這裡**再匯出**同一個物件，既有 `from ui.main_window import
+#: spawn_positions` 的呼叫端與測試不用改。搬移前後逐位元相同（6 種機數 × 5 種間距實測）。
+spawn_positions = _spawn_positions
 
-    ⚠ 一定要用 ``point_at_distance_bearing``（它用 ``EARTH_RADIUS_M``），
-    不可再用手刻的 111320.0 m/deg：避撞偵測的 ``_haversine`` 用的是
-    ``EARTH_RADIUS_M``（2πR/360 = 111319.4908 m/deg），兩個常數差 0.51 m/deg，
-    會讓「排好 50 m」量起來只有 49.999771 m，剛好掉到 50 m 門檻底下，
-    於是 t=0 每一組相鄰機都被誤判成衝突（cos φ 會約掉 ⇒ 與緯度無關）。
+
+#: SITL 生成點在共用起降場時要排開的間距（公尺）。VTOL 的
+#: ``vtol_site_clear_radius_m`` 是 6–8 m，10 m 剛好把兩台的淨空圈分開。
+SITL_COLOCATED_SPREAD_M: float = 10.0
+
+
+def spread_colocated_homes(homes: list, spacing_m: float = SITL_COLOCATED_SPREAD_M,
+                           tol_m: float = 1.0, logger_=None) -> list:
+    """把**共點**的每架起飛點排成一列；本來就分開的原樣不動。
+
+    ⚠⚠⚠ 為什麼需要：`per_uav_homes` 取的是每台計畫的第一個航點，而全隊共用一個
+    起降場時那四個點是**同一個座標**（實測 HV 規劃四台都是
+    ``(25.074968, 121.235507)``）。那份清單忠實反映計畫沒有錯，但直接餵給
+    ``start_multi(homes=…)`` 會讓四台 SITL **生在同一個點上**、彼此重疊。
+
+    排開的方向取**垂直於起飛航向**（與 :func:`spawn_positions` 同一個慣例），
+    這樣是並排而不是一台擋在另一台的起飛路徑上。以起飛點為中心對稱展開。
+
+    ⚠ 只在「所有點彼此都在 ``tol_m`` 內」時才動作。使用者真的規劃了多個起降場時
+    （逐機回收站／多場坪）那些座標本來就不同，**不可以**把它們拉到一條線上。
     """
-    if num_drones <= 1:
-        return [(base_lat, base_lon)]
-    out = []
-    for i in range(num_drones):
-        offset_m = (i - (num_drones - 1) / 2.0) * spacing_m
-        brg = (takeoff_bearing_deg + 90.0) % 360.0
-        if offset_m < 0.0:
-            brg = (brg + 180.0) % 360.0
-        out.append(point_at_distance_bearing(base_lat, base_lon, abs(offset_m), brg))
+    if not homes or len(homes) < 2:
+        return homes
+    lat0, lon0 = float(homes[0][0]), float(homes[0][1])
+    for h in homes[1:]:
+        dN = (float(h[0]) - lat0) * 111320.0
+        dE = (float(h[1]) - lon0) * 111320.0 * math.cos(math.radians(lat0))
+        if math.hypot(dN, dE) > float(tol_m):
+            return homes                                   # 真的分開 ⇒ 不動
+    hdg0 = float(homes[0][2]) if len(homes[0]) > 2 else 0.0
+    pts = spawn_positions(lat0, lon0, len(homes), hdg0, float(spacing_m))
+    out = [(p[0], p[1], (float(h[2]) if len(h) > 2 else hdg0))
+           for p, h in zip(pts, homes)]
+    if logger_ is not None:
+        logger_.info(
+            f'[SITL] 每架起飛點共用同一個起降場 ⇒ 沿垂直於起飛航向 '
+            f'{hdg0:.0f}° 排成一列，間距 {float(spacing_m):.1f} m（{len(out)} 台）。'
+            f'不排開的話四台會生在同一個座標上互相重疊。'
+        )
     return out
 
 
@@ -294,10 +414,10 @@ MIN_CORNERS = 3   # 最少邊界點數量
 MAX_CORNERS = 100  # 最大邊界點數量
 _WP_LIMIT = 655   # Mission Planner 單次最大匯入航點數
 
-# HV-DCCPP 兩個構型的顯示名稱（數值以 docs/平台參數表.md 為準，這裡只給人看）
+# HARVEST 兩個構型的顯示名稱（數值以 docs/平台參數表.md 為準，這裡只給人看）
 HV_PLATFORM_NAMES = {'A': 'Pioneer PNP', 'B': 'HERO PNP'}
 
-# ── 關視窗時還在跑的 HV-DCCPP 規劃執行緒（見 _hv_park_running_worker）────────
+# ── 關視窗時還在跑的 HARVEST 規劃執行緒（見 _hv_park_running_worker）────────
 #   放在模組層級是刻意的：這裡是唯一在視窗死後還握著它的地方。
 _HV_ORPHAN_WORKERS: set = set()
 
@@ -307,7 +427,7 @@ def _hv_wait_for_orphan_workers(timeout_ms: int = 60000) -> None:
     for w in list(_HV_ORPHAN_WORKERS):
         try:
             if w.isRunning():
-                logger.info('[HV-DCCPP] 等待背景規劃收尾…')
+                logger.info('[HARVEST] 等待背景規劃收尾…')
                 w.wait(timeout_ms)
         except RuntimeError:
             pass
@@ -347,7 +467,761 @@ def _hv_park_running_worker(window, worker) -> None:
                                     _Qt.ConnectionType.UniqueConnection)
     except Exception:
         pass
-    logger.warning('[HV-DCCPP] 視窗關閉時規劃仍在執行，已寄放該執行緒等它自行結束')
+    logger.warning('[HARVEST] 視窗關閉時規劃仍在執行，已寄放該執行緒等它自行結束')
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  航測建圖（HARVEST 建圖模式）：上傳前參數讀回閘門、相機回授、tlog
+#  （模組層級純函式 ⇒ 值層級測試不必建 MainWindow）
+# ═════════════════════════════════════════════════════════════════════
+#: 讀回閘門逾時（每輪秒數）與補送輪數：最壞 3 × 3 = 9 s／架（read_params 只在工作執行緒呼叫）
+MAPPING_READBACK_TIMEOUT_S = 3.0
+MAPPING_READBACK_RETRIES = 2
+#: 這些參數在開機時建立相機後端／回授中斷／relay／輸出功能 ⇒ 改了要**重開飛控**才生效：
+#:   CAM1_TYPE（後端在 AP_Camera::init 建立）；CAM1_FEEDBAK_PIN（AP_Camera_Params.cpp 4.4.4–master 標
+#:   @RebootRequired）；CAM1_FEEDBAK_POL（AP_Camera_Backend::setup_feedback_callback 只在開機時依極性掛一次
+#:   RISING／FALLING 中斷，沒標 @RebootRequired 但改了不重開中斷邊緣不變）；CAM1_COMPID（master @RebootRequired，
+#:   匯出器目前不輸出，先列著）；RELAY*（AP_Relay 開機設定腳位）；SERVOn_FUNCTION（輸出功能開機配置）。
+_MAPPING_REBOOT_RE = re.compile(r'^(CAM1_TYPE|CAM1_FEEDBAK_PIN|CAM1_FEEDBAK_POL|CAM1_COMPID|RELAY.*|SERVO\d+_FUNCTION)$')
+#: SERVOn_FUNCTION 讀回閘門：只有目前是這些值才允許自動寫（0 = 停用；10 = 相機觸發；-1 = GPIO）。
+#:   其他值 ＝ 這個輸出正在用（馬達、舵面…），寫了下次開機就少一個輸出 ⇒ 拒絕並說出會失去什麼（R1 #5）。
+_SERVO_FN_RE = re.compile(r'^SERVO\d+_FUNCTION$')
+_SERVO_FN_REPLACEABLE = (0.0, 10.0, -1.0)
+#: SERVOn_FUNCTION 常見值（SRV_Channel.h）；表外的就顯示數字
+_SERVO_FUNCTION_LABELS = {
+    -1: 'GPIO', 0: '停用（Disabled）', 1: 'RC 直通（RCPassThru）', 4: '副翼（Aileron）',
+    10: '相機觸發（CameraTrigger）', 19: '升降舵（Elevator）', 21: '方向舵（Rudder）', 24: '襟翼（Flap）',
+    25: '自動襟翼（FlapAuto）', 26: '空氣煞車（Airbrake）', 70: '油門（Throttle）', 73: '左油門（ThrottleLeft）',
+    74: '右油門（ThrottleRight）', 75: '左傾轉馬達（TiltMotorLeft）', 76: '右傾轉馬達（TiltMotorRight）',
+    77: '左升降副翼（ElevonLeft）', 78: '右升降副翼（ElevonRight）', 79: 'V 尾左（VTailLeft）',
+    80: 'V 尾右（VTailRight）', 81: '加力油門（BoostThrottle）',
+    **{33 + i: f'馬達 {i + 1}（Motor{i + 1}）' for i in range(8)},
+    **{82 + i: f'馬達 {i + 9}（Motor{i + 9}）' for i in range(4)},
+    **{51 + i: f'RC 輸入 {i + 1}（RCIN{i + 1}）' for i in range(16)},
+}
+#: LOG_BITMASK 的相機位元（ArduPlane Parameters.cpp 4.5.7:627：bit 12 = Camera）；沒設 ⇒ 飛完沒有 CAM 紀錄
+LOG_BITMASK_CAMERA_BIT = 12
+#: 讀回閘門每架一定會讀的額外參數（空速包絡＋日誌）
+_MAPPING_EXTRA_READ = ('AIRSPEED_MIN', 'AIRSPEED_MAX', 'LOG_BITMASK', 'LOG_DISARMED')
+#: MAV_PARAM_TYPE → SITLLink.set_param 的型別名（ArduPilot 其實不看 param_type，用的是自己存的型別）
+_PTYPE_NAMES = {1: 'INT8', 2: 'INT8', 3: 'INT16', 4: 'INT16', 5: 'INT32', 6: 'INT32', 9: 'REAL32'}
+#: 專案根目錄（tlog 存 runs/survey/<日期>/）
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def mapping_airspeed_commands(items) -> list:
+    """任務裡每個「空速型」DO_CHANGE_SPEED（178，param1=0）的 param2（m/s）。
+
+    -2（回預設空速）與 ≤ 0 不算；地速型（param1=1）不受 AIRSPEED_MIN/MAX 限制，也不算。
+    ArduPlane do_change_speed：空速不在 [AIRSPEED_MIN, AIRSPEED_MAX] 內 ⇒ **靜默忽略**（4.4.4–master 相同）。
+    """
+    out = []
+    for it in items:
+        if int(it.get('command', 0)) != 178 or float(it.get('param1', 0.0)) != 0.0:
+            continue
+        v = float(it.get('param2', 0.0))
+        if v > 0.0:
+            out.append(v)
+    return out
+
+
+def servo_function_label(v) -> str:
+    """SERVOn_FUNCTION 值 → 中文名稱（表外的顯示數字）。"""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return str(v)
+    if math.isfinite(f) and f == int(f) and int(f) in _SERVO_FUNCTION_LABELS:
+        return f'{int(f)} = {_SERVO_FUNCTION_LABELS[int(f)]}'
+    return f'功能 {f:g}'
+
+
+def _finite(v):
+    """讀回值 → float；None／NaN／非數字 ⇒ None。"""
+    if v is None or isinstance(v, bool):
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
+def mapping_readback_rows(expected: dict, got: dict, types: dict, speeds, *,
+                          airspeed_expected: dict | None = None) -> list:
+    """讀回值逐項比對 → ``[{'name','kind','expected','actual','ok','writable','write_value','ptype', ...}, ...]``。
+
+    * 相機參數（kind ``value``）：``mission.sitl_link.values_match``（float32 格點比對；讀不到 = 不符），
+      可寫（寫成預期值）。**例外** SERVOn_FUNCTION（R1 #5）：只有目前是 0（停用）或已經是相機／GPIO 功能
+      （10／-1）才可寫；其他值（馬達、舵面…）⇒ ``writable=False`` 並在 ``refuse`` 說出會失去哪個輸出。
+    * 空速（kind ``airspeed``，**永遠不自動寫**：飛行包絡）：讀回的 AIRSPEED_MIN／MAX 要等於匯出 .param 的值
+      （``airspeed_expected``；R2：ArduPlane 存成 AP_Int16，26.6 會靜默變 26），而且任務每個空速型
+      DO_CHANGE_SPEED 都要落在 [MIN, MAX]（含邊界，超出 ArduPlane 會靜默忽略該指令）。``detail`` 說哪一條不符。
+    * LOG_BITMASK（kind ``bit``，R2）：要含 bit 12（Camera），否則飛完沒有 CAM 紀錄。這是位元測試、不是值比對；
+      可寫但**只用 OR 補上這一個位元**（``write_value`` = 讀回值 | 4096，其他位元不動）；讀不到 ⇒ 不可寫。
+    * LOG_DISARMED（kind ``info``，不擋）：只顯示；0 ⇒ 未解鎖時不記錄，地面測試拍照不會進日誌。
+    """
+    from mission.sitl_link import values_match
+    rows = []
+    for name, exp in expected.items():
+        act = got.get(name)
+        ok = bool(values_match(exp, act, types.get(name)))
+        row = {'name': name, 'kind': 'value', 'expected': float(exp), 'actual': act, 'ok': ok,
+               'writable': True, 'write_value': float(exp), 'ptype': types.get(name)}
+        if not ok and _SERVO_FN_RE.match(name):
+            a = _finite(act)
+            if a is None:
+                row['writable'] = False
+                row['refuse'] = '讀不到目前的輸出功能，無法確認這個輸出沒有在用 ⇒ 不自動寫，請自己檢查'
+            elif a not in _SERVO_FN_REPLACEABLE:
+                row['writable'] = False
+                row['refuse'] = (f'這個輸出目前是 {servo_function_label(a)}；寫成 {servo_function_label(exp)} '
+                                 f'會在下次開機拿掉這個輸出 ⇒ 不自動寫。請改用沒在用的輸出通道（重新設定 relay／回授通道）'
+                                 f'或自己確認後手動改')
+        rows.append(row)
+    speeds = [float(s) for s in (speeds or [])]
+    aexp = dict(airspeed_expected or {})
+    for name in ('AIRSPEED_MIN', 'AIRSPEED_MAX'):
+        need, fails = [], []
+        act = got.get(name)
+        a = _finite(act)
+        ev = aexp.get(name)
+        if ev is not None:
+            need.append(f'= {float(ev):g}（匯出 .param）')
+            if not values_match(ev, act, types.get(name)):
+                fails.append(f'與匯出的 .param {float(ev):g} 不同（飛控實際用 {_fmt_param(act)}）')
+        if speeds:
+            lo, hi = min(speeds), max(speeds)
+            if name == 'AIRSPEED_MIN':
+                need.append(f'≤ {lo:g}（任務最低空速）')
+                if a is None or not a <= lo:
+                    fails.append(f'任務空速 {lo:g} m/s 低於 AIRSPEED_MIN ⇒ 該 DO_CHANGE_SPEED 會被飛控靜默忽略')
+            else:
+                need.append(f'≥ {hi:g}（任務最高空速）')
+                if a is None or not a >= hi:
+                    fails.append(f'任務空速 {hi:g} m/s 高於 AIRSPEED_MAX ⇒ 該 DO_CHANGE_SPEED 會被飛控靜默忽略')
+        if not need:
+            continue
+        ok = a is not None and not fails
+        rows.append({'name': name, 'kind': 'airspeed', 'expected': ' 且 '.join(need), 'actual': act, 'ok': bool(ok),
+                     'writable': False, 'ptype': types.get(name),
+                     'detail': '；'.join(fails) if fails else ('讀不到' if a is None else '')})
+    # LOG_BITMASK：位元測試（不是 values_match）
+    bit = 1 << LOG_BITMASK_CAMERA_BIT
+    act = got.get('LOG_BITMASK')
+    a = _finite(act)
+    row = {'name': 'LOG_BITMASK', 'kind': 'bit', 'expected': f'含 bit {LOG_BITMASK_CAMERA_BIT}（Camera）',
+           'actual': act, 'ptype': types.get('LOG_BITMASK')}
+    if a is None:
+        row.update(ok=False, writable=False,
+                   refuse='讀不到 LOG_BITMASK，無法只補 bit 12（不能把未知的其他位元蓋掉）⇒ 不自動寫')
+    else:
+        iv = int(round(a))
+        has = bool(iv & bit)
+        row.update(ok=has, writable=not has, write_value=float(iv | bit))
+        if not has:
+            row['write_note'] = (f'寫入時只補這一個位元：{iv} OR {bit} = {iv | bit}（其他日誌位元不變）；'
+                                 f'沒有它飛完沒有 CAM 紀錄，後處理會失敗')
+    rows.append(row)
+    # LOG_DISARMED：資訊（不擋）
+    act = got.get('LOG_DISARMED')
+    a = _finite(act)
+    if a is None:
+        note = '讀不到 LOG_DISARMED'
+    elif int(round(a)) == 0:
+        note = 'LOG_DISARMED=0：未解鎖時不記錄日誌 ⇒ 地面測試拍照不會進日誌（飛行中正常）'
+    else:
+        note = f'LOG_DISARMED={a:g}：未解鎖時也記錄（地面測試拍照會進日誌）'
+    rows.append({'name': 'LOG_DISARMED', 'kind': 'info', 'expected': '（資訊，不擋）', 'actual': act, 'ok': True,
+                 'writable': False, 'ptype': types.get('LOG_DISARMED'), 'info': note})
+    return rows
+
+
+def run_mapping_readback(jobs, *, timeout_s: float = MAPPING_READBACK_TIMEOUT_S,
+                         retries: int = MAPPING_READBACK_RETRIES) -> dict:
+    """**工作執行緒**裡跑：每架 ``link.read_params``（PARAM_REQUEST_READ，不用 MAVFTP）→ 比對。
+
+    jobs：``[{'sysid', 'link', 'expected': {name: 值}, 'speeds': [m/s, ...],
+    'airspeed_expected': {'AIRSPEED_MIN': 值, 'AIRSPEED_MAX': 值}（可省）}, ...]``
+    每架讀：預期的相機參數 + AIRSPEED_MIN／MAX + LOG_BITMASK + LOG_DISARMED。
+    回傳 ``{sysid: {'rows': [...], 'error': None | str}}``；讀取本身丟例外 ⇒ ``error``（視為不符）。
+    """
+    out = {}
+    for job in jobs:
+        sysid = int(job['sysid'])
+        names = list(dict.fromkeys(list(job['expected']) + list(_MAPPING_EXTRA_READ)))
+        types = {}
+        try:
+            got = job['link'].read_params(names, timeout_s=timeout_s, retries=retries, types_out=types)
+        except Exception as e:      # noqa: BLE001 — 讀不到就是不符，要說出原因
+            out[sysid] = {'rows': [], 'error': f'{type(e).__name__}: {e}'}
+            continue
+        out[sysid] = {'rows': mapping_readback_rows(job['expected'], got, types, job.get('speeds'),
+                                                    airspeed_expected=job.get('airspeed_expected')),
+                      'error': None}
+    return out
+
+
+class MappingReadbackWorker(QThread):
+    """上傳前讀回閘門的工作執行緒（read_params 是同步等待，不可在 GUI 執行緒跑）。"""
+    done = pyqtSignal(dict)
+
+    def __init__(self, jobs, parent=None):
+        super().__init__(parent)
+        self._jobs = list(jobs)
+
+    def run(self):
+        try:
+            res = run_mapping_readback(self._jobs)
+        except Exception as e:      # noqa: BLE001 — 執行緒裡的例外不能吞，交回 GUI 顯示
+            res = {int(j['sysid']): {'rows': [], 'error': f'{type(e).__name__}: {e}'} for j in self._jobs}
+        self.done.emit(res)
+
+
+def _fmt_param(v) -> str:
+    if v is None:
+        return '讀不到'
+    if isinstance(v, str):
+        return v
+    return f'{float(v):g}'
+
+
+def mapping_reboot_names(bad: dict) -> dict:
+    """{sysid: [不符、會寫、而且寫了要重開飛控的參數名]}（CAM1_TYPE／CAM1_FEEDBAK_PIN／CAM1_FEEDBAK_POL／
+    CAM1_COMPID／RELAY*／SERVOn_FUNCTION；見 ``_MAPPING_REBOOT_RE``）。"""
+    out = {}
+    for sysid, r in bad.items():
+        names = [row['name'] for row in r.get('rows', [])
+                 if not row['ok'] and row['writable'] and _MAPPING_REBOOT_RE.match(row['name'])]
+        if names:
+            out[sysid] = names
+    return out
+
+
+def mapping_mismatch_text(bad: dict) -> str:
+    """讀回不符清單（每架：名稱／預期／實際）。相符的不列。"""
+    lines = []
+    for sysid in sorted(bad):
+        r = bad[sysid]
+        lines.append(f'UAV-{sysid}：')
+        if r.get('error'):
+            lines.append(f'  讀回失敗：{r["error"]}')
+        for row in r.get('rows', []):
+            if row['ok']:
+                continue
+            if row['writable']:
+                tail = f'（{row["write_note"]}）' if row.get('write_note') else ''
+            elif row.get('refuse'):
+                tail = f'（{row["refuse"]}）'
+            else:
+                tail = '（飛行包絡參數，不會自動寫入，請自行調整）'
+            detail = f'：{row["detail"]}' if row.get('detail') else ''
+            lines.append(f'  {row["name"]}：預期 {_fmt_param(row["expected"])}，'
+                         f'實際 {_fmt_param(row["actual"])}{detail}{tail}')
+    reboot = mapping_reboot_names(bad)
+    if reboot:
+        names = sorted({n for v in reboot.values() for n in v})
+        lines.append('')
+        lines.append(f'注意：{"、".join(names)} 寫入後要重開飛控才生效（相機後端、回授中斷、relay 與輸出功能在開機時建立）；'
+                     '寫完不會自動上傳任務。')
+    return '\n'.join(lines)
+
+
+def mapping_tlog_path(callsign: str, when=None):
+    """tlog 路徑：runs/survey/<YYYYMMDD>/<callsign>_<HHMMSS>.tlog（專案根目錄下）。"""
+    import datetime as _dt
+    t = when or _dt.datetime.now()
+    return _PROJECT_ROOT / 'runs' / 'survey' / t.strftime('%Y%m%d') / f'{callsign}_{t.strftime("%H%M%S")}.tlog'
+
+
+def assign_links_to_uavs(links, uav_ids):
+    """鏈路 → UAV 對應（與既有上傳同一規則）：sysid 等於某 UAV id 就用它，否則給尚未用過的最小 id。
+
+    回傳 ``([(link, uav_id), ...], [沒分到的 sysid, ...])``；同一份任務不會給兩架。
+    """
+    ids = sorted(int(u) for u in uav_ids)
+    used, pairs, skipped = set(), [], []
+    direct = {int(getattr(l, 'sysid_label', 0)) for l in links} & set(ids)
+    for link in links:
+        sysid = int(getattr(link, 'sysid_label', 0))
+        if sysid in ids and sysid not in used:
+            uid = sysid
+        else:
+            remaining = [u for u in ids if u not in used and u not in direct]
+            if not remaining:
+                skipped.append(sysid)
+                continue
+            uid = remaining[0]
+        used.add(uid)
+        pairs.append((link, uid))
+    return pairs, skipped
+
+
+def mapping_expected_airspeed(hv, drone_id, camera_cfg) -> dict:
+    """匯出 .param 會寫的 AIRSPEED_MIN／MAX（同一支 hv_dccpp.ardupilot.recommended_params；值只看機型 spec，
+    與 export_all 傳的其他引數無關）。讀回閘門拿它跟飛控實際值比（R2：AP_Int16 會把 26.6 靜默存成 26）。"""
+    from hv_dccpp.ardupilot import recommended_params
+    uid = hv.id_map.get(int(drone_id))
+    up = hv.last_plan.plans.get(uid) if uid is not None else None
+    if up is None:
+        raise ValueError(f'drone_id={drone_id} 在這份計畫裡沒有任務')
+    spec = hv.last_ctx.specs[up.cls]
+    p = recommended_params(spec, None, hv.cfg, sensor_kinds=('rgb',), camera_cfg=camera_cfg, warnings=[])
+    return {k: float(p[k]) for k in ('AIRSPEED_MIN', 'AIRSPEED_MAX') if k in p}
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  HARVEST 起飛時程（R1 #1）：4D 去衝突有一部分是靠「延後起飛」錯開的（UAVPlan.t_takeoff_s），
+#  建圖模式又不分層 ⇒ 時間是唯一的隔離。任務檔本身不帶時間原點，所以一鍵起飛（全部同時 AUTO）會把
+#  規劃的 293 m 間距吃到 12 m（R1 probe stagger2）。這裡：上傳報告列每架的起飛時程、時程不同就擋一鍵起飛、
+#  「依時程放行」由 GCS 依時程逐機送同一支 auto_start。
+# ═════════════════════════════════════════════════════════════════════
+#: 起飛時程差 ≤ 這個秒數視為同時（一鍵起飛不擋）
+TAKEOFF_STAGGER_TOL_S = 1.0
+
+
+def _normalize_takeoff_schedule(sched, id_map) -> dict:
+    """``HvDccppCoordinator.takeoff_schedule()`` 的回傳 → ``{drone_id: 秒}``；看不懂 ⇒ ValueError（不猜）。
+
+    接受：``{drone_id: 秒}``、``{drone_id: {'offset_s'|'delay_s'|'t_offset_s': 秒, ...}}``、
+    ``{uav_id 字串: ...}``（以 id_map 反查）、外層包一層 ``{'delay_s': {...}}``／``{'offsets': {...}}``、
+    或 ``[{'drone_id'|'uav_id', 'offset_s'|'delay_s'}, ...]``。
+    """
+    keys = ('offset_s', 'delay_s', 't_offset_s', 'offset')
+    rev = {str(u): int(d) for d, u in (id_map or {}).items()}
+
+    def _did(k):
+        if isinstance(k, bool):
+            raise ValueError(f'看不懂的機號 {k!r}')
+        if isinstance(k, int):
+            return int(k)
+        s = str(k)
+        if s in rev:
+            return rev[s]
+        return int(s)
+
+    def _sec(v):
+        if isinstance(v, dict):
+            for k in keys:
+                if v.get(k) is not None:
+                    return float(v[k])
+            raise ValueError(f'起飛時程項目沒有秒數欄位：{v!r}')
+        return float(v)
+
+    if isinstance(sched, dict):
+        for wrap in ('offsets', 'delay_s', 'offsets_s'):
+            if isinstance(sched.get(wrap), dict):
+                sched = sched[wrap]
+                break
+        out = {_did(k): _sec(v) for k, v in sched.items()}
+    elif isinstance(sched, (list, tuple)):
+        out = {}
+        for it in sched:
+            if not isinstance(it, dict):
+                raise ValueError(f'起飛時程項目不是 dict：{it!r}')
+            k = it.get('drone_id', it.get('uav_id'))
+            out[_did(k)] = _sec(it)
+    else:
+        raise ValueError(f'起飛時程型別看不懂：{type(sched).__name__}')
+    for d, s in out.items():
+        if not math.isfinite(s) or s < -1e-6:
+            raise ValueError(f'機 {d} 的起飛時程 {s!r} 不合法')
+    return out
+
+
+def harvest_takeoff_offsets(hv) -> tuple:
+    """HARVEST 計畫每架的起飛時程 → ``({drone_id: 相對全隊最早起飛的秒數}, 來源說明)``。
+
+    優先用轉接層的 ``HvDccppCoordinator.takeoff_schedule()``（另一個套件正在加）；沒有這個方法、或回傳看不懂
+    ⇒ 改從 ``last_plan.plans[uid].t_takeoff_s − min`` 自己算（與 export_all 的 ``delay_s`` 同一條：t0 = 全隊最小
+    t_takeoff_s），來源字串會說用的是哪一個（有效值契約：不靜默換來源）。只回有任務（在 last_plan.plans 裡）的機。
+    """
+    fn = getattr(hv, 'takeoff_schedule', None)
+    if callable(fn):
+        try:
+            raw = _normalize_takeoff_schedule(fn(), getattr(hv, 'id_map', None))
+            if raw:
+                t0 = min(raw.values())
+                return {d: float(s) - t0 for d, s in raw.items()}, 'HvDccppCoordinator.takeoff_schedule()'
+        except Exception as e:      # noqa: BLE001 — 看不懂就改用規劃本身的 t_takeoff_s，但要說出來
+            logger.error(f'[起飛時程] takeoff_schedule() 的結果用不了（{type(e).__name__}: {e}）'
+                         f'⇒ 改用 UAVPlan.t_takeoff_s 自己算')
+    plan = getattr(hv, 'last_plan', None)
+    plans = dict(getattr(plan, 'plans', None) or {})
+    if not plans:
+        return {}, 'UAVPlan.t_takeoff_s（沒有計畫）'
+    t0 = min(float(p.t_takeoff_s) for p in plans.values())
+    out = {}
+    for did, uid in (getattr(hv, 'id_map', None) or {}).items():
+        p = plans.get(uid)
+        if p is not None:
+            out[int(did)] = float(p.t_takeoff_s) - t0
+    return out, 'UAVPlan.t_takeoff_s − 全隊最早起飛'
+
+
+def link_flight_state(link) -> tuple:
+    """這條連線的飛控**能不能**被換任務／放行 → ``(代碼, 原因)``；可以 ⇒ ``(None, None)``。
+
+    代碼：``'armed'``（已解鎖，可能在飛）、``'auto'``（AUTO 模式：換任務會改到正在執行的任務）、
+    ``'unknown'``（沒有遙測或還沒收到心跳、模式 '---'：狀態不明，不猜）。
+    """
+    sysid = getattr(link, 'sysid_label', '?')
+    get = getattr(link, 'get_latest_telemetry', None)
+    f = None
+    if callable(get):
+        try:
+            f = get()
+        except Exception:          # noqa: BLE001
+            f = None
+    if f is None:
+        return 'unknown', f'UAV-{sysid} 還沒收到遙測，無法確認未解鎖'
+    mode = str(getattr(f, 'mode', '---') or '---').upper()
+    if bool(getattr(f, 'armed', False)):
+        return 'armed', f'UAV-{sysid} 已解鎖（模式 {mode}）'
+    if mode in ('---', ''):
+        return 'unknown', f'UAV-{sysid} 還沒收到心跳，無法確認飛行模式'
+    if mode == 'AUTO':
+        return 'auto', f'UAV-{sysid} 在 AUTO 模式'
+    return None, None
+
+
+def link_flight_state_problem(link):
+    """:func:`link_flight_state` 的原因字串（None ＝ 可以）。"""
+    return link_flight_state(link)[1]
+
+
+def send_link_command(link, cmd: str, arg=None):
+    """逐機送一個 HUD 指令。一鍵起飛（_sitl_broadcast）與「依時程放行」走**同一支**：
+    auto_start ＝ SITLLink.auto_start()（AUTO + ARM + MISSION_START）。"""
+    if cmd == 'arm':       link.arm()
+    elif cmd == 'disarm':  link.disarm()
+    elif cmd == 'set_mode':link.set_mode(arg)
+    elif cmd == 'takeoff': link.takeoff(arg)
+    elif cmd == 'guided_takeoff': link.guided_takeoff(arg)
+    elif cmd == 'vtol_transition': link.vtol_transition(int(arg))
+    elif cmd == 'auto_start': link.auto_start()
+    elif cmd == 'mission_start': link.mission_start()
+    elif cmd == 'set_param':
+        name, value, ptype = arg
+        link.set_param(name, value, ptype)
+    elif cmd == 'set_params':
+        link.set_params(arg)
+    elif cmd == 'get_param':
+        link.get_param(arg)
+
+
+def schedule_spread_s(entries) -> float:
+    """起飛時程的最大差（秒）。"""
+    offs = [float(e['offset_s']) for e in entries]
+    return (max(offs) - min(offs)) if offs else 0.0
+
+
+def release_schedule_lines(entries) -> list:
+    return [f'UAV-{e["sysid"]}（機 {e["uav"]} {e.get("callsign", "?")}）：T+{e["offset_s"]:.0f} s'
+            for e in sorted(entries, key=lambda x: (x['offset_s'], x['sysid']))]
+
+
+def _refresh_countdown_of(win) -> None:
+    fn = getattr(win, '_refresh_release_countdown', None)
+    if callable(fn):
+        fn()
+
+
+def _cancel_active_release(win, reason: str) -> list:
+    """飛控上的任務／時程變了（重新上傳、Write WPs、別的上傳路徑）⇒ 還在倒數的放行用的是舊時程，全部取消。"""
+    rel = getattr(win, '_release', None)
+    if rel is None or not getattr(rel, 'active', False):
+        return []
+    cancelled = rel.cancel()
+    msg = (f'[放行] {reason} ⇒ 還在倒數的放行全部取消（UAV-{cancelled} 不會被送出起飛）；'
+           f'確認新任務後再按「依時程放行」')
+    logger.error(msg)
+    try:
+        win.statusBar().showMessage(msg, 15000)
+    except Exception:          # noqa: BLE001
+        pass
+    return cancelled
+
+
+def record_release_schedule(win, hv, pairs, *, mapping: bool):
+    """上傳了 HARVEST 任務 ⇒ 在 ``win._hv_release_schedule`` 記下飛控上這些任務的起飛時程。
+    pairs：``[(sysid, drone_id), ...]``（真的送出寫入的）。同一份結果（同一個 hv、同一個 last_result）分批上傳
+    ⇒ 合併；換了結果 ⇒ 取代。回傳 ``(entries, 來源)``，entries ＝ ``{sysid: {'sysid','uav','offset_s','callsign'}}``。
+    """
+    offsets, source = harvest_takeoff_offsets(hv)
+    _cancel_active_release(win, '重新上傳了 HARVEST 任務')
+    result = getattr(hv, 'last_result', None)
+    old = getattr(win, '_hv_release_schedule', None)
+    same = bool(old) and old.get('hv') is hv and old.get('result') is result
+    entries = dict(old['entries']) if same else {}
+    upload_ok = dict(old.get('upload_ok') or {}) if same else {}
+    if old and not same:
+        logger.info('[起飛時程] 新的 HARVEST 結果上傳，取代舊的起飛時程')
+    missing = []
+    for sysid, did in pairs:
+        off = offsets.get(int(did))
+        if off is None:
+            missing.append(int(did))
+            continue
+        entries[int(sysid)] = {'sysid': int(sysid), 'uav': int(did), 'offset_s': float(off),
+                               'callsign': (getattr(hv, 'id_map', None) or {}).get(int(did), '?')}
+        upload_ok[int(sysid)] = None
+    if missing:
+        # 沒有時程 = 不知道該何時起飛 ⇒ 不列入（不能依時程放行）；一鍵起飛仍會被其他機的時程擋
+        logger.error(f'[起飛時程] 機 {missing} 沒有起飛時程（{source}）⇒ 不能依時程放行')
+    win._hv_release_schedule = {'hv': hv, 'result': result, 'source': source, 'mapping': bool(mapping),
+                                'entries': entries, 'upload_ok': upload_ok}
+    logger.warning('[起飛時程] 飛控上的 HARVEST 任務：' + '；'.join(
+        f'UAV-{e["sysid"]}（機 {e["uav"]} {e["callsign"]}）T+{e["offset_s"]:.1f} s'
+        for e in sorted(entries.values(), key=lambda x: (x['offset_s'], x['sysid']))) + f'（來源：{source}）')
+    _refresh_countdown_of(win)
+    return entries, source
+
+
+def forget_release_schedule(win, sysids=None, reason: str = '') -> None:
+    """這些飛控的任務被別的上傳路徑換掉了 ⇒ 移出 HARVEST 起飛時程（None ＝ 全部清掉）。"""
+    sched = getattr(win, '_hv_release_schedule', None)
+    if not sched:
+        return
+    if sysids is None:
+        win._hv_release_schedule = None
+        logger.info(f'[起飛時程] 清除起飛時程（{reason}）')
+        _cancel_active_release(win, f'起飛時程清除（{reason}）')
+    else:
+        gone = [int(s) for s in sysids if int(s) in sched['entries']]
+        for s in gone:
+            sched['entries'].pop(s, None)
+            sched.get('upload_ok', {}).pop(s, None)
+        if gone:
+            logger.info(f'[起飛時程] UAV-{gone} 的任務已被換掉（{reason}），移出起飛時程')
+            _cancel_active_release(win, f'UAV-{gone} 的任務已被換掉（{reason}）')
+    _refresh_countdown_of(win)
+
+
+def staggered_start_block(schedule, links):
+    """一鍵起飛（auto_start／mission_start）要不要擋 → 拒絕訊息或 None。
+
+    擋：飛控上的 HARVEST 任務起飛時程不同（差 > TAKEOFF_STAGGER_TOL_S），而這次的指令對象裡有其中任何一架
+    （包括只選一架：單獨提早或延後起飛同樣破壞相對時程）。時程相同、或對象都不是 HARVEST 任務 ⇒ None（行為不變）。
+    """
+    if not schedule or not schedule.get('entries'):
+        return None
+    entries = list(schedule['entries'].values())
+    if schedule_spread_s(entries) <= TAKEOFF_STAGGER_TOL_S:
+        return None
+    hit = sorted(int(getattr(l, 'sysid_label', 0)) for l in links
+                 if int(getattr(l, 'sysid_label', 0)) in schedule['entries'])
+    if not hit:
+        return None
+    return ('飛控上的 HARVEST 任務起飛時程不同（4D 去衝突有一部分靠延後起飛錯開；'
+            + ('建圖模式不分層，時間是唯一的隔離' if schedule.get('mapping') else '同時起飛會失去這段隔離')
+            + '）。\n一鍵起飛會讓這些飛機同時起飛，不允許：\n  '
+            + '\n  '.join(release_schedule_lines(entries))
+            + f'\n\n（這次指令對象裡受影響的：UAV-{hit}）\n'
+            + '請改用 HUD 的「依時程放行」：時程 T+0 的立刻起飛，其他的依時程倒數後自動起飛，可「取消放行」。')
+
+
+def release_report_text(schedule, entries, source: str, *, mapping: bool) -> str:
+    """上傳報告的「起飛時程」段（每架 T+秒）：時程不同 ⇒ 大聲說一鍵起飛會被擋、要用「依時程放行」。
+    schedule ＝ 合併後的 ``_hv_release_schedule``（分批上傳時列全部）；沒有就用這次的 entries。"""
+    all_entries = list(((schedule or {}).get('entries') or entries or {}).values())
+    if not all_entries:
+        return '起飛時程：沒有（這些任務不能依時程放行）'
+    spread = schedule_spread_s(all_entries)
+    head = f'起飛時程（相對全隊最早起飛；來源 {source}）：\n  ' + '\n  '.join(release_schedule_lines(all_entries))
+    if spread > TAKEOFF_STAGGER_TOL_S:
+        return (head + '\n各機起飛時間不同：4D 去衝突有一部分靠延後起飛錯開'
+                + ('（建圖模式不分層，時間是唯一的隔離）' if mapping else '')
+                + ' ⇒ 「一鍵起飛」會被擋，請用 HUD 的「依時程放行」。')
+    return head + f'\n各機起飛時程相同（差 ≤ {TAKEOFF_STAGGER_TOL_S:g} s），可以一鍵起飛。'
+
+
+def hv_upload_gate(hv, swarm_coordinator) -> dict:
+    """建圖上傳閘門 = 轉接層 ``mapping_gate()``（未覆蓋／mapping_incomplete／NO_GO）＋ validate 的原因（R1 #8）。
+
+    validate 的結果在**產生這個 hv 的** SwarmCoordinator（``hv_validation_reasons``）。對不上（不是同一個 hv）、
+    或 validate 沒跑到 ⇒ 不可上傳（沒驗過不能當驗過）。
+    """
+    gate = hv.mapping_gate()
+    reasons = list(gate.get('reasons') or [])
+    sc = swarm_coordinator
+    if sc is not None and getattr(sc, 'hv_coordinator', None) is hv:
+        vr = getattr(sc, 'hv_validation_reasons', None)
+        if vr is None:
+            reasons.append('validate 沒有跑到（這份計畫沒有經過時空去衝突與能量驗證）')
+        else:
+            reasons.extend(str(r) for r in vr)
+    else:
+        reasons.append('找不到這份計畫的 validate 結果（時空去衝突／能量驗證）')
+    return {'uploadable': not reasons, 'reasons': reasons}
+
+
+def gcp_blocks_provider(win):
+    """「GCP／檢核點規劃」要的 UAV 區塊：回傳一個**呼叫時才讀**最新 HARVEST 規劃的函式（對話框是非模態的）。
+
+    回傳函式的結果：``(區塊, 說明, 來源說明)``；沒有 HARVEST 規劃 ⇒ ``(None, {}, 說明)``。
+    區塊由 ``survey.gcp_plan.blocks_from_hv`` 從 ``win._hv_coordinator`` 的 last_plan／last_ctx **唯讀**取出；
+    規劃結果有但讀不出來時讓例外往上丟（對話框會照實顯示，不默默改成不分區塊）。
+    """
+    def _provider():
+        from survey import gcp_plan
+        hv = getattr(win, '_hv_coordinator', None)
+        if hv is None or getattr(hv, 'last_plan', None) is None:
+            return None, {}, '沒有 HARVEST 規劃：不分 UAV 區塊（每區塊 GCP 與接縫檢核點對不會產生）'
+        blocks, info = gcp_plan.blocks_from_hv(hv)
+        names = '、'.join(f"{k}（#{v.get('drone_id')}）" for k, v in sorted(info.items()))
+        return blocks, info, f'HARVEST 最近一次規劃：{len(blocks)} 架 {names}'
+    return _provider
+
+
+def _qt_single_shot(delay_s: float, callback):
+    """預設計時器：PreciseTimer（⚠ 預設的 CoarseTimer 誤差可達間隔的 5%，1516 s 就是 ±76 s）。"""
+    from PyQt6.QtCore import QTimer, Qt as _Qt
+    t = QTimer()
+    t.setSingleShot(True)
+    t.setTimerType(_Qt.TimerType.PreciseTimer)
+    t.timeout.connect(callback)
+    t.start(max(0, int(round(float(delay_s) * 1000.0))))
+    return t
+
+
+class StaggeredRelease:
+    """依起飛時程逐機放行：時程 0 的立刻送、其他的用計時器在各自的時程送（同一支 ``start_fn``）。
+
+    ``start_fn(entry)``：真的送出起飛（MainWindow 用與「一鍵起飛」同一支的逐機 auto_start）；丟例外 ⇒ 該機
+    記為放行失敗（例外訊息就是原因）。``timer_factory(delay_s, callback)`` 回傳有 ``stop()`` 的物件；
+    ``clock()`` 單調秒數；``wall()`` 牆上時間（log 用）。三者都可注入（測試用假時鐘／假計時器）。
+    每一次放行（成功／失敗／取消）都記進 ``events`` 並寫 log。
+    """
+
+    def __init__(self, start_fn, *, timer_factory=None, clock=None, wall=None, on_change=None):
+        import time as _time
+        import datetime as _dt
+        self._start_fn = start_fn
+        self._timer_factory = timer_factory or _qt_single_shot
+        self._clock = clock or _time.monotonic
+        self._wall = wall or _dt.datetime.now
+        self._on_change = on_change
+        self._t0 = None
+        self._pending = {}          # sysid → {'entry', 'delay_s', 'timer'}
+        self.events = []
+
+    @property
+    def active(self) -> bool:
+        return bool(self._pending)
+
+    def start(self, entries) -> list:
+        """entries：``[{'sysid', 'uav', 'offset_s', ...}]``；延遲 = offset − 這批最小的 offset。回傳延遲表。"""
+        if self._pending:
+            raise RuntimeError('上一批放行還沒結束，請先「取消放行」')
+        entries = [dict(e) for e in entries]
+        if not entries:
+            raise ValueError('沒有要放行的飛機')
+        base = min(float(e['offset_s']) for e in entries)
+        self._t0 = float(self._clock())
+        plan = []
+        for e in sorted(entries, key=lambda x: (float(x['offset_s']), int(x['sysid']))):
+            delay = float(e['offset_s']) - base
+            e['delay_s'] = delay
+            plan.append((int(e['sysid']), delay))
+        logger.warning('[放行] 依時程放行開始（T0 = ' + self._wall().strftime('%H:%M:%S') + '）：' + '；'.join(
+            f'UAV-{s} T+{d:.1f} s' for s, d in plan))
+        for e in sorted(entries, key=lambda x: float(x['delay_s'])):
+            if e['delay_s'] <= TAKEOFF_STAGGER_TOL_S:
+                self._fire(e)
+            else:
+                sysid = int(e['sysid'])
+                self._pending[sysid] = {'entry': e, 'delay_s': e['delay_s'], 'timer': None}
+                self._pending[sysid]['timer'] = self._timer_factory(e['delay_s'],
+                                                                    lambda s=sysid: self._on_timer(s))
+        self._changed()
+        return plan
+
+    def _on_timer(self, sysid: int) -> None:
+        p = self._pending.pop(int(sysid), None)
+        if p is None:
+            return              # 已取消
+        self._fire(p['entry'])
+        self._changed()
+
+    def _fire(self, e: dict) -> None:
+        now = float(self._clock())
+        actual = now - (self._t0 if self._t0 is not None else now)
+        ev = {'sysid': int(e['sysid']), 'uav': e.get('uav'), 'planned_s': float(e.get('delay_s', 0.0)),
+              'actual_s': actual, 'wall': self._wall().strftime('%H:%M:%S'), 'ok': True, 'error': None}
+        try:
+            self._start_fn(e)
+        except Exception as ex:      # noqa: BLE001 — 放不了要說出原因，其他機照時程
+            ev.update(ok=False, error=str(ex))
+        self.events.append(ev)
+        if ev['ok']:
+            logger.warning(f'[放行] UAV-{ev["sysid"]}（機 {ev["uav"]}）已送出 AUTO+ARM+START：預定 T+{ev["planned_s"]:.1f} s、'
+                           f'實際 T+{actual:.2f} s（{ev["wall"]}）')
+        else:
+            logger.error(f'[放行] UAV-{ev["sysid"]}（機 {ev["uav"]}）放行失敗：{ev["error"]}（預定 T+{ev["planned_s"]:.1f} s、'
+                         f'{ev["wall"]}）')
+
+    def cancel(self) -> list:
+        """停掉所有還沒放行的計時器；回傳被取消的 sysid。"""
+        cancelled = sorted(self._pending)
+        for s in cancelled:
+            t = self._pending[s].get('timer')
+            try:
+                if t is not None:
+                    t.stop()
+            except Exception:          # noqa: BLE001
+                pass
+            self.events.append({'sysid': s, 'uav': self._pending[s]['entry'].get('uav'),
+                                'planned_s': self._pending[s]['delay_s'], 'actual_s': None,
+                                'wall': self._wall().strftime('%H:%M:%S'), 'ok': False, 'error': '已取消'})
+        self._pending.clear()
+        if cancelled:
+            logger.warning('[放行] 取消放行：' + '、'.join(f'UAV-{s}' for s in cancelled) + '（這些飛機不會被送出起飛）')
+        self._changed()
+        return cancelled
+
+    def remaining(self) -> list:
+        """``[(sysid, uav, 剩餘秒數), ...]``（依剩餘時間排序）。"""
+        now = float(self._clock())
+        t0 = self._t0 if self._t0 is not None else now
+        return sorted(((s, p['entry'].get('uav'), max(0.0, p['delay_s'] - (now - t0)))
+                       for s, p in self._pending.items()), key=lambda x: (x[2], x[0]))
+
+    def countdown_text(self) -> str:
+        lines = []
+        for ev in self.events:
+            if ev['ok']:
+                lines.append(f'UAV-{ev["sysid"]}：已放行（{ev["wall"]}，T+{ev["actual_s"]:.0f} s）')
+            elif ev['error'] == '已取消':
+                lines.append(f'UAV-{ev["sysid"]}：已取消')
+            else:
+                lines.append(f'UAV-{ev["sysid"]}：放行失敗（{ev["error"]}）')
+        for s, uav, rem in self.remaining():
+            m, sec = divmod(int(math.ceil(rem)), 60)
+            lines.append(f'UAV-{s}：倒數 {m:d}:{sec:02d} 後放行')
+        return '\n'.join(lines)
+
+    def _changed(self) -> None:
+        if self._on_change is not None:
+            try:
+                self._on_change()
+            except Exception as e:      # noqa: BLE001
+                logger.error(f'[放行] 更新畫面失敗：{e}')
+
+
+def _stop_link_tlog(link):
+    """鏈路斷線時停 tlog（沒在記錄也可以呼叫）；回傳 tlog_status（沒有 tlog 能力的假鏈路 ⇒ None）。"""
+    stop = getattr(link, 'stop_tlog', None)
+    if stop is None:
+        return None
+    try:
+        st = stop()
+    except Exception as e:      # noqa: BLE001 — 斷線清理不可以被 tlog 帶掉
+        logger.error(f'[航測] tlog 關檔失敗 sysid={getattr(link, "sysid_label", "?")}: {e}')
+        return None
+    if isinstance(st, dict) and st.get('error'):
+        logger.error(f'[航測] tlog 錯誤 sysid={getattr(link, "sysid_label", "?")}: {st["error"]}')
+    return st
 
 
 class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
@@ -521,9 +1395,16 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
 
         self._dccpp_result = None  # 當前 DCCPP 最佳化結果
 
-        # ── HV-DCCPP（異構雙構型 VTOL）狀態 ──
-        self._hv_worker = None        # HvPlanningWorker（背景規劃執行緒）
+        # ── HARVEST（異構雙構型 VTOL）狀態 ──
+        self._hv_worker = None        # HarvestPlanningWorker（背景規劃執行緒）
         self._hv_coordinator = None   # hv_dccpp 的 HvDccppCoordinator（匯出／上傳／重規劃）
+        # 產生 _hv_coordinator 的那個 SwarmCoordinator（讀 validate 結果 hv_validation_reasons 用；R1 #8）
+        self._hv_swarm_coordinator = None
+        # 目前飛控上的 HARVEST 任務的起飛時程（上傳時記；一鍵起飛閘門與「依時程放行」用；R1 #1）
+        self._hv_release_schedule = None
+        self._release = None                  # StaggeredRelease（進行中的依時程放行）
+        self._release_timer_factory = None    # 測試注入：None ⇒ QTimer（PreciseTimer）
+        self._release_clock = None            # 測試注入：None ⇒ time.monotonic
         self._hv_classes: dict = {}   # {drone_id: 'A'|'B'}
         self._hv_display_ctx: dict = {}
         self._hv_last_report: dict = {}   # 最近一次 on_report 的重點（未覆蓋、被夾的參數…）
@@ -865,6 +1746,11 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         self.sitl_hud.cmd_takeoff.connect(lambda a: self._sitl_broadcast('takeoff', a))
         self.sitl_hud.cmd_upload.connect(self.on_sitl_upload_mission)
         self.sitl_hud.cmd_download.connect(self.on_sitl_download_mission)
+        # Mission Planner 風格航點檔三兄弟（Load / Write / Save）；
+        # Write 是安全關鍵路徑，刻意不重用 on_sitl_upload_mission 的機制。
+        self.sitl_hud.cmd_load_wp.connect(self.on_sitl_load_wp_file)
+        self.sitl_hud.cmd_write_wp.connect(self.on_sitl_write_wp)
+        self.sitl_hud.cmd_save_wp.connect(self.on_sitl_save_wp_file)
         self.sitl_hud.cmd_upload_fence.connect(self.on_sitl_upload_fence)
         self.sitl_hud.cmd_auto_start.connect(lambda: self._sitl_broadcast('auto_start'))
         self.sitl_hud.cmd_guided_takeoff.connect(
@@ -884,6 +1770,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         self.sitl_hud.cmd_vtol_transition.connect(
             lambda state: self._sitl_broadcast('vtol_transition', state)
         )
+        # 「依時程放行」／「取消放行」＋逐機倒數：放在 HUD 的「一鍵起飛」正下方（同一個起飛控制區）
+        self._install_release_controls()
 
         # 加到參數面板的 QTabWidget 作為第 4 個分頁
         # SITL 分頁採內部 QTabWidget：
@@ -904,6 +1792,11 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
 
         self.sitl_command_panel = SitlCommandPanel()
         sitl_inner_tabs.addTab(self.sitl_command_panel, "Command")
+        # DroneDetailPanel 的「↥」鈕（原本沒接東西——不知道要送哪份任務）
+        # → 走同一套 Write WPs 守衛，對象換成這個面板選定的單機。
+        if hasattr(self.sitl_command_panel, 'detail'):
+            self.sitl_command_panel.detail.write_wp_requested.connect(
+                self._on_detail_panel_write_wp)
 
         # 「HIL」：實體飛控多機連線（最多 6 顆，序列埠 / udp / tcp）
         self.hil_panel = HILConnectPanel()
@@ -922,6 +1815,9 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         # 模式二：多個作業區
         self.vtol_recon_panel.commit_area_requested.connect(self.commit_current_area)
         self.vtol_recon_panel.clear_areas_requested.connect(self.clear_all_survey_areas)
+        # 起降場 = home_point（與固定翼「起飛點」同一份狀態）；VTOL 偵察規劃前必選
+        self.vtol_recon_panel.pick_launch_site_requested.connect(self.on_pick_home_point)
+        self.vtol_recon_panel.clear_launch_site_requested.connect(self.on_clear_home_point)
         self.vtol_recon_panel.delete_last_corner_requested.connect(
             self.on_delete_last_corner)
         # 自動建構的電子圍籬狀態也餵給 VTOL 面板 —— 否則地圖上明明畫著圍籬，
@@ -933,6 +1829,9 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         self.vtol_recon_panel.update_fence_status(
             getattr(self.map_widget, 'last_fence_bundle', None))
         self.vtol_recon_panel.plan_requested.connect(self._on_vtol_recon_plan)
+        self.vtol_recon_panel.find_flat_requested.connect(self._on_vtol_recon_find_flat)
+        self.vtol_recon_panel.flat_apply_requested.connect(self._on_vtol_recon_apply_flat)
+        self.vtol_recon_panel.flat_undo_requested.connect(self._on_vtol_recon_undo_flat)
         self.vtol_recon_panel.verify_coverage_requested.connect(
             self._on_vtol_recon_verify)
         self.vtol_recon_panel.show_missed_requested.connect(
@@ -978,6 +1877,15 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         self._sitl_links: list = []   # 多機鏈路列表
         # 最近一次從飛控讀回的任務 {'sysid': int, 'items': [dict, ...]}
         self._fc_mission: dict | None = None
+        # 最近一次從檔案載入的航點檔（LoadedMission；見 mission/waypoint_file.py）。
+        # 「寫入飛控」永遠送這一份，不是 self._fc_mission —— 兩者用途相反
+        # （一個是要寫進去的、一個是剛讀回來的），混用會把讀回結果當成要寫的東西。
+        self._loaded_mission = None
+        # 正在等待 mission_uploaded 回報的 sysid 集合：寫入期間該連線的
+        # 「寫入飛控」鈕會停用，避免連點造成兩筆寫入互相競爭（見 on_sitl_write_wp）。
+        self._write_pending_sysids: set = set()
+        # 上次「載入/存成航點檔」對話框停留的目錄；純 UI 便利，不是任何正確性契約。
+        self._last_wp_dir: str = ''
         self._hil_links: list = []    # HIL 實體飛控鏈路（_sitl_links 的子集）
         self._sitl_launcher = None
         
@@ -1202,6 +2110,16 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         action = tools_menu.addAction("飛行器配置")
         action.triggered.connect(self.on_vehicle_config)
 
+        # 航測後處理（飛控日誌＋樹莓派 session → 照片位姿 → ODM → 正射／位姿圖層）
+        action = tools_menu.addAction("航測處理…")
+        action.setStatusTip("把一個架次的飛控日誌與相機 session 處理成照片位姿與正射圖層")
+        action.triggered.connect(self.on_survey_process)
+
+        # GCP／檢核點佈設（交叉航帶 vs 加密 GCP 兩方案；作業區＋HARVEST 每架區塊 → 外業表、gcp_list 樣板、地圖點位）
+        action = tools_menu.addAction("GCP／檢核點規劃…")
+        action.setStatusTip("依作業區（與 HARVEST 規劃的每架區塊）產生 GCP 與檢核點的建議位置，匯出外業表並顯示在地圖上")
+        action.triggered.connect(self.on_gcp_plan)
+
         tools_menu.addSeparator()
 
         action = tools_menu.addAction("障礙物管理")
@@ -1326,14 +2244,32 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
     def on_pick_home_point(self):
         """進入起飛點點選模式：下次地圖點擊將設定為起飛點"""
         self.picking_home_point = True
-        self.statusBar().showMessage("點擊地圖上任意位置以設定起飛點（跑道位置）...", 0)
+        self.statusBar().showMessage(
+            "點擊地圖設定起降場／起飛點（VTOL：各機起降坪排在這裡；固定翼：跑道位置）...", 0)
         logger.info("進入起飛點選模式")
+
+    def _sync_launch_site_display(self):
+        """VTOL 偵察面板的「起降場」顯示跟著 home_point 走（狀態只有這一份）。"""
+        # ⚠ 面板還沒建（__init__ 途中的 on_clear_corners）或測試用 cls.__new__ 建的 MainWindow：
+        #   sip 物件在 Qt __init__ 沒跑過時，讀不存在的屬性丟的是 RuntimeError 而不是
+        #   AttributeError ⇒ getattr(..., None) 的預設值接不住（tests/test_clear_all_wipes_map.py）。
+        try:
+            panel = self.vtol_recon_panel
+        except (AttributeError, RuntimeError):
+            return
+        if panel is None:
+            return
+        if self.home_point is not None:
+            panel.set_launch_site(*self.home_point)
+        else:
+            panel.clear_launch_site()
 
     def on_home_point_set(self, lat: float, lon: float):
         """設定起飛點並更新 UI"""
         self.home_point = (lat, lon)
         self.picking_home_point = False
         self.parameter_panel.set_home_point_display(lat, lon)
+        self._sync_launch_site_display()
         self.map_widget.set_home_point_overlay(lat, lon)
         self.statusBar().showMessage(f"起飛點已設定: ({lat:.6f}, {lon:.6f})", 5000)
         logger.info(f"起飛點設定: ({lat:.6f}, {lon:.6f})")
@@ -1343,6 +2279,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         self.home_point = None
         self.picking_home_point = False
         self.parameter_panel.clear_home_point_display()
+        self._sync_launch_site_display()
         if hasattr(self.map_widget, 'clear_home_point_overlay'):
             self.map_widget.clear_home_point_overlay()
         self.statusBar().showMessage("起飛點已清除", 3000)
@@ -1479,6 +2416,107 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         if len(cur) >= 3:
             out.append(cur)
         return out
+
+    # ══════════════════════════════════════════════════════════════
+    #  找平坦位置（World Terrain 掃描 → 平移作業區，可復原）
+    # ══════════════════════════════════════════════════════════════
+    def _on_vtol_recon_find_flat(self, req: dict) -> None:
+        """按下「找平坦位置」：補上作業區與 token，丟到背景執行緒。"""
+        from ui.workers.flat_search_worker import FlatSearchWorker
+        from utils.cesium_ion import configured_ion_token
+        panel = self.vtol_recon_panel
+        areas = self.survey_area_polygons()
+        if not areas:
+            panel.set_flat_busy(False, "請先圈好作業區")
+            return
+        token, _src = configured_ion_token()
+        if not token:
+            panel.set_flat_busy(False, "沒有 Cesium ion token（config/settings.json 的 map.cesium_ion_token 或環境變數 CESIUM_ION_TOKEN）")
+            return
+        old = getattr(self, '_flat_worker', None)
+        if old is not None and old.isRunning():
+            self.statusBar().showMessage('找平坦位置還在執行，請稍候', 4000)
+            return
+        if old is not None:
+            try:
+                old.deleteLater()
+            except RuntimeError:
+                pass
+        full = dict(req)
+        full['areas'] = [list(a) for a in areas]
+        panel.set_flat_busy(True, "掃描中…（下載地形圖磚，約 10–20 秒）")
+        # parent=None：視窗關閉時由 closeEvent 等它跑完（在還在跑的 QThread 上跑解構子是 qFatal）
+        self._flat_worker = FlatSearchWorker(token, full, parent=None)
+        self._flat_worker.finished_ok.connect(self._on_flat_search_done)
+        self._flat_worker.failed.connect(self._on_flat_search_failed)
+        self._flat_worker.start()
+        logger.info(f"[找平坦位置] 開始：{len(areas)} 塊作業區、半徑 {req.get('radius_km')} km、大小 {req.get('scale', 1.0) * 100:.0f}%")
+
+    def _on_flat_search_done(self, payload: dict) -> None:
+        logger.info(f"[找平坦位置] 完成：{len(payload.get('candidates') or [])} 個候選，"
+                    f"不用豁免可行 {payload.get('any_fits')}")
+        self.vtol_recon_panel.show_flat_result(payload, can_undo=bool(getattr(self, '_flat_undo', None)))
+
+    def _on_flat_search_failed(self, msg: str) -> None:
+        self.vtol_recon_panel.set_flat_busy(False, f"⚠ {msg}")
+        self.statusBar().showMessage(f'找平坦位置失敗：{msg}', 10000)
+
+    def _on_vtol_recon_apply_flat(self, lat: float, lon: float, scale: float) -> None:
+        """把所有作業區（含正在畫的角點與起降場）平移到 (lat, lon)，並縮放 ``scale`` 倍。可復原。"""
+        from core.terrain.flat_finder import areas_window, transform_point
+        areas = self.survey_area_polygons()
+        if not areas:
+            return
+        _h, _w, src = areas_window(areas)
+        dst = (float(lat), float(lon))
+
+        def _t(p):
+            return transform_point(p, src, dst, scale)
+
+        self._flat_undo = {'survey_areas': [list(a) for a in self.survey_areas],
+                           'corners': list(self.corners or []), 'home': self.home_point}
+        self.survey_areas = [[_t(p) for p in a] for a in self.survey_areas]
+        self.corners = [_t(p) for p in (self.corners or [])]
+        self._flat_redraw_areas()
+        if self._flat_undo['home'] is not None:
+            self.on_home_point_set(*_t(self._flat_undo['home']))
+        self.on_clear_paths()        # 舊的規劃結果已不適用（位置變了）
+        try:
+            self.map_widget.fly_to_position(dst[0], dst[1], 0.0, 4000.0)
+        except Exception as e:       # noqa: BLE001 - 2D 模式沒有 fly_to 也不影響平移
+            logger.debug(f"[找平坦位置] fly_to 略過：{e}")
+        self.vtol_recon_panel.set_flat_can_undo(True)
+        self.statusBar().showMessage(
+            f'作業區已平移到 ({dst[0]:.4f}, {dst[1]:.4f})' + (f'、縮成 {scale * 100:.0f}%' if scale < 0.999 else '')
+            + '；請確認起降場後重新規劃（可在對話框按「復原上次平移」）', 12000)
+        logger.info(f"[找平坦位置] 平移：{src} → {dst}，縮放 {scale:.2f}")
+
+    def _on_vtol_recon_undo_flat(self) -> None:
+        snap = getattr(self, '_flat_undo', None)
+        if not snap:
+            return
+        self.survey_areas = [list(a) for a in snap['survey_areas']]
+        self.corners = list(snap['corners'])
+        self._flat_redraw_areas()
+        if snap['home'] is not None:
+            self.on_home_point_set(*snap['home'])
+        else:
+            self.on_clear_home_point()
+        self.on_clear_paths()
+        self._flat_undo = None
+        self.vtol_recon_panel.set_flat_can_undo(False)
+        self.statusBar().showMessage('已復原平移', 6000)
+        logger.info("[找平坦位置] 已復原平移")
+
+    def _flat_redraw_areas(self) -> None:
+        """依 self.corners / self.survey_areas 重畫兩張圖與面板計數（平移與復原共用）。"""
+        self.map_widget.clear_corners()
+        for (la, lo) in self.corners:
+            self.map_widget.add_corner(la, lo)         # 不發信號（與手動輸入角點同一條路）
+        self._render_committed_areas()
+        self.parameter_panel.update_corner_count(len(self.corners))
+        self._sync_area_counts()
+        self.update_statusbar()
 
     def commit_current_area(self) -> bool:
         """把正在畫的那一塊收進清單，然後清空畫布準備畫下一塊。"""
@@ -1766,6 +2804,14 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             if self.map_widget.markers:
                 self.map_widget.markers.pop()
             self.map_widget._render_map()
+            # 在 3D 點的話，Cesium 自己也加了一顆角點標記（DualMapWidget 只把它鏡射進 2D
+            # 再由上面 pop 掉）⇒ 3D 那顆不收的話，起降場位置上會留一個作業區角點的紅點。
+            _m3 = getattr(self.map_widget, 'map_3d', None)
+            try:
+                if _m3 is not None and _m3.corners and tuple(_m3.corners[-1]) == (lat, lon):
+                    _m3.remove_last_corner()
+            except Exception as _e:
+                logger.warning(f"[起降場] 移除 3D 暫時角點失敗: {_e}")
             self.on_home_point_set(lat, lon)
             return
 
@@ -4032,11 +5078,12 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             )
         if hasattr(self.map_widget, 'clear_circle_overlay'):
             self.map_widget.clear_circle_overlay()
-        # 同時清除起飛點設定
+        # 同時清除起飛點設定（⚠ VTOL 偵察的「起降場」也是這一份 ⇒ 清區之後要重選）
         self.home_point = None
         self.picking_home_point = False
         if hasattr(self, 'parameter_panel'):
             self.parameter_panel.clear_home_point_display()
+        self._sync_launch_site_display()
         if hasattr(self.map_widget, 'clear_home_point_overlay'):
             self.map_widget.clear_home_point_overlay()
         logger.info("已清除邊界")
@@ -4087,13 +5134,108 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         QMessageBox.information(self, "網格顯示", "網格顯示功能開發中")
     
     def on_camera_config(self):
-        """相機配置"""
+        """相機配置（工具 → 相機配置）。
+
+        按對話框的「套用到航測建圖」⇒ 焦距／像素／影像尺寸／前向與側向重疊填進 VTOL 偵察頁的「航測建圖」欄位
+        （見 _apply_camera_config_values）。以前這裡只開對話框、結果丟掉，而對話框還說「相機設定已應用」。
+        """
         try:
             from ui.dialogs.camera_config import CameraConfigDialog
-            dialog = CameraConfigDialog(self)
-            dialog.exec()
         except ImportError:
             QMessageBox.information(self, "相機配置", "相機配置功能開發中")
+            return
+        dialog = CameraConfigDialog(self)
+        if not dialog.exec():
+            return                      # 關閉／取消：什麼都不套用
+        self._apply_camera_config_values(dialog.applied_values())
+
+    def _apply_camera_config_values(self, values: dict):
+        """相機配置對話框的值 → 偵察頁「航測建圖」欄位。
+
+        建圖模式還沒開時先問（是 = 打開並套用；否 = 只填欄位；取消 = 不動）。套用後把**欄位讀回**的有效值
+        與「沒有套用」的對話框欄位（飛行高度、速度）一起列出來；超出欄位範圍 ⇒ 拒絕並說明（不讓 spinbox 夾值）。
+        """
+        panel = getattr(self, 'vtol_recon_panel', None)
+        if panel is None:
+            QMessageBox.warning(self, '相機配置', '找不到 VTOL 偵察頁，無法套用。')
+            return
+        if panel.mapping_enabled():
+            enable = True
+        else:
+            ret = QMessageBox.question(
+                self, '相機配置',
+                '要把這台相機套用到 VTOL 偵察頁的「航測建圖」嗎？\n\n'
+                '是：打開建圖模式並填入欄位（規劃演算法會切到 HARVEST）\n'
+                '否：只填入欄位，不打開建圖模式\n'
+                '取消：什麼都不套用',
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel)
+            if ret == QMessageBox.StandardButton.Cancel:
+                logger.info('[相機配置] 使用者取消，沒有套用任何值')
+                return
+            enable = ret == QMessageBox.StandardButton.Yes
+        try:
+            eff = panel.apply_camera_values(values, enable_mapping=enable)
+        except ValueError as e:
+            logger.error(f'[相機配置] 套用失敗：{e}')
+            QMessageBox.critical(self, '相機配置', f'沒有套用：{e}')
+            return
+        lines = [f'相機：{values.get("camera_name", "?")}', '', '已套用（欄位讀回的值）：']
+        lines += [f'  {k}：{v:g}' if isinstance(v, float) else f'  {k}：{v}' for k, v in eff.items()]
+        skipped = values.get('not_applied') or {}
+        if skipped:
+            lines += ['', '沒有套用（偵察頁另有自己的欄位）：']
+            lines += [f'  {k}：{v}' for k, v in skipped.items()]
+        logger.info(f'[相機配置] 套用到航測建圖：{eff}；未套用 {skipped}')
+        QMessageBox.information(self, '相機配置已套用', '\n'.join(lines))
+
+    def on_survey_process(self):
+        """工具 → 航測處理…（對話框由 ui.dialogs.survey_process_dialog 提供，延遲匯入）。"""
+        try:
+            from ui.dialogs.survey_process_dialog import SurveyProcessDialog
+        except ImportError as e:
+            logger.error(f'[航測] 航測處理對話框載入失敗：{e}')
+            QMessageBox.warning(self, '航測處理', f'航測處理對話框無法載入：{e}')
+            return
+        # R2：「以測區計算視數」要的是**已完成的測區**（完成本區後地圖上的角點會清空）⇒ 把測區多邊形交給對話框
+        polygons = self.survey_area_polygons()
+        import inspect as _inspect
+        _takes_blocks = False
+        try:
+            _ps = _inspect.signature(SurveyProcessDialog).parameters
+            _ok = 'polygons' in _ps or any(p.kind is p.VAR_KEYWORD for p in _ps.values())
+            _takes_blocks = 'gcp_blocks' in _ps    # 新版對話框才收：「GCP／檢核點規劃…」按鈕要的 HARVEST 區塊
+        except (TypeError, ValueError):
+            _ok = True                         # 看不到簽章（C 擴充之類）就照常呼叫（不送新參數）
+        if not _ok:
+            # 對話框還不收 polygons=（另一個套件正在加）⇒ 說出來，不默默改用地圖角點
+            logger.error('[航測] 航測處理對話框不接受 polygons=，測區多邊形交不過去')
+            QMessageBox.warning(self, '航測處理',
+                                f'航測處理對話框這個版本不接受測區多邊形（polygons=）；目前 {len(polygons)} 個測區'
+                                '無法交給它。請更新 ui/dialogs/survey_process_dialog.py。')
+            return
+        kw = {'gcp_blocks': gcp_blocks_provider(self)} if _takes_blocks else {}
+        dlg = SurveyProcessDialog(parent=self, map_widget=self.map_widget, polygons=polygons, **kw)
+        self._survey_process_dialog = dlg      # 非模態：留參考，避免被 GC 收掉
+        dlg.show()
+
+    def on_gcp_plan(self):
+        """工具 → GCP／檢核點規劃…（ui.dialogs.gcp_plan_dialog，延遲匯入；非模態）。
+
+        作業區每次按「產生」時才向 survey_area_polygons 取；HARVEST 區塊由 ``gcp_blocks_provider`` 從
+        ``self._hv_coordinator`` 最近一次規劃**唯讀**取出（沒有 HARVEST 規劃 ⇒ 不分區塊，對話框會說明）。
+        """
+        try:
+            from ui.dialogs.gcp_plan_dialog import GcpPlanDialog
+        except ImportError as e:
+            logger.error(f'[航測] GCP／檢核點規劃對話框載入失敗：{e}')
+            QMessageBox.warning(self, 'GCP／檢核點規劃', f'對話框無法載入：{e}')
+            return
+        dlg = GcpPlanDialog(parent=self, map_widget=self.map_widget, polygons=self.survey_area_polygons,
+                            blocks=gcp_blocks_provider(self))
+        self._gcp_plan_dialog = dlg            # 非模態：留參考，避免被 GC 收掉
+        dlg.show()
     
     def on_vehicle_config(self):
         """飛行器配置"""
@@ -5294,7 +6436,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         Args:
             params:    面板送來的參數字典（ParameterPanel.get_dccpp_params 或
                        VTOLReconPanel.get_params）
-            run_async: HV-DCCPP 分支是否丟到背景執行緒。
+            run_async: HARVEST 分支是否丟到背景執行緒。
                        ⚠ 呼叫端若在本函式回來後立刻讀 `self._dccpp_result`（舊寫法），
                        **必須**傳 False，否則會讀到上一次的結果或 None 而且不會報錯。
                        新的呼叫端請改用 `on_done`。
@@ -5323,7 +6465,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             #   而且不會有任何錯誤訊息。舊版是靠 UI 凍結擋住這件事的。
             if self._hv_planning_in_flight():
                 QMessageBox.information(
-                    self, "HV-DCCPP",
+                    self, "HARVEST",
                     "背景規劃仍在執行中，請等它結束再送出新的規劃。\n"
                     "（規劃無法中途取消：hv 的求解器沒有取消點）")
                 if on_done:
@@ -5357,7 +6499,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                     logger.info(f'覆蓋規劃：面板沒帶 dem_path，改用已載入的 DEM {dem_path}')
                 elif params.get('hv_dccpp'):
                     logger.warning(
-                        '覆蓋規劃：沒有任何 DEM ⇒ HV-DCCPP 會把地形當成海平面 0 m 的'
+                        '覆蓋規劃：沒有任何 DEM ⇒ HARVEST 會把地形當成海平面 0 m 的'
                         '平面，對地淨空與下降走廊的地形檢查不會生效')
 
             # ── 組裝區域 ──
@@ -5459,7 +6601,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 vehicle_type=vehicle_type, auto_scan=auto_scan,
             )
 
-            # ── HV-DCCPP（異構雙構型 VTOL）分支 ──
+            # ── HARVEST（異構雙構型 VTOL）分支 ──
             #   面板勾選且 vehicle_type == 'vtol' 才接手；其餘一律走既有 DCCPP。
             #   見 docs/AEROPLAN_接入手冊.md §5 與 docs/adr/0007-hv-dccpp-planner.md。
             if self._configure_hv_dccpp(coordinator, params, vehicle_type) and run_async:
@@ -5470,6 +6612,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             dccpp_result = coordinator.plan_coverage_dccpp(**plan_kwargs)
             # HV 分支同步跑時也要把轉接器留下來（匯出／上傳／重規劃要用）
             self._hv_coordinator = getattr(coordinator, 'hv_coordinator', None)
+            self._hv_swarm_coordinator = coordinator      # validate 結果（上傳閘門用）
             self._display_dccpp_result(dccpp_result, **display_ctx)
             if on_done:
                 on_done(True)
@@ -5481,6 +6624,11 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             if on_done:
                 on_done(False)
 
+    def _notify_avoidance_problem(self, text: str) -> None:
+        """狀態列(第一行)+ 警告對話框(全文)。"""
+        self.statusBar().showMessage("⚠ " + text.splitlines()[0], 20000)
+        QMessageBox.warning(self, "避撞未完成", text)
+
     def _display_dccpp_result(self, dccpp_result: dict, *, params: dict,
                               corners_snapshot: list,
                               centroid_lat: float, centroid_lon: float,
@@ -5489,7 +6637,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         """把 DCCPP 規劃結果套用到 UI：避讓後處理、地圖、統計、metrics。
 
         由 `_on_dccpp_coverage_requested` 直接呼叫（同步路徑），或由
-        `HvPlanningWorker.finished_ok` 觸發（HV-DCCPP 背景執行緒路徑）。
+        `HarvestPlanningWorker.finished_ok` 觸發（HARVEST 背景執行緒路徑）。
         內容是原本寫在 handler 裡的後處理，**逐行照搬**，只有兩處改動：
           * 兩次 `list(self.corners)` 改讀 `corners_snapshot`（規劃前拍的快照）；
           * 自己帶一個 try/except，讓「規劃失敗」與「顯示失敗」不會互相掩蓋。
@@ -5581,23 +6729,10 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             )
 
             # ── 避撞偵測與解衝突 ──
-            _collision_enabled = bool(params.get('collision_avoidance', False))
-            _collision_conflicts = []
-            _collision_actions = []
-            if _collision_enabled and assembled_paths and len(assembled_paths) >= 2:
-                try:
-                    from core.dccpp.collision_avoidance import CollisionAvoidance
-                    _ca = CollisionAvoidance(
-                        **build_avoidance_kwargs(params, speed))
-                    _collision_conflicts, _collision_actions = _ca.run(assembled_paths)
-                    if _collision_conflicts:
-                        self.statusBar().showMessage(
-                            f"避撞偵測: {len(_collision_conflicts)} 個衝突, "
-                            f"已執行 {len(_collision_actions)} 個避撞動作",
-                            5000,
-                        )
-                except Exception as _ca_err:
-                    logger.warning(f"避撞模組失敗: {_ca_err}", exc_info=True)
+            _collision_conflicts, _collision_actions = run_collision_avoidance(
+                params, speed, assembled_paths,
+                status=lambda *a: self.statusBar().showMessage(*a),
+                notify=lambda t: self._notify_avoidance_problem(t))
 
             drones_data = []
             total_wps = 0
@@ -5606,52 +6741,21 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             # ── 優先使用 assembled_paths（含 Dubins 曲線）──
             if assembled_paths:
                 for uav_id, apath in assembled_paths.items():
-                    # 按 SegmentLabel 分組：起飛/進入/作業歸 operation_paths，轉移/降落歸 transfer_paths
-                    takeoff_pts = []
-                    entry_pts = []
-                    op_pts = []
-                    xfer_pts = []
-                    landing_pts = []
-                    current_seg = []
-                    current_label = None
-
-                    for wp in apath.waypoints:
-                        pt = (wp.lat, wp.lon, getattr(wp, 'alt', altitude))
-                        if wp.segment_type != current_label:
-                            if current_seg and current_label is not None:
-                                lname = current_label.name
-                                if lname == 'TAKEOFF':
-                                    takeoff_pts.append(current_seg)
-                                elif lname == 'ENTRY':
-                                    entry_pts.append(current_seg)
-                                elif lname == 'OPERATION':
-                                    op_pts.append(current_seg)
-                                elif lname == 'TRANSFER':
-                                    xfer_pts.append(current_seg)
-                                elif lname == 'LANDING':
-                                    landing_pts.append(current_seg)
-                            current_seg = [pt]
-                            current_label = wp.segment_type
-                        else:
-                            current_seg.append(pt)
-                    # flush last segment
-                    if current_seg and current_label is not None:
-                        lname = current_label.name
-                        if lname == 'TAKEOFF':
-                            takeoff_pts.append(current_seg)
-                        elif lname == 'ENTRY':
-                            entry_pts.append(current_seg)
-                        elif lname == 'OPERATION':
-                            op_pts.append(current_seg)
-                        elif lname == 'TRANSFER':
-                            xfer_pts.append(current_seg)
-                        elif lname == 'LANDING':
-                            landing_pts.append(current_seg)
+                    # 按 SegmentLabel 切段；⚠ 邊界那條腿要依來源接到前段或後段
+                    # （HARVEST 腿歸出發點、舊版 DCCPP 腿歸終點），否則 1 點的段被丟掉
+                    # 或腿被歸錯類型（見 mission/path_segments.py）
+                    from mission.path_segments import segments_for_path
+                    _segs = segments_for_path(apath, altitude)
+                    takeoff_pts = _segs['takeoff_paths']
+                    entry_pts = _segs['entry_paths']
+                    op_pts = _segs['operation_paths']
+                    xfer_pts = _segs['transfer_paths']
+                    landing_pts = _segs['landing_paths']
 
                     # 各段分別保留，讓 map_widget 以不同線型/顏色繪製
                     total_wps += len(apath.waypoints)
                     start_pos = (apath.waypoints[0].lat, apath.waypoints[0].lon) if apath.waypoints else (centroid_lat, centroid_lon)
-                    # 構型（只有 HV-DCCPP 有）：讓 2D/3D 一眼看得出哪幾架是
+                    # 構型（只有 HARVEST 有）：讓 2D/3D 一眼看得出哪幾架是
                     # Pioneer、哪幾架是 HERO —— 兩者的轉彎半徑與作業高度差很多，
                     # 混在一起看只會看到「一堆顏色」。同構規劃時是 None，畫法不變。
                     _cls = getattr(apath, 'cls', None)
@@ -5827,7 +6931,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             QMessageBox.warning(self, "DCCPP 失敗", f"DCCPP 最佳化路徑規劃失敗：\n{e}")
 
     # ══════════════════════════════════════════════════════════════════
-    # HV-DCCPP（異構雙構型 VTOL 覆蓋規劃）
+    # HARVEST（異構雙構型 VTOL 覆蓋規劃）
     #   套件 hv_dccpp；接法與參數對照見 docs/AEROPLAN_接入手冊.md，
     #   決策見 docs/adr/0007-hv-dccpp-planner.md、0008-planning-in-worker-thread.md。
     # ══════════════════════════════════════════════════════════════════
@@ -5849,18 +6953,18 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             reg = FenceZoneRegistry.instance()
             return reg.by_category(ZoneCategory.NFZ) + reg.by_category(ZoneCategory.THREAT)
         except Exception as e:      # noqa: BLE001
-            logger.warning(f'[HV-DCCPP] 取不到 fence zone：{e}')
+            logger.warning(f'[HARVEST] 取不到 fence zone：{e}')
             return []
 
     def _configure_hv_dccpp(self, coordinator, params: dict, vehicle_type: str) -> bool:
-        """決定這一次規劃要不要走 HV-DCCPP，要的話把旗標設到 coordinator 上。
+        """決定這一次規劃要不要走 HARVEST，要的話把旗標設到 coordinator 上。
 
         Returns:
-            True 表示已切到 HV 分支（coordinator.use_hv_dccpp 已打開）。
+            True 表示已切到 HV 分支（coordinator.use_harvest 已打開）。
         """
         enabled = (str(vehicle_type).lower() == 'vtol'
                    and bool(params.get('hv_dccpp', False)))
-        coordinator.use_hv_dccpp = enabled
+        coordinator.use_harvest = enabled
         if not enabled:
             self._hv_classes = {}
             return False
@@ -5878,14 +6982,14 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             n_b = max(0, int(n_b))
             if n_a + n_b != n_total:
                 logger.warning(
-                    f'[HV-DCCPP] 台數對不上：Pioneer {n_a} + HERO {n_b} = {n_a + n_b}，'
+                    f'[HARVEST] 台數對不上：Pioneer {n_a} + HERO {n_b} = {n_a + n_b}，'
                     f'但 num_drones={n_total}；以相加值為準')
         # {drone_id: 'A'|'B'} — 前 n_a 台是構型 A（Pioneer + LiDAR），其餘是 B（HERO + 相機）
         self._hv_classes = {i + 1: ('A' if i < n_a else 'B')
                             for i in range(n_a + n_b)}
 
         coordinator.hv_class_of = self._hv_class_of
-        coordinator.hv_params = dict(params)
+        coordinator.harvest_params = dict(params)
         coordinator.hv_home = self.home_point
         coordinator.hv_alternates = getattr(self, '_hv_alternates', None)
         coordinator.hv_wind = params.get('hv_wind')
@@ -5893,11 +6997,11 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         #   QObject 單例，規劃跑在背景執行緒時不該由那邊去讀它。
         coordinator.hv_fence_zones = self._hv_fence_zones()
         logger.info(
-            f'[HV-DCCPP] 啟用：構型 A {n_a} 台 / 構型 B {n_total - n_a} 台，'
+            f'[HARVEST] 啟用：構型 A {n_a} 台 / 構型 B {n_total - n_a} 台，'
             f'home={self.home_point}, 風={params.get("hv_wind")}, '
             f'C2={params.get("hv_c2_range_km")} km')
         if not self._hv_classes:
-            logger.warning('[HV-DCCPP] num_drones=0，沒有任何飛機可規劃')
+            logger.warning('[HARVEST] num_drones=0，沒有任何飛機可規劃')
         return True
 
     def _hv_planning_in_flight(self) -> bool:
@@ -5914,13 +7018,13 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 pass          # 本來就沒接 / C++ 物件已消失
 
     def _start_hv_planning(self, coordinator, plan_kwargs: dict, display_ctx: dict) -> None:
-        """把 HV-DCCPP 規劃丟到背景執行緒（大情境數十秒，同步跑會讓視窗「沒有回應」）。"""
-        from ui.workers.planning_worker import HvPlanningWorker
+        """把 HARVEST 規劃丟到背景執行緒（大情境數十秒，同步跑會讓視窗「沒有回應」）。"""
+        from ui.workers.planning_worker import HarvestPlanningWorker
 
         if self._hv_planning_in_flight():
             # 正常情況下 `_on_dccpp_coverage_requested` 的閘門已經先擋掉了；
             # 這裡是防止有人日後從別的地方直接呼叫進來。
-            logger.warning('[HV-DCCPP] 已有規劃在執行，忽略這次請求')
+            logger.warning('[HARVEST] 已有規劃在執行，忽略這次請求')
             return
 
         old = getattr(self, '_hv_worker', None)
@@ -5939,18 +7043,18 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         #   Qt 會連同子物件一起銷毀，而在「還在跑的 QThread」上呼叫解構子是 qFatal
         #   ⇒ 整個程式 abort 而不是正常關閉。改由 closeEvent 的 _hv_park_running_worker
         #   接手（見該函式）。
-        self._hv_worker = HvPlanningWorker(coordinator, plan_kwargs, parent=None)
+        self._hv_worker = HarvestPlanningWorker(coordinator, plan_kwargs, parent=None)
         self._hv_worker.progress.connect(self._on_hv_progress)
         self._hv_worker.report.connect(self._on_hv_report)
         self._hv_worker.failed.connect(self._on_hv_failed)
         self._hv_worker.finished_ok.connect(self._on_hv_finished)
         self._hv_worker.cancelled.connect(self._on_hv_cancelled)
-        self.statusBar().showMessage('HV-DCCPP 規劃中…', 0)
+        self.statusBar().showMessage('HARVEST 規劃中…', 0)
         self._hv_worker.start()
 
     def _on_hv_progress(self, frac: float, msg: str):
         """進度回報。⚠ 0.40 → 0.90 之間沒有中間進度（plan_mission 整段無回呼）。"""
-        self.statusBar().showMessage(f'HV-DCCPP {frac * 100:.0f}%：{msg}', 0)
+        self.statusBar().showMessage(f'HARVEST {frac * 100:.0f}%：{msg}', 0)
 
     #: `notes` 裡真的會改變飛行結果、必須讓操作員看到的幾種（其餘只寫進 log）
     _HV_LOUD_NOTES = (
@@ -5976,6 +7080,23 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         'min_fw_lowered',
         # 高度帶下限被調到規格預設 20 以下：同時放寬 GSD 可達性判準。
         'dh_band_min_relaxed',
+        # ⚠⚠⚠ 「畫一大區、系統自動切」這條路唯一已量到的靜默失效：禁航區在
+        #   步進軸方向太寬 ⇒ 子區被吃穿 ⇒ 整胞 no_feasible_class，而 status
+        #   仍是 GO_WITH_WARNINGS、errors 仍是空的。實測 1560×800 切 4 塊
+        #   （門檻 61.4 m）：跨度 70 m ⇒ makespan +60%、100 m ⇒ 只剩 1/4 台。
+        'nfz_too_wide_for_auto_split',
+        # 多場坪自動指派：採用或被守衛擋下，兩者都要讓操作員看見
+        # （靜靜換了降落點跟靜靜沒換一樣糟）。
+        'recovery_auto_applied',
+        'recovery_auto_rejected',
+        # 規劃器沒把某架降回它自己的起飛點（能量吃不下等）⇒ 使用者要看見，不能在 3D 圖上才發現
+        'landing_not_at_requested_site',
+        # World Terrain：地形來源與授權（個人/非商用）要讓操作員看見；起伏吃掉高度帶時要說出需要多高的 AGL 上限
+        'terrain_source',
+        'terrain_relief_exceeds_band',
+        # 航測建圖：實際生效的相機／觸發間隔／重疊／引入段（有效值契約），與「這份計畫不能上傳」
+        'mapping_setup',
+        'mapping_upload_blocked',
     )
 
     def _on_hv_report(self, payload: dict):
@@ -5993,27 +7114,27 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             notes.append(str(_vn))
         warnings = list(payload.get('warnings') or [])
         logger.info(
-            f"[HV-DCCPP] status={payload.get('status')} "
+            f"[HARVEST] status={payload.get('status')} "
             f"errors={len(payload.get('errors') or [])} "
             f"warnings={len(warnings)} notes={len(notes)} "
             f"total={float(timing.get('total', 0.0)):.0f} ms")
         for w in warnings:
-            logger.warning(f'[HV-DCCPP] {w}')
+            logger.warning(f'[HARVEST] {w}')
         loud = []
         for n in notes:
             text = str(n)
             if text.startswith(self._HV_LOUD_NOTES):
                 loud.append(text)
-                logger.warning(f'[HV-DCCPP] {text}')
+                logger.warning(f'[HARVEST] {text}')
             else:
-                logger.info(f'[HV-DCCPP] note: {text}')
+                logger.info(f'[HARVEST] note: {text}')
         # 存起來給 _on_hv_finished 在後處理**之後**再顯示一次
         # （後處理最後一定會用「DCCPP 最佳化完成」蓋掉狀態列）
         self._hv_last_report = {'loud_notes': loud,
                                 'uncovered': list(payload.get('uncovered') or []),
                                 'status': payload.get('status')}
         for u in self._hv_last_report['uncovered']:
-            logger.error(f'[HV-DCCPP] 未覆蓋：{u}')
+            logger.error(f'[HARVEST] 未覆蓋：{u}')
 
     def _hv_show_report_banner(self):
         """把 `_on_hv_report` 收集到的重點顯示出來（要在後處理之後叫，否則會被蓋掉）。"""
@@ -6021,13 +7142,13 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         uncovered, loud = rep.get('uncovered') or [], rep.get('loud_notes') or []
         if uncovered:
             from PyQt6.QtWidgets import QMessageBox
-            self.statusBar().showMessage(f'⚠ HV-DCCPP 有未覆蓋區域：{uncovered}', 0)
+            self.statusBar().showMessage(f'⚠ HARVEST 有未覆蓋區域：{uncovered}', 0)
             QMessageBox.warning(
-                self, 'HV-DCCPP 覆蓋不完整',
+                self, 'HARVEST 覆蓋不完整',
                 '下列區域沒有被完全覆蓋：\n  ' + '\n  '.join(str(u) for u in uncovered)
                 + '\n\n（多半要改機隊組成或放寬約束，見接入手冊 §15.2 第 13 條）')
         elif loud:
-            self.statusBar().showMessage('HV-DCCPP：' + '；'.join(loud[:3]), 15000)
+            self.statusBar().showMessage('HARVEST：' + '；'.join(loud[:3]), 15000)
 
     def _hv_notify_done(self, ok: bool):
         """呼叫並清掉這一趟的 `on_done`。
@@ -6042,7 +7163,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         try:
             cb(bool(ok))
         except Exception as e:      # noqa: BLE001 - 回呼壞掉不該連累規劃流程
-            logger.error(f'[HV-DCCPP] on_done 回呼失敗：{e}', exc_info=True)
+            logger.error(f'[HARVEST] on_done 回呼失敗：{e}', exc_info=True)
 
     def _on_hv_failed(self, msg: str):
         """⚠⚠ 失敗對話框一定要帶上 `_on_hv_report` 收到的重點。
@@ -6054,15 +7175,15 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         """
         from PyQt6.QtWidgets import QMessageBox
         self.statusBar().clearMessage()
-        logger.error(f'[HV-DCCPP] 規劃失敗：{msg}')
+        logger.error(f'[HARVEST] 規劃失敗：{msg}')
         loud = list((getattr(self, '_hv_last_report', None) or {}).get('loud_notes') or [])
         text = msg if not loud else (msg + '\n\n' + '\n'.join(f'• {n}' for n in loud))
-        QMessageBox.critical(self, 'HV-DCCPP 失敗', text)
+        QMessageBox.critical(self, 'HARVEST 失敗', text)
         self._hv_notify_done(False)
 
     def _on_hv_cancelled(self):
         """規劃跑完了但結果已被放棄（呼叫過 stop()，多半是關視窗）。"""
-        logger.info('[HV-DCCPP] 規劃結果已放棄（使用者取消）')
+        logger.info('[HARVEST] 規劃結果已放棄（使用者取消）')
         try:
             self.statusBar().clearMessage()
         except RuntimeError:
@@ -6074,6 +7195,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         worker = getattr(self, '_hv_worker', None)
         coordinator = getattr(worker, 'coordinator', None)
         self._hv_coordinator = getattr(coordinator, 'hv_coordinator', None)
+        self._hv_swarm_coordinator = coordinator      # validate 結果（上傳閘門用）
         ctx = getattr(self, '_hv_display_ctx', None) or {}
         self._display_dccpp_result(result, **ctx)
         # 後處理會把狀態列改成「DCCPP 最佳化完成…」，所以警示要在它之後才顯示
@@ -6185,6 +7307,10 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         if not export_dir:
             return
 
+        # 航測建圖：走 hv 匯出器 export_all(camera_cfg)，匯出的 .waypoints／.param 與上傳的逐項相同
+        if self._hv_mapping_upload_applies():
+            return self._export_hv_mapping(export_dir)
+
         try:
             from mission.vtol_mission_exporter import VTOLMissionExporter
 
@@ -6211,7 +7337,12 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             try:
                 cesium = self._get_cesium_widget()
                 if cesium:
-                    vtol_data = exporter.to_cesium_data(assembled_paths, altitude)
+                    from ui.widgets.cesium_map_widget import swarm_drone_colors
+                    vtol_data = exporter.to_cesium_data(
+                        assembled_paths, altitude,
+                        colors=swarm_drone_colors(
+                            (uid, getattr(ap, 'cls', None))
+                            for uid, ap in assembled_paths.items()))
                     cesium.draw_vtol_swarm_paths(vtol_data)
             except Exception as ve:
                 logger.warning(f'[VTOL] 3D 視覺化失敗: {ve}')
@@ -6231,6 +7362,41 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         except Exception as e:
             logger.error(f"匯出 VTOL 任務失敗: {e}", exc_info=True)
             QMessageBox.warning(self, "匯出失敗", f"VTOL 任務匯出失敗：\n{e}")
+
+    def _export_hv_mapping(self, export_dir: str):
+        """建圖模式匯出：hv_dccpp.ardupilot.export_all(..., camera_cfg) ⇒ 每架 .waypoints／.param／.plan
+        與 mission_summary.json。項目與上傳的 hv.mission_items 逐項相同（同一支 plan_to_mission_items、同一份
+        camera_cfg）；建圖閘門不過時照樣匯出（給人檢查），但要大聲說這份計畫不允許上傳。
+        """
+        hv = self._hv_coordinator
+        cc = getattr(hv, 'camera_cfg', None)
+        if cc is None:
+            QMessageBox.critical(self, '航測建圖：無法匯出', '這份建圖計畫沒有相機觸發設定（camera_cfg）。請重新規劃。')
+            return
+        try:
+            from hv_dccpp.ardupilot import export_all
+            summary = export_all(hv.last_plan, hv.last_ctx, hv.cfg, export_dir, camera_cfg=cc)
+        except Exception as e:      # noqa: BLE001
+            logger.error(f'[航測] 建圖匯出失敗：{e}', exc_info=True)
+            QMessageBox.warning(self, '匯出失敗', f'航測建圖任務匯出失敗：\n{e}')
+            return
+        lead = float(hv.mapping_mode.lead_in_m)
+        lines = [f'目錄：{export_dir}',
+                 f'CAM1_INTRVAL_MIN {cc.interval_min_s:.2f} s（規劃拍照率 {1.0 / cc.interval_min_s:.3f} Hz）、'
+                 f'CAM1_DURATION {cc.duration_s:g} s、引入段 {lead:g} m、後端 {cc.backend}'
+                 f'（韌體 {cc.firmware or "未填"}）', '']
+        for uid, u in sorted((summary.get('uavs') or {}).items()):
+            lines.append(f'{uid}：{u.get("n_items")} 項 → {Path(u["files"]["waypoints"]).name}、'
+                         f'{Path(u["files"]["param"]).name}')
+        lines.append(f'摘要：{Path(summary["files"]["summary"]).name}')
+        logger.info(f'[航測] 建圖匯出完成：{export_dir}（{len(summary.get("uavs") or {})} 架）')
+        gate = hv_upload_gate(hv, getattr(self, '_hv_swarm_coordinator', None))
+        if not gate['uploadable']:
+            lines += ['', '注意：這份計畫不允許上傳（' + '；'.join(gate['reasons']) + '）；匯出的檔案只供檢查。']
+            QMessageBox.warning(self, '航測建圖：已匯出，但不允許上傳', '\n'.join(lines))
+        else:
+            QMessageBox.information(self, '航測建圖匯出成功（與上傳內容相同）', '\n'.join(lines))
+        self.statusBar().showMessage(f'已匯出航測建圖任務至 {export_dir}', 5000)
 
     def _export_dccpp_waypoints(self):
         """
@@ -6434,10 +7600,19 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         #    接在處理函式裡會每按一次多接一條 ⇒ 第 N 次點擊畫 N 遍。
         link.mission_downloaded.connect(self._on_mission_downloaded)
         link.mission_download_failed.connect(self._on_mission_download_failed)
+        # 任務**寫入**結果 → 狀態列 + 解除「寫入飛控」鈕的停用。
+        # ⚠️ 接在這裡（建立 link 時）、只接一次，理由與上面 mission_downloaded
+        #    的註解相同：不論觸發來源是 HUD 按鈕、DroneDetailPanel 的 ↥、還是
+        #    程式自己呼叫 link.upload_mission_items()，結果都要被聽到；
+        #    接在按鈕處理函式裡會每次呼叫多接一條，第 N 次寫入就回報 N 次。
+        link.mission_uploaded.connect(self._on_mission_uploaded)
+        # 相機回授（CAMERA_FEEDBACK）→ 航測建圖的「已拍 N / 預估 M」。只有建圖上傳過的機才顯示。
+        link.camera_feedback.connect(self._on_camera_feedback)
         link.start()
         self._sitl_links.append(link)
         if self._sitl_link is None:
             self._sitl_link = link
+        self._update_write_wp_enabled()
 
         # ── 註冊到 FleetRegistry：讓 ADOS 風 SitlCommandPanel 看見此 UAV ──
         # callsign 規則：sysid 1 → "UAV-1"…等，與既有 status bar 一致。
@@ -6522,6 +7697,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 link.disconnected.disconnect()
             except Exception:
                 pass
+            _stop_link_tlog(link)          # 航測 tlog（沒在記錄就什麼都不做）
             try:
                 link.stop()
                 link.wait(2000)
@@ -6536,6 +7712,11 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         self.sitl_hud.on_disconnected('使用者中斷')   # 內含 clear_cards + 復位指令對象
         if hasattr(self.map_widget, 'clear_uav'):
             self.map_widget.clear_uav()
+        # 全域斷線 ⇒ 任何等待中的寫入都已經不會有回報了（link 已經停止）；
+        # 清掉待回報集合並停用「寫入飛控」鈕，否則它會卡在「寫入中」的停用狀態，
+        # 而使用者重新連線後那個 sysid 早就不對了。
+        self._write_pending_sysids.clear()
+        self._update_write_wp_enabled()
 
     # ─────────────────────────────────────────────────────────────────
     # HIL：實體飛控多機連線（SITL 分頁 HIL 內頁）
@@ -6581,6 +7762,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 link.disconnected.disconnect()
             except Exception:
                 pass
+            _stop_link_tlog(link)          # 航測 tlog（沒在記錄就什麼都不做）
             try:
                 link.stop()
                 link.wait(2000)
@@ -6590,10 +7772,22 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 self._sitl_links.remove(link)
             except ValueError:
                 pass
+            # ⚠️ finding（major，ui_safety）：這裡先切斷了 disconnected 信號
+            # （上面那段），所以 _on_sitl_link_disconnected 不會為這些 link 執行
+            # ——它原本負責的「該機若正等待 mission_uploaded 回報，回報永遠不會
+            # 來了，要把它從待回報集合裡拿掉」這件事，在 HIL 斷線這條路上要自己
+            # 補做一次，否則這個 sysid 會永遠卡在 _write_pending_sysids 裡：
+            # _update_write_wp_enabled() 的 enabled 條件是「集合是空的」，卡住
+            # 一台會連帶讓所有機的「寫入飛控」鈕都停用；若同一 sysid 之後又用
+            # HIL 重連，on_sitl_write_wp() 的併發守衛（見那裡 (2.5)）會誤判成
+            # 「已經有一筆寫入在進行中」而永遠拒絕對它寫入。
+            self._write_pending_sysids.discard(
+                int(getattr(link, 'sysid_label', 1)))
         self._hil_links.clear()
         if self._sitl_link is not None and self._sitl_link not in self._sitl_links:
             self._sitl_link = self._sitl_links[0] if self._sitl_links else None
         self.hil_panel.on_disconnected()
+        self._update_write_wp_enabled()
         self.statusBar().showMessage('[HIL] 已斷開所有實體飛控鏈路', 5000)
 
     def on_sitl_disconnect_one(self, sysid: int):
@@ -6622,6 +7816,19 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         sysid = int(getattr(link, 'sysid_label', 1))
         if link in self._sitl_links:
             self._sitl_links.remove(link)
+        # 航測 tlog：鏈路結束就關檔（run() 自己也會關；這裡多報一次錯誤狀態）
+        _tl = _stop_link_tlog(link)
+        if isinstance(_tl, dict) and _tl.get('error'):
+            self.statusBar().showMessage(f'UAV-{sysid} tlog 錯誤：{_tl["error"]}', 10000)
+        # 該機若正等待 mission_uploaded 回報 → 這條 link 已經停止，回報永遠不會來了
+        # （零次違反「恰好一次」的期待，但 link 本身已死，UI 不能繼續卡在「寫入中」）。
+        # ⚠️ finding（ui_safety）：只默默拿掉、不額外提示的話，「寫入被連線中斷
+        # 打斷」跟「單純斷線」在使用者眼裡長得一模一樣——只有下面那行通用的
+        # 斷線狀態列文字，沒有 `_on_mission_uploaded` 失敗分支那種大聲警告。
+        # 飛控端這時可能只寫進一半的任務，必須跟那裡用同一套「不要假設剛才
+        # 的寫入已經生效」措辭提醒使用者，不能讓這種失敗看起來不像失敗。
+        interrupted_write = sysid in self._write_pending_sysids
+        self._write_pending_sysids.discard(sysid)
         # FleetRegistry 反註冊（callsign 與註冊時一致）
         try:
             from mission.fleet_registry import FleetRegistry
@@ -6647,6 +7854,16 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         else:
             self.sitl_hud.lbl_status.setText(
                 f'🔌 UAV-{sysid} 已斷線（剩餘 {len(self._sitl_links)} 台連線）')
+        self._update_write_wp_enabled()
+        if interrupted_write:
+            logger.error(
+                f'[WP] UAV-{sysid} 寫入任務途中斷線（{reason}），無法確定寫入是否完成')
+            QMessageBox.critical(
+                self, 'Write WPs 被中斷',
+                f'UAV-{sysid} 在寫入任務的過程中斷線（原因：{reason}），'
+                '這筆寫入**沒有被可靠地完成**。\n\n'
+                '飛控上可能只寫進一半的任務。請重新連線後先按「📥 從飛控讀回'
+                '任務航線」確認飛控上實際存著的內容，不要假設剛才的寫入已經生效。')
 
     def _on_sitl_telemetry(self, frame):
         """收到一幀遙測 → 更新 HUD + 推到 3D 地圖（多機支援）"""
@@ -6701,25 +7918,219 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             QMessageBox.information(
                 self, 'SITL', '所選的指令對象 UAV 已離線，請改選其他機或「全部」')
             return
+        # R1 #1：飛控上是起飛時程不同的 HARVEST 任務 ⇒ 不准一起起飛（4D 去衝突靠起飛時間錯開）
+        if cmd in ('auto_start', 'mission_start'):
+            block = staggered_start_block(getattr(self, '_hv_release_schedule', None), links)
+            if block:
+                logger.error(f'[起飛時程] 擋下一鍵起飛：{block}')
+                QMessageBox.critical(self, '一鍵起飛：已拒絕（起飛時程不同）', block)
+                return
         for link in links:
             try:
-                if cmd == 'arm':       link.arm()
-                elif cmd == 'disarm':  link.disarm()
-                elif cmd == 'set_mode':link.set_mode(arg)
-                elif cmd == 'takeoff': link.takeoff(arg)
-                elif cmd == 'guided_takeoff': link.guided_takeoff(arg)
-                elif cmd == 'vtol_transition': link.vtol_transition(int(arg))
-                elif cmd == 'auto_start': link.auto_start()
-                elif cmd == 'mission_start': link.mission_start()
-                elif cmd == 'set_param':
-                    name, value, ptype = arg
-                    link.set_param(name, value, ptype)
-                elif cmd == 'set_params':
-                    link.set_params(arg)
-                elif cmd == 'get_param':
-                    link.get_param(arg)
+                send_link_command(link, cmd, arg)
             except Exception as e:
                 logger.error(f'[SITL] {cmd} 失敗: {e}')
+
+    # ─────────────────────────────────────────────────────────────────
+    # HARVEST 起飛時程：記錄（上傳時）→ 擋一鍵起飛 → 依時程放行（R1 #1）
+    #   記錄／清除／判斷都是模組層級函式（假 self 的測試也走得到），這裡只是薄包裝
+    # ─────────────────────────────────────────────────────────────────
+    def _record_release_schedule(self, hv, pairs, *, mapping: bool):
+        return record_release_schedule(self, hv, pairs, mapping=mapping)
+
+    def _forget_release_schedule(self, sysids=None, reason: str = ''):
+        forget_release_schedule(self, sysids, reason)
+
+    @staticmethod
+    def _schedule_spread_s(entries) -> float:
+        return schedule_spread_s(entries)
+
+    @staticmethod
+    def _release_schedule_lines(entries) -> list:
+        return release_schedule_lines(entries)
+
+    def _staggered_start_block(self, links):
+        return staggered_start_block(getattr(self, '_hv_release_schedule', None), links)
+
+    def _install_release_controls(self):
+        """在 HUD「一鍵起飛」下面插入「依時程放行」「取消放行」與逐機倒數（sitl_hud.py 不動，從外面插）。"""
+        from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+        box = QWidget()
+        v = QVBoxLayout(box)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(2)
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        self.btn_release_schedule = QPushButton('依時程放行')
+        self.btn_release_schedule.setToolTip(
+            'HARVEST 任務的起飛時程不同時用（一鍵起飛會被擋）：時程 T+0 的立刻 AUTO+ARM+START，\n'
+            '其他的倒數到各自的時程再送同一個指令。已解鎖、AUTO 中、沒連線或任務寫入未確認的飛機不放行。')
+        self.btn_release_schedule.clicked.connect(self.on_release_by_schedule)
+        self.btn_release_cancel = QPushButton('取消放行')
+        self.btn_release_cancel.setToolTip('停掉還沒到時間的放行（已經放行的飛機不受影響）。')
+        self.btn_release_cancel.clicked.connect(self.on_cancel_release)
+        self.btn_release_cancel.setEnabled(False)
+        row.addWidget(self.btn_release_schedule, 1)
+        row.addWidget(self.btn_release_cancel, 1)
+        v.addLayout(row)
+        self._release_label = QLabel('')
+        self._release_label.setWordWrap(True)
+        v.addWidget(self._release_label)
+        self._release_widget = box
+        try:
+            btn = self.sitl_hud.btn_auto_start
+            lay = btn.parentWidget().layout()
+            lay.insertWidget(lay.indexOf(btn) + 1, box)
+        except Exception as e:      # noqa: BLE001 — 插不進 HUD 就要說，不然按鈕不見了沒人知道
+            logger.error(f'[放行] 「依時程放行」沒辦法放進 HUD（{type(e).__name__}: {e}）')
+
+    def _release_start_one(self, entry):
+        """放行一架（計時器到時間或 T+0 立刻）：放行**當下**重新確認還連著、沒解鎖、不在 AUTO、任務寫入沒失敗，
+        再送與一鍵起飛同一支的 auto_start。不合 ⇒ 丟例外（StaggeredRelease 記為放行失敗並寫 log）。"""
+        sysid = int(entry['sysid'])
+        link = next((l for l in self._sitl_links if int(getattr(l, 'sysid_label', -1)) == sysid), None)
+        if link is None:
+            raise RuntimeError(f'UAV-{sysid} 已斷線')
+        sched = getattr(self, '_hv_release_schedule', None) or {}
+        if sysid not in (sched.get('entries') or {}):
+            raise RuntimeError(f'UAV-{sysid} 的任務已被換掉，不再屬於這份起飛時程')
+        if (sched.get('upload_ok') or {}).get(sysid) is False:
+            raise RuntimeError(f'UAV-{sysid} 的任務寫入失敗過')
+        prob = link_flight_state_problem(link)
+        if prob:
+            raise RuntimeError(prob)
+        send_link_command(link, 'auto_start')
+
+    def on_release_by_schedule(self):
+        """「依時程放行」：時程 T+0 的立刻送 auto_start，其他的用計時器在各自的時程送；倒數顯示在 HUD。"""
+        sched = getattr(self, '_hv_release_schedule', None)
+        if not sched or not sched.get('entries'):
+            QMessageBox.information(self, '依時程放行',
+                                    '飛控上沒有已上傳的 HARVEST 任務（先規劃 HARVEST、按「上傳飛控」）。')
+            return
+        rel = getattr(self, '_release', None)
+        if rel is not None and rel.active:
+            QMessageBox.information(self, '依時程放行', '上一批放行還在倒數；要重來請先按「取消放行」。')
+            return
+        entries = sorted(sched['entries'].values(), key=lambda e: (e['offset_s'], e['sysid']))
+        armed, other = [], []
+        for e in entries:
+            sysid = e['sysid']
+            link = next((l for l in self._sitl_links if int(getattr(l, 'sysid_label', -1)) == sysid), None)
+            if link is None:
+                other.append((e, f'UAV-{sysid} 沒有連線'))
+                continue
+            if sysid in getattr(self, '_write_pending_sysids', set()):
+                other.append((e, f'UAV-{sysid} 任務寫入還沒確認'))
+                continue
+            if (sched.get('upload_ok') or {}).get(sysid) is False:
+                other.append((e, f'UAV-{sysid} 任務寫入失敗'))
+                continue
+            code, prob = link_flight_state(link)
+            if code is not None:
+                # 已解鎖／AUTO／狀態不明：可能已經在飛 ⇒ 其他機相對它的時間不明，整批不放行
+                armed.append((e, prob))
+        if armed:
+            text = ('下列飛機已解鎖、在 AUTO 或狀態不明（可能已經在飛），其他飛機相對它的起飛時間無法確定 ⇒ '
+                    '整批不放行：\n  ' + '\n  '.join(p for _e, p in armed))
+            logger.error(f'[放行] 拒絕：{text}')
+            QMessageBox.critical(self, '依時程放行：已拒絕', text)
+            return
+        ok_entries = [e for e in entries if all(e is not x for x, _p in other)]
+        if not ok_entries:
+            text = '沒有可以放行的飛機：\n  ' + '\n  '.join(p for _e, p in other)
+            logger.error(f'[放行] 拒絕：{text}')
+            QMessageBox.critical(self, '依時程放行：已拒絕', text)
+            return
+        base = min(e['offset_s'] for e in ok_entries)
+        lines = [f'UAV-{e["sysid"]}（機 {e["uav"]} {e.get("callsign", "?")}）：'
+                 + ('立刻' if e['offset_s'] - base <= TAKEOFF_STAGGER_TOL_S else f'{e["offset_s"] - base:.0f} s 後')
+                 + f'（計畫 T+{e["offset_s"]:.0f} s）' for e in ok_entries]
+        text = '依起飛時程送出 AUTO + ARM + MISSION_START：\n  ' + '\n  '.join(lines)
+        if other:
+            text += ('\n\n下列飛機**不放行**（不會起飛；其他飛機的相對時程不變）：\n  '
+                     + '\n  '.join(p for _e, p in other))
+        text += '\n\n倒數中的飛機可按「取消放行」停掉。確定開始？'
+        ret = QMessageBox.question(self, '依時程放行', text,
+                                   QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                                   QMessageBox.StandardButton.Cancel)
+        if ret != QMessageBox.StandardButton.Yes:
+            logger.info('[放行] 使用者取消依時程放行')
+            return
+        if other:
+            logger.warning('[放行] 不放行：' + '；'.join(p for _e, p in other))
+        self._release_failures_shown = 0          # 新的一批：失敗訊息從頭算
+        self._release = StaggeredRelease(self._release_start_one,
+                                         timer_factory=getattr(self, '_release_timer_factory', None),
+                                         clock=getattr(self, '_release_clock', None),
+                                         on_change=self._on_release_changed)
+        self._release.start(ok_entries)
+        self._ensure_release_ticker()
+
+    def on_cancel_release(self):
+        rel = getattr(self, '_release', None)
+        if rel is None or not rel.active:
+            return
+        cancelled = rel.cancel()
+        self.statusBar().showMessage(f'已取消放行：UAV-{cancelled}（這些飛機不會被送出起飛）', 10000)
+
+    def _on_release_changed(self):
+        """放行狀態變了（放出一架／失敗／取消）：更新倒數；失敗要大聲。"""
+        rel = getattr(self, '_release', None)
+        self._refresh_release_countdown()
+        if rel is None:
+            return
+        shown = getattr(self, '_release_failures_shown', 0)
+        fails = [ev for ev in rel.events if not ev['ok'] and ev['error'] != '已取消']
+        if len(fails) > shown:
+            self._release_failures_shown = len(fails)
+            new = fails[shown:]
+            QMessageBox.warning(self, '依時程放行：有飛機沒有放行',
+                                '\n'.join(f'UAV-{ev["sysid"]}：{ev["error"]}' for ev in new)
+                                + '\n\n其他飛機照時程繼續；要全部停下請按「取消放行」。')
+
+    def _ensure_release_ticker(self):
+        """每秒更新倒數（只在有飛機倒數時跑）。"""
+        from PyQt6.QtCore import QTimer
+        t = getattr(self, '_release_ticker', None)
+        if t is None:
+            t = QTimer(self)
+            t.setInterval(1000)
+            t.timeout.connect(self._refresh_release_countdown)
+            self._release_ticker = t
+        if not t.isActive():
+            t.start()
+
+    def _refresh_release_countdown(self):
+        rel = getattr(self, '_release', None)
+        sched = getattr(self, '_hv_release_schedule', None)
+        if rel is not None and (rel.active or rel.events):
+            text = rel.countdown_text()
+        elif sched and sched.get('entries'):
+            spread = schedule_spread_s(sched['entries'].values())
+            text = ('起飛時程：' + '、'.join(release_schedule_lines(sched['entries'].values()))
+                    + ('（不同 ⇒ 用「依時程放行」）' if spread > TAKEOFF_STAGGER_TOL_S else ''))
+        else:
+            text = ''
+        self._release_countdown_text = text
+        lbl = getattr(self, '_release_label', None)
+        if lbl is not None:
+            try:
+                lbl.setText(text)
+            except RuntimeError:
+                pass
+        btn = getattr(self, 'btn_release_cancel', None)
+        if btn is not None:
+            try:
+                btn.setEnabled(bool(rel is not None and rel.active))
+            except RuntimeError:
+                pass
+        t = getattr(self, '_release_ticker', None)
+        if t is not None and (rel is None or not rel.active):
+            try:
+                t.stop()
+            except RuntimeError:
+                pass
 
     # ── 投放：送指令 → **等 PWM 讀回真的變了** → 才播落點模擬 ──────────
     # 設計要點：動畫不是按鈕觸發的，是**飛控回報的 SERVO_OUTPUT_RAW 觸發的**。
@@ -7389,6 +8800,307 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         logger.warning(f'[SITL] UAV-{sysid} 任務讀回失敗: {reason}')
         self.statusBar().showMessage(f'UAV-{sysid} 任務讀回失敗：{reason}', 10000)
 
+    # ── 航點檔 Load / Write / Save（Mission Planner 風格；Read = 上面那組）──
+    def _update_write_wp_enabled(self) -> None:
+        """『寫入飛控』鈕是否可按的**唯一**決定點。
+
+        兩個條件：至少有一條連線、而且沒有任何 sysid 正在等待 mission_uploaded
+        回報。任何會改變這兩者的地方（連線/斷線、送出寫入前、回報後）都要呼叫
+        這裡，而不是自己重算一次 setEnabled —— 否則按鈕狀態遲早會跟真實狀態
+        脫節（例如寫入中被使用者連點兩次，開兩筆互相競爭的交易）。
+        """
+        enabled = bool(self._sitl_links) and not self._write_pending_sysids
+        try:
+            self.sitl_hud.btn_write_wp.setEnabled(enabled)
+        except Exception:
+            pass
+
+    def on_sitl_load_wp_file(self):
+        """Load WP File —— 從檔案載入一份任務並預覽到地圖。
+
+        純讀檔 + 畫圖，**不需要連線**、也**不會**自動寫入飛控（要寫入另外按
+        「✍️ 寫入飛控」，中間一定會再跳一次確認對話框）。
+        """
+        import os
+        from mission.waypoint_file import MissionFileError, load_mission_file
+        path, _flt = QFileDialog.getOpenFileName(
+            self, '載入航點檔', self._last_wp_dir,
+            'Mission Planner / QGC waypoints (*.waypoints *.txt);;'
+            'QGroundControl plan (*.plan);;All files (*)')
+        if not path:
+            return
+        self._last_wp_dir = os.path.dirname(path)
+        try:
+            lm = load_mission_file(path)
+        except MissionFileError as e:
+            # ⚠️ 不可以靜默 return：使用者按了載入卻什麼都沒發生，
+            # 會以為程式沒反應而不是「這份檔案讀不進來」。
+            logger.error(f'[WP] 載入航點檔失敗: {e}')
+            QMessageBox.critical(self, '載入航點檔失敗', str(e))
+            return
+        if lm.has_errors:
+            # 有錯誤的檔案完全不進 self._loaded_mission —— 保留使用者先前
+            # 已經載入、驗證過的那一份，不能被一次失敗的載入悄悄蓋掉。
+            QMessageBox.critical(
+                self, '航點檔有錯誤，無法寫入',
+                lm.summary_text() + '\n\n請修正檔案後重新載入；'
+                '目前不會覆蓋先前已載入的任務。')
+            return
+        self._loaded_mission = lm
+        # 預覽走 display_fc_mission（跟「讀回」共用同一條路）——
+        # 不可以用 display_path/display_paths/display_fw_paths：那幾條會
+        # 連帶重建「上傳電子圍籬」出發的圍籬，而這裡只是單純的載入預覽。
+        try:
+            from mission import mission_view as _mv
+            path2d = _mv.mission_to_path_2d(lm.items)
+            path3d = _mv.mission_to_path_3d(lm.items)
+            loiters = _mv.mission_loiters(lm.items)
+            home = _mv.mission_home(lm.items)
+            if hasattr(self.map_widget, 'display_fc_mission'):
+                self.map_widget.display_fc_mission(path2d, path3d, loiters,
+                                                    home=home)
+        except Exception as e:
+            logger.error(f'[WP] 預覽載入的航點檔失敗: {e}', exc_info=True)
+        self.statusBar().showMessage(
+            f'已載入 {os.path.basename(path)}：{len(lm.items)} 個項目', 8000)
+        logger.info(f'[WP] 已載入航點檔 {path}: {len(lm.items)} 項、'
+                    f'{len(lm.warnings)} 個警告')
+        QMessageBox.information(self, '航點檔已載入', lm.summary_text())
+
+    def on_sitl_write_wp(self, target_links=None):
+        """Write WPs（安全關鍵）—— 把已載入的航點檔寫入**恰好一台**飛控。
+
+        target_links: 通常留 None，此時對象由 HUD 的「指令對象」
+        （`_target_links()`）決定；DroneDetailPanel 的「↥」鈕會直接帶入該
+        面板 callsign 對應的單一 link（見 `_on_detail_panel_write_wp`），
+        但**不會**因此少走任何一道下面的守衛——換的只是「對象怎麼決定」，
+        不是「要不要檢查」。
+
+        ⚠️ 刻意不重用 `on_sitl_upload_mission`：那條走的是「當前規劃路徑」
+        （地圖 paths / DCCPP 結果），資料來源、語意、失敗處理都不同，
+        混用只會讓兩條路都變得難懂、難測。
+        """
+        import os
+        # (1) 檔案面：沒載入、或載入了但有錯誤 —— 一律拒絕，不猜、不部分寫。
+        lm = self._loaded_mission
+        if lm is None:
+            QMessageBox.information(
+                self, 'Write WPs',
+                '尚未載入任何航點檔。\n請先按「📂 載入航點檔」選擇 '
+                '.waypoints / .plan 檔案。')
+            return
+        if lm.has_errors:
+            QMessageBox.critical(
+                self, 'Write WPs：航點檔有錯誤',
+                '這份航點檔有錯誤，寫入飛控前必須先修正：\n\n'
+                + lm.summary_text())
+            return
+
+        # (2) 對象面：必須恰好一台。這個專案已經撞過「兩架飛機拿到同一份
+        #     任務」的事故（on_sitl_upload_mission 的 per_uav_wps 註解），
+        #     這裡把「多於一台」與「零台」都當拒絕理由，不猜使用者想寫哪台。
+        links = list(target_links) if target_links is not None else self._target_links()
+        if len(links) > 1:
+            QMessageBox.warning(
+                self, 'Write WPs',
+                f'目前指令對象是 {len(links)} 台 UAV。\n'
+                '「寫入飛控」只能對**恰好一台**執行——這個專案曾經發生過'
+                '「兩架飛機拿到同一份任務」的事故，這裡刻意拒絕多機寫入。\n\n'
+                '請先在 HUD 上點選單一 UAV 卡片，再重試。')
+            return
+        if not links:
+            QMessageBox.information(
+                self, 'Write WPs',
+                '所選的指令對象 UAV 已離線（或尚未連線任何飛控），無法寫入。')
+            return
+        link = links[0]
+        sysid = int(getattr(link, 'sysid_label', 1))
+
+        # (2.5) 併發面：這台 UAV 已經有一筆寫入在跑——不論是從 HUD 按鈕、
+        #     還是從 DroneDetailPanel 的「↥」鈕（見 _on_detail_panel_write_wp）
+        #     進來的都一樣要擋。_update_write_wp_enabled() 只會關閉 HUD 那顆
+        #     按鈕，DroneDetailPanel 的按鈕沒有對應的 enabled 狀態，所以「對象
+        #     是否已經在寫」不能只靠某一個 widget 被 disable 來防，必須在這個
+        #     函式的入口自己查 _write_pending_sysids——否則兩條路徑各自排一筆
+        #     upload_mission_items() 到同一台飛控，先回來的 mission_uploaded
+        #     會把 pending 清掉、兩顆按鈕都重新可按，而另一筆其實還沒有結果。
+        if sysid in self._write_pending_sysids:
+            QMessageBox.information(
+                self, 'Write WPs',
+                f'UAV-{sysid} 已經有一筆寫入在進行中，請等它完成（成功或失敗）'
+                '後再試一次。\n\n'
+                '（這個檢查涵蓋所有入口——HUD 的「✍️ 寫入飛控」按鈕，和 '
+                'DroneDetailPanel 的「↥」快速鈕，寫的是同一台飛控就會互相'
+                '擋，不管是哪一個先按下去。）')
+            return
+
+        # (3) 確認對話框——顯示的必須是「等一下真的會送出去的那份」。
+        conn_str = str(getattr(link, 'conn_str', '?'))
+        is_real_board = looks_like_real_board_connection(conn_str)
+        items = lm.items
+        first_wp = items[1] if len(items) > 1 else (items[0] if items else None)
+        last_wp = items[-1] if items else None
+
+        lines = [
+            f'目標：UAV-{sysid}（sysid={sysid}）',
+            f'連線：{conn_str}' + ('　⚠️ 這看起來是「真實飛控」（序列埠）'
+                                  if is_real_board else '　（SITL / 網路連線）'),
+            f'檔案：{os.path.basename(lm.path) if lm.path else "?"}',
+            f'項目數：{len(items)}',
+        ]
+        if first_wp is not None:
+            lines.append(
+                f'第一個航點：#{int(first_wp["seq"])} cmd={int(first_wp["command"])} '
+                f'({first_wp["lat"]:.6f}, {first_wp["lon"]:.6f}, {first_wp["alt"]:.1f}m)')
+        if last_wp is not None:
+            lines.append(
+                f'最後一個航點：#{int(last_wp["seq"])} cmd={int(last_wp["command"])} '
+                f'({last_wp["lat"]:.6f}, {last_wp["lon"]:.6f}, {last_wp["alt"]:.1f}m)')
+        if lm.warnings:
+            lines.append('')
+            lines.append(f'{len(lm.warnings)} 個警告（仍允許寫入，但請先看過）：')
+            for w in lm.warnings:
+                where = '' if w.seq is None else f'#{w.seq} '
+                lines.append(f'  [警告] {where}{w.message}')
+
+        frame = None
+        try:
+            frame = link.get_latest_telemetry()
+        except Exception:
+            frame = None
+        in_flight_auto = bool(
+            frame is not None and getattr(frame, 'armed', False)
+            and str(getattr(frame, 'mode', '')).upper() == 'AUTO')
+        if in_flight_auto:
+            lines.insert(
+                0, '⚠️⚠️ 這台 UAV 目前 ARMED 且在 AUTO 模式——這將取代一份'
+                   '**飛行中的任務**！請務必確認這是你要做的事。')
+
+        # ⚠️ 用 QMessageBox.warning/.question 這兩個**類別方法**而不是自己
+        #    `QMessageBox(self)` 建實體——一來圖示照案例自動對，二來這是
+        #    本專案既有的整體替換測法（見 test_dccpp_reroute_altitude.py 的
+        #    `_QtW.QMessageBox.warning = staticmethod(...)`），不必為了測試
+        #    另外發明一套攔截機制。
+        #    真實飛控 / 飛行中 AUTO 兩種都用 warning()（警告圖示，措辭更重）；
+        #    其餘情況用 question()（詢問圖示）。
+        msg_fn = QMessageBox.warning if (is_real_board or in_flight_auto) \
+            else QMessageBox.question
+        # 真實飛控預設停在「取消」——多一道刻意的摩擦，逼使用者主動選「是」。
+        default_btn = (QMessageBox.StandardButton.Cancel if is_real_board
+                       else QMessageBox.StandardButton.Yes)
+        ret = msg_fn(
+            self,
+            '⚠️ 寫入真實飛控 —— Write WPs' if is_real_board else 'Write WPs 確認',
+            '\n'.join(lines),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            default_btn,
+        )
+        if ret != QMessageBox.StandardButton.Yes:
+            # 唯一允許的「什麼都不送」路徑：Cancel（含叉掉視窗）一律不送。
+            logger.info(f'[WP] 使用者取消寫入 UAV-{sysid}')
+            return
+
+        # (4) 快照——在**這一刻**複製。對話框開著的時候另外載入別的檔案
+        #     不可以改到已經排隊要送出的內容；確認對話框顯示的就是實際
+        #     送出的內容，這是本函式唯一的正確性承諾。
+        snapshot = list(lm.items)
+        self._write_pending_sysids.add(sysid)
+        self._update_write_wp_enabled()
+        try:
+            link.upload_mission_items(snapshot, verify=True)
+        except Exception as e:
+            logger.error(f'[WP] 送出寫入請求失敗 UAV-{sysid}: {e}', exc_info=True)
+            self._write_pending_sysids.discard(sysid)
+            self._update_write_wp_enabled()
+            QMessageBox.critical(self, 'Write WPs 失敗', f'送出寫入請求失敗：{e}')
+            return
+        # 這架的任務換成載入檔了 ⇒ 不再屬於 HARVEST 起飛時程
+        forget_release_schedule(self, [sysid], reason='Write WPs 寫入載入檔')
+        self.statusBar().showMessage(
+            f'正在寫入 UAV-{sysid}（{len(snapshot)} 項）…', 5000)
+        logger.info(f'[WP] 已送出寫入請求 UAV-{sysid}: {len(snapshot)} 項')
+
+    def _on_mission_uploaded(self, sysid: int, ok: bool, message: str):
+        """任務**寫入**結果——`SITLLink.mission_uploaded` 的**唯一**接收端。
+
+        失敗必須夠大聲：一個被拒絕 / 逾時 / 只寫一半 / 沒驗證的寫入絕對不能
+        看起來像成功——那會讓使用者帶著一份沒生效的任務去飛。
+        """
+        self._write_pending_sysids.discard(sysid)
+        self._update_write_wp_enabled()
+        # HARVEST 起飛時程：記下這架的任務有沒有寫成功（寫失敗的不放行）
+        _sched = getattr(self, '_hv_release_schedule', None)
+        if _sched and int(sysid) in (_sched.get('entries') or {}):
+            _sched.setdefault('upload_ok', {})[int(sysid)] = bool(ok)
+        if ok:
+            logger.info(f'[WP] UAV-{sysid} 寫入成功: {message}')
+            self.statusBar().showMessage(
+                f'✅ UAV-{sysid} 任務寫入完成（已驗證）：{message}', 10000)
+        else:
+            logger.error(f'[WP] UAV-{sysid} 寫入失敗: {message}')
+            self.statusBar().showMessage(
+                f'❌ UAV-{sysid} 任務寫入失敗：{message}', 10000)
+            QMessageBox.critical(
+                self, 'Write WPs 失敗',
+                f'UAV-{sysid} 的飛控任務**沒有被可靠地更新**：\n\n{message}\n\n'
+                '飛行前請先按「📥 從飛控讀回任務航線」確認飛控上實際存著的內容，'
+                '不要假設剛才的寫入已經生效。')
+
+    def on_sitl_save_wp_file(self):
+        """Save WP File —— 存的是**剛從飛控讀回**的那份任務，不是載入檔。
+
+        ⚠️ 這顆鈕永遠讀 `self._fc_mission`（`_on_mission_downloaded` 填的），
+        不是 `self._loaded_mission`——後者是「要寫進去的」，前者才是「飛控
+        上實際有的」；用錯來源會讓使用者以為自己存到了飛控現況，實際存的
+        卻是還沒（或根本沒打算）寫入的東西。
+        """
+        import os
+        from mission.waypoint_file import MissionFileError, save_wpl
+        fc = self._fc_mission
+        if not fc or not fc.get('items'):
+            QMessageBox.information(
+                self, 'Save WP File',
+                '尚未從飛控讀回任何任務。\n請先按「📥 從飛控讀回任務航線」，'
+                '再用這顆鈕把讀回的結果存成檔案。')
+            return
+        default_name = f'UAV-{fc["sysid"]}_readback.waypoints'
+        start = (os.path.join(self._last_wp_dir, default_name)
+                 if self._last_wp_dir else default_name)
+        path, _flt = QFileDialog.getSaveFileName(
+            self, '存成航點檔', start,
+            'Mission Planner / QGC waypoints (*.waypoints)')
+        if not path:
+            return
+        if not path.lower().endswith('.waypoints'):
+            path += '.waypoints'
+        self._last_wp_dir = os.path.dirname(path)
+        try:
+            save_wpl(fc['items'], path)
+        except MissionFileError as e:
+            logger.error(f'[WP] 存檔失敗: {e}')
+            QMessageBox.critical(self, '存檔失敗', str(e))
+            return
+        self.statusBar().showMessage(f'已存成 {os.path.basename(path)}', 6000)
+        logger.info(f'[WP] UAV-{fc["sysid"]} 讀回結果已存成 {path}')
+
+    def _on_detail_panel_write_wp(self, callsign: str):
+        """DroneDetailPanel 的「↥」鈕 → 單機版 Write WPs。
+
+        ⚠️ 不直接呼叫 `link.upload_mission_items`——那會跳過『已載入且沒有
+        錯誤』檢查與確認對話框。真正的守衛邏輯只有 `on_sitl_write_wp` 一份，
+        這裡只是把「對象」從 HUD 的指令對象換成這個面板選定的 callsign
+        （格式固定 'UAV-<sysid>'，與 `on_sitl_connect` 註冊 FleetRegistry
+        時一致）。
+        """
+        try:
+            sysid = int(str(callsign).rsplit('-', 1)[-1])
+        except (ValueError, IndexError):
+            QMessageBox.warning(self, 'Write WPs', f'無法從 {callsign!r} 解析 sysid')
+            return
+        links = [l for l in self._sitl_links
+                if int(getattr(l, 'sysid_label', 1)) == sysid]
+        self.on_sitl_write_wp(target_links=links)
+
     def on_sitl_upload_fence(self):
         """把目前自動建構的電子圍籬上傳到所有連線的 SITL。"""
         if not self._sitl_links:
@@ -7421,9 +9133,17 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             return
         # ── 優先：菱形蜂群打擊（每架獨立任務 + 友善參數）──────
         if getattr(self, '_diamond_plans', None):
-            return self._on_diamond_strike_sitl_upload()
+            ret = self._on_diamond_strike_sitl_upload()
+            # 菱形打擊任務送到每一條連線 ⇒ 飛控上不再是 HARVEST 任務（它有自己的 KAMIKAZE LAUNCH 時程）
+            forget_release_schedule(self, [int(getattr(l, 'sysid_label', 0)) for l in self._sitl_links],
+                                    reason='菱形打擊任務上傳')
+            return ret
+        # ── 航測建圖（HARVEST 建圖模式）：hv 匯出器的任務（含 206 拍照指令）+ 上傳前參數讀回閘門 ──
+        if self._hv_mapping_upload_applies():
+            return self._on_hv_mapping_upload()
         # 從 map_widget.paths 收集所有航點；若無則改抓 DCCPP / swarm 結果
         wps = []
+        hv_used = None          # 這次上傳的是 HARVEST 結果（upload_tuples）⇒ 要記起飛時程（R1 #1）
         try:
             default_alt = float(self.parameter_panel.get_parameters().get('altitude', 50))
             paths = getattr(self.map_widget, 'paths', [])
@@ -7628,7 +9348,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                                               0.0, turn_radius, 0.0, 0.0))
                     return wps_local
 
-                # ── HV-DCCPP：改用轉接層的 8-tuple（手冊 §12.3）──
+                # ── HARVEST：改用轉接層的 8-tuple（手冊 §12.3）──
                 #   _build_wps_for_path 的 TAKEOFF 分支先做 `if idx == 0: continue`
                 #   才檢查 takeoff_emitted，而 hv 縮點後的路徑起飛段**只有一個航點**
                 #   且就在 idx 0 ⇒ 整份任務不會有起飛指令，飛控直接從第一個
@@ -7646,11 +9366,12 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                                 vtol_transition_alt_m=float(vtol_transition_alt)).items()
                             if v}
                         logger.info(
-                            f'[SITL] HV-DCCPP upload_tuples: '
+                            f'[SITL] HARVEST upload_tuples: '
                             f'{ {k: len(v) for k, v in per_uav_wps.items()} }')
+                        hv_used = _hv
                     except Exception as e:      # noqa: BLE001
                         logger.error(
-                            f'[SITL] HV-DCCPP upload_tuples 失敗，退回 _build_wps_for_path：{e}',
+                            f'[SITL] HARVEST upload_tuples 失敗，退回 _build_wps_for_path：{e}',
                             exc_info=True)
                         _hv_owns_result = False
 
@@ -7709,12 +9430,348 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 f'已為 {len(uploaded)}/{len(self._sitl_links)} 台 SITL 上傳獨立 '
                 f'DCCPP 路徑（{len(skipped)} 跳過）', 6000
             )
+            if hv_used is not None and uploaded:
+                # R1 #1（非建圖的 HARVEST 也一樣）：上傳報告列每架起飛時程；時程不同 ⇒ 一鍵起飛會被擋
+                entries, src = record_release_schedule(
+                    self, hv_used, [(s, u) for s, u, _n in uploaded], mapping=False)
+                text = (f'已為 {len(uploaded)}/{len(self._sitl_links)} 台送出 HARVEST 任務：\n  '
+                        + '\n  '.join(f'UAV-{s} ← 機 {u}：{n} 點' for s, u, n in uploaded)
+                        + '\n\n' + release_report_text(getattr(self, '_hv_release_schedule', None), entries, src,
+                                                       mapping=False))
+                QMessageBox.information(self, 'HARVEST：已送出上傳', text)
+            else:
+                forget_release_schedule(self, [s for s, _u, _n in uploaded], reason='非 HARVEST 任務上傳')
         else:
             for link in self._sitl_links:
                 link.upload_mission(wps)
+            forget_release_schedule(self, [int(getattr(l, 'sysid_label', 0)) for l in self._sitl_links],
+                                    reason='一般航點上傳')
             self.statusBar().showMessage(
                 f'已對 {len(self._sitl_links)} 個 SITL 上傳 {len(wps)} 個航點', 5000
             )
+
+    # ─────────────────────────────────────────────────────────────────
+    # 航測建圖：上傳（閘門 → 工作執行緒讀回參數 → 不符就擋／寫入後重讀 → upload_mission_items）
+    # ─────────────────────────────────────────────────────────────────
+    def _hv_mapping_upload_applies(self) -> bool:
+        """這份結果是 HARVEST **建圖模式**規劃出來的（看規劃當時的 coordinator，不看面板現在勾不勾）。"""
+        hv = getattr(self, '_hv_coordinator', None)
+        res = getattr(hv, 'last_result', None) if hv is not None else None
+        return (res is not None and res is getattr(self, '_dccpp_result', None)
+                and getattr(hv, 'mapping_mode', None) is not None)
+
+    def _on_hv_mapping_upload(self):
+        """建圖上傳的第一步：閘門 → 產生每架任務項目 → 背景讀回飛控參數（結果在 _on_mapping_readback_done）。
+
+        任務項目 = hv 匯出器（hv.mission_items，含每條帶 206 開／關、DO_LAND_START 後 206(0)）；
+        與「匯出航點」寫出的 .waypoints 逐項相同。
+        """
+        hv = self._hv_coordinator
+        cc = getattr(hv, 'camera_cfg', None)
+        if cc is None:
+            QMessageBox.critical(self, '航測建圖：拒絕上傳',
+                                 '這份建圖計畫沒有相機觸發設定（camera_cfg），產生不了拍照指令。請重新規劃。')
+            return
+        gate = hv_upload_gate(hv, getattr(self, '_hv_swarm_coordinator', None))
+        if not gate['uploadable']:
+            logger.error(f'[航測] 建圖閘門擋下上傳：{gate["reasons"]}')
+            QMessageBox.critical(
+                self, '航測建圖：拒絕上傳',
+                '這份計畫不能上傳：\n  ' + '\n  '.join(gate['reasons'])
+                + '\n\npreflight 的 GO_WITH_WARNINGS 不代表整區都有人拍，也不代表通過時空去衝突／能量驗證（validate）。'
+                  '請調整機隊、作業區或風之後重新規劃。')
+            return
+        worker = getattr(self, '_map_readback_worker', None)
+        if worker is not None and worker.isRunning():
+            QMessageBox.information(self, '航測建圖', '上一次的參數讀回還在進行，請等它完成。')
+            return
+        # R1 #10：只送 HUD「指令對象」選到的飛機。對應規則用**全部**連線算（選單機時機號對應不變），再篩出目標。
+        targets = list(self._target_links())
+        if not targets:
+            QMessageBox.information(self, '航測建圖', '所選的指令對象 UAV 已離線，請改選其他機或「全部」')
+            return
+        target_ids = {int(getattr(l, 'sysid_label', -1)) for l in targets}
+        uav_ids = sorted(int(k) for k in ((self._dccpp_result or {}).get('assembled_paths') or {}))
+        all_pairs, skipped = assign_links_to_uavs(self._sitl_links, uav_ids)
+        pairs = [(l, d) for l, d in all_pairs if int(l.sysid_label) in target_ids]
+        not_targeted = sorted(int(l.sysid_label) for l, _d in all_pairs if int(l.sysid_label) not in target_ids)
+        skipped = [s for s in skipped if s in target_ids]
+        busy = [int(l.sysid_label) for l, _d in pairs if int(l.sysid_label) in self._write_pending_sysids]
+        if busy:
+            QMessageBox.information(self, '航測建圖', f'UAV-{busy} 已經有一筆寫入在進行中，請等它完成後再試。')
+            return
+        # R1 #10：已解鎖／AUTO／狀態不明的飛控不換任務（可能正在飛）
+        states = [p for p in (link_flight_state_problem(l) for l, _d in pairs) if p]
+        if states:
+            logger.error(f'[航測] 擋下上傳（飛控狀態）：{states}')
+            QMessageBox.critical(self, '航測建圖：拒絕上傳',
+                                 '下列飛控不能換任務（已解鎖可能正在飛、AUTO 會改到正在執行的任務、狀態不明不猜）：\n  '
+                                 + '\n  '.join(states) + '\n\n請先上鎖、切出 AUTO 並等遙測進來後再上傳。')
+            return
+        jobs = []
+        try:
+            for link, did in pairs:
+                items = hv.mission_items(did, camera_cfg=cc)
+                jobs.append({'sysid': int(link.sysid_label), 'link': link, 'uav_id': int(did), 'items': items,
+                             'expected': hv.expected_camera_params(did, camera_cfg=cc),
+                             'airspeed_expected': mapping_expected_airspeed(hv, did, cc),
+                             'speeds': mapping_airspeed_commands(items)})
+        except Exception as e:      # noqa: BLE001 — 例如引入段值鎖不符：要說出來，不能送一份錯的任務
+            logger.error(f'[航測] 產生任務項目失敗：{e}', exc_info=True)
+            QMessageBox.critical(self, '航測建圖：拒絕上傳', f'產生任務項目失敗：{e}')
+            return
+        if not jobs:
+            QMessageBox.warning(self, '航測建圖', '沒有任何連線對得上有任務的 UAV（sysid 與機號對不起來）。')
+            return
+        if skipped:
+            logger.warning(f'[航測] 這些連線沒有對應的任務，不上傳：sysid {skipped}')
+        if not_targeted:
+            logger.info(f'[航測] 這些連線不是指令對象，這次不上傳：sysid {not_targeted}')
+        self._map_upload_jobs = jobs
+        self._map_upload_skipped = list(skipped)
+        self._map_upload_not_targeted = list(not_targeted)
+        # R1 #9：記下這批任務是哪一份計畫產生的；讀回是非同步的，回來時計畫換了就不能送
+        self._map_upload_ident = {'hv': hv, 'result': getattr(hv, 'last_result', None)}
+        self._map_write_round = 0
+        self._map_reboot_pending = {}
+        logger.info(f'[航測] 上傳前讀回 {len(jobs)} 架：' + '；'.join(
+            f'UAV-{j["sysid"]}←機 {j["uav_id"]}（{len(j["expected"])} 個相機參數＋AIRSPEED_MIN/MAX＋LOG_BITMASK／'
+            f'LOG_DISARMED）' for j in jobs))
+        self.statusBar().showMessage(f'航測建圖：讀回 {len(jobs)} 架飛控的相機、空速與日誌參數中…（不用 MAVFTP）', 0)
+        self._start_mapping_readback(jobs)
+
+    def _hv_upload_gate(self, hv) -> dict:
+        """建圖上傳閘門（見模組層級 :func:`hv_upload_gate`：mapping_gate ＋ validate 的原因）。"""
+        return hv_upload_gate(hv, getattr(self, '_hv_swarm_coordinator', None))
+
+    def _mapping_upload_stale_reason(self):
+        """R1 #9：讀回（非同步，最壞約 27 s）回來時，這批任務的計畫還是不是目前的計畫？是 ⇒ None；否則回原因。"""
+        ident = getattr(self, '_map_upload_ident', None) or {}
+        hv = getattr(self, '_hv_coordinator', None)
+        if not ident or hv is None or hv is not ident.get('hv'):
+            return '讀回期間重新規劃過（規劃器物件已換）'
+        if getattr(hv, 'last_result', None) is not ident.get('result'):
+            return '讀回期間重新規劃過（計畫結果已換）'
+        if not self._hv_mapping_upload_applies():
+            return '目前畫面上的結果已不是這份建圖計畫'
+        return None
+
+    def _abort_stale_mapping_upload(self) -> bool:
+        """計畫在讀回期間換了 ⇒ 取消這批上傳（大聲說）並回 True。"""
+        why = self._mapping_upload_stale_reason()
+        if not why:
+            return False
+        logger.error(f'[航測] 取消上傳：{why}；讀回開始時的那份任務不再送出')
+        self._map_upload_jobs = []
+        self.statusBar().showMessage('航測建圖：計畫已變更，這次上傳取消', 10000)
+        QMessageBox.critical(self, '航測建圖：計畫已變更，取消上傳',
+                             f'{why}。\n\n讀回開始時的那份任務**沒有**送出（送出去會跟畫面上的新計畫不一致）。'
+                             '請確認新計畫後再按一次「上傳飛控」。')
+        return True
+
+    def _start_mapping_readback(self, jobs):
+        """讀回在工作執行緒跑（read_params 會同步等飛控回覆，最壞 9 s／架）；結果交回 GUI 執行緒。"""
+        w = MappingReadbackWorker(jobs, parent=None)
+        w.done.connect(self._on_mapping_readback_done)
+        self._map_readback_worker = w
+        w.start()
+
+    def _on_mapping_readback_done(self, results: dict):
+        """讀回比對完成：全部相符 ⇒ 上傳；不符 ⇒ 擋下、列出、問要不要寫入（寫完重讀重比一次）。"""
+        jobs = list(getattr(self, '_map_upload_jobs', None) or [])
+        for s, r in sorted(results.items()):
+            logger.info(f'[航測] UAV-{s} 讀回：' + '、'.join(
+                f'{row["name"]}={_fmt_param(row["actual"])}{"" if row["ok"] else "（不符）"}'
+                for row in r.get('rows', [])) + (f'；讀回失敗 {r["error"]}' if r.get('error') else ''))
+        # R1 #9：讀回期間重新規劃過 ⇒ 這批任務是舊計畫的，不送
+        if self._abort_stale_mapping_upload():
+            return
+        # LOG_DISARMED 等資訊列（不擋）：上傳報告要顯示
+        self._map_readback_info = {int(s): [row['info'] for row in r.get('rows', []) if row.get('info')]
+                                   for s, r in results.items()}
+        bad = {s: r for s, r in results.items()
+               if r.get('error') or any(not row['ok'] for row in r.get('rows', []))}
+        if not bad:
+            reboot = getattr(self, '_map_reboot_pending', None) or {}
+            if reboot:
+                names = sorted({n for v in reboot.values() for n in v})
+                self._map_reboot_pending = {}
+                QMessageBox.warning(
+                    self, '航測建圖：要重開飛控',
+                    f'參數已寫入並讀回相符，但 {"、".join(names)} 要**重開飛控**才生效'
+                    f'（UAV-{sorted(reboot)}）。\n\n這次不上傳任務：請重開飛控、重新連線後再按「上傳飛控」。')
+                self.statusBar().showMessage('航測建圖：參數已寫入，等待重開飛控後再上傳', 10000)
+                return
+            self._upload_mapping_missions(jobs)
+            return
+        text = mapping_mismatch_text(bad)
+        logger.error(f'[航測] 讀回不符，擋下上傳：\n{text}')
+        self.statusBar().showMessage('航測建圖：飛控參數與任務不符，已擋下上傳', 10000)
+        if int(getattr(self, '_map_write_round', 0) or 0) >= 1:
+            QMessageBox.critical(self, '航測建圖：寫入後讀回仍不符',
+                                 '已寫入一次但讀回仍不符，上傳取消：\n\n' + text)
+            return
+        if not self._ask_write_mapping_params(bad):
+            logger.info('[航測] 使用者不寫入參數，上傳取消')
+            return
+        # 對話框開著時規劃可能在背景完成 ⇒ 寫參數前再確認一次計畫沒換
+        if self._abort_stale_mapping_upload():
+            return
+        written = self._write_mapping_params(bad)
+        if not written:
+            QMessageBox.warning(self, '航測建圖：無法自動修正',
+                                '不符的項目都不能自動寫入，上傳取消：\n\n' + text)
+            return
+        self._map_write_round = 1
+        self._map_reboot_pending = mapping_reboot_names(bad)
+        self.statusBar().showMessage(f'航測建圖：已寫入 {len(written)} 個參數，重新讀回比對中…', 0)
+        self._start_mapping_readback(jobs)
+
+    def _ask_write_mapping_params(self, bad: dict) -> bool:
+        """不符清單對話框：「寫入這些參數」（只有可寫的不符時才有）／「取消上傳」。回傳是否寫入。"""
+        writable = any(not row['ok'] and row['writable'] for r in bad.values() for row in r.get('rows', []))
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle('航測建圖：飛控參數不符，已擋下上傳')
+        box.setText('下列參數與這份任務要求的不一致（名稱／預期／實際）：')
+        box.setInformativeText(mapping_mismatch_text(bad))
+        write_btn = box.addButton('寫入這些參數', QMessageBox.ButtonRole.AcceptRole) if writable else None
+        box.addButton('取消上傳', QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        return write_btn is not None and box.clickedButton() is write_btn
+
+    def _write_mapping_params(self, bad: dict) -> list:
+        """把可寫的不符項寫成 ``write_value``（相機參數 = 預期值；LOG_BITMASK = 讀回值 OR bit 12）（既有 set_param
+        路徑）；``writable=False`` 的（空速包絡、在用的 SERVOn_FUNCTION、讀不到的 LOG_BITMASK）一律不寫。
+        回傳 [(sysid, 名稱, 值), ...]。"""
+        links = {int(j['sysid']): j['link'] for j in (getattr(self, '_map_upload_jobs', None) or [])}
+        written = []
+        for sysid, r in sorted(bad.items()):
+            link = links.get(int(sysid))
+            if link is None:
+                continue
+            for row in r.get('rows', []):
+                if row['ok'] or not row['writable']:
+                    continue
+                value = float(row.get('write_value', row['expected']))
+                ptype = _PTYPE_NAMES.get(int(row.get('ptype') or 0), 'REAL32')
+                link.set_param(row['name'], value, ptype)
+                written.append((int(sysid), row['name'], value))
+                logger.warning(f'[航測] UAV-{sysid} 寫入 {row["name"]} = {value:g}'
+                               f'（原本 {_fmt_param(row["actual"])}）')
+        return written
+
+    def _upload_mapping_missions(self, jobs):
+        """讀回全部相符 ⇒ 逐架 upload_mission_items(verify=True)；勾了 tlog 就先開始記錄。"""
+        params = {}
+        try:
+            params = self.vtol_recon_panel.get_params() or {}
+        except Exception:                  # noqa: BLE001
+            params = {}
+        tlog_on = bool(params.get('hv_map_tlog'))
+        from hv_dccpp.integration.aeroplan_adapter import expected_photo_count
+        hv = self._hv_coordinator
+        # R1 #10：讀回花了好幾秒 ⇒ 送出前再看一次飛控狀態（這期間有人解鎖／切 AUTO 就不換任務）
+        states = [p for p in (link_flight_state_problem(j['link']) for j in jobs) if p]
+        if states:
+            logger.error(f'[航測] 送出前飛控狀態變了，取消上傳：{states}')
+            QMessageBox.critical(self, '航測建圖：取消上傳',
+                                 '讀回完成時下列飛控已不能換任務：\n  ' + '\n  '.join(states)
+                                 + '\n\n這次沒有送出任何任務。')
+            return
+        offsets, off_src = harvest_takeoff_offsets(hv)
+        info = getattr(self, '_map_readback_info', None) or {}
+        self._map_photo_stats = {}
+        lines, problems, sent = [], [], []
+        for job in jobs:
+            link, sysid, did, items = job['link'], int(job['sysid']), int(job['uav_id']), job['items']
+            if tlog_on:
+                try:
+                    path = link.start_tlog(mapping_tlog_path(f'UAV-{sysid}'))
+                    logger.info(f'[航測] UAV-{sysid} tlog 開始：{path}')
+                except Exception as e:      # noqa: BLE001
+                    problems.append(f'UAV-{sysid} tlog 開不了：{e}')
+            self._write_pending_sysids.add(sysid)
+            try:
+                link.upload_mission_items(items, verify=True)
+            except Exception as e:          # noqa: BLE001
+                self._write_pending_sysids.discard(sysid)
+                problems.append(f'UAV-{sysid} 送出寫入請求失敗：{e}')
+                logger.error(f'[航測] UAV-{sysid} 送出寫入請求失敗：{e}', exc_info=True)
+                continue
+            n_on = sum(1 for it in items if int(it['command']) == 206 and float(it['param1']) > 0.0)
+            n_off = sum(1 for it in items if int(it['command']) == 206 and float(it['param1']) == 0.0)
+            n_exp = expected_photo_count(items)
+            self._map_photo_stats[sysid] = {'expected': n_exp, 'taken': 0, 'fb_missing': 0, 'resets': 0,
+                                            'uav': did, 'link': link}
+            off = offsets.get(did)
+            off_txt = f'起飛時程 T+{off:.0f} s' if off is not None else '起飛時程：未知（不能依時程放行）'
+            extra = ''.join(f'；{t}' for t in info.get(sysid, []))
+            lines.append(f'UAV-{sysid} ← 機 {did}（{hv.id_map.get(did, "?")}）：{off_txt}、{len(items)} 項、'
+                         f'206 開 {n_on} 筆／關 {n_off} 筆、預估 {n_exp} 張{extra}')
+            sent.append((sysid, did))
+        self._update_write_wp_enabled()
+        self._refresh_mapping_live_status()
+        for p in problems:
+            logger.error(f'[航測] {p}')
+        logger.info('[航測] 已送出建圖任務：' + '；'.join(lines))
+        entries, _src = record_release_schedule(self, hv, sent, mapping=True) if sent else ({}, off_src)
+        skipped = getattr(self, '_map_upload_skipped', None) or []
+        not_targeted = getattr(self, '_map_upload_not_targeted', None) or []
+        text = ('飛控相機、空速與日誌參數讀回相符，已送出寫入（寫完會逐項讀回驗證，結果看狀態列）：\n  '
+                + '\n  '.join(lines))
+        text += '\n\n' + release_report_text(getattr(self, '_hv_release_schedule', None), entries, off_src,
+                                               mapping=True)
+        if skipped:
+            text += f'\n\n沒有對應任務、沒上傳的連線：sysid {skipped}'
+        if not_targeted:
+            text += f'\n\n不是 HUD 指令對象、這次沒上傳的連線：sysid {not_targeted}'
+        if problems:
+            text += '\n\n' + '\n'.join(problems)
+        self.statusBar().showMessage(f'航測建圖：已送出 {len(lines)} 架任務寫入', 10000)
+        QMessageBox.information(self, '航測建圖：已送出上傳', text)
+
+    def _on_camera_feedback(self, sysid: int, payload: dict):
+        """CAMERA_FEEDBACK → 「已拍 N / 預估 M」。
+
+        ⚠ 張數用 payload['new_photos']（以 img_idx 增量算，鏈路忙時多則訊息會合併）加總，**不是**訊號次數；
+        payload['gap'] 是**沒收到的回授訊息**，照片照常計入觸發數，不是漏拍。
+        只有建圖上傳過的機才記（不建圖的使用者畫面不變）。條帶層級的「零張」警報要 MISSION_CURRENT，沒做。
+        """
+        st = (getattr(self, '_map_photo_stats', None) or {}).get(int(sysid))
+        if st is None:
+            return
+        st['taken'] += int(payload.get('new_photos') or 0)
+        gap = payload.get('gap')
+        if gap:
+            st['fb_missing'] += (int(gap[1]) - int(gap[0])) % 0x10000 + 1
+        if payload.get('reset'):
+            st['resets'] += 1
+        self._refresh_mapping_live_status()
+
+    def _refresh_mapping_live_status(self):
+        stats = getattr(self, '_map_photo_stats', None) or {}
+        lines = []
+        for sysid in sorted(stats):
+            s = stats[sysid]
+            line = f'UAV-{sysid}：已拍 {s["taken"]} / 預估 {s["expected"]}'
+            if s['fb_missing']:
+                line += (f'（回授訊息漏收 {s["fb_missing"]} 則：CAMERA_FEEDBACK 沒收到，'
+                         f'照片照常計入觸發數，不是漏拍）')
+            if s['resets']:
+                line += f'（飛控重開機 {s["resets"]} 次，觸發計數從頭算）'
+            link = s.get('link')
+            if link is not None and hasattr(link, 'tlog_status'):
+                try:
+                    err = (link.tlog_status() or {}).get('error')
+                except Exception:          # noqa: BLE001
+                    err = None
+                if err:
+                    line += f'（tlog 錯誤：{err}）'
+            lines.append(line)
+        panel = getattr(self, 'vtol_recon_panel', None)
+        if panel is not None and hasattr(panel, 'set_mapping_live_status'):
+            panel.set_mapping_live_status('\n'.join(lines))
 
     def _on_main_tab_changed(self, index: int):
         """切換右側分頁時，調整任務面板顯示內容
@@ -7764,12 +9821,21 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                                 "有效條帶間距為 0，請檢查相機 FOV / 重疊率設定。")
             panel.set_plan_status("感測器參數無效")
             return
+        # 起降場由使用者決定（2026-10-08）：沒選就不規劃。以前會默默用作業區質心，
+        # 結果起降坪在作業區正中央、三台的進場與返場全擠在中間（2026-10-07 回報）。
+        if getattr(self, 'home_point', None) is None:
+            QMessageBox.warning(
+                self, "尚未選擇起降場",
+                "請先在「1. 偵察區域」按「從地圖選起降場」，再到地圖上點出起降場位置。\n"
+                "各機的起降坪會排在你點的位置，任務結束也降回那裡。")
+            panel.set_plan_status("尚未選擇起降場")
+            return
 
         use_hv = bool(params.get('hv_dccpp'))
         logger.info(f"[VTOL 偵察] 規劃演算法 = {params.get('planner', 'dccpp')}"
                     f"（{'背景執行緒' if use_hv else '同步'}）")
         panel.set_plan_status(
-            ("HV-DCCPP 規劃中 …（大情境需數十秒）" if use_hv else "DCCPP 規劃中 …"))
+            ("HARVEST 規劃中 …（大情境需數十秒）" if use_hv else "DCCPP 規劃中 …"))
         # ★ 結果一律由 on_done 接手：HV 走背景執行緒，這個函式回來時還沒有結果。
         #   以前這裡直接讀 self._dccpp_result，那在非同步下會讀到上一次的值而且不報錯。
         self._on_dccpp_coverage_requested(
@@ -7798,9 +9864,14 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                     cruise_speed_ms=float(params.get('speed', 18.0)),
                     turn_radius_m=float(params.get('turn_radius', 60.0)),
                 )
+                from ui.widgets.cesium_map_widget import swarm_drone_colors
+                _ap = result.get('assembled_paths') or {}
                 cesium.draw_vtol_swarm_paths(
-                    _viz.to_cesium_data(result.get('assembled_paths') or {},
-                                        float(params.get('altitude', 100.0)))
+                    _viz.to_cesium_data(
+                        _ap, float(params.get('altitude', 100.0)),
+                        # 與 3D 圖例同一份配色，否則條帶顏色和圖例對不上
+                        colors=swarm_drone_colors(
+                            (uid, getattr(ap, 'cls', None)) for uid, ap in _ap.items()))
                 )
         except Exception as _ve:
             logger.warning(f'[VTOL 偵察] 3D 視覺化失敗: {_ve}', exc_info=True)
@@ -7851,6 +9922,50 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         panel.set_plan_result(rows, summary)
         logger.info(f'[VTOL 偵察] {summary}')
 
+        # ── 航測建圖：有效值與上傳閘門回填到「航測建圖」群組（只在這份結果是建圖模式規劃的時候）──
+        _hv = getattr(self, '_hv_coordinator', None)
+        if (_hv is not None and getattr(_hv, 'last_result', None) is result
+                and getattr(_hv, 'mapping_mode', None) is not None):
+            self._show_mapping_plan_status(_hv)
+
+    def _show_mapping_plan_status(self, hv):
+        """建圖有效值（觸發間隔、引入段、逐構型條帶間距與偏流、起飛時程）＋ 上傳閘門 → 偵察頁；不可上傳時大聲說。"""
+        gate = hv_upload_gate(hv, getattr(self, '_hv_swarm_coordinator', None))
+        cc = getattr(hv, 'camera_cfg', None)
+        parts = []
+        if cc is not None:
+            parts.append(f'CAM1_INTRVAL_MIN {cc.interval_min_s:.2f} s（規劃拍照率 {1.0 / cc.interval_min_s:.3f} Hz）、'
+                         f'引入段 {float(hv.mapping_mode.lead_in_m):g} m、後端 {cc.backend}'
+                         + ('（只適用 SITL；實機請用 relay）' if cc.backend == 'servo' else ''))
+        for c, m in sorted(((getattr(hv, 'mapping_effective', None) or {}).get('per_class') or {}).items()):
+            if m:
+                parts.append(f'構型 {c}：條帶間距 {float(m.get("s_m", float("nan"))):.1f} m、'
+                             f'偏流 {float(m.get("crab_deg", 0.0)):.1f}°')
+        try:
+            offs, _src = harvest_takeoff_offsets(hv)
+        except Exception as e:      # noqa: BLE001
+            offs, _src = {}, f'取不到（{e}）'
+        if offs:
+            spread = max(offs.values()) - min(offs.values())
+            parts.append('起飛時程：' + '、'.join(f'機 {d} T+{o:.0f} s' for d, o in sorted(offs.items(),
+                                                                                    key=lambda kv: (kv[1], kv[0])))
+                         + ('（不同 ⇒ 上傳後用 HUD 的「依時程放行」，一鍵起飛會被擋）'
+                            if spread > TAKEOFF_STAGGER_TOL_S else ''))
+        if gate['uploadable']:
+            parts.append('建圖閘門：可上傳')
+        else:
+            parts.append('建圖閘門：不可上傳（' + '；'.join(gate['reasons']) + '）')
+        text = '\n'.join(parts)
+        logger.info(f'[航測] 規劃結果：{text}')
+        panel = getattr(self, 'vtol_recon_panel', None)
+        if panel is not None and hasattr(panel, 'set_mapping_plan_status'):
+            panel.set_mapping_plan_status(text, ok=gate['uploadable'])
+        if not gate['uploadable']:
+            QMessageBox.warning(self, '航測建圖：這份計畫不能上傳',
+                                '這份計畫不能上傳：\n  ' + '\n  '.join(gate['reasons'])
+                                + '\n\n（preflight 的 GO_WITH_WARNINGS 不代表整區都有人拍，'
+                                  '也不代表通過時空去衝突／能量驗證）')
+
     @staticmethod
     def _polyline_length_m(pts: list) -> float:
         """折線長度（公尺），用等距圓柱近似。"""
@@ -7870,18 +9985,45 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         if not result:
             QMessageBox.warning(self, "尚無規劃結果", "請先執行 DCCPP 偵察規劃。")
             return
-        # ⚠ 只取**作業段（OPERATION）**的航點。
-        #   論文 §2.3 明確定義：coverage 只在 Operation Path 上有效，
-        #   Entry / Transfer / 起降段感測器不計覆蓋。把全部航點都拿去驗算
-        #   等於把轉場與爬升也算成掃過，覆蓋率會虛高。
-        from core.trajectory.dccpp_path_assembler import SegmentLabel
+        # ⚠ 只取**相機真的開著**的航點。論文 §2.3 定義 coverage 只在 Operation
+        #   Path 上有效，把全部航點拿去驗算等於把轉場與爬升也算成掃過、覆蓋率虛高。
+        #
+        # ⚠⚠⚠ 但判準必須是 `sensor_on`，**不是** `segment_type == OPERATION`。
+        #   兩個規劃器的段落標籤慣例不同，實測同一份幾何：
+        #       DCCPP  73 個航點 → OPERATION 14 個（19.2%）
+        #       HARVEST 306 個   → OPERATION 16 個（**5.2%**，170 個標成 TRANSFER）
+        #   用 OPERATION 篩選驗算，HARVEST 從 **100.00%** 掉到 **75.10%**，
+        #   而 DCCPP 只從 76.68% 掉到 74.04% ⇒ **同一把尺對兩個規劃器不對等**。
+        #   使用者因此在真實機場幾何上量到 66.07%，差點據此判定演算法有問題。
+        #   相機開沒開才是語意上正確且與規劃器無關的判準（vendored 修改 #5 把
+        #   `sensor_on` 帶進 assembled waypoints）。
+        #   ⚠ 舊規劃器不帶這個欄位 ⇒ 沒有任何一點有 `sensor_on` 時退回 OPERATION，
+        #     並在 log 說明用了哪一種判準（靜默退回會讓人以為兩邊是同一把尺量的）。
+        # ⚠⚠⚠ **一定要量會被飛出去的那條路徑**（assembled_paths＝縮點後），
+        #   不可以改讀規劃器原生的未縮點計畫。我一度那樣改，但那會把一個**真的**
+        #   缺陷變成看不見的：
+        #     `deconflict.py:934` 插入的延遲盤旋，其 ORBIT 航點是條帶終點的複本；
+        #     `ardupilot.py:394` 直線段刻意不輸出自己的終點（指望那個複本）；
+        #     `ardupilot.py:361` 卻在轉 loiter 指令時把複本座標改成盤旋**圓心**。
+        #   ⇒ 上傳序列變成「條帶西端 → 圓心 → 條帶東端」，條帶被斜掉 r_orb=120 m，
+        #     實測 (c) 格漏掃 87 851 m²（0.4393%），而原生計畫是精確的 100.0000%。
+        #   量原生計畫會回報 100% ⇒ 假綠燈。**驗算的對象必須是產物，不是意圖。**
+        # ⚠⚠⚠ 成像航點要當成**腿**量，不是把航點連起來（2026-10-09 使用者問「為何 HARVEST 覆蓋率驗算
+        #   都那麼差」）：縮點後每條條帶只剩起點帶 `sensor_on`、終點是別的標籤 ⇒ 只取 `sensor_on`
+        #   的航點＝每條條帶一個孤立點，驗算再把這些點連成一條跨過整區的鋸齒線。同一份計畫（4 角點、
+        #   1A+1B）：GUI 75.06%（10 個「成像航點」）、實際飛出去的路徑 **100.00%**（3585/3585 格）。
+        #   `imaging_path` 依「腿歸出發點」取 sensor_on 航點＋它的下一個航點，不相連的條帶以 None 斷開。
+        from mission.path_segments import imaging_path
+        aps = (result.get('assembled_paths') or {})
         paths = {}
-        for uid, ap in (result.get('assembled_paths') or {}).items():
-            wps = getattr(ap, 'waypoints', None) or []
-            op = [w for w in wps
-                  if getattr(getattr(w, 'segment_type', None), 'name', '') ==
-                  SegmentLabel.OPERATION.name]
-            paths[int(uid)] = [(float(w.lat), float(w.lon)) for w in op]
+        criterion = ''
+        for uid, ap in aps.items():
+            paths[int(uid)], criterion = imaging_path(ap)
+        n_pts = sum(1 for v in paths.values() for p in v if p is not None)
+        n_runs = sum(1 for v in paths.values() if any(p is not None for p in v)) + \
+            sum(1 for v in paths.values() for p in v if p is None)
+        logger.info(f'[VTOL 偵察] 覆蓋率驗算判準：{criterion}；'
+                    f'取到 {n_runs} 段成像線（{n_pts} 個點）')
         if not any(paths.values()):
             QMessageBox.warning(
                 self, "無作業段航跡",
@@ -8177,7 +10319,10 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 vehicle=vehicle, count=count,
                 lat=lat, lon=lon, alt=0.0, heading=spawn_heading,
                 spacing_deg=0.0008,
-                homes=per_uav_homes if per_uav_homes else None,
+                # ⚠ 共用起降場時四台的起飛點是同一個座標 ⇒ 先排成一列，
+                #   否則四台 SITL 會生在同一點上互相重疊（見 spread_colocated_homes）。
+                homes=(spread_colocated_homes(per_uav_homes, logger_=logger)
+                       if per_uav_homes else None),
                 instance_configs=instance_configs,
                 auto_firewall=auto_firewall,
             )
@@ -8655,7 +10800,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 return
         except Exception:
             pass
-        # HV-DCCPP 規劃執行緒：不能殺、不能丟著不管，只能寄放（見 _hv_park_running_worker）。
+        # HARVEST 規劃執行緒：不能殺、不能丟著不管，只能寄放（見 _hv_park_running_worker）。
         try:
             _hv_worker = getattr(self, '_hv_worker', None)
             if _hv_worker is not None:
@@ -8670,14 +10815,44 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 self._hv_worker = None
         except Exception:
             pass
+        # 找平坦位置的背景執行緒：下載/掃描停不下來，放棄結果並等它跑完（在還在跑的 QThread 上解構是 qFatal）
+        try:
+            _fw = getattr(self, '_flat_worker', None)
+            if _fw is not None and _fw.isRunning():
+                _fw.stop()
+                _fw.wait(30000)
+        except Exception:
+            pass
+        # 依時程放行還有飛機在倒數 ⇒ 關視窗就不會再放行了，取消並寫 log（不留一個看不到的計時器）
+        try:
+            _rel = getattr(self, '_release', None)
+            if _rel is not None and _rel.active:
+                _rel.cancel()
+                logger.warning('[放行] 視窗關閉：還在倒數的飛機已取消放行（不會起飛）')
+        except Exception:
+            pass
         # 確保 SITL 執行緒安全停止
         for _link in self._sitl_links:
+            _stop_link_tlog(_link)
             try:
                 _link.stop()
                 _link.wait(2000)
             except Exception:
                 pass
         self._sitl_links.clear()
+        # 航測建圖的參數讀回執行緒：鏈路一停 read_params 就醒（≤ 0.25 s），等它結束再讓 Qt 解構
+        #   （在還在跑的 QThread 上解構是 qFatal）
+        try:
+            _mw = getattr(self, '_map_readback_worker', None)
+            if _mw is not None:
+                try:
+                    _mw.done.disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+                if _mw.isRunning():
+                    _mw.wait(15000)
+        except Exception:
+            pass
         # 停止本地 SITL 子行程
         if self._sitl_launcher is not None:
             try:

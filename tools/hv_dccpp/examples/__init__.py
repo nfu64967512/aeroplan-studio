@@ -1,1 +1,1 @@
-"""HV-DCCPP example scripts (run as `python examples/<name>.py` from the project root)."""
+"""HARVEST example scripts (run as `python examples/<name>.py` from the project root)."""

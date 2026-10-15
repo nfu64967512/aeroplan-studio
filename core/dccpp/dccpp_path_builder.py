@@ -69,13 +69,79 @@ class BuiltPath:
     entry_length_m: float = 0.0
     operation_length_m: float = 0.0
     transfer_length_m: float = 0.0
+    #: 起降段航跡長度。⚠ 跑道起降的階梯點是既有 golden 的一部分，沿用舊行為
+    #: 不累加；只有 VTOL 剖面會填這兩欄。不累加的話 total_length_m 少算整段
+    #: 起降，makespan 就會比最慢那一架還短。
+    takeoff_length_m: float = 0.0
+    landing_length_m: float = 0.0
 
     @property
     def total_length_m(self) -> float:
-        return self.entry_length_m + self.operation_length_m + self.transfer_length_m
+        return (self.entry_length_m + self.operation_length_m
+                + self.transfer_length_m
+                + self.takeoff_length_m + self.landing_length_m)
 
     def to_latlon(self) -> List[Tuple[float, float]]:
         return [w.to_tuple() for w in self.waypoints]
+
+
+# ============================================================
+# 飛行時間估算
+# ============================================================
+
+#: 水平位移小於這個值就當成「原地垂直」段（多旋翼懸停爬升／下降）。
+#: 起降剖面的垂直段本來就是同一組經緯度、水平位移恰好 0；留 1 m 是給
+#: 下游的重採樣與避撞偏移一點浮點餘裕。
+_HOVER_LEG_EPS_M = 1.0
+
+
+def estimate_flight_time_s(path, cruise_speed_mps: float,
+                           vertical_speed_mps: float) -> float:
+    """估算一條航線的飛行時間（秒）。
+
+    每一段依它**實際上是哪一種飛行**計時：
+
+      * 純垂直段（水平位移 ≈ 0）＝ 多旋翼懸停爬升／下降 ⇒ ``垂直距離 / 垂直速度``
+      * 其餘 ⇒ ``三維航跡長度 / 巡航速度``
+
+    ⚠ 為什麼不能直接用 ``total_length_m / cruise_speed``：VTOL 的起降段是**純垂直**的，
+    水平長度 0、垂直 60 m。用巡航速度計時會把 2.5 m/s 的懸停爬升算成 40 m/s
+    ——60 m 的爬升從 24 秒變成 1.5 秒，一趟起降就低估了 45 秒。
+
+    ⚠⚠ 為什麼不是每段都取 ``max(水平/巡航, 垂直/垂直速度)``：那樣會把**固定翼**
+    爬升段也用懸停爬升率計時。實測 40 m/s、TECS 爬升率 5 m/s 的爬升段坡度是 8:1，
+    而 ``max`` 的分界在 16:1 ⇒ 整段固定翼爬升被當成懸停，一趟起降多算 56 秒，
+    而且「轉換高度拉高」會變成任務時間**變短**（固定翼爬升段縮短的量比垂直段
+    增加的量還大）—— 方向都反了。固定翼是沿航跡以巡航速度飛，不是垂直爬升。
+
+    這支與 `ui/main_window.py` 偵察頁摘要表、makespan 顯示共用，兩邊才不會出現兩個數字。
+
+    Args:
+        path:               具 ``waypoints``（每點有 lat/lon/alt）的路徑物件
+        cruise_speed_mps:   巡航（水平）速度，m/s
+        vertical_speed_mps: 垂直速度（多旋翼段爬升／下降率），m/s
+
+    Returns:
+        秒。航點少於 2 個時回 0.0。
+    """
+    wps = list(getattr(path, 'waypoints', None) or [])
+    if len(wps) < 2:
+        return 0.0
+    v_h = max(float(cruise_speed_mps), 1e-6)
+    v_v = max(float(vertical_speed_mps), 1e-6)
+    total = 0.0
+    for a, b in zip(wps, wps[1:]):
+        lat1, lon1 = float(a.lat), float(a.lon)
+        lat2, lon2 = float(b.lat), float(b.lon)
+        d_north = (lat2 - lat1) * 111320.0
+        d_east = (lon2 - lon1) * 111320.0 * math.cos(math.radians((lat1 + lat2) / 2.0))
+        horiz = math.hypot(d_north, d_east)
+        vert = abs(float(getattr(b, 'alt', 0.0)) - float(getattr(a, 'alt', 0.0)))
+        if horiz <= _HOVER_LEG_EPS_M:
+            total += vert / v_v          # 多旋翼段：垂直爬升／下降
+        else:
+            total += math.hypot(horiz, vert) / v_h   # 固定翼段：沿航跡巡航
+    return total
 
 
 # ============================================================
@@ -418,6 +484,194 @@ class DCCPPPathBuilder:
             segment_type=SegmentLabel.LANDING,
         ))
         built.waypoints.extend(landing_wps)
+
+    # ────────────────────────────────────────────────────────
+    # 4+1 QuadPlane 垂直起降剖面
+    # ────────────────────────────────────────────────────────
+    # ⚠️⚠️⚠️ 這兩支與上面的跑道版**不是**同一件事，不可互相退回：
+    #   跑道版第一段一定有水平位移（滑跑），VTOL 版第一段一定沒有（懸停爬升）。
+    #   幾何全部來自 core.dccpp.vtol_profile.VTOLProfile，那裡的常數與
+    #   mission/sitl_launcher.generate_vtol_params() 寫進 SITL 的值同步。
+
+    @staticmethod
+    def _bearing_offset(lat: float, lon: float,
+                        bearing_compass_deg: float, dist_m: float):
+        """沿 compass 方位角平移 dist_m。
+
+        用與 :meth:`prepend_takeoff` 相同的平面近似（每度 111320 m），
+        兩條路徑的座標慣例才不會各說各話。
+        """
+        rad = math.radians(bearing_compass_deg)
+        cos_lat = max(math.cos(math.radians(lat)), 1e-6)
+        return (lat + dist_m * math.cos(rad) / 111320.0,
+                lon + dist_m * math.sin(rad) / (111320.0 * cos_lat))
+
+    @staticmethod
+    def _polyline_3d_length_m(wps: List["BuiltWaypoint"]) -> float:
+        """航點列的三維航跡長度。
+
+        ⚠ 垂直段的水平長度是 0，只用水平距離累加會把整段懸停爬升算成 0 m。
+        """
+        total = 0.0
+        for a, b in zip(wps, wps[1:]):
+            cos_lat = math.cos(math.radians((a.lat + b.lat) / 2.0))
+            dN = (b.lat - a.lat) * 111320.0
+            dE = (b.lon - a.lon) * 111320.0 * cos_lat
+            dU = b.alt - a.alt
+            total += math.sqrt(dN * dN + dE * dE + dU * dU)
+        return total
+
+    def _climb_steps(self, cruise_alt: float) -> int:
+        """階梯段數，與跑道版同一條規則（每段約 25 m，夾在 3–6 段）。"""
+        return max(3, min(6, int(round(float(cruise_alt) / 25.0))))
+
+    def prepend_vtol_takeoff(
+        self,
+        built: "BuiltPath",
+        home_lat: float,
+        home_lon: float,
+        bearing_compass_deg: float,
+        transition_alt_m: float,
+        cruise_speed_mps: Optional[float] = None,
+        cruise_alt_m: Optional[float] = None,
+        climb_path_angle_deg: Optional[float] = None,
+    ) -> None:
+        """在最前面插入 4+1 QuadPlane 的垂直起飛剖面。
+
+        產生的 TAKEOFF 航點依序是::
+
+            [0] Home 地面 (alt=0)
+            [1] Home 正上方 (alt=轉換高度)      ← 純垂直，與 [0] 同經緯度
+            [2] 前向過渡終點 (alt=轉換高度)      ← 等高，長度隨巡航速度變
+            [3..] 固定翼階梯爬升 → 巡航高度
+
+        匯出時 [0] 變 DO_SET_HOME、垂直段變 NAV_VTOL_TAKEOFF。
+
+        Args:
+            bearing_compass_deg: 起飛離場方位角（0=北，順時針）
+            transition_alt_m:    MC→FW 轉換高度（面板「轉換高度」）
+            cruise_speed_mps:    固定翼段巡航空速；``None`` 用飛控預設
+            cruise_alt_m:        巡航高度；``None`` 用建構器的 default_altitude
+            climb_path_angle_deg: 機體實際爬升航跡角；``None`` 才退回飛控
+                                 ``TECS_CLMB_MAX``（兩者水平距離差約 4 倍）
+        """
+        from core.dccpp.vtol_profile import AIRSPEED_CRUISE, VTOLProfile
+
+        cruise_alt = float(self.alt if cruise_alt_m is None else cruise_alt_m)
+        speed = float(AIRSPEED_CRUISE if cruise_speed_mps is None else cruise_speed_mps)
+        prof = VTOLProfile(
+            transition_alt_m=float(transition_alt_m),
+            cruise_alt_m=cruise_alt,
+            cruise_speed_mps=speed,
+            climb_path_angle_deg=climb_path_angle_deg,
+        )
+        hdg = float(bearing_compass_deg) % 360.0
+
+        def _wp(lat, lon, alt):
+            return BuiltWaypoint(lat=lat, lon=lon, alt=alt,
+                                 heading_compass_deg=hdg,
+                                 segment_type=SegmentLabel.TAKEOFF)
+
+        # [0][1] 純垂直：同經緯度，只有高度不同
+        wps = [_wp(home_lat, home_lon, 0.0),
+               _wp(home_lat, home_lon, prof.transition_alt_m)]
+
+        # [2] 前向過渡：等高
+        d_trans = prof.forward_transition_m
+        t_lat, t_lon = self._bearing_offset(home_lat, home_lon, hdg, d_trans)
+        wps.append(_wp(t_lat, t_lon, prof.transition_alt_m))
+
+        # [3..] 固定翼階梯爬升
+        d_climb = prof.fw_climb_distance_m
+        if prof.climb_height_m > 0.0 and d_climb > 0.0:
+            n = self._climb_steps(cruise_alt)
+            for i in range(1, n + 1):
+                frac = i / n
+                lat_i, lon_i = self._bearing_offset(
+                    home_lat, home_lon, hdg, d_trans + d_climb * frac)
+                alt_i = prof.transition_alt_m + prof.climb_height_m * frac
+                wps.append(_wp(lat_i, lon_i, alt_i))
+        # 最後一點必須**恰好**是巡航高度（frac=1 的浮點誤差會讓 3D 圖差一點）
+        wps[-1].alt = cruise_alt
+
+        # ⚠ 累加的是「這次注入**讓航跡多出多少**」＝ 注入段本身 + 接回原路徑的那一腿。
+        #   少算接回那一腿，total_length_m 就會比實際飛的短一大截，makespan 跟著低估。
+        tail = built.waypoints
+        built.takeoff_length_m += self._polyline_3d_length_m(
+            wps + tail[:1] if tail else wps)
+        built.waypoints = wps + tail
+
+    def append_vtol_landing(
+        self,
+        built: "BuiltPath",
+        home_lat: float,
+        home_lon: float,
+        bearing_compass_deg: float,
+        transition_alt_m: float,
+        cruise_speed_mps: Optional[float] = None,
+        cruise_alt_m: Optional[float] = None,
+        descent_path_angle_deg: Optional[float] = None,
+    ) -> None:
+        """在最後追加 4+1 QuadPlane 的垂直降落剖面。
+
+        產生的 LANDING 航點依序是::
+
+            [0..] 固定翼階梯下降 → 轉換高度
+            [-3]  最終進場點 (alt=轉換高度)，距 Home = land_approach_m
+            [-2]  Home 正上方 (alt=轉換高度)   ← 3D 顯示的垂直下降段起點
+            [-1]  Home 地面 (alt=0)            ← 純垂直，與 [-2] 同經緯度
+
+        ⚠ ``land_approach_m`` 用的是**飛控自己的** AIRSPEED_CRUISE 算煞停距離，
+        不是面板速度 —— PreArm「VTOL land too short」檢查的就是它。
+        ⚠ [-2] 那個懸停點只給畫面用；匯出時必須跳過，否則
+        NAV_VTOL_LAND 的進場段會變成 0 m 而被 PreArm 擋下。
+
+        Args:
+            bearing_compass_deg: 最終進場**航向**（飛機朝這個方位飛向 Home）
+        """
+        from core.dccpp.vtol_profile import AIRSPEED_CRUISE, VTOLProfile
+
+        cruise_alt = float(self.alt if cruise_alt_m is None else cruise_alt_m)
+        speed = float(AIRSPEED_CRUISE if cruise_speed_mps is None else cruise_speed_mps)
+        prof = VTOLProfile(
+            transition_alt_m=float(transition_alt_m),
+            cruise_alt_m=cruise_alt,
+            cruise_speed_mps=speed,
+            descent_path_angle_deg=descent_path_angle_deg,
+        )
+        hdg = float(bearing_compass_deg) % 360.0
+        back = (hdg + 180.0) % 360.0        # 進場點在 Home 的「來向」
+
+        def _wp(lat, lon, alt):
+            return BuiltWaypoint(lat=lat, lon=lon, alt=alt,
+                                 heading_compass_deg=hdg,
+                                 segment_type=SegmentLabel.LANDING)
+
+        d_appr = prof.land_approach_m
+        d_desc = prof.fw_descent_distance_m
+        wps: List[BuiltWaypoint] = []
+
+        # 階梯下降：由遠而近，高度 cruise → 轉換高度
+        if prof.climb_height_m > 0.0 and d_desc > 0.0:
+            n = self._climb_steps(cruise_alt)
+            for i in range(n):
+                frac = i / n
+                lat_i, lon_i = self._bearing_offset(
+                    home_lat, home_lon, back, d_appr + d_desc * (1.0 - frac))
+                alt_i = cruise_alt - prof.climb_height_m * frac
+                wps.append(_wp(lat_i, lon_i, alt_i))
+
+        # 最終進場點（PreArm 量的就是這一段到降落點的距離）
+        a_lat, a_lon = self._bearing_offset(home_lat, home_lon, back, d_appr)
+        wps.append(_wp(a_lat, a_lon, prof.transition_alt_m))
+        # 降落點正上方的懸停點 + 觸地點：純垂直
+        wps.append(_wp(home_lat, home_lon, prof.transition_alt_m))
+        wps.append(_wp(home_lat, home_lon, 0.0))
+
+        # 同上：接上原路徑最後一點的那一腿也是這次注入造成的
+        head = built.waypoints[-1:]
+        built.landing_length_m += self._polyline_3d_length_m(head + wps)
+        built.waypoints.extend(wps)
 
     @staticmethod
     def _xy_to_latlon(transformer, x: float, y: float) -> Tuple[float, float]:

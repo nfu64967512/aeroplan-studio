@@ -1,0 +1,62 @@
+{
+ "a": "HV4W00",
+ "b": "HV4W55",
+ "same_plan_files": false,
+ "plan_wind": {
+  "HV4W00": [
+   0.0,
+   270.0
+  ],
+  "HV4W55": [
+   5.0,
+   270.0
+  ]
+ },
+ "sim_wind": {
+  "HV4W00": {
+   "spd_mps": 0.0,
+   "dir_from_deg": 270.0,
+   "turb": 0.0,
+   "profile_type": 1.0
+  },
+  "HV4W55": {
+   "spd_mps": 5.0,
+   "dir_from_deg": 270.0,
+   "turb": 0.0,
+   "profile_type": 1.0
+  }
+ },
+ "deviation_cruise_m": {
+  "A1": {
+   "n": 493,
+   "median_m": 1.0,
+   "p95_m": 20.9,
+   "max_m": 50.1
+  },
+  "B2": {
+   "n": 335,
+   "median_m": 0.5,
+   "p95_m": 21.6,
+   "max_m": 32.1
+  },
+  "B3": {
+   "n": 604,
+   "median_m": 0.5,
+   "p95_m": 20.4,
+   "max_m": 32.5
+  }
+ },
+ "worst_points_m": {
+  "east": {
+   "dev": 50.1,
+   "x": 1246.9,
+   "y": -94.3
+  },
+  "west": {
+   "dev": 24.8,
+   "x": -908.0,
+   "y": 144.8
+  }
+ },
+ "method": "nearest distance from each b point (rel_alt>100 m) to the a track densified at 1 m; ENU from WGS84 radii at HOME"
+}

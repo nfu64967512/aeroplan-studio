@@ -60,8 +60,15 @@ __all__ = [
     "resolve_sensor",
     "r_eff_for_class",
     "end_extension_for",
+    "seam_tie_overlap_m",
+    "area_edge_deltas",
     "t_use_s_for",
     "RGB_REQ_SUFFIX",
+    "CrossSet",
+    "CrossStripRefused",
+    "cross_altitude_check",
+    "cross_central_band",
+    "build_cross_set",
 ]
 
 TWO_PI: float = 2.0 * math.pi
@@ -246,17 +253,34 @@ def r_eff_for_class(ctx: DecomposeContext, cls: str, z_top_m: float | None = Non
 def end_extension_for(ctx: DecomposeContext, cls: str, sensor: Sensor, h_op_m: float,
                       z_op_m: float | None = None) -> float:
     """e_ext,c = max(V_g,max t_settle, l_B(1−o_fwd))（規格 §4.5）；cfg.e_ext_override_m（legacy 0）優先。
-    V_g,max = V_a + W（W = 作業層風速；z_op 缺省 → W_R 政策）。"""
+    V_g,max = V_a + W（W = 作業層風速；z_op 缺省 → W_R 政策）。
+    建圖模式另加 `MappingModeConfig.lead_in_m`（條帶兩端各再延長；迴轉帶、代理時間、條帶端點一致吃到）。"""
     ov = getattr(ctx.cfg, "e_ext_override_m", None)
     if ov is not None:
-        return float(ov)
+        return float(ov) + _lead_in_m(ctx)
     spec = ctx.specs[cls]
     w = float(ctx.wind.speed_at(float(z_op_m))) if z_op_m is not None else _wind_speed_for_r_eff(ctx, cls)
     v_g_max = spec.cruise_airspeed_mps + w
     try:
-        return float(sensor.end_extension_m(v_g_max, ctx.cfg.t_settle_s, h_agl_m=float(h_op_m)))  # type: ignore[call-arg]
+        e = float(sensor.end_extension_m(v_g_max, ctx.cfg.t_settle_s, h_agl_m=float(h_op_m)))  # type: ignore[call-arg]
     except TypeError:
-        return float(sensor.end_extension_m(v_g_max, ctx.cfg.t_settle_s))
+        e = float(sensor.end_extension_m(v_g_max, ctx.cfg.t_settle_s))
+    return e + _lead_in_m(ctx)
+
+
+def _lead_in_m(ctx: DecomposeContext) -> float:
+    """建圖模式的條帶引入段 lead_in_m；未開建圖模式 → 0.0（x + 0.0 == x，舊行為逐位元不變）。"""
+    mp = getattr(ctx, "mapping", None)
+    return float(mp.lead_in_m) if mp is not None else 0.0
+
+
+def seam_tie_overlap_m(ctx: DecomposeContext, widths_spacings: Sequence[tuple[float, float]]) -> float | None:
+    """建圖模式接縫重疊目標 = max(w − s)（同區塊相鄰條帶的重疊；≥ side_overlap·w，有偏流餘裕時更大）。
+    未開建圖模式或 seam_tie=False → None（呼叫端照用 δ_edge）。"""
+    mp = getattr(ctx, "mapping", None)
+    if mp is None or not mp.seam_tie:
+        return None
+    return max((float(w) - float(s) for w, s in widths_spacings), default=0.0)
 
 
 def t_use_s_for(ctx: DecomposeContext, cls: str) -> float:
@@ -1042,6 +1066,23 @@ def _class_sensor_params(ctx: DecomposeContext, area: AreaSpec, classes: Sequenc
     return out
 
 
+def area_edge_deltas(ctx: DecomposeContext, params: Sequence[tuple[Sensor, float, float, float]]
+                     ) -> tuple[float, float, float | None]:
+    """`decompose_area` 的外擴量 ``(δ_edge, δ_cell, tie)``；`params` 為 `_class_sensor_params` 的值 (sensor, h_op, w, s)。
+
+    * δ_edge = cfg.delta_edge_resolved(δ_w)，δ_w = max_c w/h·σ_z：區域外緣（simplify_outward）用，**建圖模式也不變**。
+    * δ_cell：凸分割胞外擴；未開建圖模式 = δ_edge（舊行為）；seam_tie → max(δ_edge, tie/2)——兩胞以共用邊為界各外擴
+      一半，而足跡 ⊇ 外擴後的胞（lay_strips 後置斷言）⇒ 相鄰胞足跡重疊 ≥ tie。胞外擴被 F 截住，不會長出區域外緣。
+    * tie = 建圖接縫重疊目標 max_c(w − s)（:func:`seam_tie_overlap_m`）；未開 → None。相鄰子區（別的 AreaSpec）的
+      接縫由 `decompose_area(seam_neighbors=…)` 往鄰區各長 tie/2 處理。"""
+    sigma_z = getattr(ctx.terrain, "sigma_z_m", None) or 0.0
+    delta_w = max([w / h * float(sigma_z) for (_s, h, w, _sp) in params], default=0.0)
+    delta_edge = float(ctx.cfg.delta_edge_resolved(delta_w))
+    tie = seam_tie_overlap_m(ctx, [(w, sp) for (_s, _h, w, sp) in params])
+    delta_cell = delta_edge if tie is None else max(delta_edge, 0.5 * tie)
+    return delta_edge, delta_cell, tie
+
+
 def _new_cell(cell_id: str, area: AreaSpec | Cell, poly: Polygon, ctx: DecomposeContext) -> Cell:
     a_minw, w_min = min_width_direction(poly)
     d_home = float(np.hypot(*(np.asarray(poly.centroid.coords[0]) - np.asarray(ctx.home_xy, dtype=float))))
@@ -1138,23 +1179,28 @@ def _solve_class(cell: Cell, cls: str, ctx: DecomposeContext, *, rho_sym_m: dict
 
 def decompose_area(area: AreaSpec, ctx: DecomposeContext, fleet_classes: set[str], *,
                    polygon_enu: Polygon | MultiPolygon | None = None, rho_sym_m: dict[str, float] | None = None,
-                   t_use_s: dict[str, float] | None = None, n_uav: dict[str, int] | None = None) -> list[Cell]:
+                   t_use_s: dict[str, float] | None = None, n_uav: dict[str, int] | None = None,
+                   seam_neighbors: shapely.Geometry | None = None) -> list[Cell]:
     """DECOMPOSE（規格 §7.1）：
 
     P_area = simplify_outward(Z, δ_edge, ε_dp)（D31）→ F = P_area \\ ∪(NoFly⊕b_trk)（D41）→ 逐一分量
     convex_partition（s_ref = min_c s_c、τ_merge = merge_tau_factor·min_c w_c；`convexify_whole` → 凸包）→
-    Q_q ← (Q_q ⊕ disc(δ_edge)) ∩ F → 每胞每構型（fleet_classes ∩ 感測相容）：altitude_band、候選方向、
+    Q_q ← (Q_q ⊕ disc(δ_cell)) ∩ F → 每胞每構型（fleet_classes ∩ 感測相容）：altitude_band、候選方向、
     proxy_time 前三名精鋪（build_strips + 禁區檢查）、exact_time、θ* = argmin、fit = suitability。
     關鍵字：`polygon_enu`（直接給 ctx.areas_enu 之多邊形）、`rho_sym_m`／`t_use_s`／`n_uav`（cls →；供 suitability）。
+    建圖模式 seam_tie（:func:`area_edge_deltas`）：δ_cell = max(δ_edge, tie/2)；`seam_neighbors`（其他區域之聯集，
+    plan_mission 給）時 Z ← Z ∪ ((Z ⊕ tie/2) ∩ 鄰區) ⇒ 相鄰子區各往對方長 tie/2，接縫重疊 ≥ tie；外緣仍只外擴 δ_edge。
+    未開建圖模式時 δ_cell = δ_edge、`seam_neighbors` 不使用（舊行為逐位元不變）。
     後置條件：∪ cell.polygon ⊇ Z \\ ∪(NoFly⊕b_trk)。"""
     cfg = ctx.cfg
     classes = sorted(c for c in fleet_classes if c in ctx.specs)
     params = _class_sensor_params(ctx, area, classes)
     poly_in = polygon_enu if polygon_enu is not None else _area_polygon_enu(area, ctx)
-    # δ_edge（含 DEM 寬度誤差 δ_w = w σ_z/h）、ε_dp、s_ref、τ_merge
-    sigma_z = getattr(ctx.terrain, "sigma_z_m", None) or 0.0
-    delta_w = max([w / h * float(sigma_z) for (_s, h, w, _sp) in params.values()], default=0.0)
-    delta_edge = float(cfg.delta_edge_resolved(delta_w))
+    # δ_edge（含 DEM 寬度誤差 δ_w = w σ_z/h）、ε_dp、s_ref、τ_merge；δ_cell／tie 見 area_edge_deltas
+    delta_edge, delta_cell, tie = area_edge_deltas(ctx, list(params.values()))
+    if tie is not None and tie > 0.0 and seam_neighbors is not None and not seam_neighbors.is_empty:
+        grow = shapely.intersection(shapely.buffer(poly_in, 0.5 * tie), seam_neighbors)
+        poly_in = shapely.union_all([poly_in, *_polys_of(grow, 1.0)])
     s_list = [sp for (_s, _h, _w, sp) in params.values() if sp > 0]
     w_list = [w for (_s, _h, w, _sp) in params.values() if w > 0]
     s_ref = min(s_list) if s_list else max(delta_edge, 1.0)
@@ -1180,7 +1226,7 @@ def decompose_area(area: AreaSpec, ctx: DecomposeContext, fleet_classes: set[str
     for P in _polys_of(F, 1.0):
         parts = convex_partition(P, s_ref, tau_merge, cfg.lambda_cut, cfg.lambda_n)
         for Q in parts:
-            grown = Q.buffer(delta_edge).intersection(F)
+            grown = Q.buffer(delta_cell).intersection(F)
             pieces = _polys_of(grown, 1.0)
             if not pieces:
                 continue
@@ -1245,6 +1291,11 @@ def residual_candidates(cell: Cell, ctx: DecomposeContext, k_list: list[int] | N
     alpha_a = float(cell.alpha_rad["A"])
     origin_a = np.asarray(strips_a[0].sweep_origin, dtype=float)
     delta_edge = float(ctx.cfg.delta_edge_resolved())
+    # 建圖模式 seam_tie：A 子胞的足跡剛好止於 v_top，B 殘帶只往 A 側單邊外擴 ⇒ 要外擴整個 w − s，
+    #   B 第一條帶才會落在「A 的第 k+1 條」的位置（接縫重疊 = 帶內相鄰重疊）。
+    tie = seam_tie_overlap_m(ctx, [(s.width_m, s.spacing_m) for s in list(strips_a) + list(cell.strips.get("B", []))])
+    if tie is not None:
+        delta_edge = max(delta_edge, tie)
     uv = to_sweep_coords(np.asarray(cell.polygon.exterior.coords, dtype=float), origin_a, alpha_a)
     v_min_q, v_max_q = float(uv[:, 1].min()), float(uv[:, 1].max())
 
@@ -1310,3 +1361,207 @@ def residual_candidates(cell: Cell, ctx: DecomposeContext, k_list: list[int] | N
             continue
         out.append((k, cell_a, cell_b))
     return out
+
+
+# ---------------------------------------------------------------------------
+# 建圖模式：交叉航帶（`MappingModeConfig.cross_strips`；設計見 mission.MappingModeConfig docstring）
+# ---------------------------------------------------------------------------
+class CrossStripRefused(ValueError):
+    """交叉航帶的使用者設定在某區塊不可行（高度超出高度帶／低於最低固定翼高度）⇒ 整份計畫 NO_GO，不夾限。"""
+
+
+@dataclass(slots=True)
+class CrossSet:
+    """一架在一個區塊（該機在母胞實際飛的主條帶）的一組交叉航帶與其有效值。
+
+    ``block``：該機在母胞負責的區域（主條帶足跡 ∩ 胞多邊形；整胞自己飛時 = 胞）；``region``：中央橫帶
+    （面積 = ``fraction_effective`` × 區塊面積）；``imaged_area_m2``：交叉帶足跡 ∩ 區塊。
+    """
+    uav_id: str
+    cell_id: str
+    cls: str
+    strips: list[Strip]
+    alpha_main_rad: float
+    beta_rad: float
+    h_main_m: float
+    h_cross_m: float
+    block: shapely.Geometry
+    region: shapely.Geometry
+    block_area_m2: float
+    region_area_m2: float
+    imaged_area_m2: float
+    fraction_target: float
+    widened_to_two: bool
+    width_m: float
+    spacing_m: float
+    e_ext_m: float
+    d_turn_m: float
+    lateral_m: float
+    notes: list[str]
+
+    @property
+    def fraction_effective(self) -> float:
+        """中央橫帶面積 / 區塊面積（放寬到 2 條時 > fraction_target）。"""
+        return self.region_area_m2 / self.block_area_m2 if self.block_area_m2 > 0 else 0.0
+
+    @property
+    def strip_ids(self) -> list[str]:
+        return [s.strip_id for s in self.strips]
+
+
+def cross_altitude_check(cell: Cell, cls: str, h_main_m: float, alt_offset_m: float,
+                         ctx: DecomposeContext) -> tuple[float, tuple[float, float]]:
+    """交叉帶作業高度 h_x = h_main + offset，必須在該區塊的作業高度帶 [h_lo, h_hi] 內且 ≥ 最低固定翼高度，否則
+    :class:`CrossStripRefused`（訊息寫出 h_x 與帶界；**不夾限**）。回傳 (h_x, (h_lo, h_hi))。
+
+    h_lo = `altitude_band(...).h_lo_m` = max(最低固定翼, 地形淨空)；h_hi = min(h_ceil, 感測器 AGL 上限)
+    ＝主條帶 h_op 被夾的同一個上限（`altitude_band` 的 hi_cap）。⚠ 不用 `AltitudeBand.h_hi_m`（= min(h_ceil − 起伏,
+    感測器上限)，給 `altitude.layering` 用）：主條帶本身就飛在 h_op 而不扣起伏 —— 2×2 km 平地情境 ENU 地球曲率
+    使 Ω 內「起伏」0.75 m ⇒ h_hi_m 119.25 < 主條帶 120，用它會連「同高度交叉帶」都拒絕。地形使某條交叉帶的
+    局部包絡不可行時，由 `lay_strips` 標記、`build_cross_set` 略過該區塊並列警告。"""
+    band = altitude_band(cell.polygon, cls, cell.payload_req_id, ctx)
+    h_x = float(h_main_m) + float(alt_offset_m)
+    h_minfw = float(ctx.specs[cls].min_fw_operation_agl_m)
+    found = resolve_sensor(ctx, cls, cell.payload_req_id)
+    h_max = float(found[0].agl_window()[1]) if found is not None else math.inf
+    h_ceil = _h_ceil_of(ctx, cls)
+    h_lo = max(float(band.h_lo_m), h_minfw)
+    h_hi = min(h_ceil, h_max)
+    tol = 1e-6
+    problems: list[str] = []
+    if h_x < h_minfw - tol:
+        problems.append(f"低於構型 {cls} 最低固定翼作業高度 {h_minfw:g} m")
+    if h_x < float(band.h_lo_m) - tol and float(band.h_lo_m) > h_minfw + tol:
+        problems.append(f"低於高度帶下緣 {band.h_lo_m:g} m（地形淨空 {float(ctx.h_clr_m):g} m）")
+    if h_x > h_hi + tol:
+        problems.append(f"高於高度帶上緣 {h_hi:g} m（min(h_ceil {h_ceil:g}, 感測器上限 {h_max:g})）")
+    if problems:
+        raise CrossStripRefused(
+            f"cross_alt_out_of_band({cell.cell_id}.{cls}: 交叉航帶高度 = 主條帶 {float(h_main_m):g} m "
+            f"{float(alt_offset_m):+g} m = {h_x:g} m，" + "；".join(problems)
+            + f"；可用範圍 [{h_lo:g}, {h_hi:g}] m ⇒ 不夾限、整份計畫不規劃)")
+    return h_x, (h_lo, h_hi)
+
+
+def cross_central_band(block: shapely.Geometry, beta_rad: float, fraction: float,
+                       min_height_m: float = 0.0) -> tuple[shapely.Geometry | None, float]:
+    """區塊的中央橫帶（沿 β 貫穿區塊、在 n̂(β) 上置中於形心；碰到區塊邊界就整段平移不截短）：
+    面積 = fraction × 區塊面積（二分法）；``min_height_m`` > 0 時橫帶高度至少此值（不超過區塊寬）。
+    回傳 (橫帶幾何或 None, 橫帶高度 H)。"""
+    origin = sweep_origin(block, beta_rad)
+    uv = to_sweep_coords(np.asarray(shapely.get_coordinates(block), dtype=float), origin, beta_rad)
+    V = float(uv[:, 1].max())
+    if not V > 0:
+        return None, 0.0
+    v_c = float(to_sweep_coords(np.asarray(block.centroid.coords[0], dtype=float), origin, beta_rad)[1])
+    A = float(block.area)
+
+    def window(H: float) -> tuple[float, float]:
+        H = min(max(H, 0.0), V)
+        lo = min(max(v_c - H / 2.0, 0.0), V - H)
+        return lo, lo + H
+
+    def area(H: float) -> float:
+        lo, hi = window(H)
+        g = clip_band(block, origin, beta_rad, lo, hi)
+        return 0.0 if g is None else float(g.area)
+
+    if fraction >= 1.0 - 1e-12:
+        H = V
+    else:
+        target = float(fraction) * A
+        lo_h, hi_h = 0.0, V
+        for _ in range(200):
+            mid = 0.5 * (lo_h + hi_h)
+            if area(mid) < target:
+                lo_h = mid
+            else:
+                hi_h = mid
+            if hi_h - lo_h <= 1e-9 * max(1.0, V):
+                break
+        H = hi_h
+    H = min(max(H, float(min_height_m)), V)
+    if H >= V - 1e-9:
+        return block, V
+    lo, hi = window(H)
+    return clip_band(block, origin, beta_rad, lo, hi), H
+
+
+def build_cross_set(parent: Cell, cls: str, main_strips: Sequence[Strip], ctx: DecomposeContext, *, uav_id: str,
+                    fraction: float, alt_offset_m: float, angle_offset_deg: float,
+                    index_base: int = 0) -> CrossSet | str:
+    """一架在一個區塊的交叉航帶（建圖模式）。成功 → :class:`CrossSet`；區塊放不下 2 條／碰禁區／局部包絡不可行
+    → 略過原因字串（呼叫端列警告）；高度不合法 → :class:`CrossStripRefused`。
+
+    交叉帶以 `build_strips`（= `geometry.lay_strips` + 局部包絡 + 禁區檢查，e_ext 含引入段）鋪在中央橫帶上，
+    方向 β = 主條帶方向 + angle_offset、高度 h_x = 主條帶 h_op + alt_offset；條帶 id 改為
+    `geometry.cross_strip_id(...)`、`index` = index_base + k、`cell_id` 仍是母胞。"""
+    from dataclasses import replace as _replace
+    from .geometry import cross_strip_id, strips_union_footprint
+
+    tag = f"{parent.cell_id}@{uav_id}"
+    if not main_strips:
+        return f"{tag}: 沒有主條帶"
+    alpha = float(main_strips[0].theta_LR_rad) % math.pi
+    beta = (alpha + math.radians(float(angle_offset_deg))) % math.pi
+    h_main = float(main_strips[0].h_op_m)
+    h_x, _band = cross_altitude_check(parent, cls, h_main, alt_offset_m, ctx)
+    found = resolve_sensor(ctx, cls, parent.payload_req_id)
+    if found is None:
+        return f"{tag}: 找不到感測器"
+    sensor, _rid = found
+    notes: list[str] = []
+    fp = strips_union_footprint(list(main_strips))
+    parts = _polys_of(parent.polygon.intersection(fp), 1.0)
+    if not parts:
+        return f"{tag}: 主條帶足跡與胞不相交"
+    block = parts[0] if len(parts) == 1 else max(parts, key=lambda p: p.area)
+    if len(parts) > 1:
+        notes.append(f"區塊不連續（{len(parts)} 片），交叉帶只鋪最大一片")
+    A = float(block.area)
+    w_x = float(sensor.swath_m(h_x))
+    s_x = float(sensor.strip_spacing_m(h_x))
+
+    def lay(region: shapely.Geometry) -> list[Strip]:
+        tmp = _replace(parent, polygon=region, h_op_m={**parent.h_op_m, cls: h_x})
+        return build_strips(tmp, cls, beta, ctx)
+
+    region, _H = cross_central_band(block, beta, float(fraction))
+    if region is None or region.is_empty:
+        return f"{tag}: 中央橫帶為空"
+    try:
+        strips = lay(region)
+    except AssertionError as exc:
+        return f"{tag}: 交叉帶鋪設失敗（{exc}）"
+    widened = False
+    if len(strips) < 2:
+        # 至少 2 條相鄰（互相連結）：橫帶放寬到剛好 2 條（w + s）
+        # 2 條覆蓋 w + s；給 w + 0.98·s（略小）⇒ lay_strips 的 n = ⌈(H − w + s)/s⌉ 剛好 2（給滿 w + s 時浮點誤差會鋪出第 3 條）
+        region2, _H2 = cross_central_band(block, beta, float(fraction), min_height_m=w_x + 0.98 * s_x)
+        try:
+            strips2 = lay(region2) if region2 is not None and not region2.is_empty else []
+        except AssertionError:
+            strips2 = []
+        if len(strips2) < 2:
+            ext = projection_width(block, beta)
+            return f"{tag}: 區塊在主條帶方向只有 {ext:.1f} m，放不下 2 條交叉帶（刈幅 {w_x:.1f} m、間距 {s_x:.1f} m）"
+        region, strips, widened = region2, strips2, True
+    bad = [s for s in strips if not s.feasible]
+    if bad:
+        why = sorted({s.infeasible_reason or "infeasible" for s in bad})
+        return f"{tag}: {len(bad)}/{len(strips)} 條交叉帶不可行（{', '.join(why)}）"
+    for k, s in enumerate(strips, 1):
+        s.strip_id = cross_strip_id(parent.cell_id, cls, uav_id, k)
+        s.index = int(index_base) + k
+        s.cell_id = parent.cell_id
+    _z_min_c, z_max_c = _terrain_minmax(ctx, region)
+    z_op = (z_max_c if math.isfinite(z_max_c) else _z_ground_home(ctx)) + h_x
+    e_ext = end_extension_for(ctx, cls, sensor, h_x, z_op_m=z_op)
+    r_eff = r_eff_for_class(ctx, cls)
+    imaged = float(strips_union_footprint(strips).intersection(block).area)
+    return CrossSet(uav_id=uav_id, cell_id=parent.cell_id, cls=cls, strips=list(strips), alpha_main_rad=alpha,
+                    beta_rad=beta, h_main_m=h_main, h_cross_m=h_x, block=block, region=region, block_area_m2=A,
+                    region_area_m2=float(region.area), imaged_area_m2=imaged, fraction_target=float(fraction),
+                    widened_to_two=widened, width_m=w_x, spacing_m=s_x, e_ext_m=float(e_ext),
+                    d_turn_m=float(d_turn_from_r(r_eff, s_x, e_ext)), lateral_m=float(_lateral_m(r_eff, s_x)),
+                    notes=notes)

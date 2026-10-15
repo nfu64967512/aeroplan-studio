@@ -1,0 +1,17 @@
+# AeroPlan Studio：VTOL SITL 強制參數（排在 --defaults 最後 ⇒ 蓋過前面所有檔）
+# Q_ENABLE：開 QuadPlane；--model quadplane 只決定物理模型，不會開這個
+Q_ENABLE 1
+# Q_FRAME_CLASS：四軸
+Q_FRAME_CLASS 1
+# Q_FRAME_TYPE：X 型
+Q_FRAME_TYPE 1
+# SERVO5_FUNCTION：Motor1 —— 沒有這組對應，Q_ENABLE=1 也沒有馬達會轉
+SERVO5_FUNCTION 33
+# SERVO6_FUNCTION：Motor2
+SERVO6_FUNCTION 34
+# SERVO7_FUNCTION：Motor3
+SERVO7_FUNCTION 35
+# SERVO8_FUNCTION：Motor4
+SERVO8_FUNCTION 36
+# ARMING_REQUIRE：覆蓋 plane.parm 的 0（0 = 開機即解鎖、無法上鎖）
+ARMING_REQUIRE 1

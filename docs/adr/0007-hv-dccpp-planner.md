@@ -1,5 +1,8 @@
 # ADR-0007: 以 hv_dccpp 作為異構雙構型 VTOL 的覆蓋規劃核心
 
+> ⚠ 本文件寫於改名之前。文中的 **HV-DCCPP** 就是今日的 **HARVEST**（見 [ADR-0010](0010-harvest-naming.md)）。ADR 是有日期的紀錄，內文刻意不改寫。
+
+
 **狀態**: Accepted
 **日期**: 2026-09-06
 **決策者**: @james zheng

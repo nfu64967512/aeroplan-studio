@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<!--
+  FlightGear 模型包裝。⚠️ 這是 CAD 外形,**不是** SITL 飛的氣動機體
+  (memory: barracuda500-model-facts)。CAD 展長 2.325 m / 全長 3.786 m;
+  SITL 用的是 m=22 / b=1.88 / S=0.45。當插圖沒問題,當「已驗證模型」不行。
+
+  方向由實測決定,不是推理:
+    FG 要 -X 機鼻 / +Y 上 / +-Z 翼展
+    (由 c172p.ac 反推:主翼在 X 約 0 展寬 11.164 = C172 翼展;
+     水平尾翼在 X 約 +4.5 展寬 3.5 = C172 尾翼展 => 尾在 +X、鼻在 -X。
+     且 c172p.xml 的 offsets 沒有任何旋轉,所以那個 .ac 就是 FG 的方向。)
+    轉檔後已逐項驗證:X 3.786 / Y 0.901 / Z 2.325,機鼻在 -X。
+-->
+<PropertyList>
+  <path>Barracuda500.obj</path>
+</PropertyList>

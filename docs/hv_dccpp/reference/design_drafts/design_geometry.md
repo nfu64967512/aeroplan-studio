@@ -1,4 +1,4 @@
-# HV-DCCPP 演算法設計（幾何／運動學／三維高度優先版）
+# HARVEST 演算法設計（幾何／運動學／三維高度優先版）
 
 Heterogeneous-VTOL Dynamic Complete Coverage Path Planning，兩構型：**A = Pioneer PNP（LiDAR）**、**B = HERO PNP（測繪相機）**，皆為 lift-and-cruise 4+1 複合翼。
 本文件以 Wang et al. 2025（Defence Technology 47:197–215）為骨架，將每一層擴展為異構、含風、含地形坡度限制、含起降走廊的版本；著重幾何正確性（覆蓋完整性）與運動學可飛性（flyability）。

@@ -1,8 +1,8 @@
-"""HV-DCCPP 四機 SITL 實跑：1 架 Pioneer PNP + 3 架 HERO PNP。
+"""HARVEST 四機 SITL 實跑：1 架 Pioneer PNP + 3 架 HERO PNP。
 
 用途
 ----
-把 HV-DCCPP 規劃出來的 4D 任務，用真的 ArduPlane QuadPlane SITL 飛一次，
+把 HARVEST 規劃出來的 4D 任務，用真的 ArduPlane QuadPlane SITL 飛一次，
 並且**把 SITL 參數對齊平台參數表的真機值**（每架自己的巡航空速、失速、
 滾轉限制、爬升率、轉彎半徑），而不是四架共用一份通用樣板。
 

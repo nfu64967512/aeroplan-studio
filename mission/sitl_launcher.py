@@ -184,6 +184,116 @@ _DEFAULT_PARAMS = {
     'VTOL':   'default_params/plane.parm',  # 基礎用 plane，再疊加 VTOL 參數
 }
 
+# 主迴圈速率（Hz）。使用者決定（2026-10-08）「Hz 數高是 HIL 要做的，SITL 50 夠了」⇒ 能用 50 的
+#   一律 50（COPTER / PLANE）。韌體預設其實依機型不同（Copter 400 / QuadPlane 300），但高迴圈
+#   速率的驗證歸 HIL（板上韌體跑自己的迴圈）。
+#
+#   ⚠⚠ **VTOL 例外 = 100（韌體下限）**：ArduPlane 4.8 的 QuadPlane 解鎖檢查直接拒絕
+#   < 100 Hz —— 2026-10-08 實測 SCHED_LOOP_RATE=50 時
+#       Arm: quadplane needs SCHED_LOOP_RATE >= 100
+#   正常解鎖永遠被擋；唯一能解的是 force-arm（繞過檢查，真機不會讓你這樣做）。
+#   之前 ARMING_REQUIRE=0 讓「永遠已解鎖」把這道檢查整個遮掉，所以 50 看起來可行。
+#   上限：陀螺儀 400 Hz ÷ 1.8 = 222（PreArm 要 gyro >= loop×1.8）、本機實測 267。
+#   100 是三個窗口的交集裡**最接近使用者要的低 Hz** 的值。由 tests/test_sitl_param_names.py
+#   與 tests/test_vtol_prearm_real.py 依值鎖住 —— 要改先問使用者。
+_SCHED_LOOP_RATE = {
+    'COPTER': 50,
+    'PLANE':  50,
+    'VTOL':   100,
+}
+
+
+def identity_parm_text(vehicle: str, sysid: int) -> str:
+    """每個 SITL 實例的 identity.parm 內容（固定 9 行，與 Mission Planner 內建 SITL 一致）。
+
+    ⚠⚠⚠ 機號參數是 ``MAV_SYSID``，**不是** ``SYSID_THISMAV``。
+    ArduPilot 4.6+ 改名，而 ``--defaults`` 裡韌體不認識的名字會被**靜默略過**：
+    寫舊名 ⇒ 每一台都停在預設 sysid 1 ⇒ 多條 TCP 連線回報同一個 system 1，
+    HUD 併成一張卡、Cesium 一個圖示在幾個起飛點之間跳（2026-10-07 GUI log 實際發生）。
+    名字是否存在由 tests/test_sitl_param_names.py 對照韌體參數表快照鎖住。
+    """
+    v = vehicle.upper()
+    if v not in _SCHED_LOOP_RATE:
+        raise ValueError(f'未知飛行器類型: {vehicle}')
+    return (
+        'SERIAL0_PROTOCOL=2\n'
+        'SERIAL1_PROTOCOL=2\n'
+        f'MAV_SYSID={int(sysid)}\n'
+        'SIM_TERRAIN=0\n'
+        'TERRAIN_ENABLE=0\n'
+        f'SCHED_LOOP_RATE={_SCHED_LOOP_RATE[v]}\n'
+        'SIM_RATE_HZ=400\n'
+        'SIM_DRIFT_SPEED=0\n'
+        'SIM_DRIFT_TIME=0\n'
+    )
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  VTOL 強制參數：**注入**而不是檢查（2026-08-25 實測挖出，2026-10-08 再次踩到）
+# ═════════════════════════════════════════════════════════════════════
+#   plane.parm 有 `ARMING_REQUIRE 0`（原意是讓 SITL 好解鎖）。對固定翼沒差；對 QuadPlane：
+#     * 開機就是**已解鎖**，DISARM 被拒絕（使用者：「無法上鎖，一直保持解鎖」）；
+#     * 四軸馬達輸出恆為 1000 µs，AUTO 顯示 `Mission: 2 VTOLTakeoff` 但**飛機不離地**，
+#       沒有任何錯誤訊息。
+#   同一顆 binary、同一個 home 的對照：plane.parm + Q_ENABLE 那組 → 0.15 m；再加 ARMING_REQUIRE 1
+#   → 爬到 21 m 以上（2026-10-08 重測：106 m、轉換完成、航點 3→7 依序到達）。
+#
+#   ⚠ 這份修法曾經在樹上，後來整段消失（tests/test_vtol_sitl_enforced.py 還在、實作沒了）。
+#   --defaults 是**後面蓋前面**，所以這份檔一定排在最後（build_defaults_list）。
+VTOL_ENFORCED_PARAMS = (
+    ('Q_ENABLE', 1, '開 QuadPlane；--model quadplane 只決定物理模型，不會開這個'),
+    ('Q_FRAME_CLASS', 1, '四軸'),
+    ('Q_FRAME_TYPE', 1, 'X 型'),
+    ('SERVO5_FUNCTION', 33, 'Motor1 —— 沒有這組對應，Q_ENABLE=1 也沒有馬達會轉'),
+    ('SERVO6_FUNCTION', 34, 'Motor2'),
+    ('SERVO7_FUNCTION', 35, 'Motor3'),
+    ('SERVO8_FUNCTION', 36, 'Motor4'),
+    ('ARMING_REQUIRE', 1, '覆蓋 plane.parm 的 0（0 = 開機即解鎖、無法上鎖）'),
+)
+
+
+def vtol_enforced_parm_text() -> str:
+    """強制參數檔內容（每行 `名稱 值`，說明放在整行註解，避免被解析器當成值）。
+
+    ⚠ **每個實體行 <= 98 bytes**：韌體用 100-byte 緩衝（AP_Param 的 `char line[100]`）讀 --defaults，
+    超長的行會被切成兩段，後半段若湊巧是「短詞 + 數字」就被當成孤兒參數名（韌體因此把整份 defaults
+    反覆重載、console 洗版）。2026-10-08 審查實測：舊說明那一行 112 bytes，尾巴 `在 1000 µs` 就中了。
+    由 tests/test_vtol_sitl_enforced.py 鎖住。
+    """
+    lines = ['# AeroPlan Studio：VTOL SITL 強制參數（排在 --defaults 最後 ⇒ 蓋過前面所有檔）']
+    for name, val, why in VTOL_ENFORCED_PARAMS:
+        lines.append(f'# {name}：{why}')
+        lines.append(f'{name} {val}')
+    return '\n'.join(lines) + '\n'
+
+
+def write_vtol_enforced_parm(directory: Optional[Path] = None) -> Path:
+    """把強制參數檔寫到 ``directory``（預設 sitl/default_params），回傳路徑。"""
+    d = Path(directory) if directory is not None else (_SITL_DIR / 'default_params')
+    d.mkdir(parents=True, exist_ok=True)
+    out = d / 'vtol_enforced.parm'
+    out.write_text(vtol_enforced_parm_text(), encoding='utf-8')
+    return out
+
+
+def build_defaults_list(vehicle: str, base, vtol, identity, enforced) -> List[str]:
+    """``--defaults`` 的檔案順序（後面蓋前面）。None / 空字串的項目略過。
+
+    PLANE / COPTER：[base, identity]
+    VTOL：[base, vtol, identity, enforced]  ← enforced **永遠最後**，缺任何前置檔也一樣。
+    """
+    v = (vehicle or '').upper()
+    out: List[str] = []
+    if base:
+        out.append(base)
+    if v == 'VTOL' and vtol:
+        out.append(vtol)
+    if identity:
+        out.append(identity)
+    if v == 'VTOL' and enforced:
+        out.append(enforced)
+    return out
+
 
 def generate_vtol_params(output_path: Optional[Path] = None) -> Path:
     """產生 VTOL (QuadPlane) 專用參數檔 — 基於 Alti Transition 真機參數。
@@ -248,6 +358,10 @@ STALL_PREVENTION 1          # 啟用失速保護
 # ── 5. 多旋翼飛行動態 ─────────────────────────────────────────
 Q_ANGLE_MAX      3000       # 最大傾斜角 30°
 Q_ACCEL_Z        250        # 垂直加速度 250 cm/s²
+# ⚠⚠ 規劃器的懸停爬升率讀這一行（core/dccpp/vtol_profile.Q_PILOT_SPD_UP），
+#    改值必須兩邊一起改，tests/test_vtol_profile.py 有守衛擋住漂移。
+#    下降率留空 ⇒ 飛控自動沿用上升率，與剖面的假設一致。
+Q_PILOT_SPD_UP   2.5        # 多旋翼段最大爬升率 2.5 m/s
 Q_VELZ_MAX       250        # 最大垂直速度 250 cm/s (2.5m/s)
 Q_VELZ_MAX_DN    0          # 下降速度：0=與上升相同
 Q_LOIT_SPEED     250        # QLOITER 水平速度 250 cm/s
@@ -484,8 +598,9 @@ class SITLLauncher:
         回傳連線字串，例如 'tcp:127.0.0.1:5760'（給 Windows 端 GCS 用）。
 
         參數:
-            sysid:         覆寫 SYSID_THISMAV（給嵌入式 MAVROS tgt_system 對齊用）
-                           不指定則沿用舊行為 = instance+1
+            sysid:         寫進 MAV_SYSID（4.6+ 的名字；舊名 SYSID_THISMAV 會被靜默略過）
+                           不指定 = **呼叫端要求的** instance+1（port 被佔用而位移時
+                           仍以要求值為準，與 UI 的 sysid 標籤 logical+1 同源）
             extra_outputs: SERIAL1+ 額外 MAVLink 出口 URI 列表，
                            例如 ['udpclient:192.168.1.50:14550']
                            會依序綁到 --serial1 / --serial2 / ...
@@ -509,6 +624,9 @@ class SITLLauncher:
         # 2) start_multi 連續呼叫時，前一台 SITL 還沒完成 bind，下一輪
         #    port-check 可能誤判 free 而重派同一個 instance → bind 撞車。
         #    用 `_allocated_instances` 防止此種 race。
+        # ⚠ 預設 sysid 要在位移**之前**定下來：位移後的 instance+1 會和 UI 標籤
+        #   （logical+1）對不上 ⇒ HUD 卡片 / get_latest_telemetry 全錯位。
+        requested_instance = instance
         requested_port = self.tcp_port_for(instance)
         listener_pid = _tcp_port_listener_pid(requested_port)
         in_batch_collision = instance in self._allocated_instances
@@ -531,6 +649,9 @@ class SITLLauncher:
             )
             instance = new_inst
         self._allocated_instances.add(instance)
+        # ⚠ port 被佔用時上面會把 instance 位移掉。呼叫端要知道**實際**用了
+        #   哪一個，否則 sysid 標籤會對到別台機體（見 start_multi 的回傳）。
+        self._last_started_instance = instance
 
         binary = _SITL_DIR / _VEHICLE_BINARIES[vehicle]
         param_file = _SITL_DIR / _DEFAULT_PARAMS[vehicle]
@@ -551,20 +672,12 @@ class SITLLauncher:
 
         # 生成 identity.parm — 與 Mission Planner 內建 SITL 完全一致
         # 關鍵：SIM_DRIFT_SPEED=0 解除 SITL 預設風漂，避免飛機在地面一直往前滑
-        # sysid 若有指定，覆寫 SYSID_THISMAV（嵌入式 MAVROS tgt_system 對齊用）
-        effective_sysid = int(sysid) if sysid is not None else (instance + 1)
+        # sysid → MAV_SYSID（內容與名稱由 identity_parm_text 統一產生、受測試鎖住）
+        effective_sysid = int(sysid) if sysid is not None else (requested_instance + 1)
         identity_file = work_dir / 'identity.parm'
         try:
             identity_file.write_text(
-                f'SERIAL0_PROTOCOL=2\n'
-                f'SERIAL1_PROTOCOL=2\n'
-                f'SYSID_THISMAV={effective_sysid}\n'
-                f'SIM_TERRAIN=0\n'
-                f'TERRAIN_ENABLE=0\n'
-                f'SCHED_LOOP_RATE=50\n'
-                f'SIM_RATE_HZ=400\n'
-                f'SIM_DRIFT_SPEED=0\n'
-                f'SIM_DRIFT_TIME=0\n',
+                identity_parm_text(vehicle, effective_sysid),
                 encoding='utf-8',
             )
         except Exception as _e:
@@ -578,25 +691,38 @@ class SITLLauncher:
             '--speedup', str(speedup),
             '--instance', str(instance),
         ]
-        # sysid 覆寫：--sysid 命令列旗標 + identity.parm 雙保險
-        # （SYSID_THISMAV 是 EEPROM 參數，第一次乾淨 boot 才會吃 identity.parm）
-        if sysid is not None:
-            cmd += ['--sysid', str(int(sysid))]
-        # --defaults 用逗號分隔多份檔（與 MP 一致）
-        defaults_list = []
-        if param_file.exists():
-            defaults_list.append(str(param_file))
-        else:
+        # sysid：**一律**帶 --sysid（binary 說明：`--sysid ID  set MAV_SYSID`），
+        # 與 identity.parm 的 MAV_SYSID 雙保險。舊碼只在 sysid 有指定時才帶 ⇒
+        # GUI 不勾 fan-out 時（instance_configs=None）唯一的來源是 identity.parm，
+        # 而那裡寫的是韌體不認識的 SYSID_THISMAV ⇒ 三台全是 system 1。
+        cmd += ['--sysid', str(effective_sysid)]
+        # --defaults 用逗號分隔多份檔（與 MP 一致）；順序見 build_defaults_list（後面蓋前面）
+        if not param_file.exists():
             logger.warning(
                 f'[SITL Launcher] 找不到預設參數檔 {param_file}'
             )
-        # VTOL：額外疊加 QuadPlane 啟用參數
+        vtol_parm = None
+        enforced_parm = None
         if vehicle == 'VTOL':
+            # 額外疊加 QuadPlane 啟用參數 + **強制檔排最後**（ARMING_REQUIRE=1 等，見上方說明）。
+            # ⚠ 強制檔寫不出來就直接失敗：靜默少了它 = 飛機解得了鎖、進得了 AUTO、就是不起飛。
             vtol_parm = generate_vtol_params()
-            if vtol_parm.exists():
-                defaults_list.append(str(vtol_parm))
-        if identity_file.exists():
-            defaults_list.append(str(identity_file))
+            if not vtol_parm.exists():
+                vtol_parm = None
+            try:
+                enforced_parm = write_vtol_enforced_parm(work_dir)
+            except Exception as _e:
+                raise RuntimeError(
+                    f'無法寫入 VTOL 強制參數檔（{work_dir}）：{_e}\n'
+                    f'沒有它 SITL 會變成「永遠已解鎖、AUTO 不起飛」，所以不啟動。'
+                ) from _e
+        defaults_list = build_defaults_list(
+            vehicle,
+            str(param_file) if param_file.exists() else None,
+            str(vtol_parm) if vtol_parm is not None else None,
+            str(identity_file) if identity_file.exists() else None,
+            str(enforced_parm) if enforced_parm is not None else None,
+        )
         if defaults_list:
             cmd += ['--defaults', ','.join(defaults_list)]
 
@@ -697,7 +823,11 @@ class SITLLauncher:
                     homes: list = None,
                     instance_configs: Optional[List[dict]] = None,
                     auto_firewall: bool = False) -> list:
-        """啟動多台 SITL，回傳 [(instance, conn_str), ...]
+        """啟動多台 SITL，回傳 ``[(邏輯序號, conn_str, 實際 instance), ...]``
+
+        ⚠ 第一個是**邏輯**序號（0..count-1，與寫進 MAV_SYSID 的值同源），
+          第三個是 port 被佔用而自動位移之後**實際**啟動的 instance。
+          兩者在正常情況下相同，port 衝突時會差一個位移量。
 
         參數:
             homes: 可選 [(lat, lon, heading), ...] — 若提供則每架 SITL 依序用
@@ -706,7 +836,7 @@ class SITLLauncher:
                    sysid / embedded_port
                    （embedded_ip 欄位向下相容保留但不再使用 — SITL 改為 udpin
                     被動模式，嵌入式 MAVROS 為主動 sender）
-                   未提供 → 沿用舊行為，無 sysid 覆寫、無 fan-out
+                   未提供 → 無 fan-out；sysid 一律 = 邏輯序號+1（與 UI 標籤同源）
             auto_firewall: 是否於啟動前自動新增 Windows Firewall 入站規則
         """
         results = []
@@ -724,7 +854,9 @@ class SITLLauncher:
             # 從 dialog 帶來的 per-instance 設定取出 sysid 與 fan-out port
             # 架構：Windows SITL 被動 listen（udpin），嵌入式 MAVROS 主動 send。
             # 這樣 SITL 啟動時不會卡在嵌入式 ARP/連線，TCP SERIAL0 也不會被拖累。
-            sysid_i: Optional[int] = None
+            # 預設 = 邏輯序號+1：與 ui/main_window.py 的 sysid 標籤（logical+1）同源，
+            # port 位移時也不會漂（不走 start() 的 instance 推導）。
+            sysid_i: int = i + 1
             extra_outputs_i: Optional[List[str]] = None
             if instance_configs and i < len(instance_configs):
                 cfg = instance_configs[i] or {}
@@ -745,7 +877,14 @@ class SITLLauncher:
                 extra_outputs=extra_outputs_i,
                 auto_firewall=auto_firewall,
             )
-            results.append((i, conn))
+            # ⚠⚠⚠ 回傳**三**元組 (邏輯序號, 連線字串, 實際 instance)。
+            #   port 被佔用時 `start()` 會自動位移（實測 wslrelay 佔住 5760-5790
+            #   ⇒ i0-i3 全被推到 i4-i7），此時邏輯序號 ≠ 實際 instance。
+            #   呼叫端拿邏輯序號標 sysid、拿實際 instance 做診斷。
+            #   ⚠ 少了第三個值 ⇒ ui/main_window.py 的 `for logical, conn, actual`
+            #     會拋 ValueError 而整個啟動流程失敗（2026-09-09 實際發生過）。
+            actual = getattr(self, '_last_started_instance', i)
+            results.append((i, conn, actual))
             time.sleep(0.5)
         return results
 

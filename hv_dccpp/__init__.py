@@ -43,7 +43,8 @@ from .platform import (  # noqa: E402
     PLATFORM_HERO, PLATFORM_PIONEER, EnergyModel, MissionInputError, PlatformSpec, PlatformSpecError,
 )
 from .mission import (  # noqa: E402
-    FeasibilityReport, MissionInputs, MissionPlan, Mode, Phase, PlannerConfig, UAVPlan, Waypoint, load_mission,
+    FeasibilityReport, MappingMissionInputs, MappingModeConfig, MissionInputs, MissionPlan, Mode, Phase, PlannerConfig,
+    UAVPlan, Waypoint, load_mission,
 )
 from .context import MissionContext, build_context  # noqa: E402
 from .preflight import preflight  # noqa: E402
@@ -138,7 +139,7 @@ __all__ = [
     # 平台 / 輸入型別
     "PLATFORM_PIONEER", "PLATFORM_HERO", "PlatformSpec", "PlatformSpecError", "EnergyModel", "MissionInputError",
     "MissionInputs", "PlannerConfig", "MissionPlan", "UAVPlan", "Waypoint", "Mode", "Phase", "FeasibilityReport",
-    "load_mission",
+    "load_mission", "MappingModeConfig", "MappingMissionInputs",
     # 規劃流程
     "MissionContext", "build_context", "preflight", "plan_mission",
     # 動態重規劃

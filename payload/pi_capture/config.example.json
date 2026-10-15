@@ -1,0 +1,33 @@
+{
+  "storage_root": "/mnt/nvme/sessions",
+  "uav": "HERO2",
+  "unit_model": "RPiHQ6-HERO2",
+  "camera": {
+    "sensor": "imx477",
+    "lens_mm": 6.0,
+    "pixel_um": 1.55,
+    "width": 4056,
+    "height": 3040,
+    "readout_ms": null,
+    "shutter": "rolling",
+    "dtoverlay": "imx477"
+  },
+  "lever_arm_m": null,
+  "gnss_lever_arm_m": null,
+  "capture": {
+    "exposure_us": 800,
+    "analogue_gain": 2.0,
+    "colour_gains": [2.0, 1.8],
+    "jpeg_quality": 95,
+    "buffer_count": 4,
+    "frame_timeout_ms": 500,
+    "max_inflight_writes": 2,
+    "lens_position": null,
+    "camera_num": 0
+  },
+  "trigger": {"chip": "pinctrl-rp1", "line": 17, "bias": "pull_down"},
+  "ready": null,
+  "health": {"max_temp_c": 80, "min_free_gb": 5},
+  "imu": null,
+  "gnss": null
+}

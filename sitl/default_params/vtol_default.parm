@@ -49,6 +49,10 @@ STALL_PREVENTION 1          # 啟用失速保護
 # ── 5. 多旋翼飛行動態 ─────────────────────────────────────────
 Q_ANGLE_MAX      3000       # 最大傾斜角 30°
 Q_ACCEL_Z        250        # 垂直加速度 250 cm/s²
+# ⚠⚠ 規劃器的懸停爬升率讀這一行（core/dccpp/vtol_profile.Q_PILOT_SPD_UP），
+#    改值必須兩邊一起改，tests/test_vtol_profile.py 有守衛擋住漂移。
+#    下降率留空 ⇒ 飛控自動沿用上升率，與剖面的假設一致。
+Q_PILOT_SPD_UP   2.5        # 多旋翼段最大爬升率 2.5 m/s
 Q_VELZ_MAX       250        # 最大垂直速度 250 cm/s (2.5m/s)
 Q_VELZ_MAX_DN    0          # 下降速度：0=與上升相同
 Q_LOIT_SPEED     250        # QLOITER 水平速度 250 cm/s

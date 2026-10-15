@@ -1,5 +1,8 @@
 # ADR-0009: HV-DCCPP 兩個構型共用同一台單光相機
 
+> ⚠ 本文件寫於改名之前。文中的 **HV-DCCPP** 就是今日的 **HARVEST**（見 [ADR-0010](0010-harvest-naming.md)）。ADR 是有日期的紀錄，內文刻意不改寫。
+
+
 **狀態**: Accepted
 **日期**: 2026-09-07
 **決策者**: @james zheng

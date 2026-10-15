@@ -11,7 +11,12 @@ Cesium 3D 地圖組件
 - 與 2D MapWidget 相同的 pyqt:// URL bridge
 """
 
+import csv
 import json
+import math
+import os
+import re
+from pathlib import Path
 from typing import List, Tuple, Optional
 
 from PyQt6.QtWidgets import QVBoxLayout
@@ -30,6 +35,231 @@ logger = get_logger()
 # MIL-STD-1472H 5.8.5 允許多目標識別色板；統一從中央 palette 取得
 _REGION_COLORS = list(TC.REGION_PALETTE)
 _DRONE_COLORS  = list(TC.UAV_PALETTE)
+
+# HARVEST 兩個構型各自的色系（暖 = Pioneer + LiDAR、冷 = HERO + 相機）。
+# ⚠ 同構規劃（既有 DCCPP）不會用到這裡 —— 那時 uav_class 是 None，
+#   維持原本「1 架 UAV = 1 色」的行為，畫面不變。
+_CLASS_COLORS = {
+    'A': ['#ff6b35', '#ff9f1c', '#e8590c', '#ffc078', '#c92a2a',
+          '#f76707', '#ffa94d', '#d9480f'],      # Pioneer PNP：暖色
+    'B': ['#1c7ed6', '#22b8cf', '#1864ab', '#66d9e8', '#4c6ef5',
+          '#0ca678', '#74c0fc', '#087f5b'],      # HERO PNP：冷色
+}
+
+
+def swarm_drone_colors(drones) -> dict:
+    """``[(drone_id, uav_class), ...]``（依顯示順序）→ ``{drone_id: '#rrggbb'}``。
+
+    3D 圖例層（display_swarm_raw）與 VTOL 虛線條帶層（drawVTOLSwarmPaths）**必須共用這一份**：
+    兩層各自取色時，同一架機在兩層顏色不同（2026-10-07：Pioneer 圖例橘、條帶卻是藍；
+    HERO D2 的條帶是圖例裡根本沒有的綠色）⇒ 照圖例讀會把別台的條帶當成 Pioneer 在飛。
+
+    HARVEST（有 uav_class）：同構型同色系、色系內依出現順序取深淺；
+    同構規劃（uav_class 為 None）：維持「1 架 = 1 色」= _DRONE_COLORS[(id-1) % n]。
+    """
+    drones = list(drones)
+    cls_seq: dict = {}
+    for did, cls in drones:
+        if cls:
+            cls_seq.setdefault(cls, []).append(did)
+    out = {}
+    for did, cls in drones:
+        if cls in _CLASS_COLORS:
+            fam = _CLASS_COLORS[cls]
+            out[did] = fam[cls_seq[cls].index(did) % len(fam)]
+        else:
+            out[did] = _DRONE_COLORS[(int(did) - 1) % len(_DRONE_COLORS)]
+    return out
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  航測成果圖層（正射瓦片、照片位姿）的共用工具 —— 2D MapWidget 也用這幾個
+# ══════════════════════════════════════════════════════════════════════
+# 位姿依來源上色；main.html 的 _PHOTO_POSE_COLORS 是同一份（測試鎖兩邊相等）
+PHOTO_POSE_SOURCE_COLORS = {'fc_interp': '#FFB300', 'ppk': '#00E676', 'sfm': '#29B6F6'}
+PHOTO_POSE_OTHER_COLOR = '#FFFFFF'
+# runJavaScript 內嵌 JSON 的上限；更多點要讓頁面自己讀檔（load_photo_poses_file）
+PHOTO_POSES_INLINE_MAX = 5000
+# GCP／檢核點佈設（survey.gcp_plan）的點圖層：依類型上色；main.html 的 _SURVEY_POINT_COLORS 是同一份（測試鎖兩邊相等）
+SURVEY_POINT_COLORS = {'GCP': '#FF3D00', 'CHK': '#2979FF'}
+SURVEY_POINT_OTHER_COLOR = '#FFFFFF'
+SURVEY_POINTS_MAX = 500           # 一層最多幾點（Entity 寫法；佈設通常只有數十點）
+_TILE_EXTS = ('png', 'jpg', 'jpeg', 'webp')
+_URL_PREFIXES = ('http://', 'https://', 'file://')
+_HEX_COLOR = re.compile(r'^#[0-9A-Fa-f]{6}$')
+
+
+def local_path_to_file_url(path) -> str:
+    """本機路徑 → ``file:///`` URL；已經是 http(s):// 或 file:// 的字串原樣回傳。
+
+    磁碟機代號、空白、中文、``#``、``%`` 全部百分比編碼（``C:\\a b\\地圖`` →
+    ``file:///C:/a%20b/%E5%9C%B0%E5%9C%96``）。⚠ 不能自己拼 ``'file:///' + path``：
+    ``#`` 會被當成錨點、``%`` 會被當成跳脫字元，瓦片就靜默讀不到。
+    """
+    s = str(path)
+    if s.lower().startswith(_URL_PREFIXES):
+        return s
+    return Path(os.path.abspath(s)).as_uri()
+
+
+def _tile_corner_lonlat(x: int, y_xyz: int, z: int) -> Tuple[float, float]:
+    """Web Mercator 瓦片左上角（XYZ 編號）→ (lon, lat) 度。"""
+    n = 2 ** z
+    lon = x / n * 360.0 - 180.0
+    lat = math.degrees(math.atan(math.sinh(math.pi * (1.0 - 2.0 * y_xyz / n))))
+    return lon, lat
+
+
+def check_bounds(bounds) -> Tuple[float, float, float, float]:
+    """(西, 南, 東, 北) 度；不合理就丟 ValueError（不默默修正）。"""
+    try:
+        w, s, e, n = (float(v) for v in bounds)
+    except (TypeError, ValueError):
+        raise ValueError(f'bounds 要是 (西, 南, 東, 北) 四個數字，收到 {bounds!r}')
+    if not (-180.0 <= w < e <= 180.0 and -90.0 <= s < n <= 90.0):
+        raise ValueError(f'bounds 不合理（要 -180≤西<東≤180、-90≤南<北≤90）：{bounds!r}')
+    return w, s, e, n
+
+
+def inspect_tile_dir(path, scheme: str) -> dict:
+    """看本機瓦片資料夾：層級、副檔名、範圍。
+
+    回傳 ``{'min_level', 'max_level', 'ext', 'bounds': (西, 南, 東, 北), 'has_tilemapresource'}``。
+
+    * 層級 = 名稱是整數的子資料夾（gdal2tiles 也會放 tilemapresource.xml、*.html，略過）。
+    * 範圍取 ``max(最低層, 最高層-4)`` 那一層的瓦片聯集：最細那層檔案太多（ODM 在 3 cm GSD
+      會切到 z23，4 km² 就二十幾萬張）。上層瓦片聯集一定包住全部資料，只是邊界最多外擴一張瓦片。
+    * ``scheme='tms'``：y 由南往北數（gdal2tiles／ODM 預設）；``'xyz'``：由北往南。
+    """
+    if scheme not in ('tms', 'xyz'):
+        raise ValueError(f"scheme 只能是 'tms' 或 'xyz'，收到 {scheme!r}")
+    root = Path(path)
+    if not root.is_dir():
+        raise FileNotFoundError(f'瓦片資料夾不存在：{root}')
+    levels = sorted(int(e.name) for e in os.scandir(root) if e.is_dir() and e.name.isdigit())
+    if not levels:
+        raise ValueError(f'{root} 底下沒有數字層級資料夾（{{z}}/{{x}}/{{y}}.png），不是瓦片資料夾')
+    zb = max(levels[0], levels[-1] - 4)
+    xs, ys, ext = [], [], None
+    for ex in os.scandir(root / str(zb)):
+        if not (ex.is_dir() and ex.name.isdigit()):
+            continue
+        for ey in os.scandir(ex.path):
+            stem, dot, suf = ey.name.rpartition('.')
+            if not dot or not stem.isdigit() or suf.lower() not in _TILE_EXTS:
+                continue
+            ext = ext or suf
+            xs.append(int(ex.name))
+            ys.append(int(stem))
+    if not xs:
+        raise ValueError(f'{root / str(zb)} 底下沒有瓦片檔（{"/".join(_TILE_EXTS)}）')
+    n = 2 ** zb
+    if scheme == 'tms':
+        y_top, y_bot = n - 1 - max(ys), n - 1 - min(ys)      # 換成 XYZ 編號（由北往南）
+    else:
+        y_top, y_bot = min(ys), max(ys)
+    west, north = _tile_corner_lonlat(min(xs), y_top, zb)
+    east, south = _tile_corner_lonlat(max(xs) + 1, y_bot + 1, zb)
+    return {'min_level': levels[0], 'max_level': levels[-1], 'ext': ext,
+            'bounds': (west, south, east, north),
+            'has_tilemapresource': (root / 'tilemapresource.xml').is_file()}
+
+
+def _opt_float(v) -> Optional[float]:
+    """空字串 / None / NaN / 非數字 → None（缺值），其餘轉 float。"""
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
+def photo_pose_rows_to_compact(rows) -> Tuple[list, dict]:
+    """photos.csv（F2）的列（dict）→ ``[[lat, lon, h_ell_m, yaw_deg, source, image_id], ...]`` 與統計。
+
+    只取 lat_deg, lon_deg, h_ell_m, yaw_deg, source, image_id。yaw 是自**真北順時針**的機頭／
+    相機航向（不是航跡角 cog_deg）。經緯度缺或超出範圍的列不畫，但一定計數回報；
+    沒有航向的列以圓點畫（不當成朝北）；沒有高度的列放在橢球面 0 m。
+    """
+    out, skipped_ids, unknown_src = [], [], {}
+    no_heading = no_height = 0
+    rows = list(rows)
+    for i, r in enumerate(rows):
+        lat, lon = _opt_float(r.get('lat_deg')), _opt_float(r.get('lon_deg'))
+        img = '' if r.get('image_id') is None else str(r.get('image_id'))
+        if lat is None or lon is None or not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+            skipped_ids.append(img or f'第 {i + 1} 列')
+            continue
+        h, yaw = _opt_float(r.get('h_ell_m')), _opt_float(r.get('yaw_deg'))
+        no_height += h is None
+        no_heading += yaw is None
+        src = (r.get('source') or '').strip()
+        if src not in PHOTO_POSE_SOURCE_COLORS:
+            unknown_src[src] = unknown_src.get(src, 0) + 1
+        out.append([lat, lon, h, yaw, src, img])
+    stats = {'rows': len(rows), 'drawn': len(out), 'skipped': len(skipped_ids),
+             'skipped_ids': skipped_ids[:10], 'no_heading': no_heading,
+             'no_height': no_height, 'unknown_source': unknown_src}
+    return out, stats
+
+
+def log_photo_pose_stats(layer_id: str, stats: dict, where: str) -> None:
+    """把位姿轉換的缺漏大聲記下來（不准靜默少畫或把缺值畫成正北）。"""
+    if stats['skipped']:
+        logger.warning(f'[PhotoPoses/{where}] {layer_id}：{stats["skipped"]} 列經緯度缺值或超出範圍、'
+                       f'未畫（例：{", ".join(stats["skipped_ids"])}）')
+    if stats['no_heading']:
+        logger.warning(f'[PhotoPoses/{where}] {layer_id}：{stats["no_heading"]} 點沒有 yaw_deg，'
+                       f'以圓點顯示（不是朝北）')
+    if stats['no_height']:
+        logger.warning(f'[PhotoPoses/{where}] {layer_id}：{stats["no_height"]} 點沒有 h_ell_m，放在橢球面 0 m')
+    if stats['unknown_source']:
+        logger.warning(f'[PhotoPoses/{where}] {layer_id}：不認得的 source {stats["unknown_source"]}，'
+                       f'以 {PHOTO_POSE_OTHER_COLOR} 顯示（認得的：{", ".join(PHOTO_POSE_SOURCE_COLORS)}）')
+
+
+def check_color(color) -> Optional[str]:
+    """None = 依來源上色；否則必須是 '#RRGGBB'。"""
+    if color is None:
+        return None
+    if not isinstance(color, str) or not _HEX_COLOR.match(color):
+        raise ValueError(f"color 要是 '#RRGGBB'（或 None = 依來源上色），收到 {color!r}")
+    return color
+
+
+def check_layer_id(layer_id) -> str:
+    if not isinstance(layer_id, str) or not layer_id.strip():
+        raise ValueError(f'圖層代號要是非空字串，收到 {layer_id!r}')
+    return layer_id
+
+
+def survey_points_to_compact(points) -> Tuple[list, dict]:
+    """GCP／檢核點 [{id, type, lat, lon, label?}] → [[lat, lon, type, label], ...] 與統計。
+
+    經緯度不是有限數字或超出範圍的點**略過並計數**（不放到 (0, 0)）；超過 SURVEY_POINTS_MAX 直接丟錯。
+    """
+    pts = list(points or [])
+    if len(pts) > SURVEY_POINTS_MAX:
+        raise ValueError(f'{len(pts)} 點超過點圖層上限 {SURVEY_POINTS_MAX}（這是 GCP／檢核點用的小圖層）')
+    out, skipped = [], 0
+    for p in pts:
+        try:
+            lat, lon = float(p['lat']), float(p['lon'])
+        except (KeyError, TypeError, ValueError):
+            skipped += 1
+            continue
+        if not (math.isfinite(lat) and math.isfinite(lon) and abs(lat) <= 90.0 and abs(lon) <= 180.0):
+            skipped += 1
+            continue
+        typ = str(p.get('type') or '')
+        label = str(p.get('label') or p.get('id') or '')
+        out.append([lat, lon, typ, label])
+    counts = {}
+    for _la, _lo, t, _lb in out:
+        counts[t] = counts.get(t, 0) + 1
+    return out, {'rows': len(pts), 'drawn': len(out), 'skipped': skipped, 'by_type': counts}
 
 
 
@@ -53,6 +283,11 @@ def _load_cesium_html() -> str:
         )
 
 _CESIUM_HTML = _load_cesium_html()
+
+
+# ── Cesium ion access token ──────────────────────────────────────────
+#   解析邏輯在 utils.cesium_ion（規劃核心也要用，不能 import UI）；這裡 re-export 保持舊匯入路徑可用。
+from utils.cesium_ion import _ION_TOKEN_OK, resolve_cesium_ion_token  # noqa: E402,F401
 
 
 
@@ -144,8 +379,11 @@ class CesiumMapWidget(MapWidgetBase):
     strike_target_added = pyqtSignal(float, float)  # 打擊目標標記
     guided_goto_requested = pyqtSignal(float, float)  # 右鍵 GUIDED 飛到此點（lat, lon）
 
-    # ── Cesium Ion Token（可在設定中覆寫）────────────────────────────
-    CESIUM_TOKEN: str = ''   # 留空 = 無地形 Token，衛星影像仍正常
+    # ── Cesium ion Token ─────────────────────────────────────────────
+    #   ⚠ 不要把 token 寫在這裡（會進 git）。放 config/settings.json 的 map.cesium_ion_token，
+    #   或環境變數 CESIUM_ION_TOKEN；這個類別屬性只留給程式碼／測試覆寫，優先序最高。
+    #   留空 = 不帶 token，衛星影像（Google 圖磚）仍正常。
+    CESIUM_TOKEN: str = ''
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -181,6 +419,11 @@ class CesiumMapWidget(MapWidgetBase):
         self._tot_gate_on_rclick: bool = False   # 右鍵 → 不畫
         self._tot_gate_auto: bool = True         # 標記目標模式 → 照畫
         self._tot_approach: float = 180.0
+        # 航測成果圖層：圖層代號 → 實際生效的設定（給上層查、也給 log）
+        self._ortho_layers: dict = {}
+        self._photo_pose_layers: dict = {}
+        # GCP／檢核點佈設的點圖層（survey.gcp_plan）：圖層代號 → 統計
+        self._survey_point_layers: dict = {}
 
         self._cesium_html_file = None
 
@@ -223,6 +466,24 @@ class CesiumMapWidget(MapWidgetBase):
         ws.setAttribute(QWebEngineSettings.WebAttribute.WebGLEnabled, True)
 
         layout.addWidget(self.web_view)
+
+    def _resolve_token(self) -> str:
+        """Cesium ion token（見 :func:`resolve_cesium_ion_token`）。log 只記來源與長度，**絕不記 token 本身**。"""
+        import os
+        try:
+            from config.settings import get_settings
+            from_settings = getattr(get_settings().map, 'cesium_ion_token', '') or ''
+        except Exception:
+            from_settings = ''
+        token, source = resolve_cesium_ion_token(self.CESIUM_TOKEN, os.environ.get('CESIUM_ION_TOKEN'),
+                                                 from_settings)
+        if source.startswith('invalid'):
+            logger.warning(f'[Cesium] ion token 格式不合（{source}；只允許英數與 . _ -）⇒ 已忽略，3D 圖不帶 token')
+        elif token:
+            logger.info(f'[Cesium] ion token 已設定（來源：{source}，長度 {len(token)}）')
+        else:
+            logger.info('[Cesium] 未設定 ion token（衛星影像照常；沒有 ion 資源）')
+        return token
 
     def _load_cesium(self):
         from pathlib import Path
@@ -271,10 +532,12 @@ class CesiumMapWidget(MapWidgetBase):
         vtol_model_uri = vtol_glb.as_uri() if vtol_glb.exists() else ''
         logger.info(f'[Cesium] VTOL GLB 模型: {vtol_model_uri or "未找到，VTOL 沿用固定翼模型"}')
 
+        ion_token = self._resolve_token()
+
         html = (_CESIUM_HTML
                 .replace('__CESIUM_JS__',   cesium_js)
                 .replace('__CESIUM_CSS__',  cesium_css)
-                .replace('__CESIUM_TOKEN__', self.CESIUM_TOKEN)
+                .replace('__CESIUM_TOKEN__', ion_token)
                 .replace('__INIT_LAT__',    str(init_lat))
                 .replace('__INIT_LON__',    str(init_lon))
                 .replace('__INIT_HEIGHT__', str(init_height))
@@ -867,30 +1130,42 @@ class CesiumMapWidget(MapWidgetBase):
                     f'{json.dumps(color)},{width},{json.dumps(label)},false)'
                 )
 
+            # 同一構型的飛機用**同一個色系**：異構機隊在畫面上一眼就分得出
+            # 哪幾條是 Pioneer、哪幾條是 HERO（兩者轉彎半徑 200/120 m、
+            # 作業高度下限 120/100 m 差很多，混色看只會看到一堆線）。
+            # 色系內再依序取深淺，同構型的不同飛機仍分得開。
+            # ⚠ 取色統一走 swarm_drone_colors：VTOL 虛線條帶層也用同一份，兩層才不會互相矛盾
+            _colors = swarm_drone_colors(
+                ((_d or {}).get('drone_id', 1), (_d or {}).get('uav_class'))
+                for _d in drones)
+
             for drone_info in drones:
                 drone_id = drone_info.get('drone_id', 1)
-                # 整架 UAV 統一用一種色 — 由 drone_id 決定 (UAV 1 = palette[0], etc.)
-                color = _DRONE_COLORS[(drone_id - 1) % len(_DRONE_COLORS)]
+                platform = drone_info.get('platform') or ''
+                color = _colors[drone_id]
+
+                # 標籤帶構型：滑過線就知道這條是哪一台、哪一種機
+                tag = f'D{drone_id}' + (f' {platform}' if platform else '')
 
                 # TAKEOFF — 較粗（起飛段視覺強調）
                 for seg in drone_info.get('takeoff_paths', []) or []:
-                    _add(seg, color, 9, f'D{drone_id} 起飛', 30.0)
+                    _add(seg, color, 9, f'{tag} 起飛', 30.0)
 
                 # ENTRY — 較細（dead-heading 段）
                 for seg in drone_info.get('entry_paths', []) or []:
-                    _add(seg, color, 5, f'D{drone_id} 進入')
+                    _add(seg, color, 5, f'{tag} 進入')
 
                 # OPERATION — 主寬（偵蒐主體）
                 for seg in drone_info.get('operation_paths', []) or []:
-                    _add(seg, color, 8, f'D{drone_id} 作業')
+                    _add(seg, color, 8, f'{tag} 作業')
 
                 # TRANSFER — 較細（U-turn dead-heading）
                 for seg in drone_info.get('transfer_paths', []) or []:
-                    _add(seg, color, 5, f'D{drone_id} 轉移')
+                    _add(seg, color, 5, f'{tag} 轉移')
 
                 # LANDING — 中等寬（降落段收束）
                 for seg in drone_info.get('landing_paths', []) or []:
-                    _add(seg, color, 7, f'D{drone_id} 降落', 40.0)
+                    _add(seg, color, 7, f'{tag} 降落', 40.0)
 
             self._js('flyToScene()')
         except Exception as e:
@@ -1536,6 +1811,190 @@ class CesiumMapWidget(MapWidgetBase):
     def clear_coverage_gaps(self):
         """清除漏掃格標示"""
         self._js('clearCoverageGaps()')
+
+    # ─────────────────────────────────────────────────────────────────
+    # 航測成果：正射瓦片 + 照片位姿
+    #   ⚠ clear_all() 刻意不清這兩種：它們是成果不是規劃疊圖，有自己的移除方法
+    #     （remove_ortho_layer / clear_photo_poses / clear_survey_layers）。
+    # ─────────────────────────────────────────────────────────────────
+    def add_ortho_layer(self, layer_id: str, path_or_url, scheme: str = 'tms',
+                        bounds=None, alpha: float = 1.0) -> dict:
+        """疊一層正射瓦片（Cesium ImageryLayer，蓋在衛星底圖上）。
+
+        Parameters
+        ----------
+        layer_id : str
+            圖層代號；同代號再加一次 = 換掉舊的。
+        path_or_url : str | Path
+            本機瓦片根目錄（底下是 ``{z}/{x}/{y}.png``），或 http(s):// / file:// URL。
+        scheme : 'tms' | 'xyz'
+            ODM ``--tiles``（gdal2tiles，預設 mercator、沒有 --xyz）產出的是 **TMS**（y 由南往北）。
+            XYZ（y 由北往南）是 Google/OSM 慣例。**不猜**：給錯的話影像會南北錯位。
+        bounds : (西, 南, 東, 北) 度，可省
+            省略時：本機 TMS 有 tilemapresource.xml 就用它的範圍，否則由瓦片檔推（見 inspect_tile_dir）。
+        alpha : float
+            0–1。
+
+        Returns
+        -------
+        dict
+            實際生效的設定：url、scheme、bounds 與 bounds_source（user / tilemapresource.xml /
+            tiles_on_disk / none）、min_level、max_level、ext、alpha。
+        """
+        layer_id = check_layer_id(layer_id)
+        if scheme not in ('tms', 'xyz'):
+            raise ValueError(f"scheme 只能是 'tms'（ODM/gdal2tiles）或 'xyz'，收到 {scheme!r}")
+        alpha = float(alpha)
+        if not 0.0 <= alpha <= 1.0:
+            raise ValueError(f'alpha 要在 0–1，收到 {alpha}')
+        if bounds is not None:
+            bounds = check_bounds(bounds)
+        src = str(path_or_url)
+        info = {'id': layer_id, 'scheme': scheme, 'alpha': alpha, 'url': None,
+                'bounds': bounds, 'bounds_source': 'user' if bounds else None,
+                'min_level': None, 'max_level': None, 'ext': 'png'}
+        if src.lower().startswith(_URL_PREFIXES):
+            info['url'] = src
+            if bounds is None:
+                info['bounds_source'] = 'tilemapresource.xml' if scheme == 'tms' else 'none'
+                if scheme == 'xyz':
+                    logger.warning(f'[Ortho] {layer_id}：XYZ URL 沒給 bounds ⇒ Cesium 會對全球範圍要瓦片')
+        else:
+            tiles = inspect_tile_dir(src, scheme)
+            info.update(url=local_path_to_file_url(src), min_level=tiles['min_level'],
+                        max_level=tiles['max_level'], ext=tiles['ext'])
+            if bounds is None:
+                if scheme == 'tms' and tiles['has_tilemapresource']:
+                    info['bounds_source'] = 'tilemapresource.xml'
+                else:
+                    info['bounds'], info['bounds_source'] = tiles['bounds'], 'tiles_on_disk'
+            if scheme == 'tms' and not tiles['has_tilemapresource']:
+                logger.warning(f'[Ortho] {layer_id}：{src} 沒有 tilemapresource.xml（不是完整的 '
+                               f'gdal2tiles/ODM 輸出？）⇒ 範圍改由瓦片檔推得')
+            if scheme == 'xyz' and tiles['has_tilemapresource']:
+                logger.warning(f'[Ortho] {layer_id}：{src} 有 tilemapresource.xml（gdal2tiles/ODM 的 TMS 輸出）'
+                               f'卻指定 xyz ⇒ y 方向相反、影像會南北錯位；確定是 XYZ 才這樣用')
+        opts = {'scheme': scheme, 'alpha': alpha,
+                'rectangle': list(info['bounds']) if info['bounds'] else None,
+                'minimumLevel': info['min_level'], 'maximumLevel': info['max_level'],
+                'fileExtension': info['ext']}
+        self._ortho_layers[layer_id] = info
+        self._js(f'addOrthoLayer({json.dumps(layer_id)}, {json.dumps(info["url"])}, {json.dumps(opts)})')
+        logger.info(f'[Ortho] {layer_id}：{scheme} {info["url"]}｜範圍 {info["bounds"]}'
+                    f'（{info["bounds_source"]}）｜層級 {info["min_level"]}–{info["max_level"]}'
+                    f'｜.{info["ext"]}｜alpha {alpha}')
+        return dict(info)
+
+    def remove_ortho_layer(self, layer_id: str) -> bool:
+        """移除正射圖層；回傳這個代號原本是否存在。"""
+        existed = self._ortho_layers.pop(layer_id, None) is not None
+        self._js(f'removeOrthoLayer({json.dumps(layer_id)})')
+        return existed
+
+    def set_photo_poses(self, layer_id: str, rows, color: Optional[str] = None) -> dict:
+        """畫照片位姿（BillboardCollection，一張共用箭頭圖、rotation = −航向）。
+
+        Parameters
+        ----------
+        rows : iterable of dict
+            photos.csv（F2）的列；用到 lat_deg, lon_deg, h_ell_m, yaw_deg, source, image_id。
+            最多 PHOTO_POSES_INLINE_MAX 列（JSON 內嵌進 runJavaScript）；更多請用 load_photo_poses_file。
+        color : '#RRGGBB' | None
+            None = 依 source 上色（PHOTO_POSE_SOURCE_COLORS）；給顏色 = 整層單色。
+
+        Returns
+        -------
+        dict
+            photo_pose_rows_to_compact 的統計（drawn / skipped / no_heading / no_height / unknown_source）。
+        """
+        layer_id = check_layer_id(layer_id)
+        color = check_color(color)
+        rows = list(rows)
+        if len(rows) > PHOTO_POSES_INLINE_MAX:
+            raise ValueError(f'{len(rows)} 筆位姿超過內嵌上限 {PHOTO_POSES_INLINE_MAX}；'
+                             f'請寫成 photos.csv 再用 load_photo_poses_file()')
+        compact, stats = photo_pose_rows_to_compact(rows)
+        log_photo_pose_stats(layer_id, stats, '3D')
+        opts = {'color': color}
+        self._photo_pose_layers[layer_id] = {'id': layer_id, 'source': 'inline', 'color': color, **stats}
+        self._js(f'setPhotoPoses({json.dumps(layer_id)}, '
+                 f'{json.dumps({"rows": compact}, allow_nan=False)}, {json.dumps(opts)})')
+        logger.info(f'[PhotoPoses/3D] {layer_id}：{stats["drawn"]}/{stats["rows"]} 點')
+        return stats
+
+    def load_photo_poses_file(self, layer_id: str, path, color: Optional[str] = None) -> dict:
+        """大量位姿：讓 3D 頁面自己讀本機 photos.csv（F2）或 JSON（``{"rows": [...]}``）。
+
+        不經 runJavaScript 傳幾 MB 的字串；Python 端只先確認檔案在、CSV 表頭有經緯度欄，
+        實際畫了幾點由頁面 log（``[PhotoPoses]``）回報，也可用 query_survey_layers() 查。
+        """
+        layer_id = check_layer_id(layer_id)
+        color = check_color(color)
+        p = Path(path)
+        if not p.is_file():
+            raise FileNotFoundError(f'位姿檔不存在：{p}')
+        fmt = p.suffix.lower().lstrip('.')
+        if fmt not in ('csv', 'json'):
+            raise ValueError(f'位姿檔要是 .csv（photos.csv）或 .json，收到 {p.name}')
+        if fmt == 'csv':
+            with open(p, encoding='utf-8-sig', newline='') as fh:
+                header = [h.strip() for h in next(csv.reader(fh), [])]
+            missing = [c for c in ('lat_deg', 'lon_deg') if c not in header]
+            if missing:
+                raise ValueError(f'{p.name} 表頭缺 {missing}（photos.csv 格式見 F2）；表頭：{header}')
+        url = local_path_to_file_url(p)
+        info = {'id': layer_id, 'source': 'file', 'path': str(p), 'url': url, 'format': fmt, 'color': color}
+        self._photo_pose_layers[layer_id] = info
+        self._js(f'loadPhotoPosesUrl({json.dumps(layer_id)}, {json.dumps(url)}, '
+                 f'{json.dumps({"color": color})})')
+        logger.info(f'[PhotoPoses/3D] {layer_id}：由頁面讀檔 {url}')
+        return dict(info)
+
+    def clear_photo_poses(self, layer_id: str) -> bool:
+        """移除一層位姿；回傳這個代號原本是否存在。"""
+        existed = self._photo_pose_layers.pop(layer_id, None) is not None
+        self._js(f'clearPhotoPoses({json.dumps(layer_id)})')
+        return existed
+
+    def clear_survey_layers(self) -> None:
+        """移除所有正射與位姿圖層。"""
+        self._ortho_layers.clear()
+        self._photo_pose_layers.clear()
+        self._js('clearSurveyLayers()')
+
+    def query_survey_layers(self, callback) -> None:
+        """向頁面查目前的航測圖層（實際畫了幾點、瓦片錯誤數、載入狀態）。callback(dict)。"""
+        self._page.runJavaScript('surveyLayersInfo()', callback)
+
+    # ── GCP／檢核點佈設（survey.gcp_plan）：少量帶標籤的點，Entity 即可 ──────────
+    #   ⚠ clear_all() 與 clear_survey_layers() 都不碰它（它是佈設，不是規劃疊圖也不是成果）；
+    #     用 clear_survey_points 移除。
+    def set_survey_points(self, layer_id: str, points) -> dict:
+        """畫 GCP／檢核點（依類型上色、帶編號標籤，貼地）。同代號再畫一次 = 換掉舊的。
+
+        Parameters
+        ----------
+        points : iterable of dict
+            ``{'id', 'type': 'GCP'|'CHK', 'lat', 'lon', 'label'}``（survey.gcp_plan.map_points 的輸出）。
+
+        Returns
+        -------
+        dict  survey_points_to_compact 的統計（rows / drawn / skipped / by_type）。
+        """
+        layer_id = check_layer_id(layer_id)
+        compact, stats = survey_points_to_compact(points)
+        if stats['skipped']:
+            logger.warning(f'[SurveyPoints/3D] {layer_id}：{stats["skipped"]} 點經緯度無效，未畫')
+        self.__dict__.setdefault('_survey_point_layers', {})[layer_id] = dict(stats)
+        self._js(f'setSurveyPoints({json.dumps(layer_id)}, {json.dumps({"rows": compact}, allow_nan=False)})')
+        logger.info(f'[SurveyPoints/3D] {layer_id}：{stats["drawn"]}/{stats["rows"]} 點 {stats["by_type"]}')
+        return stats
+
+    def clear_survey_points(self, layer_id: str) -> bool:
+        """移除一層 GCP／檢核點；回傳這個代號原本是否存在。"""
+        existed = self.__dict__.setdefault('_survey_point_layers', {}).pop(layer_id, None) is not None
+        self._js(f'clearSurveyPoints({json.dumps(layer_id)})')
+        return existed
 
     def render_coverage_heatmap(self, display_grid: dict):
         """用 SAR 熱力圖呈現偵察覆蓋率分布（紅=漏掃，藍=已充分掃過）。

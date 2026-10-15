@@ -574,6 +574,47 @@ class PolygonUtils:
 
 
 # ==========================================
+# 掃描角慣例轉換
+# ==========================================
+# ⚠ 本專案同時存在**三套**掃描角慣例，同一個滑桿數字在不同規劃器會飛出不同方向。
+# 要把角度送給只認羅盤的下游（電子圍籬、地圖標註、飛控航向）時，一定要先過這裡。
+#
+#   ① 羅盤（compass）        0° = 北，順時針。公開介面、圍籬、航向一律用這個。
+#   ② CoverageParameters.angle（`core/global_planner/coverage_planner.py`）
+#                            0° = 東，順時針 ⇒ compass = 90 + angle。
+#   ③ CoveragePathPlanner.scan_angle_deg（`core/global_planner/coverage_path_planner.py`）
+#                            0° = 北，**逆時針** ⇒ compass = −angle。
+#
+# ②③ 相差 (90 + 2a)，在 a = 30° 時模 180 之下差 30° —— 這個歧異是既有行為，
+# 不是本函式造成的；圍籬必須跟著**各自那條路徑**走，所以兩支分開提供、不要統一。
+# 數值由 tests/test_fence_scan_angle.py 直接拿真的規劃器飛一趟比對鎖住。
+
+def coverage_angle_to_compass(angle_deg: float) -> float:
+    """`CoverageParameters.angle`（自東順時針）→ 羅盤度（自北順時針）。
+
+    Args:
+        angle_deg: 送進 `CoveragePlanner.plan_coverage` 的 `CoverageParameters.angle`
+
+    Returns:
+        掃描線方向的羅盤度，落在 [0, 360)。
+        （方向是無向線段，下游要比較時通常再取 % 180。）
+    """
+    return (90.0 + float(angle_deg)) % 360.0
+
+
+def fw_scan_angle_to_compass(angle_deg: float) -> float:
+    """`CoveragePathPlanner.plan_coverage(scan_angle_deg=)`（自北逆時針）→ 羅盤度。
+
+    Args:
+        angle_deg: 送進固定翼覆蓋規劃器的 `scan_angle_deg`
+
+    Returns:
+        掃描線方向的羅盤度，落在 [0, 360)。
+    """
+    return (-float(angle_deg)) % 360.0
+
+
+# ==========================================
 # 單元測試
 # ==========================================
 if __name__ == '__main__':

@@ -1,0 +1,1348 @@
+<?xml version="1.0" ?>
+<!--
+  ═══════════════════════════════════════════════════════════════════════════
+  quadplane_vtol / model.sdf
+  4+1 QuadPlane VTOL for gz sim 8.14.0 (Harmonic) + ArduPilot SITL (JSON 後端)
+
+  本機從零建的。~/ardupilot_gazebo/models/ 底下 11 個目錄裡帶 ArduPilotPlugin 的
+  只有 iris / iris_with_gimbal / zephyr / zephyr_with_parachute 四個,**沒有任何
+  QuadPlane / VTOL 模型可抄**。旋翼幾何抄 iris、機翼結構抄 zephyr,其餘全部推導。
+
+  ⚠️⚠️ 尺寸來源:core/base/airframe.py 的 HERO_PNP。那份紀錄裡**沒有任何氣動幾何**
+     (沒有翼展、翼面積、弦長、慣量)。所以本檔裡凡是幾何與係數,只有質量與速度是
+     「來自紀錄」,其餘是「推導」或「假設」。三級分類逐項寫在 README.md §3。
+     ⚠️ 猜的數字會怎麼影響飛行表現,也寫在 README.md §5。不要當成已驗證數據。
+
+  ───────────────────────────────────────────────────────────────────────────
+  座標慣例 (只能有一個,這裡選 iris 的)
+  ───────────────────────────────────────────────────────────────────────────
+  本模型 body frame:  x = 機頭前方,  y = 左翼,  z = 上
+  搭配 ArduPilotPlugin 的 <modelXYZToAirplaneXForwardZDown>0 0 0 180 0 0</...>
+  (roll 180 把 y 翻成右、z 翻成下 ⇒ 得到 ArduPilot 要的 FRD)
+
+  為什麼選 iris 的 180 0 0 而不是 zephyr 的 180 0 -90:
+    * zephyr 的 -90 存在,是因為 zephyr 的機體檔本身是 x=左 / y=後 建的
+      (見 ~/ardupilot_gazebo/models/zephyr_with_ardupilot/model.sdf 註解
+       "Zephyr is oriented x-left, y-back, z-up")。那是為了遷就既有 mesh。
+    * 我們沒有 mesh 包袱 (本模型全是 primitive,見下),可以直接用航空慣例的
+      x=前。這樣 SDF 裡每一個 pose 的 x 就是「離機頭多遠」,不必在腦裡轉 90°。
+    * ⚠️ 後果:所有從 zephyr 抄來的 lift-drag <forward>/<upward> 都**必須重算**。
+      zephyr 的機翼 forward 是 (0,-1,0)(它的 -y = 前),我們是 (1,0,0)。
+      混用零件時最容易錯的就是這裡,所以每一塊 lift-drag 都逐塊寫了理由。
+
+  ⚠️ 不變式:本檔**所有** link 的 <pose> 旋轉分量都是 0 0 0。
+     因此 <axis><xyz> 在「joint frame / child link frame / model frame」三種
+     解讀下數值完全相同 ⇒ 就算 SDF 版本改了 expressed_in 的預設值也咬不到我們。
+     ⚠️ 之後若有人給任何 link 加上旋轉,這條保護就沒了,必須同時補 expressed_in。
+
+  ───────────────────────────────────────────────────────────────────────────
+  通道對照 (端到端:SERVO(N+1) -> servos[N] -> pkt.pwm[N] -> control channel="N")
+  ───────────────────────────────────────────────────────────────────────────
+    ch 0  副翼   aileron_left_joint + aileron_right_joint  (兩塊,同一個 channel)
+    ch 1  升降舵 elevator_joint
+    ch 2  前推   pusher_joint            (ArduPlane 預設 SERVO3 = throttle)
+    ch 3  方向舵 rudder_joint
+    ch 4  M1     rotor_0_joint  右前 CCW
+    ch 5  M2     rotor_1_joint  左後 CCW
+    ch 6  M3     rotor_2_joint  左前 CW
+    ch 7  M4     rotor_3_joint  右後 CW
+
+  出處 (都在本機逐檔看過):
+    * ch 0/1/3 = aileron/elevator/rudder:
+      ~/ardupilot/libraries/SITL/SIM_Plane.cpp:407-409
+        float aileron  = filtered_servo_angle(input, 0);
+        float elevator = filtered_servo_angle(input, 1);
+        float rudder   = filtered_servo_angle(input, 3);
+    * ch 4-7 = QuadPlane 升力馬達:SIM_QuadPlane 的 motor_offset 預設 4
+      (leave first 4 servos free for plane) ⇒ SERVO5-8 ⇒ servos[4..7]。
+      SITL 以 JSON 後端啟動時 SIM_QuadPlane 不被實例化,真正生效的是 SERVOn_FUNCTION,
+      (⚠️ 這一行原本寫成命令列旗標的樣子,但那個旗標含兩個連字號,而 XML 註解裡
+       不准出現兩個連續連字號。gz sdf -k 用 TinyXML2 會放行,Python 的 expat
+       會直接 ParseError ⇒ 所有用嚴格解析器的下游工具全掛。已改寫。)
+      而 ArduPlane 在 quadplane.cpp 的 runtime 預設把 motor1..4 指到 CH_5..CH_8。
+    * <control channel="N"> 的上限:ArduPilotPlugin.cc:1552
+        int max_servo_channels = this->dataPtr->have32Channels ? 32 : 16;
+      我們用 0-7,在 16 之內 ⇒ <have_32_channels>0</have_32_channels> 即可。
+
+  ⚠️⚠️ 兩塊副翼掛同一個 channel="0" 是刻意的,而且是**合法**的:
+     ArduPilotPlugin.cc:552-575 的 LoadControlChannels 只是
+     `while (controlSDF) { Control control; ... }` 逐個 push_back,
+     **沒有任何 channel 唯一性檢查**。所以 N 個 <control> 可以共用一個 channel。
+     ⚠️ 同一段還有一個靜默坑:若 <control> 少寫 channel 屬性 (ArduPilotPlugin.cc:569-573),
+        它會**用解析順序當 channel** 並只發一行 gzwarn ⇒ 通道整個錯位卻不會失敗。
+        所以本檔每一個 <control> 都明寫 channel。
+
+  ───────────────────────────────────────────────────────────────────────────
+  @tunable 標記
+  ───────────────────────────────────────────────────────────────────────────
+  SDF 是靜態 XML,gz **不會**展開環境變數。所以「可覆寫 + 讀回」在這一層是這樣做的:
+    * 每一個可調常數都在自己那一行,並帶 `@tunable NAME=value` 註解 ⇒ 產生器/sed
+      可以確定性地改寫,grep 得到、diff 得出來。
+    * 讀回不是看註解,是**解析真的被寫進 XML 的值**:README.md §6 有一支
+      readback 指令,直接 parse 這個檔並印出生效表 (質量總和、每個 channel 的
+      servo_min/max/multiplier/type/joint)。改註解而沒改值,讀回會抓出來。
+  ═══════════════════════════════════════════════════════════════════════════
+-->
+<sdf version="1.9">
+  <model name="quadplane_vtol">
+
+    <!-- ⚠️ 建議 spawn pose 的 z = 0.25:起落架最低點在 base_link 座標 z = -0.25
+         (腿長 0.20,從 z=-0.05 到 z=-0.25)。世界檔給 0 會讓機體陷進地面 0.25 m,
+         lock_step 下的第一個 tick 就會吃到巨大接觸力。
+
+         ⚠️⚠️⚠️ 群機內嵌展開時,這一行是**必須就地改掉**的,不能只在後面再補一個
+            <pose>(2026-09-09 對抗式複審實測):同一個 <model> 底下放兩個 <pose>,
+            `gz sdf -p` **兩個都原樣印出來、零 warning**,而 sdformat 的
+            Element::Get 取的是**第一個** ⇒ 產生器附加在後面的那個座標被靜靜丟掉,
+            N 架全部疊在 0,0,0.25 同一點。沒有任何錯誤訊息,畫面上只看到「怎麼
+            只有一架」。世界檔產生器必須**覆寫**這一行,或先把它刪掉。 -->
+    <pose>0 0 0.25 0 0 0</pose>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         base_link:機身 + 主翼 + 尾翼固定段 + 兩根旋翼樑 + 起落架
+         原點 = 設計重心 (CG)。所有氣動 <cp> 都是相對這個原點量的。
+         ══════════════════════════════════════════════════════════════════ -->
+    <link name="base_link">
+      <!-- iris 也明寫 0/0,避免吃到 Gazebo 版本相依的預設阻尼:
+           一旦有隱藏阻尼,俯衝終端速度與續航就都不是我們算的那個。 -->
+      <velocity_decay>
+        <linear>0.0</linear>
+        <angular>0.0</angular>
+      </velocity_decay>
+
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <!-- @tunable BASE_MASS=6.10
+             6.65 (HERO_PNP.mass_kg) 減掉所有其他 link:
+             imu 0.15 + 4x旋翼 0.20 + 前推 0.03 + 2x副翼 0.10 + 升降舵 0.04
+             + 方向舵 0.03 = 0.55 ⇒ 6.65 - 0.55 = 6.10。
+             ⚠️ 改任何一個 link 的質量都要回頭改這裡,否則全機質量默默不等於 6.65。
+                README §6 的 readback 會把總和印出來,拿它當閘門。 -->
+        <mass>6.10</mass>
+        <!-- ⚠️⚠️ 這三個慣量是**估算值**,不是量出來的。
+             用 Raymer 的無因次迴轉半徑 (一般航空單發機):
+               Rx = 0.25 x (b/2) = 0.25 x 1.40 = 0.350  -> ixx = 6.10 x 0.350^2 = 0.747
+               Ry = 0.38 x (L/2) = 0.38 x 0.90 = 0.342  -> iyy = 6.10 x 0.342^2 = 0.713
+               Rz = 0.39 x (b+L)/4 = 0.39 x 1.15 = 0.4485 -> izz = 6.10 x 0.4485^2 = 1.227
+             (b = 2.80 翼展、L = 1.80 機身長,兩個都是本模型假設的,見 README §3)
+             ⚠️ 慣量估錯的後果是**姿態迴路增益全部偏掉**:izz 偏小會讓偏航看起來
+                過度敏感、ixx 偏大會讓 ArduPlane 的滾轉 PID 顯得無力。
+                這台機體的 Q_A_RAT_* / RLL2SRV_* 調校結果**不可以**外推到真機。
+             ⚠️ 四顆旋翼與舵面 link 的質量,Gazebo 會自己用平行軸定理疊上去
+                (+0.06 / +0.10 / +0.16),所以整機約 ixx 0.81 / iyy 0.82 / izz 1.39。 -->
+        <inertia>
+          <ixx>0.747</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.713</iyy>
+          <iyz>0</iyz>
+          <izz>1.227</izz>
+        </inertia>
+      </inertial>
+
+      <!-- ── 碰撞 ──────────────────────────────────────────────────────
+           全部用 primitive:本模型**不參照任何 mesh 檔**。
+           理由是離線可載入 —— model://ground_plane 在本機不存在會讓 gz 去 Fuel
+           線上抓並在離線時吐 Error Code 14;參照 iris 的 .dae 會把
+           iris_with_standoffs 變成硬相依,而群機用法是把本檔內文展開進 world,
+           那時 mesh 的相對 uri 解析又是另一個坑。自足式一次消掉這一整類。
+           ⚠️ 代價:看起來很陽春。要好看請另外做一個 *_visual 版本,不要動這個。 -->
+      <collision name="fuselage_collision">
+        <pose>-0.30 0 0 0 0 0</pose>
+        <geometry><box><size>1.70 0.14 0.16</size></box></geometry>
+      </collision>
+      <collision name="wing_collision">
+        <pose>-0.039 0 0 0 0 0</pose>
+        <geometry><box><size>0.238 2.80 0.03</size></box></geometry>
+      </collision>
+      <collision name="boom_left_collision">
+        <pose>0 0.55 0 0 0 0</pose>
+        <geometry><box><size>1.70 0.05 0.05</size></box></geometry>
+      </collision>
+      <collision name="boom_right_collision">
+        <pose>0 -0.55 0 0 0 0</pose>
+        <geometry><box><size>1.70 0.05 0.05</size></box></geometry>
+      </collision>
+      <!-- 起落架:四根短柱,底面 z = -0.25。跨距 1.40 x 1.10,地面姿態很穩。
+           ⚠️ 摩擦係數抄 iris 的 mu=100000 (幾乎不滑)。VTOL 垂直落地不需要滑跑,
+              但如果之後有人想拿它做滑行測試,這個值會讓它「黏在地上」。 -->
+      <collision name="leg_fl_collision">
+        <pose>0.70 0.55 -0.15 0 0 0</pose>
+        <geometry><cylinder><radius>0.012</radius><length>0.20</length></cylinder></geometry>
+        <surface>
+          <contact><ode><max_vel>100.0</max_vel><min_depth>0.001</min_depth></ode></contact>
+          <friction><ode><mu>100000.0</mu><mu2>100000.0</mu2></ode></friction>
+        </surface>
+      </collision>
+      <collision name="leg_fr_collision">
+        <pose>0.70 -0.55 -0.15 0 0 0</pose>
+        <geometry><cylinder><radius>0.012</radius><length>0.20</length></cylinder></geometry>
+        <surface>
+          <contact><ode><max_vel>100.0</max_vel><min_depth>0.001</min_depth></ode></contact>
+          <friction><ode><mu>100000.0</mu><mu2>100000.0</mu2></ode></friction>
+        </surface>
+      </collision>
+      <collision name="leg_rl_collision">
+        <pose>-0.70 0.55 -0.15 0 0 0</pose>
+        <geometry><cylinder><radius>0.012</radius><length>0.20</length></cylinder></geometry>
+        <surface>
+          <contact><ode><max_vel>100.0</max_vel><min_depth>0.001</min_depth></ode></contact>
+          <friction><ode><mu>100000.0</mu><mu2>100000.0</mu2></ode></friction>
+        </surface>
+      </collision>
+      <collision name="leg_rr_collision">
+        <pose>-0.70 -0.55 -0.15 0 0 0</pose>
+        <geometry><cylinder><radius>0.012</radius><length>0.20</length></cylinder></geometry>
+        <surface>
+          <contact><ode><max_vel>100.0</max_vel><min_depth>0.001</min_depth></ode></contact>
+          <friction><ode><mu>100000.0</mu><mu2>100000.0</mu2></ode></friction>
+        </surface>
+      </collision>
+
+      <!-- ── 視覺 ────────────────────────────────────────────────────── -->
+      <visual name="fuselage_visual">
+        <pose>-0.30 0 0 0 0 0</pose>
+        <geometry><box><size>1.70 0.14 0.16</size></box></geometry>
+        <material>
+          <ambient>0.15 0.17 0.20 1</ambient>
+          <diffuse>0.15 0.17 0.20 1</diffuse>
+          <specular>0.3 0.3 0.3 1</specular>
+        </material>
+      </visual>
+      <!-- 主翼固定段:弦長 0.238 (全弦 0.318 減掉副翼弦 0.08),前緣 x=+0.08 -->
+      <visual name="wing_visual">
+        <pose>-0.039 0 0 0 0 0</pose>
+        <geometry><box><size>0.238 2.80 0.03</size></box></geometry>
+        <material>
+          <ambient>0.85 0.85 0.88 1</ambient>
+          <diffuse>0.85 0.85 0.88 1</diffuse>
+        </material>
+      </visual>
+      <!-- 水平尾翼固定段:總弦 0.175,固定 0.105 (x -0.895 .. -1.00) -->
+      <visual name="htail_visual">
+        <pose>-0.9475 0 0.05 0 0 0</pose>
+        <geometry><box><size>0.105 0.80 0.02</size></box></geometry>
+        <material>
+          <ambient>0.85 0.85 0.88 1</ambient>
+          <diffuse>0.85 0.85 0.88 1</diffuse>
+        </material>
+      </visual>
+      <!-- 垂直尾翼固定段:總弦 0.25,固定 0.18 (x -0.855 .. -1.035),高 0.40 -->
+      <visual name="vfin_visual">
+        <pose>-0.945 0 0.25 0 0 0</pose>
+        <geometry><box><size>0.18 0.012 0.40</size></box></geometry>
+        <material>
+          <ambient>0.85 0.35 0.15 1</ambient>
+          <diffuse>0.85 0.35 0.15 1</diffuse>
+        </material>
+      </visual>
+      <visual name="boom_left_visual">
+        <pose>0 0.55 0 0 0 0</pose>
+        <geometry><box><size>1.70 0.05 0.05</size></box></geometry>
+        <material>
+          <ambient>0.10 0.10 0.10 1</ambient>
+          <diffuse>0.10 0.10 0.10 1</diffuse>
+        </material>
+      </visual>
+      <visual name="boom_right_visual">
+        <pose>0 -0.55 0 0 0 0</pose>
+        <geometry><box><size>1.70 0.05 0.05</size></box></geometry>
+        <material>
+          <ambient>0.10 0.10 0.10 1</ambient>
+          <diffuse>0.10 0.10 0.10 1</diffuse>
+        </material>
+      </visual>
+      <visual name="leg_fl_visual">
+        <pose>0.70 0.55 -0.15 0 0 0</pose>
+        <geometry><cylinder><radius>0.012</radius><length>0.20</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse></material>
+      </visual>
+      <visual name="leg_fr_visual">
+        <pose>0.70 -0.55 -0.15 0 0 0</pose>
+        <geometry><cylinder><radius>0.012</radius><length>0.20</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse></material>
+      </visual>
+      <visual name="leg_rl_visual">
+        <pose>-0.70 0.55 -0.15 0 0 0</pose>
+        <geometry><cylinder><radius>0.012</radius><length>0.20</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse></material>
+      </visual>
+      <visual name="leg_rr_visual">
+        <pose>-0.70 -0.55 -0.15 0 0 0</pose>
+        <geometry><cylinder><radius>0.012</radius><length>0.20</length></cylinder></geometry>
+        <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse></material>
+      </visual>
+      <!-- 機頭朝向標記,目視確認 x=前 沒有裝反 -->
+      <visual name="nose_marker">
+        <pose>0.53 0 0 0 0 0</pose>
+        <geometry><box><size>0.06 0.10 0.10</size></box></geometry>
+        <material><ambient>1 0.9 0 1</ambient><diffuse>1 0.9 0 1</diffuse></material>
+      </visual>
+    </link>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         IMU
+         ⚠️ <pose degrees="true">0 0 0 180 0 0</pose> 與 iris 完全一樣:把感測器
+            自己轉成 FRD。這一項與上面的 modelXYZToAirplaneXForwardZDown 是**兩件
+            不同的事**,兩邊都要對,錯一邊的症狀都是「姿態上下顛倒」。
+         ⚠️ imu_link 的 0.15 kg 是照 iris / zephyr 抄的。它是建模用的配重
+            (質量為 0 的 link 掛在鎖死關節上會讓解算器不穩),不是真的有 150 g 的
+            IMU。已經從 base_link 的質量扣掉,全機仍然是 6.65 kg。
+         ⚠️ 世界檔必須載入 gz-sim-imu-system,否則這個 sensor 不會產生資料,而
+            ArduPilotPlugin 只會安靜地送不出狀態。
+            scripts/wsl/gazebo/taoyuan_runway.sdf 已經有這個 plugin。
+         ══════════════════════════════════════════════════════════════════ -->
+    <link name="imu_link">
+      <pose>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.15</mass>
+        <inertia>
+          <ixx>0.00002</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.00002</iyy><iyz>0</iyz><izz>0.00002</izz>
+        </inertia>
+      </inertial>
+      <sensor name="imu_sensor" type="imu">
+        <gz_frame_id>imu_link</gz_frame_id>
+        <pose degrees="true">0 0 0 180 0 0</pose>
+        <always_on>1</always_on>
+        <update_rate>1000.0</update_rate>
+      </sensor>
+    </link>
+    <joint name="imu_joint" type="revolute">
+      <child>imu_link</child>
+      <parent>base_link</parent>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit><lower>0</lower><upper>0</upper><effort>0</effort><velocity>0</velocity></limit>
+        <dynamics><damping>1.0</damping></dynamics>
+      </axis>
+    </joint>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         四顆升力旋翼
+         幾何與轉向照抄 ~/ardupilot_gazebo/models/iris_with_standoffs/model.sdf
+         的**相對佈局**(不是絕對數值 —— iris 只有 0.13 x 0.22 的臂長,我們是
+         0.70 x 0.55):
+             rotor_0 = M1 右前 (+x, -y)  CCW  multiplier +
+             rotor_1 = M2 左後 (-x, +y)  CCW  multiplier +
+             rotor_2 = M3 左前 (+x, +y)  CW   multiplier -
+             rotor_3 = M4 右後 (-x, -y)  CW   multiplier -
+         iris 的實際數字 (iris_with_standoffs/model.sdf 的 <link> pose):
+             rotor_0  0.13 -0.22 0.023 / rotor_1 -0.13  0.2 0.023
+             rotor_2  0.13  0.22 0.023 / rotor_3 -0.13 -0.2 0.023
+         轉向出處 (iris_with_ardupilot/model.sdf 的 <control>):
+             channel 0/1 multiplier  838  (CCW)
+             channel 2/3 multiplier -838  (CW)
+         這正好對上 ArduPilot quad-X 的 M1 CCW / M2 CCW / M3 CW / M4 CW。
+         軸一律 0 0 1 (body +z),正 omega = 由上往下看逆時針。
+         ══════════════════════════════════════════════════════════════════ -->
+
+    <!-- @tunable ROTOR_R=0.19  螺旋槳半徑 m (15 吋槳)。
+         @tunable ROTOR_CP=0.16 氣動壓力中心半徑 = 0.84 x R,與 iris 同比例
+                  (iris: cp 0.084 / 槳半徑 0.10)。
+         @tunable ROTOR_MASS=0.05 每顆槳 (含槳轂) 質量 kg —— **假設值**。
+         慣量沿用 iris 的形狀比例 (izz = 0.67 m R^2、ixx/izz = 0.0582),
+         再以 izz = ixx + iyy 讓它自洽 (iris 自己這三個數是不自洽的,差 5%)。
+           izz = 0.67 x 0.05 x 0.19^2 = 1.209e-3
+           ixx = 0.0582 x izz         = 7.04e-5
+           iyy = izz - ixx            = 1.139e-3  -> 進位寫成 1.140e-3
+         ⚠️ 為什麼要進位:sdformat 會檢查慣量的三角不等式 (ixx+iyy >= izz 等)。
+            「恰好相等」會因為浮點捨入落到不等式外面,`gz sdf -k` 報
+            `Error Code 19: A link named ... has invalid inertia.` 而**整個模型
+            載不進去**。本檔所有 link 的三對不等式都刻意留了餘裕
+            (前推槳 izz 3.71e-4 -> 3.72e-4、副翼 izz 1.0685e-3 -> 1.0680e-3、
+             升降舵 izz 2.1497e-3 -> 2.1490e-3、方向舵 iyy 4.1225e-4 -> 4.1150e-4)。
+            這些調整都在估算誤差的萬分之一以內,不影響任何飛行結論。 -->
+
+    <link name="rotor_0">
+      <pose>0.70 -0.55 0.10 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.05</mass>
+        <inertia>
+          <ixx>7.04e-05</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>1.140e-03</iyy><iyz>0</iyz><izz>1.209e-03</izz>
+        </inertia>
+      </inertial>
+      <collision name="collision">
+        <geometry><cylinder><length>0.005</length><radius>0.19</radius></cylinder></geometry>
+      </collision>
+      <visual name="visual">
+        <geometry><box><size>0.38 0.028 0.006</size></box></geometry>
+        <!-- 藍 = CCW,與 iris 的 iris_prop_ccw 用色一致 -->
+        <material><ambient>0.1 0.2 0.9 1</ambient><diffuse>0.1 0.2 0.9 1</diffuse></material>
+      </visual>
+    </link>
+    <joint name="rotor_0_joint" type="revolute">
+      <child>rotor_0</child>
+      <parent>base_link</parent>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit><lower>-1e+16</lower><upper>1e+16</upper></limit>
+        <!-- @tunable ROTOR_DAMPING=0.0008
+             ⚠️⚠️ 這一項就是偏航權限,而且**刻意與 iris 不同**。
+             iris 用 0.004,在 838 rad/s 下阻尼力矩 3.35 N.m,而它單顆推力 x 力臂
+             只有 3.35 N.m ⇒ 偏航/滾轉權限比 ~1.0,實機大約是 0.02-0.04,
+             也就是 iris 的偏航權限被灌水約 30 倍。
+             我們選物理上合理的:0.0008 x 500 = 0.40 N.m,加上葉片阻力力矩
+             0.154 N.m ⇒ 每顆反扭矩 0.554 N.m,除以單顆推力 40.8 N 得等效力臂
+             0.0136 m,對 15 吋槳是合理值 (實槳 k_M/k_F 約 0.01-0.02)。
+             ⚠️⚠️ 葉片阻力力矩的算法 (2026-09-09 對抗式複審訂正,原本寫 0.512):
+                gazebo lift-drag 的阻力係數是 cd = |cda x alpha|,**不是** cda。
+                懸停時葉片速度純切向 ⇒ alpha = a0 = 0.3 ⇒ cd = 0.10 x 0.3 = 0.03。
+                  q = 0.5 x 1.225 x (500 x 0.16)^2 = 3920 Pa
+                  D = q x 0.00408 x 0.03 = 0.480 N (單片)
+                  M = D x 0.16 x 2 片 = 0.154 N.m
+                原本漏掉 "x alpha" ⇒ 高估 1/a0 = 3.33 倍。README §6.2 的讀回
+                現在**從解析到的面板值現算**這個量,不再寫死常數,所以改
+                ROTOR_BLADE_AREA / ROTOR_CP / ROTOR_WMAX 這條鎖會跟著動。
+             ⚠️ 風險與回退:偏航若明顯遲鈍 (QLOITER 下對不準航向),把這個值調大;
+                要做到「反扭矩 = 單顆推力 x 力臂」(iris 那種權限比 1.0) 需要
+                damping x 500 + 0.154 = 40.8 x sqrt(0.70^2+0.55^2) = 36.3
+                ⇒ damping = 0.072。改完務必重跑 README §6 讀回。 -->
+        <dynamics><damping>0.0008</damping></dynamics>
+      </axis>
+    </joint>
+
+    <link name="rotor_1">
+      <pose>-0.70 0.55 0.10 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.05</mass>
+        <inertia>
+          <ixx>7.04e-05</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>1.140e-03</iyy><iyz>0</iyz><izz>1.209e-03</izz>
+        </inertia>
+      </inertial>
+      <collision name="collision">
+        <geometry><cylinder><length>0.005</length><radius>0.19</radius></cylinder></geometry>
+      </collision>
+      <visual name="visual">
+        <geometry><box><size>0.38 0.028 0.006</size></box></geometry>
+        <material><ambient>0.1 0.2 0.9 1</ambient><diffuse>0.1 0.2 0.9 1</diffuse></material>
+      </visual>
+    </link>
+    <joint name="rotor_1_joint" type="revolute">
+      <child>rotor_1</child>
+      <parent>base_link</parent>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit><lower>-1e+16</lower><upper>1e+16</upper></limit>
+        <dynamics><damping>0.0008</damping></dynamics>
+      </axis>
+    </joint>
+
+    <link name="rotor_2">
+      <pose>0.70 0.55 0.10 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.05</mass>
+        <inertia>
+          <ixx>7.04e-05</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>1.140e-03</iyy><iyz>0</iyz><izz>1.209e-03</izz>
+        </inertia>
+      </inertial>
+      <collision name="collision">
+        <geometry><cylinder><length>0.005</length><radius>0.19</radius></cylinder></geometry>
+      </collision>
+      <visual name="visual">
+        <geometry><box><size>0.38 0.028 0.006</size></box></geometry>
+        <!-- 綠 = CW,與 iris 的 iris_prop_cw 用色一致 -->
+        <material><ambient>0.1 0.8 0.2 1</ambient><diffuse>0.1 0.8 0.2 1</diffuse></material>
+      </visual>
+    </link>
+    <joint name="rotor_2_joint" type="revolute">
+      <child>rotor_2</child>
+      <parent>base_link</parent>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit><lower>-1e+16</lower><upper>1e+16</upper></limit>
+        <dynamics><damping>0.0008</damping></dynamics>
+      </axis>
+    </joint>
+
+    <link name="rotor_3">
+      <pose>-0.70 -0.55 0.10 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.05</mass>
+        <inertia>
+          <ixx>7.04e-05</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>1.140e-03</iyy><iyz>0</iyz><izz>1.209e-03</izz>
+        </inertia>
+      </inertial>
+      <collision name="collision">
+        <geometry><cylinder><length>0.005</length><radius>0.19</radius></cylinder></geometry>
+      </collision>
+      <visual name="visual">
+        <geometry><box><size>0.38 0.028 0.006</size></box></geometry>
+        <material><ambient>0.1 0.8 0.2 1</ambient><diffuse>0.1 0.8 0.2 1</diffuse></material>
+      </visual>
+    </link>
+    <joint name="rotor_3_joint" type="revolute">
+      <child>rotor_3</child>
+      <parent>base_link</parent>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit><lower>-1e+16</lower><upper>1e+16</upper></limit>
+        <dynamics><damping>0.0008</damping></dynamics>
+      </axis>
+    </joint>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         後推螺旋槳 (channel 2 = ArduPlane 的 throttle)
+         @tunable PUSHER_R=0.14   半徑 m (11 吋槳)
+         @tunable PUSHER_CP=0.1176 = 0.84 x R
+         @tunable PUSHER_MASS=0.03 kg —— 假設值
+         轉軸 = body +x。正 omega 產生 +x (前向) 推力。
+         ⚠️ 這個 link **不轉 pose** (跟 zephyr 的 propeller 不一樣,zephyr 用
+            pitch 90 把 local z 轉到轉軸上)。不轉的好處是 <axis> 與 <cp> 都直接
+            用 body 座標讀,少一層心算。代價是慣量三軸要重排:轉軸是 x,所以
+            ixx 才是「繞轉軸」的那個。
+              ixx = 0.67 x 0.03 x 0.14^2 = 3.94e-4   (繞轉軸)
+              iyy = 0.0582 x ixx         = 2.29e-5   (沿槳葉長軸)
+              izz = ixx - iyy            = 3.71e-4
+         ⚠️ 陀螺效應是真的:ixx x omega = 3.94e-4 x 900 = 0.355 kg.m^2/s,
+            1 rad/s 的俯仰率會產生 0.355 N.m 的偏航力矩。這是物理,不是 bug。
+         ══════════════════════════════════════════════════════════════════ -->
+    <link name="pusher">
+      <pose>-1.20 0 0.05 0 0 0</pose>
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.03</mass>
+        <inertia>
+          <ixx>3.94e-04</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>2.30e-05</iyy><iyz>0</iyz><izz>3.72e-04</izz>
+        </inertia>
+      </inertial>
+      <collision name="collision">
+        <!-- 圓盤面在 yz 平面 ⇒ 圓柱要繞 y 轉 90 度 -->
+        <pose>0 0 0 0 1.5707963 0</pose>
+        <geometry><cylinder><length>0.005</length><radius>0.14</radius></cylinder></geometry>
+      </collision>
+      <visual name="visual">
+        <geometry><box><size>0.020 0.28 0.010</size></box></geometry>
+        <material><ambient>0.9 0.9 0.1 1</ambient><diffuse>0.9 0.9 0.1 1</diffuse></material>
+      </visual>
+    </link>
+    <joint name="pusher_joint" type="revolute">
+      <child>pusher</child>
+      <parent>base_link</parent>
+      <axis>
+        <xyz>1 0 0</xyz>
+        <limit><lower>-1e+16</lower><upper>1e+16</upper></limit>
+        <!-- @tunable PUSHER_DAMPING=0.0003
+             0.0003 x 900 = 0.27 N.m 的反扭矩 ⇒ 全油門時約 0.56 N.m 的滾轉反應
+             (加上葉片阻力 0.29)。單槳飛機本來就有這個扭矩,不是建模瑕疵。 -->
+        <dynamics><damping>0.0003</damping></dynamics>
+      </axis>
+    </joint>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         舵面
+         ⚠️⚠️ 正負號是本檔**最可能裝反**的一項,而且裝反的症狀是「起飛就翻」
+            而不是報錯。推導的權威來源是 ArduPilot 自己的參考被控體
+            ~/ardupilot/libraries/SITL/SIM_Plane.cpp (它能被 ArduPlane 飛好,
+            就代表它的號誌約定就是控制器心裡想的那個):
+              :335  ma = qbar*c*( ... + c_m_deltae * inputElevator)
+              :334  la = qbar*b*( ... + c_l_deltaa * inputAileron  + ...)
+              :336  na = qbar*b*( ... + c_n_deltar * inputRudder)
+            而 SIM_Plane.h:80 c_m_deltae = +1.0、:75 c_l_deltaa = +0.25、
+            :86 c_n_deltar = +0.1,三個都是**正**的。la/ma/na 是 FRD 下的
+            roll/pitch/yaw 力矩 ⇒
+              正升降舵 = 抬頭 /  正副翼 = 右滾 /  正方向舵 = 右偏航。
+            (`filtered_servo_angle` 把 PWM 以 SERVOn_TRIM 為中心映到 [-1,1],
+             SERVOn_REVERSED=0 時 PWM 高於 trim 就是正。)
+         ⚠️ 就算推導對,實際還是要驗:README §6 有一支不用起飛的檯面測試。
+         ══════════════════════════════════════════════════════════════════ -->
+
+    <!-- 左副翼:link 原點就是鉸鏈線 (x = -0.158,主翼固定段的後緣),
+         舵面弦 0.08 往 -x 延伸,展長 0.50 (y 0.85 .. 1.35)。 -->
+    <link name="aileron_left">
+      <pose>-0.158 1.10 0 0 0 0</pose>
+      <inertial>
+        <pose>-0.04 0 0 0 0 0</pose>
+        <mass>0.05</mass>
+        <inertia>
+          <ixx>1.0418e-03</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>2.677e-05</iyy><iyz>0</iyz><izz>1.0680e-03</izz>
+        </inertia>
+      </inertial>
+      <collision name="collision">
+        <pose>-0.04 0 0 0 0 0</pose>
+        <geometry><box><size>0.08 0.50 0.008</size></box></geometry>
+      </collision>
+      <visual name="visual">
+        <pose>-0.04 0 0 0 0 0</pose>
+        <geometry><box><size>0.08 0.50 0.008</size></box></geometry>
+        <material><ambient>0.9 0.2 0.2 1</ambient><diffuse>0.9 0.2 0.2 1</diffuse></material>
+      </visual>
+    </link>
+    <joint name="aileron_left_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>aileron_left</child>
+      <axis>
+        <!-- 軸 = body +y。繞 +y 轉正角時,位於 -x 的後緣往 +z (上) 走
+             (R_y(θ) 把 (-c,0,0) 送到 (-c cosθ, 0, +c sinθ))。 -->
+        <xyz>0 1 0</xyz>
+        <!-- @tunable AIL_LIMIT=0.35  rad,約 +-20 度 -->
+        <limit><lower>-0.35</lower><upper>0.35</upper></limit>
+        <dynamics><damping>0.05</damping></dynamics>
+      </axis>
+    </joint>
+
+    <link name="aileron_right">
+      <pose>-0.158 -1.10 0 0 0 0</pose>
+      <inertial>
+        <pose>-0.04 0 0 0 0 0</pose>
+        <mass>0.05</mass>
+        <inertia>
+          <ixx>1.0418e-03</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>2.677e-05</iyy><iyz>0</iyz><izz>1.0680e-03</izz>
+        </inertia>
+      </inertial>
+      <collision name="collision">
+        <pose>-0.04 0 0 0 0 0</pose>
+        <geometry><box><size>0.08 0.50 0.008</size></box></geometry>
+      </collision>
+      <visual name="visual">
+        <pose>-0.04 0 0 0 0 0</pose>
+        <geometry><box><size>0.08 0.50 0.008</size></box></geometry>
+        <material><ambient>0.2 0.9 0.2 1</ambient><diffuse>0.2 0.9 0.2 1</diffuse></material>
+      </visual>
+    </link>
+    <joint name="aileron_right_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>aileron_right</child>
+      <axis>
+        <xyz>0 1 0</xyz>
+        <limit><lower>-0.35</lower><upper>0.35</upper></limit>
+        <dynamics><damping>0.05</damping></dynamics>
+      </axis>
+    </joint>
+
+    <!-- 升降舵:鉸鏈線 x = -1.00,舵面弦 0.07,展長 0.80 -->
+    <link name="elevator">
+      <pose>-1.00 0 0.05 0 0 0</pose>
+      <inertial>
+        <pose>-0.035 0 0 0 0 0</pose>
+        <mass>0.04</mass>
+        <inertia>
+          <ixx>2.1334e-03</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>1.642e-05</iyy><iyz>0</iyz><izz>2.1490e-03</izz>
+        </inertia>
+      </inertial>
+      <collision name="collision">
+        <pose>-0.035 0 0 0 0 0</pose>
+        <geometry><box><size>0.07 0.80 0.008</size></box></geometry>
+      </collision>
+      <visual name="visual">
+        <pose>-0.035 0 0 0 0 0</pose>
+        <geometry><box><size>0.07 0.80 0.008</size></box></geometry>
+        <material><ambient>0.9 0.5 0.1 1</ambient><diffuse>0.9 0.5 0.1 1</diffuse></material>
+      </visual>
+    </link>
+    <joint name="elevator_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>elevator</child>
+      <axis>
+        <xyz>0 1 0</xyz>
+        <!-- @tunable ELEV_LIMIT=0.44  rad,約 +-25 度 -->
+        <limit><lower>-0.44</lower><upper>0.44</upper></limit>
+        <dynamics><damping>0.05</damping></dynamics>
+      </axis>
+    </joint>
+
+    <!-- 方向舵:鉸鏈線 x = -1.035,舵面弦 0.07,高 0.40
+         ⚠️ 為什麼**有**做方向舵 (可以省略但沒省):
+            省掉方向舵不會報錯,只會讓 ch3 沒人接。ArduPlane 的協調轉彎、
+            側風落地、以及 QuadPlane 前飛段的偏航配平全都會送 ch3;沒人接的話
+            飛機還是飛,但偏航靠 rudder 的那條路徑整條靜默失效 —— 正是本專案
+            最痛的那類失效 (指令送得出去、沒有告警、就是沒效果)。所以做。 -->
+    <link name="rudder">
+      <pose>-1.035 0 0.25 0 0 0</pose>
+      <inertial>
+        <pose>-0.035 0 0 0 0 0</pose>
+        <mass>0.03</mass>
+        <inertia>
+          <ixx>4.0006e-04</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>4.1150e-04</iyy><iyz>0</iyz><izz>1.231e-05</izz>
+        </inertia>
+      </inertial>
+      <collision name="collision">
+        <pose>-0.035 0 0 0 0 0</pose>
+        <geometry><box><size>0.07 0.008 0.40</size></box></geometry>
+      </collision>
+      <visual name="visual">
+        <pose>-0.035 0 0 0 0 0</pose>
+        <geometry><box><size>0.07 0.008 0.40</size></box></geometry>
+        <material><ambient>0.2 0.4 0.95 1</ambient><diffuse>0.2 0.4 0.95 1</diffuse></material>
+      </visual>
+    </link>
+    <joint name="rudder_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>rudder</child>
+      <axis>
+        <!-- 軸 = body +z。繞 +z 轉正角時,位於 -x 的後緣往 -y (右) 走
+             (R_z(θ) 把 (-c,0,0) 送到 (-c cosθ, -c sinθ, 0))。
+             後緣往右 ⇒ 尾鰭側力朝 +y (左) ⇒ 對 CG 的力矩繞 -z ⇒ 機頭右偏。
+             與 SIM_Plane 的「正方向舵 = 右偏航」一致。 -->
+        <xyz>0 0 1</xyz>
+        <!-- @tunable RUD_LIMIT=0.44  rad,約 +-25 度 -->
+        <limit><lower>-0.44</lower><upper>0.44</upper></limit>
+        <dynamics><damping>0.05</damping></dynamics>
+      </axis>
+    </joint>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         plugins
+         ══════════════════════════════════════════════════════════════════ -->
+    <plugin filename="gz-sim-joint-state-publisher-system"
+        name="gz::sim::systems::JointStatePublisher">
+    </plugin>
+
+    <!--
+      為什麼用 gz-sim-lift-drag-system 而不是 gz-sim-advanced-lift-drag-system
+      ────────────────────────────────────────────────────────────────────
+      本機兩支都在 (/usr/lib/x86_64-linux-gnu/gz-sim-8/plugins/,8.14.0):
+        libgz-sim8-lift-drag-system.so
+        libgz-sim8-advanced-lift-drag-system.so
+      選普通版,三個理由:
+        1. advanced 版要一整組穩定導數。我對它的 .so 做 strings 看得到它讀
+           Cellb / Cellp / Cellq / Cellr / Cem0 / Cema / Cemq / Cemr /
+           Cenb / Cenp / Cenq / Cenr / alpha_stall / area / mac / ... 這一大票。
+           HERO_PNP 一個都沒有。**憑空捏 20 個導數,比誠實用 6 個面板參數更糟**。
+        2. 普通版是 iris 與 zephyr 用的那一支,也就是本機唯一有「跟 ArduPilotPlugin
+           在 lock_step 下一起跑過」證據的那一支。
+        3. 我們需要 <control_joint_name> / <control_joint_rad_to_cl> 來驅動
+           副翼/升降舵/方向舵。普通版有 (strings 在 .so 裡找得到
+           `control_joint_name` 與被截斷的 `LiftDragcontrol_joint_ra`)。
+      ⚠️⚠️ 方法教訓:本機**沒有** LiftDrag.cc 原始碼 (只有 .so,/usr/src 底下沒有),
+         所以 cla / cda / alpha_stall 的**確切語意我無法從原始碼證實**,是從
+         iris / zephyr 的數值反推的。反推內容與其可證偽的預測寫在 README §5。
+      ⚠️ 另一個方法教訓:對 .so 跑 strings 找不到某個 tag **不能當成它不支援**。
+         短字面值 (<=15 char) 會被 SSO 內嵌進指令流,strings 看不到 —— 我實測
+         `cla_stall` 只以 `cla_stalH` 的殘影出現。用 strings 證明「沒有」是無效的。
+
+      統一約定:所有面板 <air_density>1.225</air_density> (ISA 海平面)。
+      ⚠️ 這與 iris / zephyr 的 1.2041 不同。刻意的:README §3 的翼面積推導
+         S = 2mg/(rho V_stall^2 CL_max) 題目就規定 rho=1.225,模型跟推導同一個
+         rho 才能一路對得起來。差 1.7 倍百分比,失速速度 10.00 -> 10.07 m/s。
+      ⚠️ 這個 rho 是**寫死的**,不隨高度變。所以本模型在 3000 m 的升力/推力
+         與海平面一模一樣 —— 任何跟高度有關的性能驗收都不成立。
+    -->
+
+    <!-- ── 主翼 左半 ────────────────────────────────────────────────────
+         @tunable WING_AREA_HALF=0.445  (全機 S = 0.890 m^2 的一半)
+         @tunable WING_CLA=4.95   3D 升力線斜率 = a0/(1+a0/(pi e AR)),
+                  a0=2pi、e=0.85、AR=8.81 ⇒ 4.958
+         @tunable WING_A0=0.067   零升角偏置 (翼型彎度 + 安裝角)。
+                  由「巡航 19 m/s、機身姿態 0 度時 CL 剛好等於 0.331」反解:
+                  CL_cruise = 2W/(rho V^2 S) = 130.43/(1.225*361*0.890) = 0.331
+                  ⇒ a0 = 0.331/4.95 = 0.0669
+         @tunable WING_ALPHA_STALL=0.242  = CL_max/cla = 1.2/4.95
+         @tunable WING_CDA=0.166  只裝**誘導阻力**。寄生阻力另外用下面那塊
+                  parasite_drag 面板裝,理由見該處註解。
+                  0.166 x 0.067 = 0.0111 = 巡航誘導阻力係數。
+         cp 放在 x=+0.05 (不是 0):讓中性點落在 -0.063,靜安定裕度
+         (0-(-0.063))/0.318 = 19.7% MAC,落在小型無人機的常用帶 (10-20%)。
+         <upward> 帶 3 度上反角 (左翼法線往 -y 傾) ⇒ 側滑時有正確號誌的
+         滾轉恢復力矩;沒有它,本機在無舵情況下橫向是中性的。 -->
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.067</a0>
+      <cla>4.95</cla>
+      <cda>0.166</cda>
+      <cma>0.0</cma>
+      <alpha_stall>0.242</alpha_stall>
+      <cla_stall>-3.0</cla_stall>
+      <cda_stall>-0.9</cda_stall>
+      <cma_stall>0.0</cma_stall>
+      <area>0.445</area>
+      <air_density>1.225</air_density>
+      <cp>0.05 0.70 0</cp>
+      <forward>1 0 0</forward>
+      <upward>0 -0.0523 0.9986</upward>
+      <link_name>base_link</link_name>
+      <control_joint_name>aileron_left_joint</control_joint_name>
+      <!-- @tunable AIL_RAD_TO_CL=-0.70
+           負號:左副翼後緣往上 (關節角為正) 要讓左翼升力**變小**。
+           大小的推導與可證偽預測 (滿舵滾轉率約 77 deg/s) 見 README §3/§5。 -->
+      <control_joint_rad_to_cl>-0.70</control_joint_rad_to_cl>
+    </plugin>
+
+    <!-- ── 主翼 右半 ──────────────────────────────────────────────────── -->
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.067</a0>
+      <cla>4.95</cla>
+      <cda>0.166</cda>
+      <cma>0.0</cma>
+      <alpha_stall>0.242</alpha_stall>
+      <cla_stall>-3.0</cla_stall>
+      <cda_stall>-0.9</cda_stall>
+      <cma_stall>0.0</cma_stall>
+      <area>0.445</area>
+      <air_density>1.225</air_density>
+      <cp>0.05 -0.70 0</cp>
+      <forward>1 0 0</forward>
+      <upward>0 0.0523 0.9986</upward>
+      <link_name>base_link</link_name>
+      <control_joint_name>aileron_right_joint</control_joint_name>
+      <control_joint_rad_to_cl>-0.70</control_joint_rad_to_cl>
+    </plugin>
+
+    <!-- ── 水平尾翼 ──────────────────────────────────────────────────────
+         @tunable HTAIL_AREA=0.14  由尾容積係數 V_H=0.5 反解:
+                  S_h = V_H x S x c / l_h = 0.5 x 0.890 x 0.318 / 1.00
+         @tunable HTAIL_CLA=4.20   AR_h = 0.80^2/0.14 = 4.57,e=0.9 ⇒ 4.227
+         a0 = 0 (對稱翼型、零安裝角)。
+         ⚠️ 可證偽預測:因為機翼 cp 在 CG 前 0.05 m,巡航時尾翼必須出約 3.26 N.m
+            的低頭力矩,對應升降舵約 -1.5 度的殘餘偏角。飛起來若殘餘偏角遠大於
+            這個數,代表 CG / cp / 尾臂三者有一個錯了。
+         ⚠️ 我原本想用 a0=-0.025 把這個殘餘偏角消掉,放棄了:iris / zephyr 都只用
+            非負的 a0,負 a0 在本機**沒有任何驗證樣本**,而失敗的樣子會是「俯仰
+            莫名其妙」。用 0.0 + 1.5 度殘餘偏角,是零風險換可忽略的代價。 -->
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.0</a0>
+      <cla>4.20</cla>
+      <cda>0.30</cda>
+      <cma>0.0</cma>
+      <alpha_stall>0.35</alpha_stall>
+      <cla_stall>-3.0</cla_stall>
+      <cda_stall>-0.9</cda_stall>
+      <cma_stall>0.0</cma_stall>
+      <area>0.14</area>
+      <air_density>1.225</air_density>
+      <cp>-1.00 0 0.05</cp>
+      <forward>1 0 0</forward>
+      <upward>0 0 1</upward>
+      <link_name>base_link</link_name>
+      <control_joint_name>elevator_joint</control_joint_name>
+      <!-- @tunable ELEV_RAD_TO_CL=-2.73
+           大小 = cla_h x tau = 4.20 x 0.65,tau 是弦比 0.07/0.175=0.40 的
+           襟翼效率。負號:後緣上揚 (關節角為正) 讓尾翼升力變**負** (下壓)
+           ⇒ 抬頭。與 SIM_Plane 的「正升降舵 = 抬頭」對得上。 -->
+      <control_joint_rad_to_cl>-2.73</control_joint_rad_to_cl>
+    </plugin>
+
+    <!-- ── 垂直尾翼 ──────────────────────────────────────────────────────
+         @tunable VFIN_AREA=0.10  由 V_V=0.04 反解:S_v = 0.04 x 0.890 x 2.80 / 1.00
+         @tunable VFIN_CLA=3.70   幾何 AR = 0.40^2/0.10 = 1.6,端板效應取有效
+                  AR = 3.2,e=0.9 ⇒ 3.708
+         <upward>0 1 0</upward> ⇒ 「升力」正方向朝 +y (左)。
+         驗過號誌:飛機往右滑 (速度有 -y 分量) ⇒ alpha 為正 ⇒ 側力朝 +y ⇒
+         力矩繞 -z ⇒ 機頭右轉、追上速度向量 ⇒ **風標安定**,號誌正確。
+         ⚠️ cp 的 z=+0.25 (在 CG 之上) 順帶提供了上反效應的一部分。
+            這是真實的高尾翼效應,不是筆誤。 -->
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.0</a0>
+      <cla>3.70</cla>
+      <cda>0.30</cda>
+      <cma>0.0</cma>
+      <alpha_stall>0.35</alpha_stall>
+      <cla_stall>-3.0</cla_stall>
+      <cda_stall>-0.9</cda_stall>
+      <cma_stall>0.0</cma_stall>
+      <area>0.10</area>
+      <air_density>1.225</air_density>
+      <cp>-1.00 0 0.25</cp>
+      <forward>1 0 0</forward>
+      <upward>0 1 0</upward>
+      <link_name>base_link</link_name>
+      <control_joint_name>rudder_joint</control_joint_name>
+      <!-- @tunable RUD_RAD_TO_CL=1.96
+           大小 = cla_v x tau = 3.70 x 0.53 (弦比 0.07/0.25=0.28)。
+           正號:關節角為正 ⇒ 後緣往右 ⇒ 側力朝 +y (與 upward 同向) ⇒ 右偏航。 -->
+      <control_joint_rad_to_cl>1.96</control_joint_rad_to_cl>
+    </plugin>
+
+    <!-- ── 寄生阻力面板 ──────────────────────────────────────────────────
+         ⚠️⚠️ 這一塊在 iris / zephyr 都沒有,是我加的。理由必須寫清楚:
+         gz-sim-lift-drag-system 的阻力形式是 cd = |cda * alpha| —— **沒有
+         alpha 無關的 CD0 項**。也就是說機身、旋翼樑、四顆停轉的旋翼、起落架
+         這些東西的阻力在這個外掛裡**根本不存在**,而且 alpha 隨速度上升趨近 0
+         ⇒ 阻力隨速度**下降**。zephyr 就是這樣才那麼「飄」。
+         直接後果:不修的話這台飛機俯衝時會無上界加速,AIRSPEED_MAX / TECS /
+         終端速度全部驗不了 (參見專案記憶 jet-conversion-never-applied:
+         阻力沒套上,幾十趟數據全作廢)。
+
+         做法:一塊 cla=0 的面板。cl = cla * alpha = 0 恆成立 (不產生升力),
+         cd = |cda * a0| 在機身對齊氣流時是常數 ⇒ 就是 q S CD0 的寄生阻力。
+           @tunable PARA_CD0=0.022 (= cda 0.22 x a0 0.10),以 S=0.890 為參考面積
+         校核:總阻力 D = q S (CD0 + CDi)
+           19 m/s: q=221.1 ⇒ D = 221.1 x 0.890 x (0.022 + 0.0111) = 6.52 N
+                   ⇒ L/D = 65.21/6.52 = 10.0  (四軸外掛的 VTOL 合理值)
+           40 m/s: D = 872.1 x 0.890 x (0.022 + 0.0025) = 19.0 N
+                   真實 (D0 正比 V^2、Di 反比 V^2) 應為 19.7 N ⇒ 誤差 4%。可接受。
+         ⚠️ 未驗證風險:cla=0 在這個外掛裡的行為我沒有原始碼可查。萬一它被當成
+            無效面板整塊跳過,寄生阻力會**靜默消失**而且畫面上完全看不出來。
+            README §6 有針對這一項的專屬檢查 (量 40 m/s 平飛的所需油門),
+            **這是本檔第一順位要驗的東西**。若真的失效,回退是把 cla 改成 0.001
+            (升力貢獻 0.0001 級,可忽略) 再驗一次。 -->
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.10</a0>
+      <cla>0.0</cla>
+      <cda>0.22</cda>
+      <cma>0.0</cma>
+      <alpha_stall>1.5</alpha_stall>
+      <cla_stall>0.0</cla_stall>
+      <cda_stall>0.22</cda_stall>
+      <cma_stall>0.0</cma_stall>
+      <area>0.890</area>
+      <air_density>1.225</air_density>
+      <cp>0 0 0</cp>
+      <forward>1 0 0</forward>
+      <upward>0 0 1</upward>
+      <link_name>base_link</link_name>
+    </plugin>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         旋翼氣動:每顆槳兩塊面板 (兩片葉),結構抄 iris_with_ardupilot。
+         @tunable ROTOR_BLADE_AREA=0.00408 每片葉的等效面積 m^2
+           由「T/W = 2.5」反解:
+             W = 6.65 x 9.80665 = 65.21 N,目標總推力 163.1 N
+             ⇒ 每片葉 20.39 N
+             葉尖速度 V = omega_max x cp = 500 x 0.16 = 80.0 m/s
+             L = 0.5 rho V^2 A (cla a0) = 0.5 x 1.225 x 6400 x A x 4.25 x 0.30
+               = 4997.4 A  ⇒ A = 20.39/4997.4 = 0.004080
+           校核:0.00408/0.19 = 21.5 mm 等效弦長,對 15 吋槳是**物理上合理的**
+           (真槳約 25-30 mm),不是隨便湊的黑數。
+         a0 / cla / cda / alpha_stall / cla_stall 直接沿用 iris 的葉片參數
+         (0.30 / 4.25 / 0.10 / 1.4 / -0.025):那是本機唯一有飛行證據的一組。
+         <forward> 是該片葉在正 omega 下的切線運動方向;<upward> 是推力方向 (+z)。
+         CW 的兩顆 (rotor_2/3) forward 要反過來 —— 抄 iris channel 2/3 的做法。
+         ══════════════════════════════════════════════════════════════════ -->
+
+    <!-- rotor_0 (CCW) -->
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.3</a0><alpha_stall>1.4</alpha_stall><cla>4.2500</cla><cda>0.10</cda><cma>0.0</cma>
+      <cla_stall>-0.025</cla_stall><cda_stall>0.0</cda_stall><cma_stall>0.0</cma_stall>
+      <area>0.00408</area><air_density>1.225</air_density>
+      <cp>0.16 0 0</cp><forward>0 1 0</forward><upward>0 0 1</upward>
+      <link_name>rotor_0</link_name>
+    </plugin>
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.3</a0><alpha_stall>1.4</alpha_stall><cla>4.2500</cla><cda>0.10</cda><cma>0.0</cma>
+      <cla_stall>-0.025</cla_stall><cda_stall>0.0</cda_stall><cma_stall>0.0</cma_stall>
+      <area>0.00408</area><air_density>1.225</air_density>
+      <cp>-0.16 0 0</cp><forward>0 -1 0</forward><upward>0 0 1</upward>
+      <link_name>rotor_0</link_name>
+    </plugin>
+
+    <!-- rotor_1 (CCW) -->
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.3</a0><alpha_stall>1.4</alpha_stall><cla>4.2500</cla><cda>0.10</cda><cma>0.0</cma>
+      <cla_stall>-0.025</cla_stall><cda_stall>0.0</cda_stall><cma_stall>0.0</cma_stall>
+      <area>0.00408</area><air_density>1.225</air_density>
+      <cp>0.16 0 0</cp><forward>0 1 0</forward><upward>0 0 1</upward>
+      <link_name>rotor_1</link_name>
+    </plugin>
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.3</a0><alpha_stall>1.4</alpha_stall><cla>4.2500</cla><cda>0.10</cda><cma>0.0</cma>
+      <cla_stall>-0.025</cla_stall><cda_stall>0.0</cda_stall><cma_stall>0.0</cma_stall>
+      <area>0.00408</area><air_density>1.225</air_density>
+      <cp>-0.16 0 0</cp><forward>0 -1 0</forward><upward>0 0 1</upward>
+      <link_name>rotor_1</link_name>
+    </plugin>
+
+    <!-- rotor_2 (CW) -->
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.3</a0><alpha_stall>1.4</alpha_stall><cla>4.2500</cla><cda>0.10</cda><cma>0.0</cma>
+      <cla_stall>-0.025</cla_stall><cda_stall>0.0</cda_stall><cma_stall>0.0</cma_stall>
+      <area>0.00408</area><air_density>1.225</air_density>
+      <cp>0.16 0 0</cp><forward>0 -1 0</forward><upward>0 0 1</upward>
+      <link_name>rotor_2</link_name>
+    </plugin>
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.3</a0><alpha_stall>1.4</alpha_stall><cla>4.2500</cla><cda>0.10</cda><cma>0.0</cma>
+      <cla_stall>-0.025</cla_stall><cda_stall>0.0</cda_stall><cma_stall>0.0</cma_stall>
+      <area>0.00408</area><air_density>1.225</air_density>
+      <cp>-0.16 0 0</cp><forward>0 1 0</forward><upward>0 0 1</upward>
+      <link_name>rotor_2</link_name>
+    </plugin>
+
+    <!-- rotor_3 (CW) -->
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.3</a0><alpha_stall>1.4</alpha_stall><cla>4.2500</cla><cda>0.10</cda><cma>0.0</cma>
+      <cla_stall>-0.025</cla_stall><cda_stall>0.0</cda_stall><cma_stall>0.0</cma_stall>
+      <area>0.00408</area><air_density>1.225</air_density>
+      <cp>0.16 0 0</cp><forward>0 -1 0</forward><upward>0 0 1</upward>
+      <link_name>rotor_3</link_name>
+    </plugin>
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.3</a0><alpha_stall>1.4</alpha_stall><cla>4.2500</cla><cda>0.10</cda><cma>0.0</cma>
+      <cla_stall>-0.025</cla_stall><cda_stall>0.0</cda_stall><cma_stall>0.0</cma_stall>
+      <area>0.00408</area><air_density>1.225</air_density>
+      <cp>-0.16 0 0</cp><forward>0 1 0</forward><upward>0 0 1</upward>
+      <link_name>rotor_3</link_name>
+    </plugin>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         前推螺旋槳氣動:兩片葉,葉片沿 +-y,轉軸 +x。
+         @tunable PUSHER_BLADE_AREA=0.00137
+         @tunable PUSHER_A0=0.45  螺距角 (rad, 25.8 度)。
+           ⚠️ 這一項不能照抄 iris 的 0.30。這個外掛的葉片有效攻角是
+              a0 - atan(V_axial / V_tangential),0.30 的話在 105.8 m/s 葉尖速下
+              **31 m/s 的空速就完全不出推力**了;巡航 19 m/s 已經吃掉 0.178 rad,
+              等於巡航要開到 83% 油門。0.45 把零推力空速推到 51 m/s。
+           由「19 m/s 巡航時 65% 油門剛好抵銷 6.52 N 阻力」反解 area:
+             s=0.65 ⇒ V_tan=68.8,alpha=0.45-atan(19/68.8)=0.1802
+             L = 0.5 x 1.225 x (68.8^2+19^2) x A x 4.25 x 0.1802 = 2389.5 A
+             每片要 3.26 N ⇒ A = 0.001364
+           校核:靜態全油門 35.9 N (T/W=0.55,小型 VTOL 合理);
+                 19 m/s 全油門 22.4 N (= 3.4 倍巡航阻力,爬升餘裕足夠);
+                 推估最大平飛速度約 31 m/s。
+           ⚠️ 0.00137/0.14 = 9.8 mm 等效弦長,對 11 吋槳偏小 (真槳約 18 mm)。
+              這是外掛用固定 a0 取代真實槳葉扭轉所吃掉的差,是**校正黑數**,
+              不要拿它當真實槳葉幾何。
+         ══════════════════════════════════════════════════════════════════ -->
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.45</a0><alpha_stall>1.4</alpha_stall><cla>4.2500</cla><cda>0.10</cda><cma>0.0</cma>
+      <cla_stall>-0.025</cla_stall><cda_stall>0.0</cda_stall><cma_stall>0.0</cma_stall>
+      <area>0.00137</area><air_density>1.225</air_density>
+      <!-- 正 omega 繞 +x:位於 +y 的葉片切線速度朝 +z -->
+      <cp>0 0.1176 0</cp><forward>0 0 1</forward><upward>1 0 0</upward>
+      <link_name>pusher</link_name>
+    </plugin>
+    <plugin filename="gz-sim-lift-drag-system" name="gz::sim::systems::LiftDrag">
+      <a0>0.45</a0><alpha_stall>1.4</alpha_stall><cla>4.2500</cla><cda>0.10</cda><cma>0.0</cma>
+      <cla_stall>-0.025</cla_stall><cda_stall>0.0</cda_stall><cma_stall>0.0</cma_stall>
+      <area>0.00137</area><air_density>1.225</air_density>
+      <cp>0 -0.1176 0</cp><forward>0 0 -1</forward><upward>1 0 0</upward>
+      <link_name>pusher</link_name>
+    </plugin>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         ApplyJointForce:每個「被 ArduPilotPlugin 控制的關節」各一個。
+         iris (4 個旋翼) 與 zephyr (螺旋槳 + 兩片襟翼) 都是這樣配。
+         ⚠️ 少配一個的症狀是那個關節完全不動,而且**不會有任何錯誤訊息**。
+            我們有 9 個被控關節,所以這裡必須剛好 9 個。
+            README §6 的 readback 會比對「被控關節集合」與「ApplyJointForce 集合」。
+         ══════════════════════════════════════════════════════════════════ -->
+    <plugin filename="gz-sim-apply-joint-force-system" name="gz::sim::systems::ApplyJointForce">
+      <joint_name>rotor_0_joint</joint_name>
+    </plugin>
+    <plugin filename="gz-sim-apply-joint-force-system" name="gz::sim::systems::ApplyJointForce">
+      <joint_name>rotor_1_joint</joint_name>
+    </plugin>
+    <plugin filename="gz-sim-apply-joint-force-system" name="gz::sim::systems::ApplyJointForce">
+      <joint_name>rotor_2_joint</joint_name>
+    </plugin>
+    <plugin filename="gz-sim-apply-joint-force-system" name="gz::sim::systems::ApplyJointForce">
+      <joint_name>rotor_3_joint</joint_name>
+    </plugin>
+    <plugin filename="gz-sim-apply-joint-force-system" name="gz::sim::systems::ApplyJointForce">
+      <joint_name>pusher_joint</joint_name>
+    </plugin>
+    <plugin filename="gz-sim-apply-joint-force-system" name="gz::sim::systems::ApplyJointForce">
+      <joint_name>aileron_left_joint</joint_name>
+    </plugin>
+    <plugin filename="gz-sim-apply-joint-force-system" name="gz::sim::systems::ApplyJointForce">
+      <joint_name>aileron_right_joint</joint_name>
+    </plugin>
+    <plugin filename="gz-sim-apply-joint-force-system" name="gz::sim::systems::ApplyJointForce">
+      <joint_name>elevator_joint</joint_name>
+    </plugin>
+    <plugin filename="gz-sim-apply-joint-force-system" name="gz::sim::systems::ApplyJointForce">
+      <joint_name>rudder_joint</joint_name>
+    </plugin>
+
+    <!-- ══════════════════════════════════════════════════════════════════
+         ArduPilotPlugin
+         ══════════════════════════════════════════════════════════════════ -->
+    <plugin name="ArduPilotPlugin" filename="ArduPilotPlugin">
+
+      <fdm_addr>127.0.0.1</fdm_addr>
+      <!-- @tunable FDM_PORT_IN=9102
+           ⚠️⚠️⚠️ 埠與 SITL instance 是**綁死的**,不能各算各的。
+           ArduPilot 的 JSON 後端自己從 instance 號推:
+             ~/ardupilot/libraries/AP_HAL_SITL/SITL_cmdline.cpp:258-259
+                SIM_IN_PORT = 9003 / SIM_OUT_PORT = 9002
+             同檔 :444-449  等於預設值時 += instance*10
+           SITL **送**伺服封包到 SIM_OUT_PORT,所以
+                fdm_port_in == 9002 + 10 x instance
+           本線從 -I10 起 (I0-I3 的 9002/9012/9022/9032 已被另一個 session 的
+           四機 Gazebo 佔用) ⇒ 9102。錯位的症狀是 "No JSON sensor message",
+           跟撞名一模一樣,分不出來。
+
+           ⚠️⚠️⚠️ **ss -lunp 看到埠 bind 了,證明不了任何事。**
+           ArduPilotPlugin.cc:227 是 `SocketUDP sock = SocketUDP(true, true);`,
+           SocketUDP.cc:72-75 會設 SO_REUSEADDR ⇒ 兩個 socket bind 同一個
+           127.0.0.1:port **都會成功**,而且**後 bind 的收走全部封包、先 bind 的
+           收到零**,沒有錯誤、沒有 log。所以前置檢查必須實際送探測封包並確認
+           是誰收到,不能只看 ss。 -->
+      <fdm_port_in>9102</fdm_port_in>
+
+      <connectionTimeoutMaxCount>5</connectionTimeoutMaxCount>
+
+      <!-- @tunable LOCK_STEP=1
+           ⚠️⚠️ lock_step 的失效語意 (務必連著判準一起讀):
+           * 已經上線過的機體斷線 ⇒ arduPilotOnline 永遠不會被設回 false
+             (ArduPilotPlugin.cc:1523-1548:lock_step 分支走的是 SendState()
+              重送,**不是** `arduPilotOnline = false`) ⇒ PreUpdate 卡在
+             ArduPilotPlugin.cc:1204-1213 的
+                while (!this->ReceiveServoPacket() && arduPilotOnline)
+             每輪睡 10 ms。gz-sim 的 PreUpdate 跑在**單一更新執行緒** ⇒
+             **一架死掉會凍結整個 world**。而且因為是 sleep 不是 busy-spin,
+             **沒有 CPU 尖峰**,用 CPU 判別會失效。
+           * 從來沒收到第一個封包的機體 ⇒ arduPilotOnline 仍是 false ⇒
+             迴圈立刻退出 ⇒ **world 照跑,那架靜靜死掉**。
+           ⇒ 判準:「/stats 的 sim_time 有前進」是必要條件但**不充分**。
+             要證明每一架都活著必須**逐機**檢查 (見 README §6)。 -->
+      <lock_step>1</lock_step>
+
+      <no_time_sync>1</no_time_sync>
+      <!-- 我們只用 channel 0-7,在 16 之內 (ArduPilotPlugin.cc:1552) -->
+      <have_32_channels>0</have_32_channels>
+
+      <!-- 座標框:見檔頭。iris 慣例。 -->
+      <modelXYZToAirplaneXForwardZDown degrees="true">0 0 0 180 0 0</modelXYZToAirplaneXForwardZDown>
+      <gazeboXYZToNED degrees="true">0 0 0 180 0 90</gazeboXYZToNED>
+
+      <!-- ⚠️⚠️ 這裡是**不加模型名前綴**的。本模型是自足式 (沒有 <include>),
+           所以 imu / joint 的名字相對於外掛所在的 model 就是這樣。
+           對照:iris_with_ardupilot 寫的是 `iris_with_standoffs::imu_link::imu_sensor`,
+           那個前綴是因為它 include 了底層模型才需要的。
+           好處:群機把本檔內文展開進 world 並把 model name 改成 vtol_3 之類時,
+           這些名字**不用跟著改** —— 外掛是用 model.Entity() 當根去找
+           (ArduPilotPlugin.cc:619),找不到會印 "This plugin will not run."
+           (:624)。如果有人改成用 <include> 包一層,就必須自己補前綴,否則
+           整個外掛不跑。 -->
+      <imuName>imu_link::imu_sensor</imuName>
+
+      <!-- ══════════════════════════════════════════════════════════════
+           ch 0:副翼 (兩塊,共用同一個 channel)
+           servo_min/max 1100/1900:ArduPlane 的 SERVOn_MIN/MAX 出廠預設
+             ~/ardupilot/libraries/SRV_Channel/SRV_Channel.cpp:37  MIN  1100
+             ~/ardupilot/libraries/SRV_Channel/SRV_Channel.cpp:46  MAX  1900
+             ( :55 TRIM 1500 )
+           本 repo 的 sitl/default_params/plane.parm 只覆寫了 SERVO3_MIN/MAX,
+           沒有動 SERVO1/2/4 ⇒ 這三個舵面就是 1100/1900。
+           ⚠️ 若有人在 .parm 改了 SERVO1/2/4_MIN/MAX,這裡**必須跟著改**:
+              ArduPilotPlugin.cc:137/142 的註解就明寫
+              "The lower/upper bound of PWM input should match SERVOX_MIN/MAX"。
+              不改的後果是行程被夾掉一截,而且完全沒有告警。
+           multiplier / offset:raw_cmd 在 [0,1],offset -0.5 移到 [-0.5,0.5],
+           乘 0.698 得 +-0.349 rad (+-20 度) = AIL_LIMIT 的範圍。
+           ⚠️ 左右**反號**:PWM 高於 trim = 正副翼 = 右滾
+              ⇒ 左副翼後緣往下 (關節角為負) / 右副翼後緣往上 (關節角為正)。
+
+           ⚠️⚠️⚠️ 以下九個 <control> 裡有兩個欄位**打錯不會停擺,只會靜靜飛錯**
+              (2026-09-09 對抗式複審加,兩者都已鎖進 README §6.2 讀回):
+              * <type> 打錯 ⇒ ArduPilotPlugin.cc:587-596 只 gzwarn 一行
+                "Control type [...] not recognized ... default to VELOCITY"
+                然後**默默退回 VELOCITY**。打在舵面上的後果是 POSITION 變
+                VELOCITY:舵面不再定位,而是以 cmd (rad/s) 持續漂移直到撞上
+                <limit> ⇒ 起飛就翻,唯一線索是開機幾千行 log 裡的那一行。
+              * <useForce>0 + POSITION ⇒ :1401-1404 走沒有 JointPositionCmd
+                元件的分支,只印 "Failed to do position control on joint ..."
+                然後那支舵面**整趟不動**;飛控照樣送指令、照樣沒有告警。
+              兩者 gz sdf -k 都會印 Valid.,兩者都在**必要但不充分**的檢查
+              (外掛數量、通道數量) 底下完全隱形。
+           ══════════════════════════════════════════════════════════════ -->
+      <control channel="0">
+        <jointName>aileron_left_joint</jointName>
+        <useForce>1</useForce>
+        <multiplier>-0.698</multiplier>
+        <offset>-0.5</offset>
+        <servo_min>1100</servo_min>
+        <servo_max>1900</servo_max>
+        <type>POSITION</type>
+        <p_gain>10.0</p_gain>
+        <i_gain>0</i_gain>
+        <d_gain>0</d_gain>
+        <i_max>0</i_max>
+        <i_min>0</i_min>
+        <cmd_max>2.5</cmd_max>
+        <cmd_min>-2.5</cmd_min>
+      </control>
+      <control channel="0">
+        <jointName>aileron_right_joint</jointName>
+        <useForce>1</useForce>
+        <multiplier>0.698</multiplier>
+        <offset>-0.5</offset>
+        <servo_min>1100</servo_min>
+        <servo_max>1900</servo_max>
+        <type>POSITION</type>
+        <p_gain>10.0</p_gain>
+        <i_gain>0</i_gain>
+        <d_gain>0</d_gain>
+        <i_max>0</i_max>
+        <i_min>0</i_min>
+        <cmd_max>2.5</cmd_max>
+        <cmd_min>-2.5</cmd_min>
+      </control>
+
+      <!-- ch 1:升降舵。multiplier +0.872 ⇒ +-0.436 rad (+-25 度)。
+           正 PWM ⇒ 關節角正 ⇒ 後緣上揚 ⇒ 尾翼下壓 ⇒ 抬頭。 -->
+      <control channel="1">
+        <jointName>elevator_joint</jointName>
+        <useForce>1</useForce>
+        <multiplier>0.872</multiplier>
+        <offset>-0.5</offset>
+        <servo_min>1100</servo_min>
+        <servo_max>1900</servo_max>
+        <type>POSITION</type>
+        <p_gain>10.0</p_gain>
+        <i_gain>0</i_gain>
+        <d_gain>0</d_gain>
+        <i_max>0</i_max>
+        <i_min>0</i_min>
+        <cmd_max>2.5</cmd_max>
+        <cmd_min>-2.5</cmd_min>
+      </control>
+
+      <!-- ══════════════════════════════════════════════════════════════
+           ch 2:前推馬達 (throttle)
+           servo_min/max 1000/2000:本 repo 的
+             sitl/default_params/plane.parm:25-26  SERVO3_MIN 1000 / SERVO3_MAX 2000
+           **明確覆寫過**,所以這裡不是 1100/1900。
+           @tunable PUSHER_WMAX=900  rad/s (約 8600 rpm,11 吋槳的合理上限)
+           cmd_min 0.0:抄 zephyr。讓 PID 只能推不能煞 ⇒ 收油門時螺旋槳靠阻尼
+           與葉片阻力自然減速 (約 0.7 s),不會被硬煞出一個假的機身反扭矩。
+           ══════════════════════════════════════════════════════════════ -->
+      <control channel="2">
+        <jointName>pusher_joint</jointName>
+        <useForce>1</useForce>
+        <multiplier>900</multiplier>
+        <offset>0</offset>
+        <servo_min>1000</servo_min>
+        <servo_max>2000</servo_max>
+        <type>VELOCITY</type>
+        <p_gain>0.30</p_gain>
+        <i_gain>0</i_gain>
+        <d_gain>0</d_gain>
+        <i_max>0</i_max>
+        <i_min>0</i_min>
+        <cmd_max>4.0</cmd_max>
+        <cmd_min>0.0</cmd_min>
+      </control>
+
+      <!-- ch 3:方向舵。正 PWM ⇒ 關節角正 ⇒ 後緣往右 ⇒ 右偏航。 -->
+      <control channel="3">
+        <jointName>rudder_joint</jointName>
+        <useForce>1</useForce>
+        <multiplier>0.872</multiplier>
+        <offset>-0.5</offset>
+        <servo_min>1100</servo_min>
+        <servo_max>1900</servo_max>
+        <type>POSITION</type>
+        <p_gain>10.0</p_gain>
+        <i_gain>0</i_gain>
+        <d_gain>0</d_gain>
+        <i_max>0</i_max>
+        <i_min>0</i_min>
+        <cmd_max>2.5</cmd_max>
+        <cmd_min>-2.5</cmd_min>
+      </control>
+
+      <!-- ══════════════════════════════════════════════════════════════
+           ch 4-7:四顆升力馬達
+           ⚠️⚠️ **PWM 刻度陷阱 —— 本檔與 iris 最重要的一處不同。**
+           iris 的四個 control 都寫 servo_min 1100 / servo_max 1900,而
+           ArduPilot 的 quadplane.parm 與本 repo 的
+           mission/sitl_launcher.py generate_vtol_params() (:281-282) 都是
+           Q_M_PWM_MIN/MAX = 1000/2000。照抄 iris 的話,
+           ArduPilotPlugin.cc:1677 的
+                raw_cmd = (pwm - pwm_min)/(pwm_max - pwm_min); clamp(0,1)
+           會把 1000-1100 全夾成 0、1900-2000 全夾成 1
+           ⇒ 四顆一起損失 **25% 行程**,而且完全靜默。
+           所以升力馬達寫 **1000 / 2000**,與 Q_M_PWM_MIN/MAX 對齊。
+           ⚠️ 另注意 Q_M_PWM_TYPE 預設 NORMAL ⇒ 對馬達輸出生效的是
+              Q_M_PWM_MIN/MAX,**SERVOn_MIN/MAX 不生效**。所以 vtol_default.parm
+              裡 SERVO5/6 寫 1000/2000 而 SERVO7/8 寫 1100/1900 的不一致,
+              對這條路徑沒有影響 —— 但也代表「看 SERVOn_MIN 對不對」是**錯的
+              檢查**,要看 Q_M_PWM_MIN/MAX。
+
+           @tunable ROTOR_WMAX=500  rad/s (約 4775 rpm)
+           ⚠️⚠️ **cmd_max 是真正的推力上限,不是 multiplier。**
+           iris 就踩在這上面:它 multiplier 838,但穩態需要的力矩是
+           阻尼 0.004x838 = 3.35 加上葉片阻力 0.10,共 3.45 N.m,而它
+           cmd_max 只有 2.5 ⇒ 實際轉速卡在約 612 rad/s,最大推力只有標稱的
+           53%。也就是 iris 的 multiplier **從來沒被達到過**。
+           我們的:阻尼 0.0008x500 = 0.40 + 葉片阻力力矩 0.512 = 0.912 N.m,
+           cmd_max 4.0 有 4.4 倍餘裕 ⇒ 標稱轉速真的到得了。
+           ⚠️ 但 P 控制器一定有靜差:穩態誤差 = 0.912/p_gain = 3.04 rad/s
+              (0.6%),推力低約 1.2%。這是可預測的,不是漂移。
+           @tunable ROTOR_PGAIN=0.30
+           選 0.30 而不是 iris 的 0.20 或更高:閉迴路時間常數 = Izz/p =
+           1.209e-3/0.30 = 4.0 ms,比物理步長 1 ms 大 4 倍 ⇒ 顯式積分安全。
+           拉到 0.5 會變 2.4 ms,開始貼近步長,不值得為了 0.3% 靜差冒險。
+           cmd_min -4.0 (不是 0):固定翼段要能把旋翼**煞停並保持停止**,
+           否則停轉的槳會在 19 m/s 側風下被吹著轉並產生雜訊力。
+           ══════════════════════════════════════════════════════════════ -->
+      <control channel="4">
+        <jointName>rotor_0_joint</jointName>
+        <useForce>1</useForce>
+        <multiplier>500</multiplier>
+        <offset>0</offset>
+        <servo_min>1000</servo_min>
+        <servo_max>2000</servo_max>
+        <type>VELOCITY</type>
+        <p_gain>0.30</p_gain>
+        <i_gain>0</i_gain>
+        <d_gain>0</d_gain>
+        <i_max>0</i_max>
+        <i_min>0</i_min>
+        <cmd_max>4.0</cmd_max>
+        <cmd_min>-4.0</cmd_min>
+      </control>
+      <control channel="5">
+        <jointName>rotor_1_joint</jointName>
+        <useForce>1</useForce>
+        <multiplier>500</multiplier>
+        <offset>0</offset>
+        <servo_min>1000</servo_min>
+        <servo_max>2000</servo_max>
+        <type>VELOCITY</type>
+        <p_gain>0.30</p_gain>
+        <i_gain>0</i_gain>
+        <d_gain>0</d_gain>
+        <i_max>0</i_max>
+        <i_min>0</i_min>
+        <cmd_max>4.0</cmd_max>
+        <cmd_min>-4.0</cmd_min>
+      </control>
+      <control channel="6">
+        <jointName>rotor_2_joint</jointName>
+        <useForce>1</useForce>
+        <multiplier>-500</multiplier>
+        <offset>0</offset>
+        <servo_min>1000</servo_min>
+        <servo_max>2000</servo_max>
+        <type>VELOCITY</type>
+        <p_gain>0.30</p_gain>
+        <i_gain>0</i_gain>
+        <d_gain>0</d_gain>
+        <i_max>0</i_max>
+        <i_min>0</i_min>
+        <cmd_max>4.0</cmd_max>
+        <cmd_min>-4.0</cmd_min>
+      </control>
+      <control channel="7">
+        <jointName>rotor_3_joint</jointName>
+        <useForce>1</useForce>
+        <multiplier>-500</multiplier>
+        <offset>0</offset>
+        <servo_min>1000</servo_min>
+        <servo_max>2000</servo_max>
+        <type>VELOCITY</type>
+        <p_gain>0.30</p_gain>
+        <i_gain>0</i_gain>
+        <d_gain>0</d_gain>
+        <i_max>0</i_max>
+        <i_min>0</i_min>
+        <cmd_max>4.0</cmd_max>
+        <cmd_min>-4.0</cmd_min>
+      </control>
+
+      <!-- ⚠️ 刻意**不寫** <controlVelocitySlowdownSim>:iris 寫的那個 tag
+           根本不存在。ArduPilotPlugin.cc:726-727 讀的是
+           `controlSDF->Get("rotorVelocitySlowdownSim", 1)`,少一個 "rotor"。
+           iris 那四行是靜默無效的死字,只是剛好預設值也是 1 所以沒人發現。
+           我們用預設值 1,不重複那個誤導。 -->
+
+    </plugin>
+
+  </model>
+</sdf>

@@ -37,7 +37,7 @@ from .decompose import resolve_sensor
 from .geometry import Cell, Strip
 from .mission import (FW_PHASES, MissionInputs, MissionPlan, Mode, Phase, PlannerConfig, SortieEnergy, UAVInstance,
                       UAVPlan, UAVState, Waypoint, mode_phase_violation)
-from .planner import plan_mission
+from .planner import _start_site, plan_mission
 from .platform import (G_MPS2, PLATFORM_HERO, PLATFORM_PIONEER, CameraHardware, EnergyModel, LidarHardware,
                        PlatformSpec)
 from .wind import WindField, r_eff_wind_speed
@@ -1129,9 +1129,17 @@ def validate(plan: MissionPlan, ctx: MissionContext, cache: CostCache | _BudgetC
             separation_ok = False
             details.setdefault("separation", []).append(f"check_separation_failed: {exc}")
         sched = CorridorSchedule(cfg)
-        home = ctx.inputs.home.site_id
+        # ⚠⚠⚠ 這裡原本是 `home = ctx.inputs.home.site_id` 然後每一架都登記在 home，
+        #   **完全不看逐機起飛站**（`UAVInstance.start_site_id`）。而 planner 早就
+        #   逐機登記（`planner.py:1550-1552` 用 `_start_site`）⇒ 兩條管線用不同的
+        #   站點，只要有人從別的場坪起飛，validate 就會報**不存在的**走廊衝突。
+        #   實測：B4 起飛站 ALT4、t_takeoff=588.0，validate 回報一筆
+        #   `site=H, res_kinds=('landing','takeoff'), t=588.0`；四組接了起飛站的
+        #   組態全部 validate_failed(conflicts=2)，而基準組全部 passed。
+        #   ⚠ 用 planner 那支**同一個**存取器，不要自己再寫一份 fallback ——
+        #   兩份會再度漂開，那正是這個 bug 的成因。
         for p in plan.plans.values():
-            sched.reserve_plan(p, home)
+            sched.reserve_plan(p, _start_site(ctx, p.uav_id))
         conflicts += sched.conflicts()
         min_h, min_v, t_min, pair = min_separation(plan.plans, cfg)
     sep_lines = [f"min_sep_h={min_h:.1f} m at t={t_min:.1f} s pair={pair}", f"min_sep_v(d_h<d_sep)={min_v:.1f} m",

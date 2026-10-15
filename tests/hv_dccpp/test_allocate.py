@@ -288,6 +288,10 @@ def test_makespan_parity_rule(mini):
         assert t_done - t_arr == pytest.approx(cell.T_single_s["A"])
         assert AL.makespan_after_insert([], 0, cell, b.ctx.uav("A1"), b.cache, b.cfg) == pytest.approx(est.C_s)
         # 兩側擇優：估計 ≤ 任一固定側（skip-k 序列正／反向）之手算
+        # ⚠ 2026-09-10：`sweep_order` 多了 `cfg` 參數（可搜尋序列），但配置層**刻意不傳**
+        #   —— 封閉基準 24 格否決了那個接法（淨 +731 s，見 `allocate.py` 的 `_chain`
+        #   與 `test_sweep_order_search.py::test_chain_deliberately_uses_the_fixed_order`）。
+        #   所以這裡維持不傳 cfg，與 `_task_options` 的實際行為一致。
         order = AL.sweep_order(ids[:n], "A", b.cache)
         assert set(order) == {b.cache.idx["A"][s] for s in ids[:n]} and (first, last) in ((order[0], order[-1]), (order[-1], order[0]))
         for idx_in2 in (0, 1):

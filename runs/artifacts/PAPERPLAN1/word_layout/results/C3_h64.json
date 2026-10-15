@@ -1,0 +1,175 @@
+{
+ "pages": 5,
+ "used_cm_per_page": [
+  24.44,
+  25.36,
+  25.44,
+  24.57,
+  9.37
+ ],
+ "content_cm": 109.18,
+ "pages_equiv": 4.248,
+ "last_page_lines": 19,
+ "last_line_top_cm": 10.86,
+ "last_page_used_cm": 9.32,
+ "body_height_cm": 25.7,
+ "last_page_fill_pct": 36.3,
+ "n_paragraphs": 144,
+ "n_paragraphs_snap_to_grid_on": 0,
+ "n_table_row_end_marks_reported_on": 15,
+ "where": [
+  [
+   "一、前言",
+   1,
+   12.2
+  ],
+  [
+   "二、研究方法",
+   1,
+   18.8
+  ],
+  [
+   "2.1 系統架構與規劃流",
+   1,
+   19.4
+  ],
+  [
+   "2.2 核心公式",
+   1,
+   23.4
+  ],
+  [
+   "三、SITL 驗證與成果",
+   2,
+   17.6
+  ],
+  [
+   "3.1 實驗設置",
+   2,
+   18.1
+  ],
+  [
+   "3.2 規劃與 SITL",
+   2,
+   22.7
+  ],
+  [
+   "表1 規劃與 SITL ",
+   2,
+   25.7
+  ],
+  [
+   "3.3 規劃天花板與風場",
+   3,
+   8.9
+  ],
+  [
+   "[圖檔]",
+   3,
+   14.9
+  ],
+  [
+   "圖1 高度合規與 SIT",
+   3,
+   21.3
+  ],
+  [
+   "表2 規劃天花板與風場之",
+   3,
+   22.8
+  ],
+  [
+   "四、結論與限制",
+   4,
+   6.0
+  ],
+  [
+   "參考文獻",
+   4,
+   18.7
+  ]
+ ],
+ "figures": [
+  {
+   "file": "fig5_compliance.png",
+   "width_cm": 16.992,
+   "height_cm": 6.392,
+   "scale_pct": [
+    100.0,
+    100.0
+   ]
+  }
+ ],
+ "tables": [
+  {
+   "tnum": "1",
+   "col_cm": [
+    6.51,
+    4.01,
+    6.49
+   ]
+  },
+  {
+   "tnum": "2",
+   "col_cm": [
+    2.11,
+    1.36,
+    3.0,
+    1.63,
+    2.87,
+    1.63,
+    4.39
+   ]
+  }
+ ],
+ "n_omath": 4,
+ "build_s": 4.7,
+ "layout": {
+  "indent": false,
+  "spacing": false,
+  "compress_punct": false,
+  "table_split": true,
+  "no_widow": false
+ },
+ "caveats_missing": [],
+ "caveats_checked": 61,
+ "name": "C3 C2＋L3L4＋D1D2",
+ "cuts": [
+  1,
+  2,
+  3,
+  4,
+  5,
+  6,
+  7,
+  8
+ ],
+ "candidates": [
+  "L1",
+  "K1",
+  "K2",
+  "K3",
+  "K4",
+  "K5",
+  "K6",
+  "K7",
+  "K8",
+  "K9",
+  "K10",
+  "K11",
+  "K12",
+  "F1",
+  "F2",
+  "L2",
+  "L3",
+  "L4",
+  "R1",
+  "R2",
+  "T1",
+  "X1",
+  "D1",
+  "D2"
+ ],
+ "docx": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\PAPERPLAN1\\word_layout\\variants\\C3.docx",
+ "pdf": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\PAPERPLAN1\\word_layout\\variants\\C3.pdf"
+}

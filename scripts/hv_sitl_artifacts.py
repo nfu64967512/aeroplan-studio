@@ -1,4 +1,4 @@
-"""把 HV-DCCPP 四機 SITL 航次整理成圖與說明（runs/artifacts/<TRIAL>/）。
+"""把 HARVEST 四機 SITL 航次整理成圖與說明（runs/artifacts/<TRIAL>/）。
 
 ⚠ 本專案的航次資料是**覆寫式**的：下一趟會蓋掉 flight.csv。所以每趟結束要立刻跑這支。
 """
@@ -19,7 +19,25 @@ ROOT = Path(__file__).resolve().parent.parent
 TRIAL = os.environ.get("HV_TRIAL", "HV4SITL2")
 OUT = ROOT / "runs" / "artifacts" / TRIAL
 
-CLS_COLOR = {"Pioneer": "#ff6b35", "HERO": "#1c7ed6"}
+# ⚠ 舊版按**構型**上色 ⇒ 三台 HERO 共用同一個藍色，圖上分不出是哪一台。
+#   改成逐機一色、同構型留在同一個色系（暖＝Pioneer、冷＝HERO）。
+#   與 scripts/hv_sitl_report.py 的 CLS_PALETTE 同一組值，兩張圖顏色一致。
+CLS_PALETTE = {
+    "Pioneer": ["#ff6b35", "#e8590c", "#ffa94d", "#c92a2a"],
+    "HERO": ["#1c7ed6", "#0ca678", "#7048e8", "#0b7285"],
+}
+
+
+def uav_colors(rows) -> dict:
+    """{機號: 顏色}；同構型依機號排序後在自己的色系裡依序取色。"""
+    used, out = {}, {}
+    for r in sorted(rows, key=lambda x: str(x["uav"])):
+        cls = r["class"]
+        pal = CLS_PALETTE.get(cls) or ["#888888"]
+        i = used.get(cls, 0)
+        used[cls] = i + 1
+        out[r["uav"]] = pal[i % len(pal)]
+    return out
 AREAS = {
     "Z1 LiDAR (Pioneer)": [(23.944131, 120.906876), (23.944131, 120.910806),
                            (23.947742, 120.910806), (23.947743, 120.906877)],
@@ -57,9 +75,10 @@ def main() -> int:
         ax1.plot(xs, ys, "k--", lw=1.0, alpha=0.6)
         ax1.text(sum(xs[:-1]) / 4, max(ys) + 0.0004, name, fontsize=8, ha="center")
 
+    colors = uav_colors(summary)
     for row in summary:
         uav, cls = row["uav"], row["class"]
-        c = CLS_COLOR[cls]
+        c = colors[uav]
         plon, plat = _planned(uav)
         ax1.plot(plon, plat, color=c, lw=0.8, alpha=0.35, ls=":")
         lon, lat, t, alt = _track(uav)

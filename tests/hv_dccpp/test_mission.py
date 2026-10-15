@@ -411,6 +411,14 @@ EXPECTED_DEFAULTS = dict(
     #   悲觀且偏差隨條帶數二次成長，再傳進掃描方向排序與 λ_floor。
     #   `sweep_sequence="fixed"` 可逐位元退回上游行為（legacy_mode 也會強制 fixed）。
     sweep_sequence="search", sweep_exact_max_n=9,
+    # ⚠⚠⚠ vendored 修改 #3（見 docs/hv_dccpp/VENDOR.md）：這四個也**不在規格 §16.2 裡**。
+    #   `repair` 是逐衝突貪婪、`_compact_makespan` 一次只平移一機 ⇒ 協同平移做不到。
+    #   實測 HV4SITL9 起飛被排成 0/289.1/623.9/1265.6 s（makespan 的 70.3%），而
+    #   驅動它的 6 筆衝突**全部**是同一場坪的降落走廊排隊，沒有一筆是空間衝突。
+    #   `global_reschedule=False` 可逐位元退回上游行為（含那四個起飛時刻），
+    #   由 tests/hv_dccpp/test_global_reschedule.py 的刪除實驗鎖住。
+    global_reschedule=True, reschedule_step_s=10.0,
+    reschedule_objective="landing", reschedule_max_evals=20000,
 )
 
 

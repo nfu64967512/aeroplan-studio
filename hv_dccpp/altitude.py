@@ -30,6 +30,7 @@ from .dubins import (
     path_time,
 )
 from .geo import TerrainGrid
+from .geometry import is_cross_strip
 from .geometry import Cell, Strip, to_sweep_coords
 from .mission import FW_PHASES, Mode, Phase, PlannerConfig, UAVInstance, UAVState, Waypoint, mode_phase_violation
 from .platform import EnergyModel, PlatformSpec, Sensor
@@ -82,6 +83,10 @@ def _h_ceil_of(ctx: MissionContext, cls: str) -> float:
         return float(ctx.cfg.h_ceil_override_m)
     v = ctx.h_ceil_m.get(cls) if ctx.h_ceil_m else None
     return math.inf if v is None else float(v)
+
+
+#: 交叉航帶作業段高度上界 = z_des + 此值（m；見 sample_bounds）
+_CROSS_Z_TOL_M = 0.25
 
 
 def _h_transit_of(ctx: MissionContext, cls: str, spec: PlatformSpec) -> float:
@@ -637,6 +642,7 @@ def sample_bounds(samples: list[Sample2D], cls: str, ctx: MissionContext, strips
     h_op_l = np.full(n, np.nan)
     h_max_l = np.full(n, np.inf)
     is_oper = np.zeros(n, dtype=bool)
+    is_x = np.zeros(n, dtype=bool)                  # 建圖模式交叉航帶的作業樣本
     for j, p in enumerate(samples):
         if p.phase is Phase.OPERATE and p.strip_id is not None and p.strip_id in strips:
             st = strips[p.strip_id]
@@ -645,6 +651,7 @@ def sample_bounds(samples: list[Sample2D], cls: str, ctx: MissionContext, strips
             h_op_l[j] = st.h_op_m
             h_max_l[j] = _sensor_h_max(ctx, cls, st)
             is_oper[j] = True
+            is_x[j] = is_cross_strip(p.strip_id)
     dv = _dv_of(ctx.terrain)
     nat = ctx.terrain.raw_view()                  # AGL 一律以自然地形量（障礙淨空走 z_obs，見下）
     zg_max = nat.corridor_max(A.xy, A.theta, hw, dv)
@@ -668,6 +675,11 @@ def sample_bounds(samples: list[Sample2D], cls: str, ctx: MissionContext, strips
     z_lo = np.where(is_oper, np.maximum(z_lo, zg_max + h_min_l), z_lo)
     z_hi = zg0 + h_ceil
     z_hi = np.where(is_oper, np.minimum(z_hi, zg_min + h_max_l * cfg.k_gsd), z_hi)
+    if is_x.any():
+        # 交叉航帶（MappingModeConfig.cross_strips，可與主條帶不同高）：作業段上界收緊到 z_des + _CROSS_Z_TOL_M。
+        #   否則前後的進入／返航段 z_des = 過境高度 h_transit，包絡平滑會把升降延伸進交叉帶（1 km 實測：交叉 100 m、
+        #   A 的 h_transit 120 m ⇒ 帶上 100 → 116.6 m）。主條帶不走這裡（舊行為逐位元不變）。
+        z_hi = np.where(is_x, np.maximum(np.minimum(z_hi, zg_max + h_op_l + _CROSS_Z_TOL_M), z_lo), z_hi)
     msl_max = ctx.inputs.airspace.max_msl_m
     if msl_max is not None and cfg.h_ceil_override_m is None:
         z_hi = np.minimum(z_hi, ctx.frame.msl_to_enu_z(A.xy, float(msl_max)))

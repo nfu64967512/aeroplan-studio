@@ -1,0 +1,234 @@
+{
+ "pages": 7,
+ "used_cm_per_page": [
+  22.03,
+  23.91,
+  25.52,
+  25.27,
+  25.06,
+  24.74,
+  1.78
+ ],
+ "content_cm": 148.31,
+ "pages_equiv": 5.771,
+ "last_page_lines": 2,
+ "last_line_top_cm": 3.28,
+ "last_page_used_cm": 1.73,
+ "body_height_cm": 25.7,
+ "last_page_fill_pct": 6.7,
+ "n_paragraphs": 224,
+ "n_paragraphs_snap_to_grid_on": 0,
+ "n_table_row_end_marks_reported_on": 27,
+ "where": [
+  [
+   "一、前言",
+   1,
+   13.3
+  ],
+  [
+   "二、研究方法",
+   1,
+   21.0
+  ],
+  [
+   "2.1 系統架構",
+   1,
+   21.5
+  ],
+  [
+   "[圖檔]",
+   2,
+   2.8
+  ],
+  [
+   "圖1 HARVEST 系",
+   2,
+   9.6
+  ],
+  [
+   "2.2 規劃流程",
+   2,
+   10.1
+  ],
+  [
+   "[圖檔]",
+   2,
+   12.1
+  ],
+  [
+   "圖2 HARVEST 規",
+   2,
+   19.8
+  ],
+  [
+   "2.3 核心公式",
+   2,
+   20.3
+  ],
+  [
+   "表1 兩型 VTOL 平",
+   3,
+   14.2
+  ],
+  [
+   "三、SITL 驗證與成果",
+   3,
+   20.9
+  ],
+  [
+   "3.1 實驗設置",
+   3,
+   21.5
+  ],
+  [
+   "3.2 規劃與 SITL",
+   3,
+   26.0
+  ],
+  [
+   "表2 規劃與 SITL ",
+   4,
+   4.9
+  ],
+  [
+   "3.3 規劃天花板與風場",
+   4,
+   12.0
+  ],
+  [
+   "表3 規劃天花板與風場之",
+   4,
+   18.6
+  ],
+  [
+   "[圖檔]",
+   5,
+   4.9
+  ],
+  [
+   "圖3 高度合規與 SIT",
+   5,
+   11.2
+  ],
+  [
+   "3.4 起降走廊判準對照",
+   5,
+   12.8
+  ],
+  [
+   "表4 起降走廊豁免判準對",
+   5,
+   15.3
+  ],
+  [
+   "3.5 跳帶排序之觸發情",
+   5,
+   19.0
+  ],
+  [
+   "表2 情境之各胞條帶數（",
+   5,
+   19.4
+  ],
+  [
+   "四、結論與限制",
+   5,
+   22.0
+  ],
+  [
+   "誌謝",
+   6,
+   8.9
+  ],
+  [
+   "參考文獻",
+   6,
+   9.9
+  ]
+ ],
+ "figures": [
+  {
+   "file": "fig1_architecture.png",
+   "width_cm": 16.992,
+   "height_cm": 6.798,
+   "scale_pct": [
+    100.0,
+    100.0
+   ]
+  },
+  {
+   "file": "fig2_flowchart.png",
+   "width_cm": 16.992,
+   "height_cm": 7.594,
+   "scale_pct": [
+    100.0,
+    100.0
+   ]
+  },
+  {
+   "file": "fig5_compliance.png",
+   "width_cm": 16.992,
+   "height_cm": 6.392,
+   "scale_pct": [
+    100.0,
+    100.0
+   ]
+  }
+ ],
+ "tables": [
+  {
+   "tnum": "1",
+   "col_cm": [
+    8.01,
+    4.64,
+    4.35
+   ]
+  },
+  {
+   "tnum": "2",
+   "col_cm": [
+    6.51,
+    4.01,
+    6.49
+   ]
+  },
+  {
+   "tnum": "3",
+   "col_cm": [
+    2.45,
+    1.23,
+    3.0,
+    1.42,
+    2.88,
+    1.62,
+    4.39
+   ]
+  },
+  {
+   "tnum": "4",
+   "col_cm": [
+    5.86,
+    4.15,
+    2.05,
+    3.31,
+    1.63
+   ]
+  }
+ ],
+ "n_omath": 6,
+ "build_s": 5.8,
+ "layout": {
+  "indent": false,
+  "spacing": false,
+  "compress_punct": false,
+  "table_split": false,
+  "no_widow": false
+ },
+ "caveats_missing": [],
+ "caveats_checked": 61,
+ "name": "V0",
+ "cuts": [],
+ "candidates": [],
+ "docx": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\PAPERPLAN1\\word_layout\\variants\\V0.docx",
+ "pdf": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\PAPERPLAN1\\word_layout\\variants\\V0.pdf"
+}

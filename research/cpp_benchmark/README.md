@@ -78,6 +78,25 @@ python -u make_table.py                          # 產生 results/matrix_table.m
 * 所有基準線都是我們自己的實作，不是原作者釋出的程式碼。
   拿它們當「文獻方法」講的時候必須說清楚這一點。
 
+* ⚠⚠⚠ **`DCCPP` / `DCCPP_mix` 兩列不檢查能量，所以 `coverage` 一欄不對等。**
+  `core/dccpp/` 的**十個 .py 檔**對 `energy|battery|endurance|fuel` 是 **0 次命中**
+  （對照：`hv_dccpp` 有五個檔各 31–74 次）。後果在 S1 n=2 這格看得最清楚：
+
+  | 方法 | coverage | max_km |
+  |---|---|---|
+  | DCCPP / DCCPP_mix | 1.0 | **104.25** |
+  | HARVEST / HARVEST_mix | 0.5277 / 0.5238 | 59.06 / 58.83 |
+
+  DCCPP 要求每台飛 **104.25 km** 才拿到 1.0，比 HARVEST **拒絕**的 59.06 km 還長 77%；
+  HARVEST 那 0.5277 是 `hard_feasible` 回 `H4_energy` 之後**明講**蓋不完
+  （`uncovered=[('Z3_1','no_feasible_insertion')]`、`validate.passed=False`、
+  子區印 `all=0.0000 FAIL`，三個管道都響）。
+  ⇒ **「HARVEST 覆蓋率輸給 DCCPP」這句話不可以寫進論文**，那是「會檢查續航」對上
+  「不檢查續航」。要比就得先給基準線補一個能量檢查，或在表上明標這個差異。
+  重跑：`grep -ric "energy" core/dccpp/*.py`（全 0）、
+  `cd research/cpp_benchmark && python -u matrix.py HARVEST S1 2`。
+  查證日 2026-09-10；細節見記憶 `coverage-ceiling-root-cause`。
+
 ---
 
 ## 2026-09-08 更新：公平性修正、重跑、以及兩個新欄位

@@ -206,3 +206,39 @@ _add(Scenario(
     target_gsd=0.05,
     note="模式一：一大區（1.248 km²）自動切給 1A+3B，法規 120 m 上限無豁免。"
          "與 gui_legal_120 面積相同 ⇒ 可對照「自動切」vs「分開畫」"))
+
+
+# ── 同一份幾何，開全域起飛重排（vendored 修改 #3）────────────────────
+#   與 gui_legal_120_split（HV4SITL9）**逐欄相同**，只換 trial ⇒ 這是一次乾淨的 A/B：
+#   規劃器唯一的差別是 PlannerConfig.global_reschedule（預設已 True）。
+#   ⚠ 分開 trial 是為了不覆寫 HV4SITL9 的基準產物（它是關掉重排的對照組）。
+#   規劃值：makespan 1799.8 → 1450.8 s、掃描完成 1594.6 → 1216.4 s，
+#   航程／條帶／航點逐位不變（只動時間戳）。這一趟要看它飛不飛得成。
+_add(Scenario(
+    key="gui_legal_120_split_resched", trial="HV4SITL13", path="gui", n_a=1, n_b=3,
+    areas=[{"area_id": 1, "priority": 1.0, "polygon": rect(0, 0, 780, 400)}],
+    coverage_altitude_m=120.0, coverage_width_m=150.0, overlap_rate=0.30,
+    waiver_max_agl_m=None,
+    min_fw_agl_m={"A": 100.0, "B": 100.0},
+    dh_band_min_m=15.0,
+    target_gsd=0.05,
+    note="與 HV4SITL9 同一份幾何與空域，開全域起飛重排 ⇒ 乾淨 A/B"))
+
+
+# ── 1 Pioneer + 3 HERO：禁航區 × 法規上限（兩件事第一次一起飛）────────
+#   幾何、機隊、禁航區與 gui_nfz_1a3b（HV4SITL7）完全相同，只把空域換成
+#   「無豁免 ⇒ 法規 120 m」那一組 ⇒ 可與 HV4SITL7（140 m、假設有 200 m 豁免）對照。
+#   ⚠ 這一趟會同時走兩條切區路徑：先 split_area_for_fleet 再 split_areas_around_nfz。
+#     禁航區子區的 id 從 "3_1" 這種字串改成整數（轉接層 int() 會把底線吃掉變 31 撞號）
+#     之後**還沒有飛過**，這是第一次上天。
+_add(Scenario(
+    key="gui_legal_120_nfz", trial="HV4SITL12", path="gui", n_a=1, n_b=3,
+    areas=_grid(4, 260, 300, 1500), coverage_altitude_m=120.0,
+    coverage_width_m=150.0, overlap_rate=0.30,
+    nfz=[rect(-1132, 174, 150, 150)],
+    waiver_max_agl_m=None,
+    min_fw_agl_m={"A": 100.0, "B": 100.0},
+    dh_band_min_m=15.0,
+    target_gsd=0.05,
+    note="1 Pioneer + 3 HERO，禁航區 + 法規 120 m AGL 無豁免。"
+         "與 HV4SITL7 同幾何同禁航區，只差空域 ⇒ 可直接對照"))

@@ -1,19 +1,14 @@
-"""Pytest 全域 fixture 設定 — 確保測試可從任何目錄執行
+"""pytest 根設定 —— 測試絕不寫進使用者的 data/logs
 
-pytest 會自動偵測此檔並在 import 測試模組前執行。
-此檔負責：
-    1. 將專案根目錄加入 sys.path
-    2. 避開專案根 __init__.py 的相對匯入問題
-    3. 設定測試時的統一日誌等級
+utils.logger 第一次 get_logger() 就會掛 FileHandler 到
+<repo>/data/logs/UAVPathPlanner_<日期>.log（使用者 GUI 的真日誌）；
+2026-10-07 一次診斷因此在 App 關閉後追加了 124 行假紀錄。
+
+pytest 在 import 任何測試模組前就會執行本檔，所以在這裡打開開關即可；
+測試啟動的子行程也會繼承這個環境變數。開關的語意見 utils/logger.py::resolve_log_dir。
+⚠ 在 tests/ 裡面執行 pytest 時本檔不會被載入 ⇒ tests/conftest.py 設同一個開關。
+鎖在 tests/test_logger_no_user_log.py。
 """
-import sys
-from pathlib import Path
+import os
 
-# 將專案根目錄置於 sys.path 首位
-_project_root = Path(__file__).resolve().parent
-if str(_project_root) not in sys.path:
-    sys.path.insert(0, str(_project_root))
-
-# 測試時抑制 INFO 日誌，只看 WARNING+
-import logging
-logging.getLogger('UAVPathPlanner').setLevel(logging.WARNING)
+os.environ["AEROPLAN_NO_FILE_LOG"] = "1"

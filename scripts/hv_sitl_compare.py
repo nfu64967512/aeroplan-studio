@@ -1,4 +1,4 @@
-"""跨航次比較：把幾趟 HV-DCCPP SITL 的規劃 vs 實飛擺在一起。
+"""跨航次比較：把幾趟 HARVEST SITL 的規劃 vs 實飛擺在一起。
 
     python scripts/hv_sitl_compare.py HV4SITL2 HV4SITL3 HV4SITL4
 

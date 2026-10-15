@@ -35,6 +35,7 @@ from .mission import (
     Airspace,
     AreaSpec,
     C2Link,
+    MappingModeConfig,
     MissionInputError,
     MissionInputs,
     NoFlyZone,
@@ -51,6 +52,7 @@ from .platform import (
     Sensor,
     SensorHardware,
     combine_sensors,
+    crabbed_width_m,
     sensor_model,
 )
 from .wind import WindField
@@ -74,6 +76,7 @@ __all__ = [
     "burn_obstacles",
     "build_energy_model",
     "build_sensors",
+    "apply_crab_margin",
     "link_polygon",
 ]
 
@@ -130,6 +133,7 @@ class DecomposeContext:
     h_clr_m: float
     h_ceil_m: dict[str, float | None]
     cfg: PlannerConfig
+    mapping: MappingModeConfig | None = None           # 建圖模式（= inputs.mapping_mode；None ＝ 舊行為）
 
 
 @dataclass(slots=True)
@@ -168,6 +172,7 @@ class MissionContext:
     ground_station_xy: np.ndarray = field(default_factory=lambda: np.zeros(2))
     t_window: tuple[float, float] | None = None
     start_sites: dict[str, str] = field(default_factory=dict)   # uav_id → 起飛站點 site_id（預設 home）
+    recovery_sites: dict[str, str] = field(default_factory=dict)  # uav_id → 回收站 site_id（預設全域 recovery；vendored #4）
 
     # -- 便利查詢 -------------------------------------------------------------
     @property
@@ -184,6 +189,10 @@ class MissionContext:
         if sid is None:
             sid = self.inputs.start_site_id_of(uav_id)
         return sid
+
+    def recovery_site_id_of(self, uav_id: str) -> str:
+        """該機**回收／降落**站點 id（缺鍵 → 全域 `recovery_site_id`，即 D40 既有行為）。"""
+        return self.recovery_sites.get(uav_id) or self.recovery_site_id
 
     def start_xy(self, uav_id: str) -> np.ndarray:
         """該機起飛站點之 ENU xy ``(2,)``。"""
@@ -211,6 +220,7 @@ class MissionContext:
             specs=self.specs, sensors=self.sensors, available_kinds=self.available_kinds,
             auw_kg=self.auw_kg, models_rep=self.models_rep, nofly_buffered=self.nofly_buffered,
             home_xy=self.home_xy, h_clr_m=self.h_clr_m, h_ceil_m=self.h_ceil_m, cfg=self.cfg,
+            mapping=self.inputs.mapping_mode,
         )
 
 
@@ -566,6 +576,53 @@ def build_sensors(fleet: Sequence[UAVInstance], payload_reqs: dict[str, Any]) ->
     return sensors, available, warnings
 
 
+_CRAB_REF_AGL_M: float = 100.0
+"""`apply_crab_margin` 回報 w_eff/w 與檢查 w_eff > 0 的參考高度（針孔／線掃描／梯形足跡 w、l 皆 ∝ h，比值與 h 無關）。"""
+
+
+def apply_crab_margin(sensors: dict[tuple[str, str], Sensor], specs: dict[str, PlatformSpec],
+                      wind_speed_mps: float) -> tuple[dict[tuple[str, str], Sensor], list[str]]:
+    """建圖模式偏流餘裕（`MappingModeConfig.crab_margin`）：逐構型 ψ_c = asin(W / V_a,c)（V_a,c = 巡航空速、
+    W = 規劃風速），寫進該構型每個感測器的 ``crab_rad``（CombinedSensor 寫進各子感測器），使條帶間距改用
+    w_eff = w cosψ − l sinψ。W ≥ V_a,c 或 w_eff ≤ 0 → MissionInputError（不默默照原間距飛）。
+
+    回傳 ``(sensors, warnings)``；每個 (cls, req_id) 一筆 ``mapping_crab_margin(...)`` 有效值紀錄（ψ = 0 也記）。
+    """
+    out = dict(sensors)
+    warnings: list[str] = []
+    W = float(wind_speed_mps)
+    for (cls, rid), s in sensors.items():
+        va = float(specs[cls].cruise_airspeed_mps)
+        if W >= va:
+            raise MissionInputError(
+                f"建圖模式偏流餘裕：規劃風速 {W:g} m/s ≥ 構型 {cls} 巡航空速 {va:g} m/s，無法偏流維持航跡")
+        psi = math.asin(W / va) if W > 0.0 else 0.0
+        subs = getattr(s, "sensors", None)
+        if psi == 0.0:
+            new, check = s, ()
+        elif subs is not None:                                  # CombinedSensor：間距取子感測器最小值
+            check = tuple(dataclasses.replace(x, crab_rad=psi) for x in subs)
+            new = dataclasses.replace(s, sensors=check)
+        else:
+            new = dataclasses.replace(s, crab_rad=psi)
+            check = (new,)
+        ratio = 1.0
+        for x in check:
+            w = float(x.swath_m(_CRAB_REF_AGL_M))
+            l = float(x.footprint_len_m(_CRAB_REF_AGL_M))
+            w_eff = crabbed_width_m(w, l, psi)
+            if not w_eff > 0.0:
+                raise MissionInputError(
+                    f"建圖模式偏流餘裕：構型 {cls}（{rid}）ψ = asin({W:g}/{va:g}) = {math.degrees(psi):.2f}° 時 "
+                    f"w_eff = w cosψ − l sinψ = {w_eff:.1f} m ≤ 0（@{_CRAB_REF_AGL_M:g} m：w {w:.1f}、l {l:.1f} m）"
+                    f"⇒ 足跡轉了之後沒有保守可用寬；降低規劃風速或把相機長邊轉成垂直航跡")
+            ratio = min(ratio, w_eff / w)
+        out[(cls, rid)] = new
+        warnings.append(f"mapping_crab_margin({cls}/{rid}: ψ={math.degrees(psi):.2f}°（W {W:.2f} / V_a {va:.2f} m/s）"
+                        f" → w_eff/w={ratio:.4f}；間距 = w_eff·(1 − side_overlap))")
+    return out, warnings
+
+
 def build_energy_model(uav: UAVInstance, spec: PlatformSpec, cfg: PlannerConfig,
                        weather_obs: Any | None) -> tuple[EnergyModel, list[str]]:
     """單機 EnergyModel（規格 §5.1–§5.7、D39）。
@@ -752,6 +809,13 @@ def build_context(inputs: MissionInputs, cfg: PlannerConfig, *,
     # 10) 感測器
     sensors, available_kinds, w = build_sensors(inputs.fleet, inputs.payload_reqs)
     warnings += w
+    # 10b) 建圖模式（opt-in）：有效值寫進警告；偏流餘裕改感測器間距（W = 各風層最大平均風速）
+    mapping = inputs.mapping_mode
+    if mapping is not None:
+        warnings.append("mapping_mode(" + ", ".join(f"{k}={v}" for k, v in mapping.to_dict().items()) + ")")
+        if mapping.crab_margin:
+            sensors, w = apply_crab_margin(sensors, specs, wind.max_speed())
+            warnings += w
 
     # 11) 能量模型
     models: dict[str, EnergyModel] = {}
@@ -784,6 +848,20 @@ def build_context(inputs: MissionInputs, cfg: PlannerConfig, *,
         warnings.append("per_uav_start_sites(" + ",".join(
             f"{u}@{s}" for u, s in start_sites.items() if s != home.site_id) + ")")
 
+    # 13b) 逐機回收站（選填 `UAVInstance.recovery_site_id`；未設定 → 全域 recovery）
+    #   ⚠ vendored #4。全員未設定時 recovery_sites 每一項都等於全域值 ⇒ 下游逐位元不變。
+    _rec_global = inputs.recovery_site.site_id
+    recovery_sites: dict[str, str] = {}
+    for u in inputs.fleet:
+        _sid = u.recovery_site_id or _rec_global
+        if _sid not in sites_enu:
+            raise MissionInputError(
+                f"UAVInstance[{u.uav_id}].recovery_site_id={_sid!r} 不在站點清單 {sorted(sites_enu)}")
+        recovery_sites[u.uav_id] = _sid
+    if any(x != _rec_global for x in recovery_sites.values()):
+        warnings.append("per_uav_recovery_sites(" + ",".join(
+            f"{u}@{x}" for u, x in recovery_sites.items() if x != _rec_global) + ")")
+
     return MissionContext(
         inputs=inputs, cfg=cfg, frame=frame, terrain=terrain, wind=wind, keepouts=keepouts,
         specs=specs, sensors=sensors, models=models, models_rep=models_rep, sites_enu=sites_enu,
@@ -791,4 +869,5 @@ def build_context(inputs: MissionInputs, cfg: PlannerConfig, *,
         areas_enu=areas_enu, recovery_site_id=inputs.recovery_site.site_id, warnings=warnings,
         nofly_buffered=nofly_buffered, available_kinds=available_kinds, auw_kg=auw_kg,
         obstacles_enu=obstacles_enu, ground_station_xy=gs_xy, t_window=t_window, start_sites=start_sites,
+        recovery_sites=recovery_sites,
     )

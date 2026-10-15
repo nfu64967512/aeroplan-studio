@@ -35,6 +35,7 @@ class ParameterPanel(QWidget):
     # 信號定義
     parameters_changed = pyqtSignal(dict)  # 參數變更信號
     corner_added = pyqtSignal(float, float)  # 新增邊界點信號
+    corner_count_changed = pyqtSignal(int)   # 角點數變更（供其他分頁同步顯示）
     clear_corners_requested = pyqtSignal()  # 清除邊界點信號
     remove_last_corner_requested = pyqtSignal()  # 刪除最後一點信號
     open_click_map_requested = pyqtSignal()  # 打開點擊地圖視窗
@@ -189,6 +190,9 @@ class ParameterPanel(QWidget):
 
         # ── Tab 2: DCCPP ──────────────────────────────────────────────
         dccpp_group = self.create_dccpp_panel()
+        # 註：HARVEST（異構雙構型 VTOL）的入口在「VTOL 偵察」分頁的
+        #     「規劃演算法」下拉，不放在這裡 —— 同一個旗標有兩個入口只會讓人
+        #     搞不清楚自己按下去的是哪一套。見 ui/widgets/vtol_recon_panel.py。
         dccpp_scroll = self._make_resizable_tab(
             [dccpp_group, self._create_fence_export_group()]
         )
@@ -1070,6 +1074,9 @@ class ParameterPanel(QWidget):
             'role', 'friendly' if count >= 3 else 'hostile'
         )
         self.corner_count_label.style().polish(self.corner_count_label)
+        # 廣播給其他分頁（例如 VTOL 偵察頁的「偵察區域」狀態），
+        # 免得它們只能在切分頁時才補上，或各自去 hook 每個變更點。
+        self.corner_count_changed.emit(int(count))
 
     def set_circle_center_display(self, lat: float, lon: float, radius_m: float = 0.0):
         """更新圓心座標顯示（拖曳時同時帶入半徑）— 設定後切到 friendly 角色"""
@@ -1917,10 +1924,13 @@ class ParameterPanel(QWidget):
         參數:
             params: 參數字典
         """
+        applied: list = []
+        dropped: list = []
         for key, value in params.items():
             if key in self.parameters:
+                applied.append(key)
                 self.parameters[key] = value
-                
+
                 # 更新 UI
                 if key == 'altitude':
                     self.altitude_spin.setValue(value)
@@ -1949,8 +1959,22 @@ class ParameterPanel(QWidget):
                     self.lock_heading_check.setChecked(bool(value))
                 elif key == 'heading_angle':
                     self.heading_slider.setValue(int(value))
+            else:
+                dropped.append(key)
 
-        logger.info("參數已設置")
+        # ⚠️ 舊版對不認得的 key 直接跳過，然後照樣印「參數已設置」——
+        # 呼叫端拼錯 key 會拿到一個靜默的 no-op 加一行成功訊息，
+        # 之後 get_parameters().get(那個 key) 回 None 看起來像「有這個參數但沒值」。
+        # 例：scripts/_full_flow_capture.py 送 "overlap"（正確是 get_dccpp_params()
+        # 的 'overlap_rate'），整趟流程照樣報成功。
+        if dropped:
+            logger.warning(
+                f"參數已設置（{len(applied)} 項）；下列 key 不在本面板的參數表、"
+                f"已略過：{', '.join(sorted(dropped))}。請改用正確的 key，"
+                f"或檢查是否應改呼叫 get_dccpp_params() 那一組。"
+            )
+        else:
+            logger.info(f"參數已設置（{len(applied)} 項）")
     
     # ══════════════════════════════════════════════════════════════════
     #  DCCPP 最佳化規劃面板（論文 MDTSP + IDP + GDA）
@@ -2655,6 +2679,14 @@ class ParameterPanel(QWidget):
         self._heatmap_grid_spin.setToolTip("網格行列數（越大越精細，但消耗越多）")
         layout.addRow("網格解析度:", self._heatmap_grid_spin)
 
+        # ⚠ 「解析度 20」看不出格子有多大。格子邊長由**區域跨距 ÷ 行列數**決定，
+        #   而區域是使用者在地圖上畫的 —— 面板自己算不出來，得由 MainWindow 回填。
+        #   沒有這個回饋時，使用者只能從畫面上的方塊大小猜，猜不準就會覺得
+        #   「解析度調了沒用」。
+        self._heatmap_cell_label = QLabel("尚未初始化")
+        self._heatmap_cell_label.setWordWrap(True)
+        layout.addRow("格子邊長:", self._heatmap_cell_label)
+
         # 初始化 / 重置 / 清除按鈕列
         btn_row = QHBoxLayout()
 
@@ -2679,6 +2711,17 @@ class ParameterPanel(QWidget):
         layout.addRow(btn_row)
 
         return group
+
+    def set_heatmap_cell_info(self, text: str, ok: bool = True) -> None:
+        """由 MainWindow 回填「這個解析度換算成幾公尺的格子」。
+
+        ⚠ 格子比感測器掃描寬度還大時，熱力圖在物理上就表達不出感測器真正
+        掃過的範圍（覆蓋判定是看格子**中心點**落不落在足跡內），
+        畫面會變成一大格一大格地翻 —— 那不是渲染問題，是取樣不足。
+        """
+        self._heatmap_cell_label.setText(text)
+        self._heatmap_cell_label.setStyleSheet(
+            "color:#2e7d32;" if ok else "color:#e65100;")
 
     def _on_sar_heatmap_init(self):
         """SAR 熱力圖初始化：發送參數"""

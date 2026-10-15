@@ -23,9 +23,16 @@ ArduPilot SITL 多機模擬與 Mission Planner 相容 MAVLink 匯出的一站式
     7. Ctrl+E 匯出 QGC WPL 110 航點檔供 Mission Planner / QGC 使用
 """
 
+import os
 import sys
 import argparse
 from pathlib import Path
+
+# ── MAVLink 2：一定要在任何模組 import pymavlink **之前**設 ──────────────
+# pymavlink 預設 MAVLink 1.0，而且收到第一個 0xFE 位元組就鎖死在 v1：之後 MAVLink 2 的擴充欄位
+# （例如 CAMERA_FEEDBACK.completed_captures）一律讀成 0，18 通道 RC 覆寫在飛行中才 TypeError。
+# setdefault：使用者自己在環境變數裡設了 MAVLINK20（例如 0）就尊重他的值。
+os.environ.setdefault('MAVLINK20', '1')
 
 # 添加專案根目錄到路徑
 project_root = Path(__file__).parent

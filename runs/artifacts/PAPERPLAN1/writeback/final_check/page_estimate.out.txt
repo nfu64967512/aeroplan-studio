@@ -1,0 +1,5 @@
+after:
+{"text_lines": 250.5, "eq_cm": 8.8, "fig_cm": 20.59, "tables": 4, "pages_by_line_pitch_cm": {"0.47": 5.72, "0.494": 5.96, "0.53": 6.31}}
+before:
+{"text_lines": 163.4, "eq_cm": 6.8, "fig_cm": 14.39, "tables": 3, "pages_by_line_pitch_cm": {"0.47": 3.81, "0.494": 3.97, "0.53": 4.19}}
+4cfe9b2ce50c55a30451b7cf147d6cf0 *docs/hv_dccpp/AASRC2026_abstract/cowork_brief.md

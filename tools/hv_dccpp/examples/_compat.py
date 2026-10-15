@@ -332,7 +332,7 @@ def param_lines(ctx: Any, cls: str) -> list[str]:
     g_c = math.radians(float(spec.planning_climb_angle_deg))
     g_d = math.radians(float(spec.planning_descent_angle_deg))
     h_ceil = ctx.h_ceil_m.get(cls)
-    lines = [f"# HV-DCCPP suggested ArduPlane/QuadPlane parameters for class {cls} ({spec.name})",
+    lines = [f"# HARVEST suggested ArduPlane/QuadPlane parameters for class {cls} ({spec.name})",
              "# ArduPlane 4.5+ names; verify against the installed firmware before use.",
              f"AIRSPEED_CRUISE,{va:.1f}", f"AIRSPEED_MIN,{spec.v_min_mission():.1f}"]
     if spec.max_airspeed_mps is not None:

@@ -638,7 +638,7 @@ def _finish_plan(old: UAVPlan, uav: UAVInstance, keep_n: int, anchor: UAVState, 
     warnings = [w for w in old.warnings if not w.startswith("profile:")] + [f"profile:{v}" for v in stats.violations] + [tag]
     plan = UAVPlan(old.uav_id, cls, wps, strips_out, float(old.t_takeoff_s), float(t_arr), float(t_land), landing_site,
                    float(e_used), float(e_end - model.reserve_wh()), dist, float(model.cruise_equiv_km(e_used)),
-                   int(old.orbits_inserted), warnings)
+                   int(old.orbits_inserted), warnings, takeoff_site=old.takeoff_site)
     return plan, tail
 
 

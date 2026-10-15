@@ -24,8 +24,29 @@ sys.path.insert(0, str(ROOT))
 from scripts.hv_sitl_run import out_dir  # noqa: E402
 from scripts.hv_sitl_scenarios import SCENARIOS  # noqa: E402
 
-CLS_COLOR = {"A": "#ff6b35", "B": "#1c7ed6"}
 CLS_NAME = {"A": "Pioneer", "B": "HERO"}
+
+# ⚠ 舊版是 `CLS_COLOR = {"A": ..., "B": ...}`，**按構型**上色 ⇒ 三台 HERO 共用同一個
+#   藍色，圖上分不出是哪一台（1A+3B 的機隊裡有四分之三看起來一樣）。
+#   改成逐機一色，但同構型留在同一個**色系**：暖色＝Pioneer、冷色＝HERO
+#   ⇒ 既分得出個別機體，也仍然一眼看得出構型。
+CLS_PALETTE = {
+    "A": ["#ff6b35", "#e8590c", "#ffa94d", "#c92a2a"],   # Pioneer：暖色系
+    "B": ["#1c7ed6", "#0ca678", "#7048e8", "#0b7285"],   # HERO：冷色系
+}
+
+
+def uav_colors(uavs) -> dict[str, str]:
+    """{機號: 顏色}。同構型依機號排序後在自己的色系裡依序取色。"""
+    used: dict[str, int] = {}
+    out: dict[str, str] = {}
+    for u in sorted(uavs):
+        cls = str(u)[0]
+        pal = CLS_PALETTE.get(cls) or ["#888888"]
+        i = used.get(cls, 0)
+        used[cls] = i + 1
+        out[u] = pal[i % len(pal)]
+    return out
 
 
 def _track(out: Path, uav: str):
@@ -230,9 +251,10 @@ def main() -> int:
     offset = _clock_offset(out, uavs)
     print(f"telemetry 時基偏移 {offset:.1f} s（已從所有實飛時刻扣掉）")
     rows, tracks, series = [], {}, {}
+    colors = uav_colors(uavs)
     for uav in uavs:
         cls = uav[0]
-        c = CLS_COLOR.get(cls, "#888")
+        c = colors[uav]
         plon, plat = _planned(out, uav)
         ax1.plot(plon, plat, color=c, lw=0.8, alpha=0.35, ls=":")
         lon, lat, t, alt, armed = _track(out, uav)

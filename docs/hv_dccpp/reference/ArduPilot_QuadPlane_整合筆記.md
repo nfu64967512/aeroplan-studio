@@ -1,4 +1,4 @@
-# ArduPilot QuadPlane 整合筆記（供 HV-DCCPP 實作代理使用）
+# ArduPilot QuadPlane 整合筆記（供 HARVEST 實作代理使用）
 
 來源：主控代理的 ArduPilot/MAVLink 知識（ArduPlane 4.4–4.6 世代），已用本機 pymavlink 2.4.49 驗證常數值。
 **實作時以 pymavlink 的 `mavutil.mavlink.MAV_CMD_*` 常數為準，不要手寫數字。** 標示「待驗證」者需在文件中註明以實機韌體版本確認。
@@ -23,7 +23,7 @@
 | 跳轉 | DO_JUMP | 177 | 目標 seq | 重複次數 | | | |
 
 Frame：`MAV_FRAME_GLOBAL_RELATIVE_ALT`=3（相對 home 高度，MSL_home + alt），`MAV_FRAME_GLOBAL_TERRAIN_ALT`=10（相對地形，需 TERRAIN_ENABLE=1 且有地形資料），`MAV_FRAME_GLOBAL`=0（MSL）。
-HV-DCCPP 自己算了坡度受限高度包絡（MSL），建議輸出 **MAV_FRAME_GLOBAL_RELATIVE_ALT（alt = z_msl − home_msl）**，並提供 TERRAIN_ALT 選項。
+HARVEST 自己算了坡度受限高度包絡（MSL），建議輸出 **MAV_FRAME_GLOBAL_RELATIVE_ALT（alt = z_msl − home_msl）**，並提供 TERRAIN_ALT 選項。
 每個 NAV_WAYPOINT 對 QuadPlane 的固定翼段是「L1 導航追蹤」，轉彎會提前切入；Dubins 弧段離散點（論文 Eq.28/29）作為航點時，航點間距應 ≥ WP_RADIUS 且避免過密（建議弧段每 20–30° 一點，直線段只留端點）。
 
 QGC WPL 110 文字格式（Mission Planner 可直接開啟 `.waypoints` / `.txt`）：

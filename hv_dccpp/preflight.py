@@ -52,6 +52,7 @@ from .costs import v_air_star
 from .decompose import (
     AltitudeBand,
     altitude_band,
+    area_edge_deltas,
     class_can_serve,
     d_turn_m,
     end_extension_for,
@@ -64,7 +65,7 @@ from .mission import (
     PlannerConfig,
     resolve_weather_go,
 )
-from .platform import BEAUFORT_UPPER_MPS, PlatformSpec
+from .platform import BEAUFORT_UPPER_MPS, PlatformSpec, crabbed_width_m
 from .wind import ground_speed, r_eff_wind_speed
 
 __all__ = [
@@ -220,6 +221,13 @@ def check_sites(ctx: MissionContext) -> tuple[list[str], list[str], dict[str, li
         except Exception:                                   # pragma: no cover - 手工情境
             continue
         primary.setdefault(sid, set()).add(c_u)
+    # vendored #4：逐機回收站也算 primary，否則被指派的備降點會被當成「只是備降」而漏檢
+    for uid, sid in (getattr(ctx, "recovery_sites", {}) or {}).items():
+        try:
+            c_u = inputs.uav_by_id(uid).cls
+        except Exception:                                   # pragma: no cover - 手工情境
+            continue
+        primary.setdefault(sid, set()).add(c_u)
     alt_ids = {s.site_id for s in inputs.alternates}
     for sid in ctx.sites_enu:
         for c in classes:
@@ -351,6 +359,54 @@ def _direction_feasibility(spec: PlatformSpec, auw_kg: float, v_cap: float, wind
     return bool(ok.any()), bool(two_way.any()), int(ok.sum()), vg_max
 
 
+def _shutter_cap_needed(spec: PlatformSpec, auw_kg: float, v_cap: float, wind_xy: np.ndarray,
+                        v_g_min: float) -> float | None:
+    """步 9 不可行**只因**快門限速時，讓「∃θ 使 V_a* 存在」成立的最小 V_cap（m/s；與步 9 同一判準二分求得）。
+    V_cap 無限大也不可行（風、失速、v_g_min 等其他原因）或 V_cap 本來就無限 → None。"""
+    if not math.isfinite(v_cap) or not _direction_feasibility(spec, auw_kg, math.inf, wind_xy, v_g_min)[0]:
+        return None
+    lo = float(v_cap)
+    hi = float(spec.cruise_airspeed_mps) + float(np.hypot(wind_xy[0], wind_xy[1])) + 1.0   # ≥ 任何方向的地速
+    if not _direction_feasibility(spec, auw_kg, hi, wind_xy, v_g_min)[0]:      # pragma: no cover - 防禦
+        return None
+    for _ in range(60):
+        mid = 0.5 * (lo + hi)
+        if _direction_feasibility(spec, auw_kg, mid, wind_xy, v_g_min)[0]:
+            hi = mid
+        else:
+            lo = mid
+    return hi
+
+
+def _shutter_limit_note(aid: str, c: str, spec: PlatformSpec, auw_kg: float, sensor: Any, h_op: float, h_hi: float,
+                        v_cap: float, wind_xy: np.ndarray, v_g_min: float) -> tuple[dict[str, float], str] | None:
+    """快門（觸發率）把地速壓到最低空速以下時的明確原因：V_cap = l(1 − o_fwd)·f_s，回傳 (數值, 訊息)；
+    寫出需要的觸發率、可行的作業高度（V_cap ∝ h）與可行的前向重疊上限。非快門造成 → None。"""
+    r = getattr(sensor, "r", None)
+    f_s = getattr(r, "shutter_rate_hz", None)
+    if getattr(sensor, "sensors", None) is not None or getattr(sensor, "kind", "") != "rgb" or not f_s:
+        return None
+    need = _shutter_cap_needed(spec, auw_kg, v_cap, wind_xy, v_g_min)
+    if need is None:
+        return None
+    l = _f(sensor.footprint_len_m(h_op))
+    fwd = _f(r.forward_overlap)
+    v_min = max(spec.v_min_mission(), 1.2 * spec.stall_speed(auw_kg))
+    f_req = need / (l * (1.0 - fwd))
+    h_req = h_op * need / v_cap
+    fwd_max = 1.0 - need / (l * float(f_s))
+    vals = {"v_cap_mps": _f(v_cap), "v_g_needed_mps": _f(need), "shutter_rate_hz": _f(f_s), "f_req_hz": _f(f_req),
+            "h_op_m": _f(h_op), "h_req_m": _f(h_req), "h_hi_m": _f(h_hi), "forward_overlap": fwd,
+            "forward_overlap_max": _f(fwd_max)}
+    h_txt = (f"，或作業高度 ≥ {h_req:.0f} m（可用上限 {h_hi:.0f} m）" if h_req <= h_hi + 1e-9
+             else f"（升高度要 ≥ {h_req:.0f} m，超過可用上限 {h_hi:.0f} m，此路不通）")
+    fwd_txt = f"，或前向重疊 ≤ {fwd_max:.2f}" if fwd_max > 0.0 else ""
+    msg = (f"shutter_rate_caps_speed({aid}, {c}: 觸發率 {float(f_s):g} Hz 把地速限在 V_cap = l(1−o_fwd)·f_s = "
+           f"{l:.1f}×(1−{fwd:.2f})×{float(f_s):g} = {v_cap:.2f} m/s，但最低空速 {v_min:.1f} m/s 下任何方向的地速至少 "
+           f"{need:.2f} m/s ⇒ 需觸發率 ≥ {f_req:.2f} Hz{h_txt}{fwd_txt})")
+    return vals, msg
+
+
 def _band_dict(b: AltitudeBand) -> dict[str, Any]:
     return {"h_op_m": _f(b.h_op_m), "h_lo_m": _f(b.h_lo_m), "h_hi_m": _f(b.h_hi_m), "dh_band_m": _f(b.dh_band_m),
             "feasible": bool(b.feasible), "reason": b.reason}
@@ -374,6 +430,7 @@ def analyse_areas(ctx: MissionContext, dc: DecomposeContext) -> tuple[dict[str, 
     z_home = _f(ctx.z_ground_home_m)
     n_uav = {c: len(inputs.uavs_of_class(c)) for c in classes}
     any_coverable = False
+    shutter_msgs: list[str] = []
 
     for area in inputs.areas:
         aid = area.area_id
@@ -395,6 +452,7 @@ def analyse_areas(ctx: MissionContext, dc: DecomposeContext) -> tuple[dict[str, 
         }
         served_kinds: set[str] = set()
         feasible_classes: list[str] = []
+        area_params: dict[str, tuple[Any, float, float, float]] = {}     # 建圖模式接縫外擴紀錄用
         for c in classes:
             spec = ctx.specs[c]
             kinds = ctx.available_kinds.get(c, frozenset())
@@ -417,6 +475,7 @@ def analyse_areas(ctx: MissionContext, dc: DecomposeContext) -> tuple[dict[str, 
             d_turn = _f(d_turn_m(c, s, e_ext, dc))
             crec.update({"h_op_m": h_op, "w_m": w, "s_m": s, "e_ext_m": e_ext, "d_turn_m": d_turn,
                          "V_g_cap_mps": _f(sensor.max_ground_speed_mps(h_op))})
+            area_params[c] = (sensor, h_op, w, s)
             if band.reason == "A_needs_waiver":
                 warnings.append(f"A_needs_waiver({aid}: h_ceil {ctx.h_ceil_m.get(c)} m 無豁免，Δh_band={band.dh_band_m:.1f} < "
                                 f"{cfg.dh_band_min_m:g} m → A 不可指派，改由 B 或給 waiver_max_agl_m)")
@@ -464,6 +523,14 @@ def analyse_areas(ctx: MissionContext, dc: DecomposeContext) -> tuple[dict[str, 
                          "V_g_max_mps": vg_max, "z_op_m": _f(z_op), "one_way_only": bool(dir_ok and not two_way)})
             if dir_ok and not two_way:
                 warnings.append(f"one_way_only({aid}, {c}: 僅單向可行，需同向 racetrack 轉場 D34)")
+            if not dir_ok:
+                # 只改訊息、不改判定：快門限速才是原因時寫出需要的觸發率／高度（原本只有籠統的 no_coverable_area）
+                lim = _shutter_limit_note(aid, c, spec, auw, sensor, h_op, _f(band.h_hi_m), v_cap, wind_xy,
+                                          cfg.v_g_min_mps)
+                if lim is not None:
+                    crec["shutter_limit"] = lim[0]
+                    warnings.append(lim[1])
+                    shutter_msgs.append(lim[1])
             # --- 綜合 ---
             reason = ""
             if not in_dem:
@@ -497,6 +564,15 @@ def analyse_areas(ctx: MissionContext, dc: DecomposeContext) -> tuple[dict[str, 
             unc_reason = "" if coverable else "sensor: 無可行構型（" + "; ".join(
                 f"{c}={rec['classes'][c].get('reason', '?')}" for c in classes) + "）"
         rec["feasible_classes"] = feasible_classes
+        mp = getattr(dc, "mapping", None)
+        if mp is not None and mp.seam_tie:
+            # 有效值：規劃時 decompose_area 用的外擴（類別集合同 plan_mission：可行構型，沒有則全隊）
+            ps = [area_params[c] for c in (feasible_classes or classes) if c in area_params]
+            d_edge, d_cell, tie = area_edge_deltas(dc, ps)
+            d0 = _f(cfg.delta_edge_resolved())
+            rec["mapping_seam"] = {"overlap_target_m": tie, "delta_area_outer_m": _f(d_edge), "delta_cell_m": _f(d_cell),
+                                   "neighbor_growth_m": (0.5 * tie if (tie and len(inputs.areas) > 1) else 0.0),
+                                   "delta_residual_m": max(d0, tie) if tie is not None else d0}
         rec["served_kinds"] = sorted(served_kinds)
         rec["coverable"] = coverable
         rec["uncoverable_reason"] = unc_reason or None
@@ -508,6 +584,7 @@ def analyse_areas(ctx: MissionContext, dc: DecomposeContext) -> tuple[dict[str, 
         per_area[aid] = rec
     if inputs.areas and not any_coverable:
         errors.append("no_coverable_area: 所有區域皆無可行構型（感測相容／高度帶／鏈路／方向）")
+        errors.extend(shutter_msgs)            # 已是 NO_GO：把快門限速的具體原因一起放進錯誤（GUI 只顯示 errors）
     return per_area, errors, warnings
 
 
@@ -542,6 +619,7 @@ def derive_by_class(ctx: MissionContext, dc: DecomposeContext, per_area: dict[st
         # 主需求：第一個能解析感測器之區域需求
         by_req: dict[str, dict[str, float]] = {}
         primary: dict[str, float] | None = None
+        primary_rid: str | None = None
         for aid, rec in per_area.items():
             crec = rec["classes"].get(c, {})
             if "h_op_m" not in crec:
@@ -551,6 +629,7 @@ def derive_by_class(ctx: MissionContext, dc: DecomposeContext, per_area: dict[st
                 by_req[rid] = {k: crec[k] for k in ("h_op_m", "w_m", "s_m", "e_ext_m", "d_turn_m", "V_g_cap_mps")}
                 if primary is None:
                     primary = by_req[rid]
+                    primary_rid = rid
         # R_eff（規格 §3.2 W_R 政策；與 decompose.r_eff_for_class 同一 z_top 規則）
         z_top = z_terrain_max + (h_ceil_f if math.isfinite(h_ceil_f) else 300.0)
         W_R = _f(r_eff_wind_speed(ctx.wind, spec, z_site, z_top, cfg.r_eff_wind_policy))
@@ -624,6 +703,37 @@ def derive_by_class(ctx: MissionContext, dc: DecomposeContext, per_area: dict[st
             "usable_alternates": list(usable_alternates.get(c, [])),
             "provisional_params": prov,
         }
+        mp = getattr(dc, "mapping", None)
+        if mp is not None:
+            # 建圖模式有效值（主需求、主作業高度）：偏流角、足跡、保守寬、實際間距、接縫重疊目標、端延伸（含 lead_in）
+            entry: dict[str, Any] = dict(mp.to_dict())
+            found = resolve_sensor(dc, c, primary_rid) if primary_rid is not None else None
+            if found is not None and primary is not None:
+                sen = found[0]
+                psi = max(float(getattr(x, "crab_rad", 0.0)) for x in (getattr(sen, "sensors", None) or (sen,)))
+                w_c, s_c = _f(primary["w_m"]), _f(primary["s_m"])
+                l_c = _f(sen.footprint_len_m(primary["h_op_m"]))
+                entry.update({"h_op_m": _f(primary["h_op_m"]), "crab_deg": _f(math.degrees(psi)), "w_m": w_c,
+                              "l_m": l_c, "w_eff_m": _f(crabbed_width_m(w_c, l_c, psi)), "s_m": s_c,
+                              "seam_overlap_target_m": (w_c - s_c) if mp.seam_tie else None,
+                              "e_ext_m": _f(primary["e_ext_m"])})
+                if getattr(mp, "cross_strips", False):
+                    # 交叉航帶（構型層級、平地近似）：h_x = h_op + offset 須在 [max(h_minfw, h_clr), min(h_ceil, 感測器上限)]
+                    #   內；地形起伏使某胞高度帶更窄者由 planner 逐區塊再擋（decompose.cross_altitude_check）。不夾限。
+                    h_x = _f(primary["h_op_m"]) + float(mp.cross_alt_offset_m)
+                    h_lo = max(_f(spec.min_fw_operation_agl_m), _f(ctx.h_clr_m))
+                    h_hi = min(h_ceil_f, _f(sen.agl_window()[1]))
+                    entry.update({"cross_h_m": h_x, "cross_w_m": _f(sen.swath_m(h_x)) if h_x > 0 else None,
+                                  "cross_s_m": _f(sen.strip_spacing_m(h_x)) if h_x > 0 else None,
+                                  "cross_band_m": [h_lo, h_hi],
+                                  "cross_gsd_ratio": (h_x / _f(primary["h_op_m"])) if primary["h_op_m"] else None})
+                    if h_x < h_lo - 1e-6 or h_x > h_hi + 1e-6:
+                        errors.append(
+                            f"cross_alt_out_of_band({c}: 交叉航帶高度 = 主條帶 {_f(primary['h_op_m']):g} m "
+                            f"{float(mp.cross_alt_offset_m):+g} m = {h_x:g} m，不在可用範圍 [{h_lo:g}, {h_hi:g}] m"
+                            f"（下緣 = max(最低固定翼 {_f(spec.min_fw_operation_agl_m):g}, 地形淨空 {_f(ctx.h_clr_m):g})、"
+                            f"上緣 = min(h_ceil {h_ceil_f:g}, 感測器上限 {_f(sen.agl_window()[1]):g})）⇒ 不夾限、不規劃)")
+            derived[c]["mapping"] = entry
     return derived, errors, warnings
 
 

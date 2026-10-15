@@ -69,14 +69,14 @@ def plan(areas, zones, split=False):
                "fov_width": 150.0}
               for i, (n, _c, _s, v, r) in enumerate(fleet)]
     c = SwarmCoordinator()
-    c.use_hv_dccpp = True
+    c.use_harvest = True
     c.hv_split_areas_around_nfz = split
     c.hv_class_of = lambda d: cls[int(d["drone_id"])]
     c.hv_home = HOME
     c.hv_alternates = [(23.972571, 120.90)]
     c.hv_wind = (5.0, 270.0)
     c.hv_fence_zones = zones
-    c.hv_params = {"hfov_deg": HFOV, "vfov_deg": 45.0, "hv_c2_range_km": 25.0,
+    c.harvest_params = {"hfov_deg": HFOV, "vfov_deg": 45.0, "hv_c2_range_km": 25.0,
                    "hv_waiver_max_agl_m": 200.0, "hv_dem_margin_m": 3000.0,
                    "hv_terrain_clearance_m": 36.0}
     try:

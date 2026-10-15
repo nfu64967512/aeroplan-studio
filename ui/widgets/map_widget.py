@@ -9,9 +9,12 @@
 4. 左鍵點擊=添加角點，拖動=移動地圖，右鍵=工具選單
 """
 
+import html as _html
 import os
 import re
 import io
+import math
+from pathlib import Path
 from typing import List, Tuple, Optional
 
 from PyQt6.QtWidgets import QVBoxLayout, QMessageBox, QSizePolicy
@@ -106,6 +109,13 @@ class MapWidget(MapWidgetBase):
     # (1-1) corner_added/corner_moved/circle_defined/nfz_polygon_drawn/
     #       nfz_circle_drawn 已上移至 MapWidgetBase；本類無專屬 signal。
 
+    # 航測成果圖層的類別層預設（不可變；__init__ 會換成實例自己的）。
+    # 測試會用沒跑 __init__ 的裸實例呼叫 _build_map，而 PyQt 物件對不存在的屬性丟的是
+    # RuntimeError 不是 AttributeError ⇒ getattr(..., 預設值) 擋不住，只能靠類別屬性。
+    _ortho_tiles: tuple = ()
+    _photo_pose_layers: Optional[dict] = None
+    _survey_point_layers: Optional[dict] = None     # GCP／檢核點佈設（survey.gcp_plan）
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.corners: List[Tuple[float, float]] = []
@@ -137,6 +147,11 @@ class MapWidget(MapWidgetBase):
         # 使用者目前視角（lat, lon, zoom）— 由 JS moveend 事件即時上報
         # 重新渲染地圖時用此值當中心，避免每次都跳回預設位置
         self._view_state: Optional[dict] = None
+        # 航測成果（持久化，隨 _render_map 重建）：正射瓦片、照片位姿
+        self._ortho_tiles: list = []
+        self._photo_pose_layers: dict = {}
+        # GCP／檢核點佈設（持久化，隨 _render_map 重建）：圖層代號 → {'rows', 'stats'}
+        self._survey_point_layers: dict = {}
 
         self._init_ui()
         self._init_map()
@@ -501,6 +516,21 @@ class MapWidget(MapWidgetBase):
             legend_html = self._build_swarm_legend(self._swarm_data)
             m.get_root().html.add_child(folium.Element(legend_html))
 
+        # === 航測成果：正射瓦片 + 照片位姿 ===
+        for tile in self._ortho_tiles:
+            self._add_ortho_tile_layer(m, tile)
+        n_notice = 0
+        for lid, layer in (self._photo_pose_layers or {}).items():
+            if layer['rows'] is None:
+                m.get_root().html.add_child(folium.Element(
+                    self._photo_pose_cap_notice(lid, layer['n'], n_notice)))
+                n_notice += 1
+            else:
+                self._add_photo_pose_layer(m, lid, layer)
+        # === GCP／檢核點佈設 ===
+        for lid, layer in (self._survey_point_layers or {}).items():
+            self._add_survey_point_layer(m, lid, layer)
+
         # 收集所有可見內容的座標，用於 fitBounds
         all_pts = list(self.corners)
         for p in self.paths:
@@ -688,7 +718,10 @@ html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden;
 /* ⚠ Leaflet 容器預設 #ddd；這裡明寫是為了不讓 Qt 那層黑色透上來 */
 .leaflet-container {{ background:#ffffff !important; }}
 .folium-map {{ width:100% !important; height:100vh !important; }}
-body > div {{ width:100% !important; height:100% !important; }}
+/* ⚠⚠ 不可再加 `body > div {{ width:100%; height:100% }}` 這種不帶 class 的規則（2026-10-08 拿掉）：
+   它會把 body 底下**每一個** div 撐成全螢幕 —— 重繪時的群飛圖例（position:fixed、z-index:9999、
+   背景 rgba(30,30,30,.88)）因此變成蓋滿地圖的深色層並接走所有點擊（「2D 地圖變暗、無法操作」），
+   右鍵選單與 toast 一出現也會整片蓋住。地圖容器本身由上面的 .folium-map 撐滿就夠了。 */
 .leaflet-control, .leaflet-control * {{ cursor:pointer !important; }}
 
 .corner-counter {{
@@ -2203,6 +2236,181 @@ body > div {{ width:100% !important; height:100% !important; }}
         """調整視圖以包含所有座標"""
         if coordinates:
             self._render_map()
+
+    # ─────────────────────────────────────
+    # 航測成果：正射瓦片 + 照片位姿（持久化，隨 _render_map 重建）
+    #   ⚠ clear_all() 刻意不清（成果不是規劃疊圖）；用 clear_ortho_tiles / clear_photo_poses /
+    #     clear_survey_layers。工具函式與 3D 共用（cesium_map_widget）。
+    # ─────────────────────────────────────
+    PHOTO_POSES_2D_MAX = 5000      # Leaflet 一頁的上限；超過就只顯示提示，請改看 3D
+    PHOTO_POSE_TICK_M = 8.0        # 航向短線長度（公尺，自位姿點往航向方向畫）
+
+    def add_ortho_tiles(self, path, tms: bool = True, bounds=None) -> dict:
+        """疊一層正射瓦片（folium TileLayer，file:// URL）。
+
+        Parameters
+        ----------
+        path : 本機瓦片根目錄（``{z}/{x}/{y}.png``），或 http(s):// / file:// URL
+        tms : True = TMS（y 由南往北；ODM --tiles / gdal2tiles 預設）；False = XYZ。不猜。
+        bounds : (西, 南, 東, 北) 度，可省；省略時本機資料夾由瓦片檔推（Leaflet 不讀 tilemapresource.xml）
+
+        Returns
+        -------
+        dict  實際生效的設定（url、template、tms、bounds 與來源、層級、副檔名）。
+        """
+        from ui.widgets.cesium_map_widget import (
+            _URL_PREFIXES, check_bounds, inspect_tile_dir, local_path_to_file_url)
+        tms = bool(tms)
+        if bounds is not None:
+            bounds = check_bounds(bounds)
+        src = str(path)
+        info = {'url': None, 'tms': tms, 'bounds': bounds, 'bounds_source': 'user' if bounds else 'none',
+                'min_level': None, 'max_level': None, 'ext': 'png',
+                'name': Path(src.rstrip('/\\')).name or src}
+        if src.lower().startswith(_URL_PREFIXES):
+            info['url'] = src
+        else:
+            tiles = inspect_tile_dir(src, 'tms' if tms else 'xyz')
+            info.update(url=local_path_to_file_url(src), min_level=tiles['min_level'],
+                        max_level=tiles['max_level'], ext=tiles['ext'])
+            if bounds is None:
+                info['bounds'], info['bounds_source'] = tiles['bounds'], 'tiles_on_disk'
+            if not tms and tiles['has_tilemapresource']:
+                logger.warning(f'[Ortho/2D] {src} 有 tilemapresource.xml（gdal2tiles/ODM 的 TMS 輸出）'
+                               f'卻指定 tms=False ⇒ 影像會南北錯位；確定是 XYZ 才這樣用')
+        base = info['url'].rstrip('/')
+        info['template'] = base if '{z}' in base else f'{base}/{{z}}/{{x}}/{{y}}.{info["ext"]}'
+        self._ortho_tiles = [t for t in self._ortho_tiles if t['url'] != info['url']] + [info]
+        logger.info(f'[Ortho/2D] {info["template"]}｜tms={tms}｜範圍 {info["bounds"]}'
+                    f'（{info["bounds_source"]}）｜層級 {info["min_level"]}–{info["max_level"]}')
+        self._render_map()
+        return dict(info)
+
+    def clear_ortho_tiles(self):
+        self._ortho_tiles = []
+        self._render_map()
+
+    def set_photo_poses(self, layer_id: str, rows, color: Optional[str] = None) -> dict:
+        """2D 照片位姿：圓點（依 source 上色）＋航向短線，懸停顯示 image_id／航向。
+
+        超過 PHOTO_POSES_2D_MAX 點**一點都不畫**（只畫一部分會讓人以為那就是全部），
+        改在圖上顯示「請切到 3D」的提示並記 warning。
+        """
+        from ui.widgets.cesium_map_widget import (
+            check_color, check_layer_id, log_photo_pose_stats, photo_pose_rows_to_compact)
+        layer_id = check_layer_id(layer_id)
+        color = check_color(color)
+        rows = list(rows)
+        if len(rows) > self.PHOTO_POSES_2D_MAX:
+            logger.warning(f'[PhotoPoses/2D] {layer_id}：{len(rows)} 點超過 2D 上限 '
+                           f'{self.PHOTO_POSES_2D_MAX}，2D 不畫，請切到 3D 檢視')
+            self._photo_pose_layers[layer_id] = {'n': len(rows), 'rows': None, 'color': color}
+            self._render_map()
+            return {'rows': len(rows), 'drawn': 0, 'over_2d_cap': True}
+        compact, stats = photo_pose_rows_to_compact(rows)
+        log_photo_pose_stats(layer_id, stats, '2D')
+        self._photo_pose_layers[layer_id] = {'n': len(rows), 'rows': compact, 'color': color}
+        self._render_map()
+        return stats
+
+    def clear_photo_poses(self, layer_id: str) -> bool:
+        existed = self._photo_pose_layers.pop(layer_id, None) is not None
+        self._render_map()
+        return existed
+
+    def clear_survey_layers(self):
+        """正射與位姿一起清，只重繪一次。"""
+        self._ortho_tiles = []
+        self._photo_pose_layers = {}
+        self._render_map()
+
+    @staticmethod
+    def _add_ortho_tile_layer(m, tile: dict):
+        kw = dict(tiles=tile['template'], tms=tile['tms'], overlay=True, control=True, show=True,
+                  name=f'正射：{_html.escape(tile["name"])}', max_zoom=22,   # 圖層選單用 innerHTML
+                  attr=f'正射影像（{_html.escape(tile["name"])}）')
+        if tile['min_level'] is not None:
+            kw['min_native_zoom'] = tile['min_level']
+        if tile['max_level'] is not None:
+            kw['max_native_zoom'] = tile['max_level']     # 超過最細層就放大最細層，不是空白
+        if tile['bounds']:
+            w, s, e, n = tile['bounds']
+            kw['bounds'] = [[s, w], [n, e]]                 # 範圍外不要瓦片（省一堆 404）
+        folium.TileLayer(**kw).add_to(m)
+
+    def _add_photo_pose_layer(self, m, layer_id: str, layer: dict):
+        from ui.widgets.cesium_map_widget import PHOTO_POSE_OTHER_COLOR, PHOTO_POSE_SOURCE_COLORS
+        feats, ticks = [], {}
+        tick = self.PHOTO_POSE_TICK_M
+        for lat, lon, _h, yaw, src, img in layer['rows']:
+            color = layer['color'] or PHOTO_POSE_SOURCE_COLORS.get(src, PHOTO_POSE_OTHER_COLOR)
+            feats.append({'type': 'Feature',
+                          'geometry': {'type': 'Point', 'coordinates': [lon, lat]},
+                          'properties': {'image_id': _html.escape(img),
+                                         'heading': '未知' if yaw is None else f'{yaw:.1f}°',
+                                         'source': _html.escape(src) or '—', 'color': color}})
+            if yaw is not None:
+                # 航向 = 自真北順時針：北分量 cos、東分量 sin
+                h = math.radians(yaw)
+                lat2 = lat + tick * math.cos(h) / 111320.0
+                lon2 = lon + tick * math.sin(h) / (111320.0 * math.cos(math.radians(lat)))
+                ticks.setdefault(color, []).append([(lat, lon), (lat2, lon2)])
+        fg = folium.FeatureGroup(name=f'照片位姿：{_html.escape(layer_id)}（{len(feats)} 張）', show=True)
+        folium.GeoJson(
+            {'type': 'FeatureCollection', 'features': feats},
+            marker=folium.CircleMarker(radius=4, weight=1, fill=True, fill_opacity=0.9),
+            style_function=lambda f: {'color': '#000000', 'weight': 1,
+                                      'fillColor': f['properties']['color'], 'fillOpacity': 0.9},
+            tooltip=folium.GeoJsonTooltip(fields=['image_id', 'heading', 'source'],
+                                          aliases=['影像', '航向', '來源']),
+        ).add_to(fg)
+        for color, segs in ticks.items():           # 每個顏色一條多段線（一個 Leaflet 物件）
+            folium.PolyLine(locations=segs, color=color, weight=2, opacity=0.9).add_to(fg)
+        fg.add_to(m)
+
+    # ── GCP／檢核點佈設（survey.gcp_plan）：少量帶編號的點 ──────────────────
+    #   ⚠ clear_all() 與 clear_survey_layers() 都不清它；用 clear_survey_points。
+    def set_survey_points(self, layer_id: str, points) -> dict:
+        """2D GCP／檢核點：依類型上色的圓點＋常駐編號標籤。同代號再畫一次 = 換掉舊的。"""
+        from ui.widgets.cesium_map_widget import check_layer_id, survey_points_to_compact
+        layer_id = check_layer_id(layer_id)
+        compact, stats = survey_points_to_compact(points)
+        if stats['skipped']:
+            logger.warning(f'[SurveyPoints/2D] {layer_id}：{stats["skipped"]} 點經緯度無效，未畫')
+        if self._survey_point_layers is None:
+            self._survey_point_layers = {}
+        self._survey_point_layers[layer_id] = {'rows': compact, 'stats': dict(stats)}
+        self._render_map()
+        return stats
+
+    def clear_survey_points(self, layer_id: str) -> bool:
+        existed = (self._survey_point_layers or {}).pop(layer_id, None) is not None
+        self._render_map()
+        return existed
+
+    @staticmethod
+    def _add_survey_point_layer(m, layer_id: str, layer: dict):
+        from ui.widgets.cesium_map_widget import SURVEY_POINT_COLORS, SURVEY_POINT_OTHER_COLOR
+        by = layer['stats'].get('by_type') or {}
+        name = (f'GCP／檢核點：{_html.escape(layer_id)}（GCP {by.get("GCP", 0)}、檢核點 {by.get("CHK", 0)}）')
+        fg = folium.FeatureGroup(name=name, show=True)
+        for lat, lon, typ, label in layer['rows']:
+            color = SURVEY_POINT_COLORS.get(typ, SURVEY_POINT_OTHER_COLOR)
+            folium.CircleMarker(
+                location=[lat, lon], radius=7 if typ == 'GCP' else 5, color='#000000', weight=2,
+                fill=True, fill_color=color, fill_opacity=0.95,
+                tooltip=folium.Tooltip(_html.escape(label), permanent=True, direction='top'),
+            ).add_to(fg)
+        fg.add_to(m)
+
+    def _photo_pose_cap_notice(self, layer_id: str, n: int, k: int = 0) -> str:
+        # 只用行內樣式（不加全域 CSS：body > div 那類規則曾把圖例撐成全螢幕）；pointer-events:none 不擋點擊
+        return (f'<div class="aeroplan-pose-cap" style="position:fixed;top:{10 + 34 * k}px;left:50%;'
+                f'transform:translateX(-50%);z-index:1000;pointer-events:none;'
+                f'background:rgba(183,28,28,0.92);color:#fff;padding:6px 12px;border-radius:4px;'
+                f'font:13px \'Segoe UI\',sans-serif;">'
+                f'⚠ 照片位姿「{_html.escape(layer_id)}」共 {n} 點，超過 2D 上限 '
+                f'{self.PHOTO_POSES_2D_MAX} 點，2D 未顯示 —— 請切到 3D 檢視</div>')
 
     # ─────────────────────────────────────
     # 編輯模式 & 工具方法

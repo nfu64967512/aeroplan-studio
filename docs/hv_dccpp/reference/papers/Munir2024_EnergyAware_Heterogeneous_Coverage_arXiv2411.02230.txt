@@ -1,0 +1,1244 @@
+arXiv:2411.02230v1 [cs.RO] 4 Nov 2024    Energy-Aware Coverage Planning for Heterogeneous
+                                                              Multi-Robot System
+
+                                                        Aiman Munir1, Ayan Dutta2, and Ramviyas Parasuraman1
+
+                                                     1 School of Computing, University of Georgia, Athens, GA 30602, USA,
+                                              2 School of Computing, University of North Florida, Jacksonville, FL 32224, USA,
+
+                                                                Corresponding author email: ramviyas@uga.edu,
+                                             Codes, Videos, and Appendix: https://github.com/herolab-uga/energy-aware-coverage
+
+                                                Abstract. We propose a distributed control law for a heterogeneous multi-robot
+                                                coverage problem, where the robots could have different energy characteristics,
+                                                such as capacity and depletion rates, due to their varying sizes, speeds, capabili-
+                                                ties, and payloads. Existing energy-aware coverage control laws consider capac-
+                                                ity differences but assume the battery depletion rate to be the same for all robots.
+                                                In realistic scenarios, however, some robots can consume energy much faster than
+                                                other robots; for instance, UAVs hover at different altitudes, and these changes
+                                                could be dynamically updated based on their assigned tasks. Robots' energy ca-
+                                                pacities and depletion rates need to be considered to maximize the performance
+                                                of a multi-robot system. To this end, we propose a new energy-aware controller
+                                                based on Lloyd's algorithm to adapt the weights of the robots based on their en-
+                                                ergy dynamics and divide the area of interest among the robots accordingly. The
+                                                controller is theoretically analyzed and extensively evaluated through simulations
+                                                and real-world demonstrations in multiple realistic scenarios and compared with
+                                                three baseline control laws to validate its performance and efficacy.
+
+                                                Keywords: Sensor Coverage, Heterogeneous Multi-Robot Systems, Energy-Awareness
+
+                                       1 Introduction
+
+                                       There has been an increase in the use of autonomous robots in recent years, particularly
+                                       for the purpose of surveillance and monitoring environments. The collected data from
+                                       the robots can be used to make further decisions. For example, in a precision agriculture
+                                       application, robot-collected hyper-spectral images might be used for weed localization
+                                       and treating the affected areas with herbicides [32]. For such applications, sensor (or
+                                       spatial) coverage is an important computational problem to consider. In a multi-robot
+                                       sensor coverage problem, the objective is to distribute the robots (sensors) in a manner
+                                       that optimally monitors the workspace covering the spatial region (environment) with
+                                       at least one robot's sensor footprint. This objective is different from and is not to be
+                                       confused with the area coverage problem, where the objective is that the robot(s) should
+                                       visit each and every part of the environment. A promising technique for achieving the
+                                       sensor coverage goal is to divide the environment into regions using Lloyd's algorithm,
+                                       also known as Voronoi partitions, which can be optimized based on constraints such as
+                                       uncertainties in sensing and sensor health, among others [28, 31, 24, 1].
+2        Munir et al.
+
+   6                                          6
+
+         w =1          w 3 =1     w 6 =1            w 1 =1.5     w 3 =0.4     w 6 =1.5
+         1
+   5                      3(6.6)     6 (5.5)  5                                  6(6.4)
+
+            1(6)                                       1(7.5)       3(3.6)
+
+   4                                          4
+
+   3                                          3
+
+         w 4 =1        w 2 =1     w 5 =1            w =1.5       w 2 =1.5     w 5 =1.5
+   2                                          2     4
+
+         4(6)             2(5.8) 5 (6.1)             4(5.9)         2(6.4) 5(6.2)
+
+   1                                          1
+
+   0                                          0
+
+      0  1        2    3       4  5       6      0  1         2  3         4  5         6
+
+Fig. 1. Regions assigned by standard Voronoi partitioning (left) and the proposed energy-aware
+controller (EAC) (right). The robots have the same initial battery level. However, robot 3's de-
+pletes its energy three times faster than the other robots. Therefore, robot 3's EAC-assigned region
+area (area in m2 in parentheses) is less than other robots by adapting the weights (wi) based on
+the ratio of energy depletion rate between the robots.
+
+    A heterogeneous group of robots (e.g., a group of UGVs and UAVs) allows the
+system to develop proficiency in different areas of the task despite their inherent limi-
+tations on a specific capability, such as sensing or mobility [27, 2]. UAVs, for instance,
+can cover more terrain and are less susceptible to obstacles than UGVs, which, on the
+other hand, generally have higher battery capacities and deplete energy at a slower rate
+than UAVs [38]. We posit that the robot's energy depletion rate is an important factor
+that needs to be incorporated into their controllers to increase the overall lifetime of the
+multi-robot system and optimize the mission objective.
+
+    The rate of energy depletion could vary significantly between robots due to their
+sensor payloads (e.g., some robots may be equipped with high-power thermal cam-
+eras or power drill tools in search and rescue applications), as well as their velocities
+(e.g., UAVs operating at higher altitude will deplete energy faster than the ones at lower
+altitudes) [23, 19, 36]. Moreover, the energy depletion rate of a robot can change dy-
+namically over time (e.g., activating or deactivating a payload, increasing the velocity,
+etc.), and the robots need to adjust their coverage loads accordingly. Fig. 1 illustrates
+such a scenario. Here, the energy-aware controller optimally assigns a lower area to
+robot 3, which had almost four times higher energy depletion rate compared to the
+other robots, which will limit its ability to cover more area. Assigning a larger area to
+a robot with more energy or a lower depletion rate and smaller areas to other robots
+will distribute the workload among robots and ensure effective coverage and timely
+execution of tasks. Energy availability has significant implications for coverage plan-
+ning. Several works proposed in the literature [11, 12, 6, 8] focusing on this problem
+consider limiting the robot velocity and/or partitioning the regions based on the cur-
+rent energy levels. However, this will result in poor coverage quality when robots have
+different energy depletion rates. Moreover, as discussed earlier, real-world applications
+might require a heterogeneous group of robots with different and dynamic energy char-
+acteristics, where robots consume energy differently.Moreover, restricting the robots'
+velocities like performed in [12, 8] could conflict with the low-level, time-limited tasks
+the robots are assigned to.
+Energy-Aware Coverage  3
+
+    To this end, we present a novel distributed multi-robot controller that holistically
+considers the robot's energy capacity and depletion characteristics of other robots for
+optimal energy-aware coverage planning. We extensively validate the controller in sim-
+ulations (scaling up to 100 robots) and with real robots within an in-house swarm
+robotics testbed (see the video). The main contributions of our paper are as follows.
+
+  ­ To the best of our knowledge, this is the first study that considers differences in
+     the energy capability of the robots with heterogeneous energy depletion rates for
+     effective multi-robot coverage planning.
+
+  ­ Unlike prior studies, we consider that the robots might have time-varying energy
+     depletion rates during a mission. Compared to the state-of-the-art relevant algo-
+     rithms, our proposed Energy-Aware Controller (EAC) significantly reduces cover-
+     age cost and achieves energy-balancing coverage objectives.
+
+2 Related Work
+
+Sensor coverage refers to the optimal placement of robots (or sensors) in an environ-
+ment that ensures maximum coverage such that detection or tracking of relevant, impor-
+tant features and landmarks can be achieved [29, 35]. Centroid Voronoi tessellation [7]
+is an extensively studied technique for sensor coverage. Distributed controllers seek-
+ing this objective are proven to be scalable since they only consider the local neigh-
+borhood. One of the pioneering works in this domain is due to [5], which presents
+a Lloyd-algorithm-based distributed controller that drives the robotic sensors toward
+the centroids of their Voronoi partitions. Extensions of this controller have been pre-
+sented in different settings such as time-varying intensity [4] and limited communica-
+tion range [15]. Recursive partitioning of Voronoi partitions based on discovering an
+obstacle-free area in an unknown environment by a group of mobile robots is studied
+in [9]. However, these algorithms assume that the robots are homogeneous with similar
+characteristics. Several studies in the literature formulate control laws for the coverage
+of heterogeneous robots. Pimenta et al. [26] consider heterogeneity in the sensing ra-
+dius of the robots. Marier et al. [18] have utilized sensor health as a weight metric ­
+a higher weight corresponds to a larger area coverage responsibility. Pierson et al. [24]
+learn the difference in robot sensing performance and adapt the weights online to assign
+larger areas to robots with better sensor health. A variation of this work is presented in
+[25] to adapt weights according to relative actuation errors.
+
+    It is vital to consider the energy limitations of the robots relative to their neighbor-
+hood to increase the lifespan of the robot group [30, 36]. To deal with energy-related
+heterogeneity, Kwok and Martinez [12] proposed an energy-aware variant of Lloyd's
+algorithm that uses a power diagram to balance the robot network's energy depletion
+and assign areas of higher importance to robots with higher energy levels while restrict-
+ing the movements of robots with less energy. In [8], the authors extended this idea
+to scenarios where the importance of the environmental distribution is time-varying.
+Morraef and Rodrigues [20] ensure the maintenance of robots' energy levels by con-
+sidering coverage as an optimal control problem while using the velocity of the robots
+as a weight metric. This controller assigns larger areas to the robots with higher speeds
+4  Munir et al.
+
+to ensure faster response. Derenick et al. [6] studied the problem of maintaining per-
+sistent coverage by deriving control laws that allow robots with depleted batteries to
+reach corresponding access points (docking) for recharging stations. Authors in [11]
+explore heterogeneity in robot speed capability and propose a velocity-adaptive control
+law that partitions regions among robots based on the maximum velocities of robots to
+facilitate rapid response to time-sensitive applications. Limiting the velocities is a good
+approach in cases where robots need to optimize their velocity based on environmen-
+tal constraints or to speed up the mission efficiency. However, adapting the partition
+weights based on velocities could be ignorant to the dynamics of energy consumption,
+which is influenced by various factors, such as computation, sensor power and fre-
+quency of operation, mechanical payload, communication range, altitude of operation,
+resource supply, etc. [16, 14, 3].
+
+3 Methodology
+
+Formally, the problem here is to devise a position controller that would balance the
+coverage area in a heterogeneous group of robots based on the robots' energy charac-
+teristics and optimize the locational (or geometric configuration) cost of the coverage.
+For instance, robots with higher energy depletion rates should be given less area to
+cover or monitor because they will quickly drain their batteries.
+Assumptions: We assume that the robots do not have an accurate model of time-varying
+energy depletion rates, but they can instantaneously measure their current energy levels
+(ubiquitously available in robots in terms of battery voltage or percentage). We further
+assume that the robots form a connected network to share data.
+Environment Partition. Let R = {1, 2, · · · n}  Rn denote the set of n robots,
+forming a connected graph G = (R, E) defined by their edges E = {(i, j)} that share a
+connection link and Ni = {j  R|(i, j)  E} is the neighbor set of robot i in the graph
+G. The cardinality of the set |Ni|  N represents the number of neighbors for robot i.
+The goal of the robots is to collectively cover a convex environment Q  R2. Let pi
+denote the position of robot i and q represent a point in Q. Prior studies on partitioning
+robots for coverage have popularly used Voronoi partitioning [33]. Let Vi denote the
+partition for robot i, which can be calculated as the following.
+
+   Vi = {q  Q | q - pi  q - pj , j = i, j  R}                                   (1)
+
+A locational cost of the current partitions can be obtained as
+
+                                                  n       1     -  pi||2(q)dq,  (2)
+                                                           ||q
+                 HV (p1, ..., pn) =                   Vi
+                                                          2
+                                                 i=1
+
+where (q) is a density function Q  R > 0 to describes the importance of a given
+point q [5]. In the coverage control literature, it is typical to operate under the assump-
+tion that the density function is known  [10] (while some works try to learn the density
+before (or simultaneously) achieving coverage [29, 21]). The traditional Lloyd-based
+coverage control algorithm minimizes the locational optimization cost in Eq. (2) by
+                                                                 Energy-Aware Coverage  5
+
+moving the robots toward the centroid of their Voronoi regions. To incorporate hetero-
+geneity in the robots, we will follow a weighted Voronoi partitioning (sometimes called
+power diagram) as mentioned in [12, 24]. The weighted partition Wi for a robot i with
+a weight wi can be calculated as
+
+             Wi = q  Q | q - pi2 - wi  q - pj2 - wj, j = i ,                            (3)
+
+The locational cost function for the power diagram will be
+
+                                      n      1      -  pi||2  -  wi)(q)dq,              (4)
+                                              (||q
+             HW (p,w) =                  Wi
+                                             2
+                                    i=1
+
+where p = {p1, p2, .., pn} and w = {w1, w2, .., wn} are the vectors with all robot posi-
+tions and weights, respectively.
+
+It has been proven in the literature [4, 25, 28] that the robots (or mobile sensors)
+
+should converge their positions at the centroid of their respective weighted Voronoi
+
+region (CWi ) to obtain the minimum locational cost in Eq. (4), i.e., if the robots follow
+the gradient (partial derivative) of the cost function with respect to their positions, then
+
+they would eventually reach an equilibrium point where CWi = arg minpi HWi (pi).
+Therefore, the velocity controller for the robots, according to their weighted partitions,
+
+is given by
+
+             pi = -kp (CWi - pi) ,                                                      (5)
+
+             1                               q(q)dq and MWi =        (q)dq.
+             where CWi = MWi                                                            (6)
+                                         Wi                      Wi
+
+    Here, kp  0 is the controller gain, which impacts the convergence rate. This control
+law places the robots in optimal locations for sensor coverage of the environment as
+
+long as the weights of the robots are adapted to satisfy the objectives of sensing [24,
+
+28], performance [25], or energy heterogeneity [12]. Our study focuses on adapting
+
+the weights wi based on the energy depletion rate, where the robots with better energy
+capability get assigned to larger partitions.
+
+3.1 Energy Consumption Model
+
+Let Ei(t) represent the current energy level of a robot i at an instant t. According to
+the standard energy consumption model of mobile robots [23, 19], three key parame-
+ters govern a robot's energy expenditure: current energy level (or the initial reserve),
+temporal energy cost (time-dependent costs such as the energy consumed by robot's
+computers and sensors even when the robot does not move), and spatial energy cost
+(mobility-dependent costs which characterize how energy depletes when robot moves
+with some velocity). Formally, we define the discretized energy consumption model as
+
+             Ei(t) = Ei(t - 1) - E i(t)                                                 (7)
+
+             E i(t) = -(t) - (t).|vi(t)|                                                (8)
+
+Here, (t) and (t) are the temporal and spatial energy depletion coefficients (poten-
+tially time-varying), respectively. The depletion coefficients need not be the same for
+6         Munir et al.
+
+all the robots. Assuming t is the time-lapse between the iterations and x is the dis-
+
+placement of the robot between the iterations, the velocity of the robot vi(t) is given
+                                         E i(t)
+by  x  .  The  energy   depletion  rate          would  vary  depending  on      the  heterogeneity  in
+    t
+
+the system. Here, the values of (t) and (t) together determine the energy deple-
+
+tion rate. Typically, they would not vary with time for a given robot unless it actively
+
+changes the behavior of how it consumes energy (e.g., hovering at a higher altitude,
+
+activating a new sensor payload, etc.). Therefore, with slight abuse of notation, we refer
+
+to  = (t),  = (t). For example, the (t) and (t) of a drone will be multiple
+
+times higher than that of a ground vehicle, thus depleting energy much faster. Simi-
+
+larly, a ground robot with a 3D LIDAR and a camera will likely have higher (t) than
+
+a ground robot with only a camera. In some robots, the mobility factor (t) is more
+
+significant than the temporal factor (t). It is worth noting that the depletion rate has
+
+been largely ignored in the multi-robot literature, where planning is done based on the
+
+robot's velocity or path length (as a proxy for energy).
+
+3.2 Distributed Weight Adaptation Law
+
+We consider heterogeneity in energy consumption rates for adaptively estimating robot
+weights in partitioning the environment into n Voronoi cells. Accordingly, we propose
+a novel distributed energy-aware weight adaptation controller (EAC) that takes into
+account both the initial energy level and depletion rate of the robot.
+
+                        w iEAC  =  - kw          wi     -     Eiinit  .  E j(t)       (9)
+                                     MWi         wj           Ejinit     E i(t)
+                                          jNi
+
+    Here, kw is a positive gain constant depending on the environment size, MWi is the
+mass of the weighted Voronoi cell of robot i (Eq. (6)), and Eiinit is the initial energy
+level of a robot i. The depletion rate E i of a robot at any instance will be a positive value
+as long as the robot remains powered, i.e., E i(t) > 0 as the  > 0,   0 (there will
+always be some energy consumed by the robot's computing unit even in idle state). We
+
+also assume there is no energy re-generation (back energy flow) during robot operation.
+The weight adaptation of the controller w iEAC is designed to balance the ratio of the
+weights with the neighbors by considering the direct ratio between the energy capacity
+
+of the robot and its neighbor and the inverse ratio between the energy depletion rate
+
+of the robot and its neighbor. Over time, the robot with a higher energy capacity will
+
+be assigned more weight, thereby more coverage area in the partitioning. Similarly, the
+
+robot with a higher energy consumption rate will get less weight to cover a smaller area.
+
+    The proposed distributed approach follows the below procedure. First, we find the
+weighted Voronoi partitions Wi based on the initial weights that are initialized to 1
+for all robots i  R. The energy depletion rates E i(t) are calculated online once the
+robots start moving following Eq. (8) and the corresponding change in Voronoi cell
+weights are calculated using Eq. (9). Next, for each such partition Wi, its centroid CWi
+is calculated. The position control law in Eq. (5) is applied to find the velocities the
+robots should follow from their current locations pi to the centroid CWi . The algorithm
+terminates if all the robots reach within  distance from the centroid or if any of the
+                                                                  Energy-Aware Coverage          7
+
+Algorithm 1: Energy-Aware Coverage (EAC)
+
+    Input: n robots, their positions, and Einit (initial energy level or battery capacities).
+
+    ,  : two small positive constants.
+
+    Output: Energy-aware weighted region partitions.
+
+1 while not converged do
+
+2 for Each robot r do
+
+3   Find weighted Voronoi partition Wr (Eq. (3)).
+
+4   Find the centroid Cr of Wr.
+
+5   Apply the position controller pr given in Eq (5).
+
+6   Get information on neighbors' energy and energy depletion rate.
+
+7   if E i(t) - E i(t - 1) > 0.2 then
+
+8   Einit = Ecurrent
+
+9   Apply the energy-aware weight adaptation controller w r from Eq. (9)
+
+10  Update wr and pr
+
+11 if (Ei(t) < )||(Ci - pi  , Ci, pi) then
+
+12  convergence = True;
+
+13  return the energy-aware weighted region partitions.
+
+robot's remaining energy at time t is less than a threshold to indicate that the robot
+might not have enough battery power left for further operation.
+
+    Algorith 1 provides a summary of the proposed energy-aware controller algorithm
+distributed in each robot.
+
+Theorem 1. Applying the distributed energy-aware coverage approach with the weight
+
+adaptation controller in Eq. (9) to robots following the energy dynamics Eq. (8) will
+
+asymptotically reach a balanced ratio of the weights wi based on the energy depletion
+rate ratio, i.e.,
+
+                          (wi/wj)  (Ej/Ei) i, j                                                  (10)
+
+Proof (Theorem 1). To prove that the weight adaptation law w i applied to all robots will
+asymptotically lead the multi-robot system to an equilibrium state defined in Eq. (10),
+we introduce a Lyapunov candidate function V and show that the derivative of the
+Lyapunov function is negative semidefinite. Consider
+
+                                        n    1
+                                             2
+                                 V=                  wi  E i 2 .
+
+                                        i=1
+
+The time-derivative of V with respect to the weights w is
+
+V = V = n  wi E i         T                n kw wiE i             T       wi     Eiinit     E j
+       w                                                             jNi  wj     Ejinit     E i
+                            w i         =-               MWi                  -          .
+
+    i=1                                         i=1
+8  Munir et al.
+
+For tractability, let's assume that Einit is the same for all robots and, without loss of
+generality, assume E i(t) = E i (a constant). This simplifies the above derivation to
+
+V = - n kw wiE i      T
+
+        MWi                     wi   -  E j       =  -   n         1         wi  wiE i - wj E j
+                                wj      E i             i=1  kw MWi          wj
+   i=1                   jNi                                            jNi
+
+Re-writing this expression in matrix form gives us the flexibility to analyze the resulting
+product of this multivariate expression. Let's define
+
+                          w1E 1                 1       0    0
+
+                           ...                     MW1
+
+                 w~e  =           ,  M -1    =    0     ...  0       .
+                                                                   
+
+                                
+
+                                                                   
+
+                         wnE n                    0     0       1
+                                                             MWn
+
+After manipulations, we obtain
+
+                           V = -kww~eT M -1Lw~e  0.
+
+Here, L is the Laplacian matrix of graph G. Given that M -1 is a positive diagonal
+
+matrix and the fact that a graph Laplacian L is positive semi-definite, we can see that
+the M -1L is positive semi-definite. This leads us to the conclusion that V is negative
+
+semidefinite. According to La Salle's Invariance principle [13], the largest invariance set
+is at V = 0. This equilibrium state can be reached when w~e falls in the null space of L.
+
+We know that for a connected graph, the smallest eigenvalue of its Laplacian is always
+zero with an eigenvector 1. Therefore, we obtain V = 0 if all the entries in the vector w~e
+are identical, i.e., (wiE i = wjE j) i, j. When we achieve this, the ratio of the weights
+becomes (wi/wj) = (Ej/Ei), concluding the proof of Eq. (10). The results can now
+be extended to time-varying E (t), where the weights would periodically adjust their
+ratios as per Eq. (10) as long as E remains constant within the convergence process.
+
+Corollary 1. We can apply the results of Theorem 1 to balance the ratio of the combi-
+nation of initial energy and the energy depletion rates.
+
+                      (wi/wj )  (EiinitE j )/(EjinitE i) i, j                    (11)
+
+Proof. The combination of reserve energy Ei and depletion rate E i can be generalized
+to a new weighted energy depletion rate E i = kdE i, which can replace the depletion
+rate in Theorem 1 to obtain (wi/wj) = (E j/E i).
+
+Theorem 2. Using the position controller Eq. (5) and the weight controller Eq. (9) for
+all robots in a distributed manner, the multi-robot system will asymptotically converge
+to the stable equilibrium towards the minimum of the locational cost in Eq. (4). i.e.,
+
+                                |pi - CWi |  0 i  n.                             (12)
+                                                          Energy-Aware Coverage  9
+
+Proof. Let us treat the cost function HW as a Lyapunov candidate function to demon-
+strate that the controller drives the multi-robot system to optimal coverage positions.
+The time derivative of HW is
+
+                         n                           n         1
+                                                           Wi 2 (q)dqw i
+          H W =                 (q - pi)T (q)dqpi +
+
+                       i=1  Wi                       i=1
+
+Splitting the above equation into two parts for traceability H W = H 1+H 2. By applying
+the position controller pi in Eq. (5),
+
+       n                                                n
+
+H 1 =          (q - pi)T (q)dq [kp(CWi - pi)] = -kpMWi [(CWi - pi)]2  0
+
+       i=1 Wi                                        i=1
+
+Applying the weight adaptation law in Eq. (9)
+
+          H 2  =  -   n     1  MWi   kw       wi  -  (  Eiinit  .  E j(t)  )
+                     i=1    2       MWi       wj        Ejinit     E i(t)
+                                         jNi
+
+Applying the result of Theorem 1 and Corollary 1, we obtain
+
+                                n    kw       wi - wi
+                                      2       wj wj
+                  H 2  -                                    0.
+
+                                i=1      jNi
+
+    Therefore, H W  0, proving the asymptotic convergence of Eq. (12). H W = 0 only
+when the velocity pi = 0 for all robots i  n. This can occur only when all the robots
+reach the centroid of their weighted Voronoi configuration, i.e., the robots converge to
+their centroids pi = CWi , which is the largest invariance set. This concludes the proof.
+
+    Theorem 1 implies the convergence of the relative ratio between the weights and the
+energy dynamics (rather than the weights being proportional to the energy, as in [12]) in
+the system. This enables our objective of obtaining coverage area proportional to the en-
+ergy characteristics, as depicted in Fig. 1. Together with the centroid-seeking controller
+in Theorem 2, the controller will achieve optimum coverage in the environment with the
+least cost in Eq. (4). Moreover, the convergence in the weight adaptation depends on
+distributed coordination and happens much faster than the convergence of positions to-
+wards the weighted centroids [22]. This allows EAC to work with time-varying energy
+consumption, making our controller realistic for different robot types and applications,
+as well as adaptable to heterogeneous robots with dynamic energy models.
+
+4 Simulation Experiments and Results
+
+We compared our proposed EAC controller against three relevant coverage controllers
+from the literature, as listed below.
+
+  ­ WMTC - As a baseline, we implement the weighted Voronoi (power diagram) in
+     Eq. (3) with constant and equal weights for all robots [4]. It uses the move-to-
+     centroid (MTC) position controller in Eq. (5).
+10     Munir et al.
+
+Table 1. Description of various scenarios tested in the simulation for six robots. Highlighted in
+red boldface are the key differences in the settings. We also list the final weights obtained by the
+different approaches for energy-aware coverage partitioning.
+
+Scenario  Initial Energy Reserve                       Energy Depletion Rate N = 6
+                  Eiinit (%)             Temporal i Spatial i Total Depletion E i(t)
+
+    1 {100,100,100,100,100,100} {1,1,1,1,5,1} {1,1,1,1,1,1} {1.4,1.4,1.4,1.4,5.4,1.4}
+
+    2     {25,25,25,100,25,25} {1,1,1,4,1,1} {1,1,1,1,1,1} {1.4,1.4,1.4,4.4,1.4,1.4}
+
+          @ t=0, Eiinit = 100 % {1,1,1,1,1,1} {1,1,5,5,1,1} {1.4,1.4,3.0,3.0,1.4,1.4 }
+
+    3                @ t=11              {1,1,1,1,1,1} {5,5,1,1,5,5} { 3.0,3.0,1.4,1.4,3.0,3.0}
+
+                     @ t=22              {1,1,1,1,1,1} {1,1,5,5,1,1} {1.4,1.4,3.0,3.0,1.4,1.4 }
+
+Scenario Time Instants       Final weights wi of all robots. (Initial weights = {1,1,1,1,1,1})
+
+                             EAC (ours)              ATC [24]                  PBC [8]
+
+    1     Final {1.5,1.5,1.5,1.5,0.4,1.5} {1,1.1,1.1,1.1,0.6,1.1} {-0.8,-0.9,-0.9,-0.9,-1.0,-0.9}
+
+    2     Final         {1,1,1,1.2,1,1}      {1,1.1,1,0.6,1,1}              {-1,-1,-1,-0.9,-1,-1}
+
+          @ t=0 {1.4,1.4,0.6,0.6,1.4,1.4} {1.1,1.1,0.7,0.7,1.1,1.1} {-1,-1,-1,-1,-1,-1}
+
+    3     @ t=11 {3.0,3.0,1.4,1.4,3.0,3.0} {1.1,1.1,0.7,0.7,1.1,1.1} {-1,-1,-1,-1,-1,-1}
+
+       @ t=22 (Final) {1.4,1.4,0.6,0.6,1.4,1.4} {1.1,1.1,0.7,0.7,1.1,1.1} {-1,-1,-1,-1,-1,-1}
+
+­ PBC - We implement the control law from [8], herein referred to as the Power
+   Balance Controller (PBC). Although the authors focus on the time-varying den-
+   sity function (t) (which affects the centroid CWi calculation), their energy-aware
+   control law is useful for comparison.
+
+                        pi = -k(Ei)      pi - CWi ,   if pi - CWi   1,
+                                          , pi -CWi   if pi - CWi  > 1.
+
+                                         pi-CWi 
+
+   Here, the weights wi(t) = Emax - Ei(t) are adapted based on the robot's current
+   energy budget, where Emax is the maximum energy capacity.
+­ ATC - In ATC [24], the robots with higher quality sensors get assigned larger areas
+   to cover. We use ATC as a baseline as it adapts weighting online similarly to us,
+   albeit for sensor health. In our implementation of ATC, the trust is inversely pro-
+   portional to the energy depletion rate to assign lower weights (area) to robots with
+   higher energy use. The position controller is the same as in Eq. (5).
+
+          wi     =       kw         ((wj  -  wj )  -  (ej  -  ei)) , ei  =  (   Ke     )2.
+                        2MWi                                                   E i(t)
+                              jNi
+
+     Ke is a constant to scale the energy depletion rates based on the environment size.
+To perform comparisons against the baselines fairly, we have set the velocity of all
+robots to 0.4m/s (with dt = 1) for all the controllers, except PBC, which assigns
+velocity based on energy. Also, we set the initial weights of all controllers to 1, con-
+sidering normalized energy with respect to maximum energy capability Emax. During
+the experiments, all controllers will change their weights based on the current energy
+levels as per their implementation. For instance, the PBC considers the instantaneous
+energy level differences to adjust the robots' weights. We have implemented the con-
+trollers described above in MATLAB simulations with n = 6 (but the algorithm is built
+                                                                                                                                        Energy-Aware Coverage                                                                                                                                                                                                                           11
+
+              Initial                                        EAC                                     ATC                                      WMTC                                                                                                                                                                                                              PBC
+
+6                                           6                                       6                                       6                                                                                                                                                                                                                   6
+
+5                                           5                                       5          1                            5                                65
+4
+                                                      1         3           6                           3           6       4           1          3                                                                                                                                                                                            4      1                           6
+                                                                                      4
+                                            4                                                                                                                                                                                                                                                                                                                   3
+
+3                                   6       3                                       3                                       3                                                                                                                                                                                                                   3
+
+2          1            35                  2                                       2                                  52                                                                                                                                                                                                                       2
+
+                 4                                    4         2           51                 4     2                                  4             2      5                                                                                                                                                                                         4                           5
+
+1                   2                       1                                                                               1                                           1                                                                                                                                                                                       2
+
+0                         4                 0             2                         0             2              4          0              2                                                                                                                                                                                                    0                        4
+    0         2                          60                              4          60                                      60                            4                                                                                                                                                                                  60           2                                6
+
+                                            10                              Robot1 10                               Robot1 10                                Robot1 10                                                                                                                                                                                                             Robot1
+                                                                                                                                                                                                                                                                                                                                                                                   Robot2
+60                                  EAC                                     Robot2                                  Robot2                                   Robot2                                                                                                                                                                                                                Robot3
+                                                                                                                                                                                                                                                                                                                                                                                   Robot4
+                                    ATC                                     Robot3                                  Robot3                                   Robot3                                                                                                                                                                                                                Robot5
+                                                                                                                                                                                                                                                                                                                                                                                   Robot6
+50                                  WMTC 8                                  Robot4  8                               Robot4  8                                Robot4                                                                                                                                                                             8
+
+                                                                            Robot5                                  Robot5                                   Robot5
+Cost
+                                                       Area(m 2)40PBC       Robot6                                  Robot6                                   Robot6
+                                                                                                               Area(m 2)
+                                                                                                                                                                      Area(m 2)30666                                                                                                                                                            6
+                                                                                                                                                                                                                              Area(m 2)
+20
+
+10                                             4                                    4                                       4                                                                                                                                                                                                                   4
+
+0                                              2                                        2                                       2                                                                                                                                                                                                                2
+                                                                                    60                                      60                                                                                                                                                                                                               60
+    0   5           10          15       20 0             2              4                        2              4                         2              4                                                                                                                                                                                            5        10          15             20
+
+              Time (sec)                                     Time (sec)                              Time (sec)                               Time (sec)                                                                                                                                                                                                     Time (sec)
+
+Fig. 2. Results of Scenario 1, where all robots have the same energy characteristics Ei(0) =
+100, i = 1, i = 1, but robot 5 has a higher temporal energy depletion rate 5 = 5. The top
+plots show the initial configurations and the final partitions calculated by all the approaches. The
+
+bottom plots show the cost comparison (left-most) and the area convergence over time.
+
+        Energy Level Ei                                      Weights wi                              Weight Convergence wiE i Distance to Centroid
+
+100                                               1.5                                                5                                                                                                                                                                                                                                  1.5
+ 90
+ 80                                 Robot1                                          Robot1                                                 Robot1                                                                                                                                                                                                                               Robot1
+ 70                                                                                 Robot2                                                                                                                                                                                                                                                                                      Robot2
+ 60                                 Robot2                                          Robot3           4                                     Robot2                                                                                                                                                                                                                               Robot3
+     0                                                                              Robot4                                                                                                                                                                                                                                                                                      Robot4
+EnergyLevel (J)                     Robot3                                          Robot5                                                 Robot3                                                                                                                                                                                                                               Robot5
+                                                             weights                Robot6                                                                                                                                                                                                                                                                                      Robot6
+                                    Robot4                                                           3                                     Robot4                                                                                                                                                                                       1
+                                                                                                                                                                                                                                                                                                                DistanceToCentroid (m)
+                                    Robot5        1                                                                                        Robot5
+
+                                    Robot6                                                                                                 Robot6
+
+                                                                                                     2
+
+                                                                                                                                                                                                                      0.5
+
+                                                                                                     1
+
+                                                  0.5
+
+              2              4              6          0     2              4               6        0  0              2                4          6
+
+                                                                                                                                                                                                                                                                                                                                        0
+
+                 Time (sec)                                  Time (sec)                                                     Time (sec)                                                                                                                                                                                                       0      1  2     3        4         5          6
+
+                                                                                                                                                                                                                                                                                                                                                          Time (sec)
+
+Fig. 3. Time-evolution of the robot energy levels Ei, weights wi, and the convergences of weight
+ratios wiE i and the robot distance from the centroid of their respective Voronoi cell in Scenario
+
+1 with EAC Controller.
+
+on top of the WMTC, which is a decentralized controller that can scale to any number
+of robots in a distributed graph G as noted in [5]). The environment Q is a 6 × 6 square
+region. The initial weights were set as wi(0) = 1, i  R. We consider a uniform den-
+sity function (i.e., (q) = 1 q) to demonstrate the effectiveness of the controller on the
+energy-aware characteristics without being influenced by the density function .
+
+    We rigorously test the controllers in various scenarios, as discussed below. Table 1
+provides the details of these scenarios and the resulting (final) weights of different con-
+trollers. Note the E is constant for all robots in the first three scenarios. A baseline sce-
+nario (Scenario 0, not discussed here due to its simplicity) is when the energy-related
+parameters such as Eiinit, i, i of all the robots are the same (or identical) and all con-
+trollers result in the same partitioning as the WMTC in the scenarios below as WMTC
+does not depend on energy characteristics.
+
+4.1 Scenario 1 - Different Temporal Energy Rates
+
+This scenario illustrates how the region would be re-partitioned if temporal energy de-
+pletion () for one robot is greater than others. In this setting, the robots start with
+the same battery reserve,  = 1, and  = 1. But, robot 5 is parameterized with a
+higher  = 5 showing the total energy depletion rate (E i(t) = 5.4) compared to all
+12                 Munir et al.
+
+                Initial                                EAC                                      ATC                                      WMTC                                                                                                              PBC
+
+6                                       6                                        6                                        6                                                                                                              6
+
+5                                       5                                6       5                                   65                                    6                                                                             5
+
+4                                       4        1        3                      4        1        3                      4        1        3                                                                                            4                                    6
+
+3                               6       3                                        3                                        3                                                                                                              3           1        3
+
+          1           35
+
+2               4                       2                                        2                                        2                                                                                                              2                           5
+                                                                                                                                                                                                                                                           2
+                                               4             2           5             4           2              5             4              2           5                                                                                      4
+
+1                  2                    1                                        1                                        1                                                      1
+
+0                                       0                                        0                                        0                                                                                                              0
+
+    0  1     2     3        4   5    6     0  1     2  3           4  5       6     0  1     2  3           4  5       6     0  1     2  3           4  5       6                                                                           0  1        2  3           4      5       6
+
+80                                      10                            Robot1 10                                Robot1 10                                Robot1 10                                                                                                             Robot1
+
+                                EAC                                   Robot2                                   Robot2                                   Robot2                                                                                                                Robot2
+
+                                ATC                                   Robot3                                   Robot3                                   Robot3                                                                                                                Robot3
+
+60                              WMTC 8                                Robot4     8                             Robot4     8                             Robot4                                                                           8                                    Robot4
+                                                                                                                                                                                                                                                                              Robot5
+                                                                      Robot5                                   Robot5                                   Robot5
+Cost
+                                                       Area(m 2)PBC   Robot6                                   Robot6                                   Robot6                                                                                                                Robot6
+                                                                                                               Area(m 2)
+40                                                                                                                                                                    Area(m 2)666                                                       6
+                                                                                                                                                                                                                              Area(m 2)
+
+20                                      4                                        4                                        4                                                                                                              4
+
+0   0     10                20          2                          4              2          2                             2          2              4              2                                                                                5     10                         20
+                                     30 0           2                         60                            4          60                                       60                                                                                                        15
+
+                Time (sec)                             Time (sec)                               Time (sec)                               Time (sec)                                                                                                        Time (sec)
+
+Fig. 4. Results of Scenario 2 experiments, where robots have a heterogeneous combination of
+energy levels and depletion rates 4 = 4 and E4init = 100, where other robots have  =
+1, Einit = 25. Because robot 4 started with high capacity but depleted energy at a 4.4x rate
+
+compared to other robots, their dynamics would eventually cancel out each other, and the final
+
+weights should remain similar for all robots in an energy-aware coverage.
+
+other robots (E i(t) = 1.4), prompting the controller to conserve energy by limiting
+the robot's allocated area, and consequently, reducing its travel cost. Following EAC,
+robot 5 is assigned a weight (0.4) that is almost one-fourth of the weight assigned to
+other robots (1.5). As shown in Fig. 2, robot 5's region shrinks compared to the WMTC
+partition. Although ATC could also shrink the region of this robot, the cost reduction
+achieved by our proposed EAC is substantial, reaching approximately -3.5, while the
+costs of ATC, WMTC, and PBC are 2.9, 2.8, and 38.4, respectively. Also, PBC required
+significantly higher iterations to converge because of its inherent velocity constraints.
+Thus, EAC outperformed the baselines. Fig. 3 shows various metrics over time. For in-
+stance, the wiE i values of all robots quickly converged to the same numbers, supporting
+Theorem 1. Also, as the robots ran the controller in Eq. (5), the robots asymptotically
+converged to the centroids (Theorem 2).
+
+4.2 Scenario 2 - Heterogeneous Energy Depletion
+
+In this setting, the robot 4 has the highest initial battery level (100), but its depletion
+rate is also the highest (E 4 = 4.4). The exact opposite is true for all other robots, i.e.,
+they have lower available energy (25) and depletion rate (E i = 1.4).
+
+    The coverage area should remain similar among all robots like WMTC because
+a 4x higher depletion rate compensates for the 4x higher initial capacity. The results
+presented in Fig. 4 show that only EAC was able to adjust the weights according to both
+the initial energy levels and depletion rates and assign almost similar weights to all the
+robots (refer to Table 1). The ATC approach could not adapt the weights effectively, and
+its converged weights align only with the ratio of energy depletion rates with reduced
+area assignment for robot 4. On the other hand, PBC restricts the movement of all
+robots except 4 and yields final weights that do not consider both available energy and
+depletion rates. The efficacy of EAC is attributed to the fact that the ratio of the updated
+weights corresponds well to the ratio Einit/E (t).
+                                                                                                   Energy-Aware Coverage                                                                                                                                                           13
+
+       Locational Cost             EAC                               ATC                           WMTC                                                                                                                                     PBC
+
+80                      10                         Robot1 10                         Robot1 10                     Robot1 10                                                                                                                                               Robot1
+                                                                                                                                                                                                                                                                           Robot2
+                   EAC                             Robot2                            Robot2                        Robot2                                                                                                                                                  Robot3
+                                                                                                                                                                                                                                                                           Robot4
+                   ATC                             Robot3                            Robot3                        Robot3                                                                                                                                                  Robot5
+                                                                                                                                                                                                                                                                           Robot6
+60                 WMTC 8                          Robot4  8                         Robot4  8                     Robot4                                                                                                                8
+
+                                                   Robot5                            Robot5                        Robot5
+Cost
+                                                       Area(m 2)PBCRobot6            Robot6                        Robot6
+                                                                                                               Area(m 2)
+40                                                                                                                                                                    Area(m 2)666                                                       6
+                                                                                                                                                                                                                              Area(m 2)
+
+20                      4                                  4                                 4                                                                                                                                           4
+
+0                       2                                  2                                 2                                                                                                                                           2
+
+    0  50               100 0  10  20          30          40 0  10  20          30          40 0  20          40          60 0                                                                                                             50                                     100
+
+       Time (sec)                  Time (sec)                        Time (sec)                    Time (sec)                                                                                                                               Time (sec)
+
+Fig. 5. Results of Scenario 3 experiments, showing the effect of dynamic (t). Initially, robots 3
+and 4 had  = 5, while other robots have  = 1. This rate flipped at time t = 11, and again reset
+to initial values at t = 22. EAC and ATC adapted to these dynamics in energy depletion rates.
+
+4.3 Scenario 3 - Time-varying Depletion Rates
+
+This setting illustrates the effect of time-varying energy depletion rates by varying the
+ of robots 3 and 4 over time. This can happen due to the terrain. At the start of the
+experiment (t = 0), all robots have the same initial energy, the same , but 3 = 4 =
+5. However, at time step t = 11, the  values of all robots are flipped, and at t = 22, they
+are reverted to their initial values as shown in Table 1. A good energy-aware controller
+should be able to seamlessly handle the change in energy depletion rates.
+
+    It can be observed from Fig. 5 that the effect of the dynamics in  value changes are
+perfectly captured in the evolution of weights and the coverage area yielded by the EAC
+controller. Both PBC and WMTC assigned similar weights to the robots, disregarding
+the change in . On the other hand, ATC also adapted its weights due to the change
+in  values over time, but its effectiveness in the weight is limited to the differences
+in the energy depletion rates and not the ratio of the rates. At time step t = 20, all
+robots once again possess the same energy value of Ei(t) = 56, alongside the same
+initial depletion rate as at the start of the experiment. As the final iteration, we observed
+a replication in weight values among the robots that were evident in the initial time
+instants, Additionally, EAC's cost reduction surpassed all other approaches, resulting
+in a substantial decrease in the locational cost value.
+
+4.4 Study on the Scalability and the Effect of Connectivity
+
+We performed several experiments to assess the proposed approach's efficacy in larger
+environments by varying the number of robots (along with the workspace dimensions
+according to the increase in robots) and varying the connectivity level of the graph G,
+forming the team of robots. We executed simulations until each robot's energy exhaus-
+tion and recorded the convergence cost for various algebraic connectivity values.
+
+    The algebraic connectivity, denoted as 2, serves as a metric that delineates a graph's
+connectedness and is defined as the second-smallest eigenvalue of the Laplacian ma-
+trix associated with the graph. The convergence cost was computed as the sum of the
+squared difference of the weight convergence values ci.
+
+                                                                                 nn
+
+                                   Convergence Cost =                                              (ci - cj )2,                                                                                                                                         (13)
+
+                                                                         i=1 jNi
+14         Munir et al.
+
+    12                                                                                  120
+
+                             2 = 1.48                                                               N = 20
+convergence cost
+                                                                Convergence Time (sec)102 = 1.89100 N = 50
+     8                                                                                              N = 100
+                             2 = 3.55                                                   80
+
+    6                        2 = 6.67                                                   60
+                             2 = 7.82
+
+    4                        2 = 20.00                                                  40
+
+    2                                                                                   20
+
+    0   0                50        100                                                  0    0  50           100
+
+              Time (sec)
+
+Fig. 6. Results of the experiments analyzing the effect of connectivity and scalability (number of
+
+robots). The convergence cost is high for sparsely connected graphs (left), and the convergence
+
+time increases proportional to the number of robots (right), demonstrating scalability aspects.
+
+Homogeneous Robots                      Heterogeneous Robots
+
+Fig. 7. An example outcome of running the proposed energy-aware controller on an in-house
+swarm robotics testbed with nine robots. The top figures show the close-up view of the robots'
+initial locations at the center of the workspace. In the heterogeneous case, the robot at the center
+has 2x higher energy capacity than the other robots. The bottom plots show their final coverage
+allocations, which visibly demonstrates a larger workspace for the center robot in the heteroge-
+neous case after the convergence of coverage areas.
+
+where ci   =  wi×E i     that explains the difference in the calculated weights and the ex-
+               Eiinit
+
+pected weights based on Eq. (11).
+
+    To substantiate the scalability of the approach, we simulated scenarios with n =
+20, 50, and 100 robots in environment sizes 50×50m2, 100×100m2, and 200×200m2
+
+respectively. We also varied the algebraic connectivity of the graph based on the initial
+
+positions of the robots by varying a disk radius around each robot to form its neighbor
+
+set Ni. After obtaining the convergence cost for different algebraic connectivity scenar-
+ios, we use the final convergence cost corresponding to the lowest algebraic connectivity
+
+(i.e., the least connected graph with 2 close to 1) as a reference for comparing the con-
+vergence time. Fig. 6 shows the results of these experiments. The left plot shows the
+
+convergence cost of the weights for n = 20 robots against 2 of the graph. The results
+demonstrate quick convergence when the connectivity is strong and a slower but guar-
+
+anteed convergence when the connectivity of the graph is sparse. The right plot shows
+
+the time taken to converge the weights using the EAC approach for up to 100 robots
+
+at different levels of connectivity. As expected, strongly connected graphs required sig-
+
+nificantly less time to converge the weights as the graph's diameter is relatively small.
+
+This requires fewer communication rounds in Eq (9), leading to quick convergence.
+                                                        Energy-Aware Coverage  15
+
+4.5 Demonstration with Heterogeneous Swarm Robots
+
+Our in-house swarm robotics testbed (2.5 × 2.5m2) allows us to deploy heterogeneous
+types of robots in the workspace. The testbed consists of AprilTag [34] based position
+tracking and real-time robot control through ROS2 software framework [17]. The ROS2
+driver running on each robot provides real-time data on the battery voltage and multi-
+ple other sensors. As shown in Fig. 7 (top figures), we create two configurations with
+n = 9 robots. In the homogeneous case, all robots are of the same type and have the
+same battery capacity and depletion rate. In the heterogeneous case, one robot is struc-
+turally larger (with 2x battery capacity and 1.2x depletion rate) than the other eight
+robots, which are of the same type. We implemented and tested our EAC approach
+in the swarm robot testbed with these real energy characteristics. Fig. 7 presents the
+results of a sample trial showing the final positions of the robots after the coverage ap-
+plied in both cases. In both cases, all robots are positioned together at the center of the
+workspace initially, as shown in the top row of the figure. The homogeneous robot re-
+sults align with the WMTC approach since similar energy characteristics would obtain
+the same weights for all the robots, hence assigning them almost equal area partitions.
+However, in the heterogeneous case, the robot weights would be adapted based on their
+energy characteristics, and therefore, the robot with higher battery capacity is assigned
+a much larger area. This effect can be observed in the right-most plot in Fig. 7. This
+demonstration explicates the difference in the coverage control output between a ho-
+mogeneous and a heterogeneous team of robots where real energy characteristics are
+considered.
+
+    Additional experiments conducted on the real-world Robotarium platform [37] are
+reported in the Appendix, where we also considered a non-uniform density function
+(i.e.,  in Eq (6) is set to a function similar to the ones used in [11]). In addition, a
+supplementary video demonstrating the experiments is available1.
+
+5 Conclusion
+
+Heterogeneous robots have different capabilities resulting in different energy consump-
+tion characteristics, which play a crucial role in multi-robot coverage performance. We
+have proposed a novel energy-aware control law to split the workspace among n robots
+for sensor coverage such that the weights, i.e., the areas of the robots' allocated unique
+sub-regions, are governed by their energy levels and the energy depletion rates. We as-
+sumed that such depletion rates might not be known a priori, and therefore, they must
+calculate these rates online and use that information to better partition the environment
+among them. Supported by theoretical results and extensive experiments in both simu-
+lations and real-world robot testbeds, we have shown that our proposed controller can
+allocate regions according to the robots' energy depletion rates while outperforming
+energy-aware controllers from the literature. In the future, we are interested in extend-
+ing this energy-aware approach to informative path planning and active sensing tasks.
+
+1 https://github.com/herolab-uga/energy-aware-coverage
+ https://www.youtube.com/watch?v=HR9HCWUJz18
+           16              Munir et al.
+
+                        Initial                          EAC                                 ATC                                        WMTC                                       PBC
+
+      6                                    6                                    6                                      6                                             6
+
+      5                                    5                                    5                                      5                                             5
+
+      4                                    4       1        3           6       4      1              6                4          1              6                   4                            6
+      3                                                                                      3                                          3
+      2                                                                                                                                                                               3
+      1                             6      3                                    3                                      3                                             3       1
+
+               1           35              2       4                 5          2         4                 5          2             4                 5             2                            5
+
+                     4                                   2                                   2                                          2                                       4
+                                                                                                                               1                                          1
+                        2                  1                                    1                                                                                                  2
+
+      0                                    0                                    0                                      0                                             0
+         0        2              4         60         2              4          60        2              4             60            2              4                60         2              4             6
+
+         1                                 0.4                                  0.4                                    0.4                                           0.4
+
+                                    EAC                                 Robot1                                 Robot1                                        Robot1                                  Robot1
+
+                                    ATC                                 Robot2                                 Robot2                                        Robot2                                  Robot2
+
+                                    WMTC 0.3                            Robot3 0.3                             Robot3 0.3                                    Robot3 0.3                              Robot3
+
+      0.5                           PBC                                 Robot4                                 Robot4                                        Robot4                                  Robot4
+
+Cost                                                                    Robot5                                 Robot5                                        Robot5                                  Robot5
+
+                                           0.2                          Robot6 0.2                             Robot6 0.2                                    Robot6 0.2                              Robot6
+
+         0
+
+                                           0.1                                  0.1                                    0.1                                           0.1
+
+      -0.5                5            10  0    0     1              2              0     1              2                 0      1     2                 3              0         5                 10
+           0         Time (sec)                                                 30                                     30                                            40
+
+                                                         Time (sec)                          Time (sec)                                 Time (sec)                                 Time (sec)
+
+           Fig. 8. Results of the additional experiments (non-uniform density case considering a bi-modal
+
+           density function). Here, all robots have the same initial energy capacity, but robot 1 has a higher
+
+           depletion rate). The WMTC coverage treats all robots equally, assigning them based on the region
+
+           of importance. However, the EAC method correctly assigns robot 1 to a smaller area compared
+
+           to other methods due to the depletion rate difference as expected.
+
+           Appendix - Additional Experimental Data
+
+           Experimental Scenario with Non-uniform Density Function
+
+           Following [11], we test the proposed energy-aware coverage controller in a non-uniform
+           density environment. A density function ((q) in Eq. (6)) represents the importance of
+           the location, e.g., representing the concentration of events or phenomena in different
+           regions. A high density implies more effort (or time) needed to survey that point of
+           interest, and hence the robots in high-density regions are allocated less area in the cov-
+           erage. We simulate such a scenario by employing an identical density function as pre-
+           sented in [11], with the following parameter adjustments: µ1 = 2 2 , µ2 = 4 4 , and
+            = 0.9I. In this setting, r1 has higher  (1 = 10) i.e, its E i(t) = 5 while all other
+           robots have E i(t) = 1.4, however the initial energy and  of all robots remain the same.
+           The results are presented in Fig. 8. Even with a non-uniform density function, the EAC
+           effectively adjusted the weights of robots, resulting in an approximate 50% decrease in
+           cost (-0.31) as compared to WMTC (-0.15) and ATC (-0.16). Furthermore, the EAC
+           demonstrated a remarkable achievement by attaining 140% lower cost than PBC (0.78).
+
+           Demonstration in the Robotarium Hardware Testbed
+
+           To validate the performance of the proposed controller in the real world, we showcase
+           experiments in two different robot testbeds. The Robotarium's hardware testbed [37]
+           allows us to verify the control accuracy of robots with simulated energy characteristics.
+
+               In this demonstration, we used four robots, and robot 2 has a lower initial energy of
+           Einit = 70 compared to all other robots (Einit = 100), while their depletion rates are
+           the same. We also simulated a bi-modal density function (q) using the same density
+           function mentioned in Scenario 5 (Sec. 5) with two sources closer to robots 1 and 2.
+           We have employed an identical density function as presented in [11], with parameter
+                   Energy-Aware Coverage  17
+
+Initial  EAC  ATC  WMTC  PBC
+
+Fig. 9. Real-robot experiment in Robotarium with a bi-modal density function. The robots have
+similar energy characteristics, but robot 2 (top right) has low initial energy and is close to a
+source. Both these effects assign significantly less weight (and coverage) to robot 2 in EAC than
+other controllers.
+
+adjustments: µ1 = 2 2 , µ2 = 4 4 , and  = 0.9I. We expect the controller to
+learn the difference between available energy and repartition accordingly. i.e., we expect
+robot 2 to have a significantly reduced coverage area for two reasons: 1) it has a lower
+energy capacity, and 2) it is in a region of high importance (high density), which needs
+to be covered more carefully, further necessitating its weight reduction.
+
+    The results for this experiment are presented in Fig 9. Although ATC and PBC
+assigned a smaller area to robot 2 (primarily due to the influence of the density values),
+EAC was more effective in allocating a significantly smaller area to it. More results
+from the simulations and the real-world experiments are included in the attached video.
+As expected, the bi-modal density function has a source closer to r2 and this further
+contributed to the reduction in the weights for r2 in EAC. Consequently, this increased
+operational efficiency extends the operational time of r2, thereby optimizing the overall
+network lifetime of the robots. Together with the Robotarium's hardware experiment
+data, we obtain more evidence that the proposed energy-aware coverage controller is
+useful in practical real-world applications.
+                            Bibliography
+
+ [1] Omur Arslan and Daniel E. Koditschek. Voronoi-based coverage control of
+      heterogeneous disk-shaped robots. In 2016 IEEE International Conference on
+      Robotics and Automation (ICRA), pages 4259­4266, 2016. doi: 10.1109/ICRA.
+      2016.7487622.
+
+ [2] Xiaoyi Cai, Brent Schlotfeldt, Kasra Khosoussi, Nikolay Atanasov, George J Pap-
+      pas, and Jonathan P How. Non-monotone energy-aware information gathering for
+      heterogeneous robot teams. In 2021 IEEE International Conference on Robotics
+      and Automation (ICRA), pages 8859­8865. IEEE, 2021.
+
+ [3] Mela Coffey and Alyssa Pierson. Covering dynamic demand with multi-resource
+      heterogeneous teams. In 2023 IEEE/RSJ International Conference on Intelligent
+      Robots and Systems (IROS), pages 11127­11134, 2023. doi: 10.1109/IROS55552.
+      2023.10342119.
+
+ [4] Jorge Corte´s. Coverage optimization and spatial load balancing by robotic sensor
+      networks. IEEE Transactions on Automatic Control, 55(3):749­754, 2010.
+
+ [5] Jorge Cortes, Sonia Martinez, Timur Karatas, and Francesco Bullo. Coverage con-
+      trol for mobile sensing networks. IEEE Transactions on robotics and Automation,
+      20(2):243­255, 2004.
+
+ [6] Jason Derenick, Nathan Michael, and Vijay Kumar. Energy-aware coverage con-
+      trol with docking for robot teams. In 2011 IEEE/RSJ International Conference on
+      Intelligent Robots and Systems, pages 3667­3672, 2011.
+
+ [7] Qiang Du, Vance Faber, and Max Gunzburger. Centroidal voronoi tessellations:
+      Applications and algorithms. SIAM review, 41(4):637­676, 1999.
+
+ [8] Rachael N Duca and Marvin K Bugeja. Multi-robot energy-aware coverage con-
+      trol in the presence of time-varying importance regions. IFAC-PapersOnLine, 53
+      (2):9676­9681, 2020.
+
+ [9] Ayan Dutta, Amitabh Bhattacharya, O Patrick Kreidl, Anirban Ghosh, and Prithvi-
+      raj Dasgupta. Multi-robot informative path planning in unknown environments
+      through continuous region partitioning. International Journal of Advanced
+      Robotic Systems, 17(6):1729881420970461, 2020.
+
+[10] Walker Gosrich, Siddharth Mayya, Rebecca Li, James Paulos, Mark Yim, Alejan-
+      dro Ribeiro, and Vijay Kumar. Coverage control in multi-robot systems via graph
+      neural networks. In 2022 International Conference on Robotics and Automation
+      (ICRA), pages 8787­8793, 2022. doi: 10.1109/ICRA46639.2022.9811854.
+
+[11] Soobum Kim, Mar´ia Santos, Luis Guerrero-Bonilla, Anthony Yezzi, and Magnus
+      Egerstedt. Coverage control of mobile robots with different maximum speeds for
+      time-sensitive applications. IEEE Robotics and Automation Letters, 7(2):3001­
+      3007, 2022. doi: 10.1109/LRA.2022.3146593.
+
+[12] Andrew Kwok and Sonia Martinez. Energy-balancing cooperative strategies for
+      sensor deployment. In 2007 46th IEEE Conference on Decision and Control,
+      pages 6136­6141. IEEE, 2007.
+
+[13] Joseph P La Salle. The stability of dynamical systems. SIAM, 1976.
+Energy-Aware Coverage  19
+
+[14] Ehsan Latif, Yikang Gui, Aiman Munir, and Ramviyas Parasuraman. Energy-
+      aware multi-robot task allocation in persistent tasks. arXiv preprint
+      arXiv:2112.15282, 2021.
+
+[15] Katie Laventall and Jorge Corte´s. Coverage control by multi-robot networks with
+      limited-range anisotropic sensory. International Journal of Control, 82(6):1113­
+      1121, 2009.
+
+[16] Tony X Lin, Esen Yel, and Nicola Bezzo. Energy-aware persistent control of
+      heterogeneous robotic systems. In 2018 Annual American Control Conference
+      (ACC), pages 2782­2787. IEEE, 2018.
+
+[17] Steven Macenski, Tully Foote, Brian Gerkey, Chris Lalancette, and William
+      Woodall. Robot operating system 2: Design, architecture, and uses in the wild.
+      Science Robotics, 7(66):eabm6074, 2022.
+
+[18] Jean-Samuel Marier, Camille Alain Rabbath, and Nicolas Le´chevin. Health-aware
+      coverage control with application to a team of small uavs. IEEE Transactions on
+      Control Systems Technology, 21(5):1719­1730, 2013. doi: 10.1109/TCST.2012.
+      2208113.
+
+[19] Yongguo Mei and Yung-Hsiang Lu. Energy-efficient motion planning for mobile
+      robots. In IEEE International Conference on Robotics and Automation, 2004.
+      Proceedings. ICRA'04. 2004, volume 5, pages 4344­4349. IEEE, 2004.
+
+[20] Miad Moarref and Luis Rodrigues. An optimal control approach to decentral-
+      ized energy-efficient coverage problems. IFAC Proceedings Volumes, 47(3):6038­
+      6043, 2014.
+
+[21] Aiman Munir and Ramviyas Parasuraman. Exploration­exploitation tradeoff in
+      the adaptive information sampling of unknown spatial fields with mobile robots.
+      Sensors, 23(23):9600, 2023.
+
+[22] Ramviyas Parasuraman and Byung-Cheol Min. Consensus control of distributed
+      robots using direction of arrival of wireless signals. In Distributed Autonomous
+      Robotic Systems: The 14th International Symposium, pages 17­34. Springer,
+      2019.
+
+[23] Ramviyas Parasuraman, Keith Kershaw, Prithvi Pagala, and Manuel Ferre. Model
+      based on-line energy prediction system for semi-autonomous mobile robots. In
+      2014 5th International Conference on Intelligent Systems, Modelling and Simula-
+      tion, pages 411­416. IEEE, 2014.
+
+[24] Alyssa Pierson and Mac Schwager. Adaptive inter-robot trust for robust multi-
+      robot sensor coverage. In Robotics Research, pages 167­183. Springer, 2016.
+
+[25] Alyssa Pierson, Lucas C Figueiredo, Luciano CA Pimenta, and Mac Schwager.
+      Adapting to performance variations in multi-robot coverage. In 2015 IEEE inter-
+      national conference on robotics and automation (ICRA), pages 415­420. IEEE,
+      2015.
+
+[26] Luciano CA Pimenta, Vijay Kumar, Renato C Mesquita, and Guilherme AS
+      Pereira. Sensing and coverage for a network of heterogeneous robots. In 2008
+      47th IEEE conference on decision and control, pages 3947­3952, 2008.
+
+[27] Max Rudolph, Sean Wilson, and Magnus Egerstedt. Range limited coverage con-
+      trol using air-ground multi-robot teams. In 2021 IEEE International Conference
+      on Robotics and Automation (ICRA), pages 3525­3530. IEEE, 2021.
+20  Munir et al.
+
+[28] Mar´ia Santos and Magnus Egerstedt. Coverage control for multi-robot teams
+      with heterogeneous sensing capabilities using limited communications. In 2018
+      IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS),
+      pages 5313­5319. IEEE, 2018.
+
+[29] Maria Santos, Udari Madhushani, Alessia Benevento, and Naomi Ehrich Leonard.
+      Multi-robot learning and coverage of unknown spatial fields. In 2021 Interna-
+      tional Symposium on Multi-Robot and Multi-Agent Systems (MRS), pages 137­
+      145. IEEE, 2021.
+
+[30] Tina Setter and Magnus Egerstedt. Energy-constrained coordination of multi-
+      robot teams. IEEE Transactions on Control Systems Technology, 25(4):1257­
+      1263, 2016.
+
+[31] Yunfei Shi, Ning Wang, Jianmin Zheng, Yang Zhang, Sha Yi, Wenhao Luo, and
+      Katia Sycara. Adaptive informative sampling with environment partitioning for
+      heterogeneous multi-robot systems. In 2020 IEEE/RSJ International Conference
+      on Intelligent Robots and Systems (IROS), pages 11718­11723, 2020. doi: 10.
+      1109/IROS45743.2020.9341711.
+
+[32] Pratap Tokekar, Joshua Vander Hook, David Mulla, and Volkan Isler. Sensor plan-
+      ning for a symbiotic uav and ugv system for precision agriculture. IEEE Transac-
+      tions on Robotics, 32(6):1498­1511, 2016.
+
+[33] Georges Voronoi. New applications of continuous parameters e`to the theory of
+      quadratic forms. second memory. research on primitive parallele`dres. Journal
+      fu¨r die reine und angewandte Mathematik (Crelles Journal), 1908(134):198­287,
+      1908.
+
+[34] John Wang and Edwin Olson. Apriltag 2: Efficient and robust fiducial detection.
+      In 2016 IEEE/RSJ International Conference on Intelligent Robots and Systems
+      (IROS), pages 4193­4198. IEEE, 2016.
+
+[35] Lai Wei, Andrew McDonald, and Vaibhav Srivastava. Multi-robot gaussian pro-
+      cess estimation and coverage: Deterministic sequencing algorithm and regret anal-
+      ysis. In 2021 IEEE International Conference on Robotics and Automation (ICRA),
+      pages 9080­9085. IEEE, 2021.
+
+[36] Minghan Wei and Volkan Isler. Energy-efficient path planning for ground robots
+      by and combining air and ground measurements. In Conference on Robot Learn-
+      ing, pages 766­775. PMLR, 2020.
+
+[37] Sean Wilson, Paul Glotfelter, Siddharth Mayya, Gennaro Notomista, Yousef
+      Emam, Xiaoyi Cai, and Magnus Egerstedt. The robotarium: Automation of a
+      remotely accessible, multi-robot testbed. IEEE Robotics and Automation Letters,
+      6(2):2922­2929, 2021.
+
+[38] Kevin Yu, Jason M O'Kane, and Pratap Tokekar. Coverage of an environment
+      using energy-constrained unmanned aerial vehicles. In 2019 international confer-
+      ence on robotics and automation (ICRA), pages 3259­3265. IEEE, 2019.
+

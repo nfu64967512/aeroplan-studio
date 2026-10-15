@@ -1,0 +1,180 @@
+{
+ "pages": 5,
+ "used_cm_per_page": [
+  23.37,
+  25.57,
+  24.4,
+  25.48,
+  5.8
+ ],
+ "content_cm": 104.62,
+ "pages_equiv": 4.071,
+ "last_page_lines": 11,
+ "last_line_top_cm": 7.3,
+ "last_page_used_cm": 5.75,
+ "body_height_cm": 25.7,
+ "last_page_fill_pct": 22.4,
+ "n_paragraphs": 143,
+ "n_paragraphs_snap_to_grid_on": 0,
+ "n_table_row_end_marks_reported_on": 15,
+ "where": [
+  [
+   "一、前言",
+   1,
+   11.3
+  ],
+  [
+   "二、研究方法",
+   1,
+   16.9
+  ],
+  [
+   "2.1 系統架構",
+   1,
+   17.5
+  ],
+  [
+   "2.2 核心公式",
+   1,
+   20.0
+  ],
+  [
+   "三、SITL 驗證與成果",
+   2,
+   15.2
+  ],
+  [
+   "3.1 實驗設置",
+   2,
+   15.8
+  ],
+  [
+   "3.2 規劃與 SITL",
+   2,
+   20.3
+  ],
+  [
+   "表1 規劃與 SITL ",
+   2,
+   23.4
+  ],
+  [
+   "3.3 規劃天花板與風場",
+   3,
+   6.3
+  ],
+  [
+   "[圖檔]",
+   3,
+   11.9
+  ],
+  [
+   "圖1 高度合規與 SIT",
+   3,
+   17.1
+  ],
+  [
+   "表2 規劃天花板與風場之",
+   3,
+   18.6
+  ],
+  [
+   "四、結論與限制",
+   4,
+   2.8
+  ],
+  [
+   "誌謝",
+   4,
+   15.0
+  ],
+  [
+   "參考文獻",
+   4,
+   16.0
+  ]
+ ],
+ "figures": [
+  {
+   "file": "fig5_compliance.png",
+   "width_cm": 16.992,
+   "height_cm": 5.198,
+   "scale_pct": [
+    100.0,
+    100.0
+   ]
+  }
+ ],
+ "tables": [
+  {
+   "tnum": "1",
+   "col_cm": [
+    6.51,
+    4.01,
+    6.49
+   ]
+  },
+  {
+   "tnum": "2",
+   "col_cm": [
+    2.11,
+    1.36,
+    3.0,
+    1.63,
+    2.87,
+    1.63,
+    4.39
+   ]
+  }
+ ],
+ "n_omath": 4,
+ "build_s": 7.3,
+ "layout": {
+  "indent": false,
+  "spacing": false,
+  "compress_punct": false,
+  "table_split": true,
+  "no_widow": false
+ },
+ "caveats_missing": [],
+ "caveats_checked": 61,
+ "name": "V1+6+7+8+L1+K1+K4+K5+K7+K8+K10+K11+K12+F1+F2+P1+P2+P4+P5+L2+L3+L4+R1+R2+D1+D2+P6+P8",
+ "cuts": [
+  1,
+  2,
+  3,
+  4,
+  5,
+  6,
+  7,
+  8
+ ],
+ "candidates": [
+  "L1",
+  "K1",
+  "K4",
+  "K5",
+  "K7",
+  "K8",
+  "K10",
+  "K11",
+  "K12",
+  "F1",
+  "F2",
+  "P1",
+  "P2",
+  "P4",
+  "P5",
+  "L2",
+  "L3",
+  "L4",
+  "R1",
+  "R2",
+  "D1",
+  "D2",
+  "P6",
+  "P8"
+ ],
+ "docx": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\PAPERPLAN1\\word_layout\\variants\\V1p6p7p8pL1pK1pK4pK5pK7pK8pK10pK11pK12pF1pF2pP1pP2pP4pP5pL2pL3pL4pR1pR2pD1pD2pP6pP8.docx",
+ "pdf": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\PAPERPLAN1\\word_layout\\variants\\V1p6p7p8pL1pK1pK4pK5pK7pK8pK10pK11pK12pF1pF2pP1pP2pP4pP5pL2pL3pL4pR1pR2pD1pD2pP6pP8.pdf"
+}

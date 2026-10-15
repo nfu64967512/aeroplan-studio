@@ -1,4 +1,4 @@
-"""HV-DCCPP 四機 SITL 實跑驅動（1 Pioneer + 3 HERO）。
+"""HARVEST 四機 SITL 實跑驅動（1 Pioneer + 3 HERO）。
 
 先跑 `scripts/hv_sitl_flight.py plan` 產生 runs/artifacts/<TRIAL>/plan/，再跑這一支。
 
@@ -31,6 +31,17 @@ from scripts.hv_sitl_flight import (  # noqa: E402
     FLEET, HOME, OUT, SPEEDUP, launch, plan_and_export, stop_all,
 )
 
+# ⚠⚠⚠ 2026-09-14：這一份帶著已知缺陷，**新的航次請走 scripts/hv_sitl_run.py**。
+#   缺陷一（涵蓋率）：下面的白名單只點名 17 個名字，而匯出的 <UAV>.param 有 **32** 個
+#     ⇒ 17 個從來沒被比對，含 WP_RADIUS、FENCE_*、FS_LONG_*、BATT_FS_*、Q_LAND_FINAL_ALT。
+#     `docs/PROJECT_STATUS.md` 記的「參數讀回 68/68 相符」其實是 17 × 4 台，不是全部。
+#   缺陷二（不可見）：`want = 檔案值 | EXPECT_EXTRA` 讓常數蓋掉檔案值，而 CSV 只寫
+#     expected/actual/ok ⇒ Q_RTL_MODE「匯出 1、實飛 0」這個**刻意**的韌體相容性覆寫
+#     在產物裡看不見，會被讀成單純相符。
+#   修好的版本在 `hv_sitl_run.py` 的 EXPECT_FALLBACK / FIRMWARE_OVERRIDE：
+#     比對匯出檔的每一個參數、檔案值優先、刻意覆寫必須帶理由並寫進 note 欄。
+#   ⚠ 這裡**沒有**跟著改，因為這條路徑（配 hv_sitl_flight.py 的四機驅動）沒有可回歸的
+#     航次可以驗證改動。要再用它之前先把上面兩點補齊，不要照抄下面的寫法。
 # 讀回驗證的參數：飛行動力學相關的每一個，加上必須成立的三個前提
 CHECK_PARAMS = [
     "AIRSPEED_CRUISE", "AIRSPEED_MIN", "AIRSPEED_MAX", "AIRSPEED_STALL",

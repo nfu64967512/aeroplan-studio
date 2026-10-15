@@ -1,4 +1,4 @@
-"""把舊 DCCPP 當參考實作，與 HV-DCCPP 逐項比較。
+"""把舊 DCCPP 當參考實作，與 HARVEST 逐項比較。
 
 ⚠⚠ 命名要小心：**兩個規劃器都不是 ground truth**。
     真正的判準有兩個，都不是規劃器自己說的：
@@ -103,12 +103,12 @@ def _one(use_hv: bool, areas, n_a, n_b, *, altitude, width, overlap, wind,
     drones, cls = _drones(n_a, n_b, width)
     c = SwarmCoordinator()
     if use_hv:
-        c.use_hv_dccpp = True
+        c.use_harvest = True
         c.hv_class_of = lambda d: cls[int(d["drone_id"])]
         c.hv_home = HOME
         c.hv_wind = wind
         c.hv_fence_zones = []
-        c.hv_params = {"hfov_deg": hfov, "vfov_deg": vfov, "hv_c2_range_km": 25.0,
+        c.harvest_params = {"hfov_deg": hfov, "vfov_deg": vfov, "hv_c2_range_km": 25.0,
                        "hv_waiver_max_agl_m": 200.0, "hv_dem_margin_m": 3000.0}
     err = None
     try:

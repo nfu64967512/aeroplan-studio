@@ -6,18 +6,18 @@
     "alt_msl_m": 9.313225746154785e-10
   },
   "alt_frame": "relative",
-  "makespan_s": 1799.770423297912,
+  "makespan_s": 1450.7528069688224,
   "feasibility": "GO_WITH_WARNINGS",
   "uncovered": [],
   "takeoff": {
     "mode": "operator",
     "t0_s": 0.0,
-    "spread_s": 1265.5686015212616,
+    "spread_s": 916.0,
     "delay_s": {
-      "A1": 289.1,
-      "B2": 623.9,
-      "B3": 0.0,
-      "B4": 1265.6
+      "A1": 916.0,
+      "B2": 0.0,
+      "B3": 612.0,
+      "B4": 280.0
     },
     "note": "任務不含時間原點：地面站須於 t0 + delay_s[uav] 才對該機 MISSION_START（規格 13.5 同墊 60 s 間隔與 4D 去衝突延遲全靠此）。"
   },
@@ -37,16 +37,16 @@
           1
         ]
       ],
-      "t_takeoff_s": 289.1216902969212,
-      "t_arr_ptc_s": 713.8744972657435,
-      "t_land_s": 823.8744972657437,
+      "t_takeoff_s": 916.0,
+      "t_arr_ptc_s": 1340.7528069688224,
+      "t_land_s": 1450.7528069688224,
       "landing_site": "H",
       "energy_used_wh": 183.28551136123883,
       "energy_margin_wh": 716.7144886387612,
       "distance_m": 8864.371974118078,
       "orbits_inserted": 0,
       "warnings": [],
-      "takeoff_delay_s": 289.1,
+      "takeoff_delay_s": 916.0,
       "param_warnings": [
         "BATT_LOW_MAH/BATT_CRT_MAH not exported (pack voltage or energy model unknown): BATT_FS_LOW_ACT/BATT_FS_CRT_ACT have no threshold until you set BATT_LOW_MAH/BATT_CRT_MAH (or BATT_LOW_VOLT/BATT_CRT_VOLT) on the vehicle"
       ],
@@ -107,16 +107,16 @@
           1
         ]
       ],
-      "t_takeoff_s": 623.8744972657435,
-      "t_arr_ptc_s": 1045.187649140309,
-      "t_land_s": 1145.187649140309,
+      "t_takeoff_s": 0.0,
+      "t_arr_ptc_s": 421.3131518745656,
+      "t_land_s": 521.3131518745656,
       "landing_site": "H",
       "energy_used_wh": 62.476615945133574,
       "energy_margin_wh": 191.52338405486643,
       "distance_m": 7708.084815358845,
       "orbits_inserted": 0,
       "warnings": [],
-      "takeoff_delay_s": 623.9,
+      "takeoff_delay_s": 0.0,
       "param_warnings": [
         "BATT_LOW_MAH/BATT_CRT_MAH not exported (pack voltage or energy model unknown): BATT_FS_LOW_ACT/BATT_FS_CRT_ACT have no threshold until you set BATT_LOW_MAH/BATT_CRT_MAH (or BATT_LOW_VOLT/BATT_CRT_VOLT) on the vehicle"
       ],
@@ -177,16 +177,16 @@
           -1
         ]
       ],
-      "t_takeoff_s": 0.0,
-      "t_arr_ptc_s": 433.87449726574346,
-      "t_land_s": 533.8744972657435,
+      "t_takeoff_s": 612.0,
+      "t_arr_ptc_s": 1045.8744972657435,
+      "t_land_s": 1145.8744972657435,
       "landing_site": "H",
       "energy_used_wh": 63.250629037608405,
       "energy_margin_wh": 190.7493709623916,
       "distance_m": 7926.324998392139,
       "orbits_inserted": 0,
       "warnings": [],
-      "takeoff_delay_s": 0.0,
+      "takeoff_delay_s": 612.0,
       "param_warnings": [
         "BATT_LOW_MAH/BATT_CRT_MAH not exported (pack voltage or energy model unknown): BATT_FS_LOW_ACT/BATT_FS_CRT_ACT have no threshold until you set BATT_LOW_MAH/BATT_CRT_MAH (or BATT_LOW_VOLT/BATT_CRT_VOLT) on the vehicle"
       ],
@@ -247,16 +247,16 @@
           1
         ]
       ],
-      "t_takeoff_s": 1265.5686015212616,
-      "t_arr_ptc_s": 1699.7704232979117,
-      "t_land_s": 1799.770423297912,
+      "t_takeoff_s": 280.0,
+      "t_arr_ptc_s": 714.2018217766501,
+      "t_land_s": 814.2018217766504,
       "landing_site": "H",
       "energy_used_wh": 63.279767513383945,
       "energy_margin_wh": 190.72023248661606,
       "distance_m": 7932.8648711681035,
       "orbits_inserted": 0,
       "warnings": [],
-      "takeoff_delay_s": 1265.6,
+      "takeoff_delay_s": 280.0,
       "param_warnings": [
         "BATT_LOW_MAH/BATT_CRT_MAH not exported (pack voltage or energy model unknown): BATT_FS_LOW_ACT/BATT_FS_CRT_ACT have no threshold until you set BATT_LOW_MAH/BATT_CRT_MAH (or BATT_LOW_VOLT/BATT_CRT_VOLT) on the vehicle"
       ],

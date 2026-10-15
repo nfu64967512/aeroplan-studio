@@ -221,8 +221,8 @@ NVIDIA Jetson @ `192.168.2.249`（user `nvidia`）｜JetPack 6.2 / L4T R36.4.7�
 - **閉環 STOT 極端落差**：等距環緊（~2s），極端不等距（700 vs 2600m）受 GUIDED carrot 跟隨保真度限制偏鬆（~10–48s）；實際包圍環場景不受影響。
 - **仿生編隊 UI**：GCS 執行器已可對 SITL 實跑，但尚未做成 AeroPlan UI 按鈕（可比照打擊執行器接 `SITLLink`+`FleetRegistry`+地圖視覺化）。
 - **refactor 分支 WIP**：本分支尚有 ~100 個檔案處於重構中（whole-project DRY/KISS/SOLID，見 `docs/refactor_audit_2026.md`）。
-- **HV-DCCPP（異構雙構型 VTOL）**：已接上，且函式庫本身已 **vendor 進本專案**（`hv_dccpp/`，與 core/ mission/ ui/ 同層；來源與同步方式見 `docs/hv_dccpp/VENDOR.md`）—— 不再需要 pip 安裝或依賴外部資料夾。它自己的 809 項測試在 `tests/hv_dccpp/`（約 72 s）。旗標 `SwarmCoordinator.use_hv_dccpp`（預設關閉）。
-  **入口在「VTOL 偵察」分頁「5. 規劃」的規劃演算法下拉**（DCCPP 既有實作 / HV-DCCPP 本專案），
+- **HARVEST（異構雙構型 VTOL）**：已接上，且函式庫本身已 **vendor 進本專案**（`hv_dccpp/`，與 core/ mission/ ui/ 同層；來源與同步方式見 `docs/hv_dccpp/VENDOR.md`）—— 不再需要 pip 安裝或依賴外部資料夾。它自己的 809 項測試在 `tests/hv_dccpp/`（約 72 s）。旗標 `SwarmCoordinator.use_harvest`（預設關閉）。
+  **入口在「VTOL 偵察」分頁「5. 規劃」的規劃演算法下拉**（DCCPP 既有實作 / HARVEST 本專案），
   選 HV 才展開它專屬的參數群組；一般 DCCPP 分頁不放這個開關。
   HV 走 `ui/workers/planning_worker.py` 的背景執行緒，結果由
   `_on_dccpp_coverage_requested(..., on_done=)` 回呼帶回偵察頁的摘要表。

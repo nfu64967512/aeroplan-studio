@@ -63,8 +63,12 @@ RTB, DESCENT, DECEL, TRANS_IN, LAND   LANDING     返場、下降、減速、FW�
 ----------------
 AeroPlan 的匯出／上傳一律採 **AGL 相對 home**（``MAV_FRAME_GLOBAL_RELATIVE_ALT`` = 3；
 REPO/utils/file_io.py:226、REPO/mission/vtol_mission_exporter.py:32、REPO/mission/sitl_link.py:1274）。
-故 :attr:`HvBuiltWaypoint.alt` 一律輸出 ``alt_msl_m − home_msl``（**不是** AGL 對當地地形，
+故 :attr:`HvBuiltWaypoint.alt` 一律輸出 ``alt_msl_m − 規劃 home MSL``（全機共用基準；**不是** AGL 對當地地形，
 也不是 AMSL）；hv_dccpp 內部之 ``Waypoint.agl_m`` 為對當地地形之 AGL，兩者在起伏地形不相等。
+⚠ 飛控的 home 是**這架自己的起飛坪**（``UAVPlan.takeoff_site``），不是規劃 home：ArduPlane 解鎖時把 home
+重設到飛機當下位置（見 :func:`hv_dccpp.ardupilot.fc_home`）。路徑上的 ``fc_alt_offset_m`` ＝ (坪 − 規劃 home)，
+送飛控的相對高度＝``alt − fc_alt_offset_m``（:func:`to_upload_tuples` 已處理）；平地時偏移 0。``alt`` 本身保留
+共用基準，是因為避撞（core/dccpp/collision_avoidance.py）與 2D/3D 顯示要跨機比較高度。
 
 已知落差（手冊必須明講；詳見 CONTRACT_DEVIATIONS.md「AeroPlan Studio 轉接層」一節）
 ------------------------------------------------------------------------------------
@@ -116,6 +120,7 @@ Qt 端寫法（本套件不 import PyQt6，僅示意）::
 """
 from __future__ import annotations
 
+import logging
 import math
 import re
 from dataclasses import dataclass, field, fields, is_dataclass, replace
@@ -124,11 +129,13 @@ from typing import Any, Callable, Iterable, Literal, Mapping, Sequence
 
 import numpy as np
 
-from ..ardupilot import MissionItem, plan_to_mission_items
+from ..ardupilot import CameraTriggerConfig, MissionItem, fc_home, plan_to_mission_items
 from ..context import MissionContext, build_context
 from ..geo import DemGrid, GeoFrame
+from ..geometry import is_cross_strip
 from ..mission import (
-    AreaSpec, Airspace, C2Link, MissionInputError, MissionInputs, MissionPlan, NoFlyZone, PayloadRequirement,
+    AreaSpec, Airspace, C2Link, MappingMissionInputs, MappingModeConfig, MissionInputError, MissionInputs, MissionPlan,
+    NoFlyZone, PayloadRequirement,
     Phase, PlannerConfig as HvPlannerConfig, Site, SortieEnergy, UAVInstance, UAVPlan, Waypoint, WeatherObs,
     WeatherThresholds, WindLayer,
 )
@@ -146,9 +153,13 @@ __all__ = [
     "PHASE_TO_SEGMENT", "SEGMENT_NAMES", "PARAM_KEY_NOTES",
     "DEFAULT_ENERGY_A", "DEFAULT_ENERGY_B",
     "to_mission_inputs", "to_planner_config", "from_mission_plan", "to_upload_tuples",
+    "mission_item_dicts", "expected_photo_count",
     "fence_zones_to_nofly", "terrain_func_to_dem", "telemetry_frames_to_events", "plan_to_aeroplan_waypoints",
     "qgc_wpl_lines", "MAV_CMD",
 ]
+
+
+_log = logging.getLogger(__name__)
 
 
 class AeroPlanAdapterError(RuntimeError):
@@ -220,7 +231,9 @@ class HvBuiltWaypoint:
     lat, lon
         WGS84 度（AeroPlan 全域慣例為 ``(lat, lon)``；REPO/mission/geofence_manager.py:60）。
     alt
-        **AGL 相對 home**（m）= ``alt_msl_m − home_msl``，對應 ``MAV_FRAME_GLOBAL_RELATIVE_ALT``（frame 3）。
+        相對**規劃 home**（m）= ``alt_msl_m − 規劃 home MSL``（全機共用基準）。送飛控
+        （``MAV_FRAME_GLOBAL_RELATIVE_ALT``，frame 3；飛控 home ＝ 這架的起飛坪）前要減掉路徑的
+        ``fc_alt_offset_m``，:func:`to_upload_tuples` 已處理。
     heading_compass_deg
         航跡方位（度，0 = 北、順時針），已正規化至 ``[0, 360)``。
     segment_type
@@ -228,12 +241,23 @@ class HvBuiltWaypoint:
 
     ``heading_deg`` 為 ``heading_compass_deg`` 之別名（legacy ``AssembledWaypoint`` 欄位名，
     REPO/core/trajectory/dccpp_path_assembler.py:47-63），消費端 REPO/ui/main_window.py:5308 兩者皆讀。
+
+    sensor_on
+        相機／感測器在這一點是不是開著。⚠⚠⚠ vendored 修改 #5：這個欄位原本**沒有
+        被帶出來**，於是下游只剩 ``segment_type`` 可以判斷「哪一段算覆蓋」。而兩個
+        規劃器的段落標籤慣例不同 —— 實測同一份幾何：DCCPP 73 個航點裡 14 個是
+        ``OPERATION``（19.2%），HARVEST 306 個裡只有 16 個（**5.2%**，170 個標成
+        ``TRANSFER``）。用 ``OPERATION`` 篩選去驗算覆蓋率，HARVEST 從 **100.00%**
+        掉到 **75.10%**，而 DCCPP 只從 76.68% 掉到 74.04% ⇒ **同一把尺對兩個規劃器
+        不對等**，會讓人以為 HARVEST 漏掃三分之一。
+        相機開沒開才是「這一段算不算覆蓋」的語意判準，而且與規劃器無關。
     """
     lat: float
     lon: float
     alt: float
     heading_compass_deg: float
     segment_type: HvSegmentLabel
+    sensor_on: bool = False
 
     @property
     def heading_deg(self) -> float:
@@ -255,6 +279,10 @@ class HvBuiltPath:
     ``total_length_m`` 為五者之和。
 
     尾端 ``hv_uav_id`` / ``cls`` / ``makespan_s`` 為本轉接層附加（AeroPlan 原型無，以 getattr 讀取者不受影響）。
+    ``alt_ref_site`` / ``alt_ref_msl_m``：各航點 ``alt`` 的基準＝**規劃 home**（全機共用；避撞、2D/3D 顯示跨機比高度靠它）。
+    ``fc_home_site`` / ``fc_home_msl_m``：這架的起飛坪＝飛控解鎖後的 home；``fc_alt_offset_m``＝坪 − 規劃 home。
+    送給飛控的相對高度＝``alt − fc_alt_offset_m``（:func:`to_upload_tuples`、legacy 匯出器）；平地時偏移 0。
+    ``land_alt_m``：降落站地面相對**飛控 home**（起飛坪）的高度（降回自己的起飛坪 ⇒ 0），NAV_VTOL_LAND 用它。
     """
     uav_id: int
     waypoints: list[HvBuiltWaypoint] = field(default_factory=list)
@@ -266,6 +294,12 @@ class HvBuiltPath:
     hv_uav_id: str = ""
     cls: str = ""
     makespan_s: float = 0.0
+    alt_ref_site: str = ""
+    alt_ref_msl_m: float = 0.0
+    fc_home_site: str = ""
+    fc_home_msl_m: float = 0.0
+    fc_alt_offset_m: float = 0.0
+    land_alt_m: float = 0.0
 
     @property
     def total_length_m(self) -> float:
@@ -783,13 +817,18 @@ def to_mission_inputs(areas: Sequence[Mapping[str, Any]], drones: Sequence[Mappi
                       sensor_b: Sequence[SensorHardware] | None = None,
                       payload_reqs: Mapping[str, PayloadRequirement] | None = None,
                       alternates: Sequence[Any] | None = None,
+                      recovery_sites: Mapping[str, str] | None = None,
+                      per_uav_takeoff_sites: bool = True,
+                      land_at_takeoff_site: bool = True,
                       wind: tuple[float, float] = (0.0, 0.0), c2_range_km: float = 25.0,
                       terrain_clearance_m: float | None = None, waiver_max_agl_m: float | None = 200.0,
                       max_agl_m: float = 120.0, dem_step_m: float = 50.0, dem_margin_m: float = 1500.0,
                       base_msl_m: float = 0.0, weather_temp_c: float = 25.0,
                       mounting_angle_deg: float = 0.0, hfov_deg: float = 0.0, vfov_deg: float = 0.0,
                       energy: Mapping[str, Mapping[str, float]] | None = None,
-                      warnings: list[str] | None = None) -> tuple[MissionInputs, dict[int, str]]:
+                      warnings: list[str] | None = None,
+                      mapping_mode: MappingModeConfig | None = None,
+                      forward_overlap: float = 0.70) -> tuple[MissionInputs, dict[int, str]]:
     """AeroPlan 的 ``areas`` / ``drones`` → :class:`hv_dccpp.mission.MissionInputs`。
 
     參數（前段照 REPO/mission/swarm_coordinator.py:975 之同名參數）
@@ -829,18 +868,34 @@ def to_mission_inputs(areas: Sequence[Mapping[str, Any]], drones: Sequence[Mappi
     alternates
         備降點 ``[(lat, lon) | Site]``；``None`` → 自動於 home 背向區域形心 400 m 處置一點
         （表 1 要求必有備降點，缺則 preflight NO_GO）。
+    recovery_sites
+        逐機回收站 ``{drone_id 或 uav_id: site_id}``；**明確指定者優先**於下面的預設。
+    land_at_takeoff_site
+        ``True``（預設）：逐機起飛站生效時（n 台 ⇒ n 個 ``TO_*`` 站），每台預設降回**自己的**起飛站，
+        不是全隊擠進同一個 home。逐機起飛站沒生效（單機／座標全相同）時是 no-op。
     terrain_clearance_m
         對地淨空（D11 必填）；``None`` → ``max(36, 3σ_DEM + 30)``。
     dem_margin_m
         DEM 邊界外擴（m）；須大於 hv_dccpp 的 ``terrain_margin_m``（預設 1500）否則地形取樣會落在網格外。
     warnings
         傳入 list 時，本函式把警告字串附加進去。
+    mapping_mode
+        建圖模式（:class:`hv_dccpp.mission.MappingModeConfig`）→ 回傳 :class:`hv_dccpp.mission.MappingMissionInputs`
+        （表 2 ＋ ``mapping_mode``）；``None``（預設）＝ 原本的 ``MissionInputs``，舊行為逐位元不變。其他型別丟
+        :class:`AeroPlanAdapterError`（不默默當成沒開）。``lead_in_m`` 要跟匯出器的 camera_lead_in_m 同一個數。
+    forward_overlap
+        相機前向重疊 → 本函式**自己推導**的 :class:`PayloadRequirement.forward_overlap`（預設 0.70 ＝ 舊行為；
+        建圖模式由面板給 0.80）。須在 ``[0, 1)``。``payload_reqs`` 是呼叫端給的時候不推導；此時若改了這個值卻跟
+        ``payload_reqs`` 裡的前向重疊不一致 ⇒ :class:`AeroPlanAdapterError`（不默默以哪一個為準）。
 
     返回
     ----
     ``(MissionInputs, {drone_id: uav_id})``——第二項為 AeroPlan 整數 id 與 hv_dccpp 字串 id 的對照表。
     """
     warn = warnings if warnings is not None else []
+    if mapping_mode is not None and not isinstance(mapping_mode, MappingModeConfig):
+        raise AeroPlanAdapterError(f"mapping_mode 須為 MappingModeConfig 或 None，得 {type(mapping_mode).__name__}")
+    fwd = _check_forward_overlap(forward_overlap)
     if not areas:
         raise AeroPlanAdapterError("areas 不可為空")
     if not drones:
@@ -893,9 +948,14 @@ def to_mission_inputs(areas: Sequence[Mapping[str, Any]], drones: Sequence[Mappi
     h_target = h_clamped
 
     if payload_reqs is None:
-        reqs, req_id, kind_req = _default_payload_reqs(hw_used, overlap_rate, h_target, warn)
+        reqs, req_id, kind_req = _default_payload_reqs(hw_used, overlap_rate, h_target, warn, forward_overlap=fwd)
     else:
         reqs = dict(payload_reqs)
+        if abs(fwd - 0.70) > 1e-12:
+            bad = {rid: r.forward_overlap for rid, r in reqs.items() if abs(float(r.forward_overlap) - fwd) > 1e-9}
+            if bad:
+                raise AeroPlanAdapterError(f"forward_overlap={fwd:g} 與 payload_reqs 的前向重疊 {bad} 不一致"
+                                           "（給了 payload_reqs 就以它為準；兩邊要給同一個數）")
         req_id = next(iter(reqs))
         kind_req = {}
         for rid, r in reqs.items():
@@ -950,9 +1010,123 @@ def to_mission_inputs(areas: Sequence[Mapping[str, Any]], drones: Sequence[Mappi
                      visibility_m=10000.0, precip_mmh=0.0, temp_c=float(weather_temp_c))
     c2 = C2Link(range_km=float(c2_range_km), coverage_polygon_wgs84=None, ground_station=home_site,
                 lost_link_policy={})
-    inputs = MissionInputs(home=home_site, alternates=alt_sites, areas=tuple(area_specs), dem=dem,
-                           obstacles=(), wind=winds, fleet=tuple(fleet), payload_reqs=reqs, c2=c2,
-                           airspace=airspace, weather_thresholds=WeatherThresholds(), weather_obs=obs)
+    # ── 逐機起飛站（vendored #7）：n 台 ⇒ n 個起降點，比照 DCCPP ────────
+    #   ⚠⚠⚠ 為什麼要接：AeroPlan 的 GUI 早就用 `spawn_positions` 把 n 台沿垂直於
+    #   起飛方向排開，逐台寫進 `drones[i]['position']`。**DCCPP 直接吃那個欄位**，
+    #   所以它的計畫真的有 n 個起飛點；HARVEST 這一側卻整個忽略它、全隊一律用 home
+    #   ⇒ 畫面上四台疊在同一個起降點，SITL 起出來也對不上計畫的第一個航點。
+    #
+    #   ⚠ 只在座標**真的不同**時才動作。`scripts/hv_sitl_scenarios.py` 每一台的
+    #     position 都是同一個 HOME 常數 ⇒ 既有 SITL 情境逐位元不變、不受影響。
+    #
+    #   ⚠⚠ 效能上**幾乎沒有幫助**：起飛站分流的精確天花板實測只有 −52.6 s（−3.6%）。
+    #     槓桿在**降落**側（見 vendored #4）。接這一條的價值是「與 DCCPP 對齊、方便起
+    #     SITL」，不是壓 makespan —— 修好 vendored #8 之後它其實會**變慢** 7～26%。
+    #
+    #   ⚠⚠⚠ 這個功能一度不安全，見 vendored #8：同坪豁免比的是場坪**座標**而不是站點
+    #     **身分**，兩個相距 < 50 m 的不同站被豁免卻沒被走廊排程互斥 ⇒ 起飛與降落
+    #     可以同時發生在相鄰坪上（實測 30 m 水平／2 m 垂直，而 `validate` 回報通過）。
+    #     修好後 10 m 間距也合法，最小水平間距 7.5 → 107.2 m。
+    #   ⚠ 修前那張「間距越小 makespan 越好」的表是**非單調的雜訊**，不是優化結果。
+    _to_sites: list[Site] = []
+    _own_pad: dict[str, str] = {}            # uav_id → 該機自己的起飛站 id（下面「回收站」預設用）
+    if per_uav_takeoff_sites and len(fleet) > 1:
+        _pos: dict[str, tuple[float, float]] = {}
+        for d in drones:
+            did = int(_get(d, "drone_id", 0))
+            uid = id_map.get(did)
+            p = _get(d, "position", None)
+            if uid is None or not p:
+                continue
+            try:
+                _pos[uid] = (float(p[0]), float(p[1]))
+            except Exception:                               # noqa: BLE001
+                continue
+        _vals = list(_pos.values())
+        _spread = 0.0
+        for i in range(len(_vals)):
+            for j in range(i + 1, len(_vals)):
+                dN = (_vals[j][0] - _vals[i][0]) * 111132.0
+                dE = ((_vals[j][1] - _vals[i][1]) * 111412.0
+                      * math.cos(math.radians(_vals[i][0])))
+                _spread = max(_spread, math.hypot(dN, dE))
+        if len(_pos) == len(fleet) and _spread > 1.0:
+            _by_uid: dict[str, str] = {}
+            for u in fleet:
+                la, lo = _pos[u.uav_id]
+                sid = f"TO_{u.uav_id}"
+                _to_sites.append(Site(sid, la, lo, kind="alternate"))
+                _by_uid[u.uav_id] = sid
+            fleet = [replace(u, start_site_id=_by_uid[u.uav_id]) for u in fleet]
+            _own_pad = dict(_by_uid)
+            # ⚠⚠ 站點間距 < 50 m 是**三不管地帶**：`deconflict.SAME_PAD_TOL_M = 50`
+            #   會讓 4D 套用同坪豁免，而走廊時刻表又因為 site_id 不同而不互斥
+            #   ⇒ 兩層保護同時關掉（實測 30 m 坪距下兩機水平只差 30.0 m）。
+            #   GUI 的生成點預設間距是 50–60 m，剛好壓在這條線上，所以要說出來。
+            _min_gap = float("inf")
+            for i in range(len(_vals)):
+                for j in range(i + 1, len(_vals)):
+                    dN = (_vals[j][0] - _vals[i][0]) * 111132.0
+                    dE = ((_vals[j][1] - _vals[i][1]) * 111412.0
+                          * math.cos(math.radians(_vals[i][0])))
+                    _min_gap = min(_min_gap, math.hypot(dN, dE))
+            if warnings is not None:
+                warnings.append(f"per_uav_takeoff_sites({len(_to_sites)} 個；"
+                                f"最小間距 {_min_gap:.1f} m)")
+                if _min_gap < 50.0:
+                    # ⚠ 這句在 vendored #8 之前是「兩層保護同時失效」——那個缺陷已修，
+                    #   現在 10 m 間距也合法（實測最小水平間距 107.2 m、validate 通過）。
+                    #   留著是因為代價變成 makespan：4D 修復必須把起降錯開。
+                    warnings.append(
+                        f"takeoff_sites_close(最小間距 {_min_gap:.1f} m < 50 m ⇒ "
+                        f"起飛與降落走廊要靠 4D 修復錯開，makespan 約 +7～26%；"
+                        f"分離本身安全，見 vendored #8)")
+        alt_sites = tuple(alt_sites) + tuple(_to_sites)
+
+    # ── 逐機回收站（vendored #4）────────────────────────────────────────
+    #   ⚠ 排序陷阱：機隊在上面就組好了，但 home / alt_sites 要到這裡才有合法的
+    #     site_id，所以不能在建 UAVInstance 當下傳 —— 在這裡用 replace 補上。
+    #   ⚠⚠ 鍵是 hv 的 uav_id（"A1"/"B2"…），不是 AeroPlan 的 drone_id；
+    #     `id_map` 提供兩者的對照，兩種鍵都收，認不得的鍵**大聲拒絕**而不是默默忽略
+    #     —— 默默忽略會讓「指派了但沒生效」看起來跟「沒指派」一樣。
+    #
+    #   ⭐⭐ 預設：各機降回**自己的起飛站**（2026-10-09 使用者定調「三架 land 會在同一點而不是起飛點，
+    #     這必須修正」）。之前逐機起飛站（vendored #7）只接了**起飛**側，降落仍全部落在 home：
+    #     GUI 實測 3 架（坪相距 60 m）全部降在中間那架（UAV-2）的坪，最後進場腿三條疊在同一條線上、
+    #     UAV-1／UAV-3 起飛點與降落點差 60 m。降落側的機制早就有（vendored #4），只是沒人預設去用。
+    #     明確指定的 ``recovery_sites`` 優先；`land_at_takeoff_site=False` 退回舊行為（全降 home）。
+    #   ⚠ 「宣告了偏好」不保證真的落在那裡（`_site_order` 能量吃不下會退回）⇒ 規劃後由
+    #     `HarvestCoordinator.plan_coverage_dccpp` 讀回 `UAVPlan.landing_site` 比對並發警告。
+    _explicit: dict[str, str] = {}
+    if recovery_sites:
+        _known = {home_site.site_id} | {s_.site_id for s_ in alt_sites}
+        for _k, _v in recovery_sites.items():
+            _uid = id_map.get(int(_k)) if str(_k).lstrip("-").isdigit() else str(_k)
+            if _uid not in {u.uav_id for u in fleet}:
+                raise AeroPlanAdapterError(
+                    f"recovery_sites 的鍵 {_k!r} 不是機隊裡的載具（uav_id {sorted(u.uav_id for u in fleet)}"
+                    f"／drone_id {sorted(id_map)}）")
+            if str(_v) not in _known:
+                raise AeroPlanAdapterError(
+                    f"recovery_sites[{_k!r}]={_v!r} 不是已知站點 {sorted(_known)}")
+            _explicit[_uid] = str(_v)
+    _rec_by_uid: dict[str, str] = dict(_own_pad) if land_at_takeoff_site else {}
+    _defaulted = sorted(set(_rec_by_uid) - set(_explicit))
+    _rec_by_uid.update(_explicit)
+    if _rec_by_uid:
+        fleet = [replace(u, recovery_site_id=_rec_by_uid.get(u.uav_id)) for u in fleet]
+        if warnings is not None:
+            warnings.append("per_uav_recovery_sites(" + ",".join(
+                f"{k}@{v}" for k, v in sorted(_rec_by_uid.items())) + ")")
+            if _defaulted:
+                warnings.append("landing_at_takeoff_sites(" + ",".join(_defaulted)
+                                + " 各自降回自己的起飛點)")
+
+    kw_in = dict(home=home_site, alternates=alt_sites, areas=tuple(area_specs), dem=dem,
+                 obstacles=(), wind=winds, fleet=tuple(fleet), payload_reqs=reqs, c2=c2,
+                 airspace=airspace, weather_thresholds=WeatherThresholds(), weather_obs=obs)
+    # 建圖模式 → MappingMissionInputs（表 2 + mapping_mode）；沒開就是原本的 MissionInputs
+    inputs = MissionInputs(**kw_in) if mapping_mode is None else MappingMissionInputs(**kw_in, mapping_mode=mapping_mode)
     return inputs, id_map
 
 
@@ -988,10 +1162,20 @@ def default_class_of(drone: Mapping[str, Any]) -> str:
     return "A"
 
 
+def _check_forward_overlap(v: Any) -> float:
+    """前向重疊須為 [0, 1) 的有限實數（PayloadRequirement 自己也會擋，這裡先給轉接層的訊息）。"""
+    if isinstance(v, bool) or not isinstance(v, (int, float, np.integer, np.floating)) \
+            or not math.isfinite(float(v)) or not 0.0 <= float(v) < 1.0:
+        raise AeroPlanAdapterError(f"forward_overlap 須為 [0, 1) 的實數，得 {v!r}")
+    return float(v)
+
+
 def _default_payload_reqs(hw_used: Mapping[str, tuple[SensorHardware, ...]], overlap_rate: float,
-                          h_target_agl_m: float, warn: list[str]
+                          h_target_agl_m: float, warn: list[str], forward_overlap: float = 0.70
                           ) -> tuple[dict[str, PayloadRequirement], str, dict[str, str]]:
     """由機隊硬體推導 :class:`PayloadRequirement` 字典。
+
+    ``forward_overlap``：相機前向重疊（預設 0.70 ＝ 舊行為；建圖模式由面板給，例如 0.80）。
 
     **每一種機上感測種類都必須有對應 kind 的需求**，否則 ``context.build_sensors`` 不會替該構型建
     :class:`hv_dccpp.platform.Sensor`（``ctx.sensors`` 之鍵為 ``(cls, req_id)``），該構型便完全無法被分配
@@ -1014,7 +1198,8 @@ def _default_payload_reqs(hw_used: Mapping[str, tuple[SensorHardware, ...]], ove
         return PayloadRequirement(rid, kind,  # type: ignore[arg-type]
                                   gsd_required_m=(gsd if kind == "rgb" else None),
                                   density_pt_m2=(20.0 if kind == "lidar" else None),
-                                  side_overlap=side, forward_overlap=0.70, h_target_agl_m=h_target_agl_m)
+                                  side_overlap=side, forward_overlap=float(forward_overlap),
+                                  h_target_agl_m=h_target_agl_m)
 
     reqs = {"default": _mk("default", primary)}
     kind_req = {primary: "default"}
@@ -1115,7 +1300,6 @@ def from_mission_plan(plan: MissionPlan, ctx: MissionContext, *, areas: Sequence
     """
     reg = types or default_types
     cfg = ctx.cfg
-    home_msl = _home_msl(ctx)
     idm = dict(id_map or {})
     if not idm:
         for uid in plan.plans:
@@ -1130,7 +1314,11 @@ def from_mission_plan(plan: MissionPlan, ctx: MissionContext, *, areas: Sequence
         did = rev.get(uid)
         if did is None:
             continue
-        bp = _built_path(up, ctx, cfg, did, reg, reduce=reduce, wp_radius_m=wp_radius_m, home_msl=home_msl)
+        # 航點 alt 的基準＝規劃 home（全機共用：避撞與顯示要跨機比高度）；飛控解鎖後的 home 是這架的起飛坪，
+        # 兩者差 (坪 − home) 記在路徑上，上傳／匯出時才換算（斜坡起降坪時不為 0）
+        pad_site, _lat, _lon, pad_msl = fc_home(ctx, up)
+        bp = _built_path(up, ctx, cfg, did, reg, reduce=reduce, wp_radius_m=wp_radius_m, home_msl=_home_msl(ctx),
+                         alt_ref_site=ctx.inputs.home.site_id, fc_home_site=pad_site, fc_home_msl=pad_msl)
         if bp is not None:
             assembled[did] = bp
 
@@ -1191,8 +1379,9 @@ def from_mission_plan(plan: MissionPlan, ctx: MissionContext, *, areas: Sequence
             st = plan.strips[sid]
             pL = _latlon(_wgs_xy(ctx, st.pL), "strip.pL")
             pR = _latlon(_wgs_xy(ctx, st.pR), "strip.pR")
-            headings.append(_compass(math.degrees(math.atan2(float(st.pR[0] - st.pL[0]),
-                                                             float(st.pR[1] - st.pL[1])))))
+            if not is_cross_strip(sid):          # 建圖模式交叉航帶不參與「這區的掃描角」（否則比例大時中位數翻轉）
+                headings.append(_compass(math.degrees(math.atan2(float(st.pR[0] - st.pL[0]),
+                                                                 float(st.pR[1] - st.pL[1])))))
             ops_by_sid[sid] = _construct(reg.operation_segment, index=int(st.index), left_point=pL,
                                          right_point=pR, waypoints=[pL, pR], length_m=float(st.length_m),
                                          covered=False, assigned_drone_id=None)
@@ -1239,8 +1428,14 @@ def from_mission_plan(plan: MissionPlan, ctx: MissionContext, *, areas: Sequence
 
 
 def _home_msl(ctx: MissionContext) -> float:
-    """home 地面之 MSL 高（m）——``HvBuiltWaypoint.alt`` 之基準（frame 3）。"""
-    xy, z = ctx.sites_enu[ctx.inputs.home.site_id]
+    """**規劃** home 地面之 MSL 高（m）＝ ``HvBuiltWaypoint.alt`` 的基準。⚠ 飛控的 home 是各機自己的起飛坪
+    （``fc_home``）；送飛控前要減掉路徑的 ``fc_alt_offset_m``。"""
+    return _site_ground_msl(ctx, ctx.inputs.home.site_id)
+
+
+def _site_ground_msl(ctx: MissionContext, site_id: str) -> float:
+    """站點地面之 MSL 高（m；與 hv_dccpp.ardupilot 同一個換算）。"""
+    xy, z = ctx.sites_enu[site_id]
     return float(ctx.frame.enu_z_to_msl(np.asarray(xy, dtype=float).reshape(1, 2), float(z))[0])
 
 
@@ -1252,8 +1447,15 @@ def _wgs_xy(ctx: MissionContext, xy: Any) -> tuple[float, float]:
 
 
 def _built_path(up: UAVPlan, ctx: MissionContext, cfg: HvPlannerConfig, drone_id: int, reg: HvTypeRegistry, *,
-                reduce: bool, wp_radius_m: float | None, home_msl: float) -> Any | None:
-    """單機 :class:`UAVPlan` → :class:`HvBuiltPath`（或註冊表中的原生 ``BuiltPath``）。"""
+                reduce: bool, wp_radius_m: float | None, home_msl: float, alt_ref_site: str = "",
+                fc_home_site: str = "", fc_home_msl: float | None = None) -> Any | None:
+    """單機 :class:`UAVPlan` → :class:`HvBuiltPath`（或註冊表中的原生 ``BuiltPath``）。
+
+    ``home_msl``：航點 ``alt`` 的基準 MSL（規劃 home，全機共用）。``fc_home_msl``：這架飛控解鎖後的 home
+    （起飛坪；``None`` ⇒ 與 ``home_msl`` 相同）。``alt = max(0, z − 坪) + (坪 − home)``：減掉偏移就是送飛控的
+    相對高度（貼地的點夾在坪面而不是 home 面，與 hv 匯出器同一個值）；平地時偏移 0、與舊值逐位元相同。"""
+    fc_msl = float(home_msl) if fc_home_msl is None else float(fc_home_msl)
+    fc_off = fc_msl - float(home_msl)
     wps = up.waypoints
     if not wps:
         return None
@@ -1287,13 +1489,27 @@ def _built_path(up: UAVPlan, ctx: MissionContext, cfg: HvPlannerConfig, drone_id
         w0 = wps[min(max(src[k], 0), len(wps) - 1)]
         lab = _segment(PHASE_TO_SEGMENT.get(w0.phase, HvSegmentLabel.TRANSFER), reg)
         out_wps.append(_construct(reg.built_waypoint, lat=float(wgs[k, 0]), lon=float(wgs[k, 1]),
-                                  alt=max(0.0, float(wgs[k, 2]) - home_msl),
-                                  heading_compass_deg=_compass(w0.track_deg), segment_type=lab))
+                                  alt=max(0.0, float(wgs[k, 2]) - fc_msl) + fc_off,
+                                  heading_compass_deg=_compass(w0.track_deg), segment_type=lab,
+                                  # vendored #5：把「相機開沒開」帶出來。下游的覆蓋率驗算
+                                  # 只剩 segment_type 可用時，會因為兩個規劃器的標籤慣例
+                                  # 不同而對 HARVEST 嚴重低估（100.00% → 75.10%）。
+                                  sensor_on=bool(getattr(w0, "sensor_on", False))))
+    # 降落站地面相對**飛控 home**（起飛坪）（降回自己的起飛坪 ⇒ 0；與 hv 匯出器 NAV_VTOL_LAND 的 z 同一條）
+    land_sid = getattr(up, "landing_site", "") or ""
+    if land_sid and land_sid == (fc_home_site or alt_ref_site):
+        land_alt = 0.0                                      # 降回自己的起飛坪（預設）
+    elif land_sid in ctx.sites_enu:
+        land_alt = _site_ground_msl(ctx, land_sid) - fc_msl
+    else:
+        land_alt = 0.0
     return _construct(reg.built_path, uav_id=int(drone_id), waypoints=out_wps,
                       entry_length_m=lengths["ENTRY"], operation_length_m=lengths["OPERATION"],
                       transfer_length_m=lengths["TRANSFER"], takeoff_length_m=lengths["TAKEOFF"],
                       landing_length_m=lengths["LANDING"], hv_uav_id=up.uav_id, cls=up.cls,
-                      makespan_s=float(up.t_land_s))
+                      makespan_s=float(up.t_land_s), alt_ref_site=str(alt_ref_site), alt_ref_msl_m=float(home_msl),
+                      fc_home_site=str(fc_home_site or alt_ref_site), fc_home_msl_m=fc_msl, fc_alt_offset_m=fc_off,
+                      land_alt_m=float(land_alt))
 
 
 # ---------------------------------------------------------------------------
@@ -1314,7 +1530,8 @@ frame 選擇 REPO/mission/sitl_link.py:1270-1274（3000 → ``MAV_FRAME_MISSION`
 
 def to_upload_tuples(built_path: Any, *, is_vtol: bool = True, cruise_speed_mps: float = 15.0,
                      turn_radius_m: float = 50.0, vtol_transition_alt_m: float = 100.0,
-                     default_alt_m: float = 100.0, emit_change_speed: bool = True) -> list[tuple]:
+                     default_alt_m: float = 100.0, emit_change_speed: bool = True,
+                     accept_radius_m: float | None = None) -> list[tuple]:
     """:class:`HvBuiltPath`（或原生 ``BuiltPath``）→ ``SITLLink.upload_mission`` 的 8-tuple 串列。
 
     餵給 REPO/mission/sitl_link.py:264 ``upload_mission(waypoints)``；該方法接受 3-tuple 或
@@ -1342,7 +1559,12 @@ def to_upload_tuples(built_path: Any, *, is_vtol: bool = True, cruise_speed_mps:
     cruise_speed_mps
         ``DO_CHANGE_SPEED`` 之 param2（param1=0 → 空速；param3=−1 → 不改油門）。
     turn_radius_m
-        ``NAV_WAYPOINT`` 之 param2（AeroPlan 於 :6122 以此傳轉彎半徑）。
+        該機的有效轉彎半徑 R_eff（幾何量）。**不再**直接寫進 ``NAV_WAYPOINT`` 的 param2：
+        ArduPlane 把非零的 param2（整數公尺）當**該航點的接受半徑**（ArduPlane_commands_logic.cpp
+        verify_nav_wp），舊版把 R_eff（Pioneer ≈200 m、HERO ≈120 m）填進去 ⇒ 條帶尾端提早最多 200 m 被判到達。
+        param2 改用 hv 匯出器同一條 :func:`hv_dccpp.ardupilot.accept_radius_m` ＝ min(R_eff/2, 30) m。
+    accept_radius_m
+        直接指定 ``NAV_WAYPOINT`` param2（接受半徑，m）；``None``（預設）＝ 由 ``turn_radius_m`` 推導如上。
     vtol_transition_alt_m
         MC↔FW 轉換高度（AGL 相對 home）。AeroPlan 由 ``parameter_panel.vtol_transition_alt_spin`` 取得（:6030）。
     default_alt_m
@@ -1353,7 +1575,8 @@ def to_upload_tuples(built_path: Any, *, is_vtol: bool = True, cruise_speed_mps:
     返回
     ----
     ``[(lat, lon, alt, cmd, p1, p2, p3, p4), ...]``；``alt`` 為 **AGL 相對 home**
-    （``sitl_link`` 對 NAV 指令一律用 ``MAV_FRAME_GLOBAL_RELATIVE_ALT``）。
+    （``sitl_link`` 對 NAV 指令一律用 ``MAV_FRAME_GLOBAL_RELATIVE_ALT``）。home ＝ 這架的起飛坪（飛控解鎖時重設），
+    :func:`from_mission_plan` 的路徑已以它為基準；降落點高度取路徑的 ``land_alt_m``（降回自己的起飛坪 ⇒ 0）。
     ``DO_*`` 項的 lat/lon/alt 皆為 0（該處 frame 為 ``MAV_FRAME_MISSION``）。
 
     與 AeroPlan 原實作的**唯一差異**（刻意；記於 CONTRACT_DEVIATIONS.md）
@@ -1363,13 +1586,23 @@ def to_upload_tuples(built_path: Any, *, is_vtol: bool = True, cruise_speed_mps:
     ``takeoff_emitted`` 永遠為 False，整個任務就**沒有起飛指令**（飛控會直接從第一個 NAV_WAYPOINT 開始）。
     本函式在 ``idx == 0`` 且尚未輸出起飛指令時照樣輸出 ``NAV_VTOL_TAKEOFF`` + ``DO_VTOL_TRANSITION(4)``，
     確保「VTOL 起降指令齊全」。其餘序列逐項相同。
+
+    另一個刻意差異（bug fix，2026-10-14）：``NAV_WAYPOINT`` param2 是接受半徑 min(R_eff/2, 30) m，
+    不再是轉彎半徑（見參數 ``turn_radius_m``）。
     """
     CMD_WP, CMD_TO, CMD_LAND, CMD_SPD = MAV_CMD["NAV_WAYPOINT"], MAV_CMD["NAV_TAKEOFF"], MAV_CMD["NAV_LAND"], MAV_CMD["DO_CHANGE_SPEED"]
     CMD_VTOL_TO, CMD_VTOL_LAND, CMD_VTOL_TRANS = MAV_CMD["NAV_VTOL_TAKEOFF"], MAV_CMD["NAV_VTOL_LAND"], MAV_CMD["DO_VTOL_TRANSITION"]
+    from ..ardupilot import accept_radius_m as _accept_radius
     out: list[tuple] = []
     wp_list = list(getattr(built_path, "waypoints", None) or [])
     if not wp_list:
         return out
+    # NAV_WAYPOINT param2 ＝ 接受半徑（不是轉彎半徑；見 docstring）
+    r_acc = float(accept_radius_m) if accept_radius_m is not None else _accept_radius(float(turn_radius_m))
+    # 降落點高度：降落站地面相對飛控 home（＝起飛坪）；降回自己的起飛坪 ⇒ 0（舊行為）。沒有這個欄位的原生路徑 ⇒ 0
+    land_alt = float(getattr(built_path, "land_alt_m", 0.0) or 0.0)
+    # 路徑 alt 的基準是規劃 home；飛控 home 是這架的起飛坪 ⇒ 送出前減掉 (坪 − home)。原生路徑沒有這欄 ⇒ 0
+    fc_off = float(getattr(built_path, "fc_alt_offset_m", 0.0) or 0.0)
     last_landing_idx = -1
     has_takeoff_seg = False
     for i, w in enumerate(wp_list):
@@ -1385,7 +1618,8 @@ def to_upload_tuples(built_path: Any, *, is_vtol: bool = True, cruise_speed_mps:
     takeoff_emitted = False
     if not has_takeoff_seg:
         w0 = wp_list[0]
-        alt0 = float(getattr(w0, "alt", default_alt_m) or default_alt_m)
+        _a0 = getattr(w0, "alt", None)
+        alt0 = (float(_a0) - fc_off) if _a0 else float(default_alt_m)
         if alt0 < 20.0:
             alt0 = max(float(default_alt_m), 50.0)
         if is_vtol:
@@ -1402,7 +1636,8 @@ def to_upload_tuples(built_path: Any, *, is_vtol: bool = True, cruise_speed_mps:
         if lat is None or lon is None:
             continue
         lat, lon = float(lat), float(lon)
-        alt = float(getattr(wp, "alt", default_alt_m) or default_alt_m)
+        _alt = getattr(wp, "alt", None)
+        alt = (float(_alt) - fc_off) if _alt else float(default_alt_m)
         hdg = float(getattr(wp, "heading_compass_deg", getattr(wp, "heading_deg", 0.0)) or 0.0)
         if seg == "TAKEOFF":
             if idx == 0 and not takeoff_emitted:
@@ -1422,19 +1657,19 @@ def to_upload_tuples(built_path: Any, *, is_vtol: bool = True, cruise_speed_mps:
                     out.append((lat, lon, alt, CMD_TO, 10.0, 0.0, 0.0, 0.0))
                 takeoff_emitted = True
             else:
-                out.append((lat, lon, alt, CMD_WP, 0.0, float(turn_radius_m), 0.0, 0.0))
+                out.append((lat, lon, alt, CMD_WP, 0.0, r_acc, 0.0, 0.0))
         elif seg == "LANDING":
             if idx == last_landing_idx:
                 if is_vtol:
                     out.append((lat, lon, float(vtol_transition_alt_m), CMD_WP, 0.0, 0.0, 0.0, 0.0))
                     out.append((0.0, 0.0, 0.0, CMD_VTOL_TRANS, 3.0, 0.0, 0.0, 0.0))
-                    out.append((lat, lon, 0.0, CMD_VTOL_LAND, 0.0, 0.0, 0.0, hdg))
+                    out.append((lat, lon, land_alt, CMD_VTOL_LAND, 0.0, 0.0, 0.0, hdg))
                 else:
-                    out.append((lat, lon, 0.0, CMD_LAND, 0.0, 0.0, 0.0, hdg))
+                    out.append((lat, lon, land_alt, CMD_LAND, 0.0, 0.0, 0.0, hdg))
             else:
-                out.append((lat, lon, alt, CMD_WP, 0.0, float(turn_radius_m), 0.0, 0.0))
+                out.append((lat, lon, alt, CMD_WP, 0.0, r_acc, 0.0, 0.0))
         else:
-            out.append((lat, lon, alt, CMD_WP, 0.0, float(turn_radius_m), 0.0, 0.0))
+            out.append((lat, lon, alt, CMD_WP, 0.0, r_acc, 0.0, 0.0))
     return out
 
 
@@ -1459,7 +1694,8 @@ def qgc_wpl_lines(items: Sequence[MissionItem], *, header: bool = True) -> list[
 def plan_to_aeroplan_waypoints(plan: MissionPlan, ctx: MissionContext, cfg: HvPlannerConfig | None = None, *,
                                header: bool = True, camera_trigger: bool = True,
                                id_map: Mapping[int, str] | None = None,
-                               key: Literal["uav_id", "drone_id"] = "uav_id") -> dict[str, list[str]]:
+                               key: Literal["uav_id", "drone_id"] = "uav_id",
+                               camera_cfg: CameraTriggerConfig | None = None) -> dict[str, list[str]]:
     """每機 QGC WPL 110 文字行（可直接寫成 AeroPlan 的 ``.waypoints`` 檔）。
 
     項目由 :func:`hv_dccpp.ardupilot.plan_to_mission_items` 產生（``alt_frame="relative"`` →
@@ -1476,6 +1712,9 @@ def plan_to_aeroplan_waypoints(plan: MissionPlan, ctx: MissionContext, cfg: HvPl
     key
         ``"uav_id"``（預設）→ 鍵為 hv_dccpp 的字串 id（如 ``"A1"``）；``"drone_id"`` → 鍵為
         AeroPlan 整數 id 的字串形式（需給 ``id_map``）。
+    camera_cfg
+        :class:`hv_dccpp.ardupilot.CameraTriggerConfig`，原樣交給 ``plan_to_mission_items``（206 的 p3、引入段 NAV、
+        地形重發）；``None`` ＝ 舊行為。建圖模式要給**上傳用的同一份**，匯出才會等於上傳。
 
     返回
     ----
@@ -1485,10 +1724,157 @@ def plan_to_aeroplan_waypoints(plan: MissionPlan, ctx: MissionContext, cfg: HvPl
     rev: dict[str, int] = {v: k for k, v in dict(id_map or {}).items()}
     out: dict[str, list[str]] = {}
     for uid, up in plan.plans.items():
-        items = plan_to_mission_items(up, ctx, cfg, alt_frame="relative", camera_trigger=camera_trigger)
+        items = plan_to_mission_items(up, ctx, cfg, alt_frame="relative", camera_trigger=camera_trigger,
+                                      camera_cfg=camera_cfg)
         name = uid if key == "uav_id" or uid not in rev else str(rev[uid])
         out[name] = qgc_wpl_lines(items, header=header)
     return out
+
+
+def mission_item_dicts(items: Sequence[MissionItem]) -> list[dict[str, Any]]:
+    """:class:`hv_dccpp.ardupilot.MissionItem` 串列 → ``SITLLink.upload_mission_items`` 吃的 dict 串列。
+
+    形狀與 REPO/mission/sitl_link.py ``_fetch_mission_items``（讀回）相同：
+    ``seq/command/frame/lat/lon/alt/param1-4/current/autocontinue``；seq 0 是 Home 槽（飛控不採用其內容，
+    但要合法——hv 匯出器的第 0 列就是 home，frame 0、alt = home MSL）。``x/y/z`` → ``lat/lon/alt``，逐值不改。
+    """
+    return [{"seq": int(it.seq), "command": int(it.command), "frame": int(it.frame),
+             "lat": float(it.x), "lon": float(it.y), "alt": float(it.z),
+             "param1": float(it.param1), "param2": float(it.param2), "param3": float(it.param3),
+             "param4": float(it.param4), "current": int(it.current), "autocontinue": int(it.autocontinue)}
+            for it in items]
+
+
+#: 帶座標、會「抵達」的 NAV 指令（206 的開關在抵達前一個 NAV 時執行）
+_PHOTO_NAV_CMDS = frozenset({16, 17, 18, 19, 21, 22, 31, 84, 85})
+
+
+def _ground_dist_m(a: tuple[float, float], b: tuple[float, float]) -> float:
+    """兩點水平距離（WGS84 子午／卯酉曲率半徑的局部平面近似；條帶尺度內誤差 < 0.1%）。"""
+    lat = math.radians(0.5 * (a[0] + b[0]))
+    e2 = 6.69437999014e-3
+    w = math.sqrt(1.0 - e2 * math.sin(lat) ** 2)
+    m_rad = 6378137.0 * (1.0 - e2) / w ** 3
+    n_rad = 6378137.0 / w
+    dn = math.radians(b[0] - a[0]) * m_rad
+    de = math.radians(b[1] - a[1]) * n_rad * math.cos(lat)
+    return math.hypot(dn, de)
+
+
+#: AP_Camera 的更新率（AP_Camera::update 由 scheduler 以 50 Hz 呼叫；距離觸發只在這些 tick 檢查）
+CAMERA_UPDATE_HZ: float = 50.0
+
+
+def _nav_accept_m(it: Mapping[str, Any]) -> float:
+    """該 NAV 的接受距離（m）：NAV_WAYPOINT 取 ``int(param2)``（ArduPlane LOWBYTE，≤ 255）；其他 NAV 與 param2 = 0 → 0。"""
+    if int(it["command"]) != 16:
+        return 0.0
+    try:
+        p2 = float(it.get("param2", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    return float(min(int(max(p2, 0.0)), 255)) if math.isfinite(p2) else 0.0
+
+
+def expected_photo_count(items: Sequence[Mapping[str, Any]], *, speed_mps: float | None = None,
+                         intrval_min_s: float = 0.0, tick_hz: float = CAMERA_UPDATE_HZ) -> int:
+    """依任務項目（:func:`mission_item_dicts` 的 dict）**估**這架會拍幾張。
+
+    模型（與 core.recon.exposure_verifier.simulate_mission_photos 同一套 AP_Camera／AP_Mission 語意，但不跑逐 tick 模擬）：
+
+    * 206（DO_SET_CAM_TRIGG_DIST）在「抵達它前一個 NAV」時執行；抵達點 = 該 NAV 前 ``int(param2)`` 公尺
+      （NAV_WAYPOINT 的接受距離；其他 NAV 為 0），且不早於前一個 NAV 的抵達點。相機開著的距離就是兩個抵達點之間的
+      折線長 —— 引入段 NAV（param2 = 1）與帶終點 NAV（param2 = 30）的差會讓有效帶長短 29 m。
+    * 50 Hz tick：距離觸發只在 tick 上檢查「離上一張 ≥ d」⇒ 實際間距 = ceil(d / (v·Δt))·v·Δt（Δt = 1/``tick_hz``）；
+      R2 實測 HERO 19 m/s、d = 18.848 ⇒ 19.0 m（每條 1.15 km 的帶少 1 張）。v = 任務裡的 DO_CHANGE_SPEED 空速
+      （param1 = 0）；``speed_mps`` 給了就整份用它。無風：地速 ＝ 空速。
+    * ``intrval_min_s``（CAM1_INTRVAL_MIN）：觸發早於它時延後到下一個允許的 tick ⇒ 間距至少 ceil(t_min/Δt)·v·Δt。
+    * 每條帶：p3 = 1 開啟即拍一張；之後每走一個間距一張；條帶中途的 206(d', 0, 0, 0)（地形重發）以新的 d 接續累積距離。
+      任何 p3 = 1 的 206（包括 p1 = 0 的關）都會立即拍一張——ArduPlane 的行為（AP_Mission_Commands.cpp 4.5.7:138-142）。
+
+    沒有任何 DO_CHANGE_SPEED 空速、也沒給 ``speed_mps`` ⇒ 無法量化 tick，退回連續模型（間距 = d）並記 WARNING
+    （可能每條帶多估 1 張）。仍不含：轉彎切角、CAM_MAX_ROLL 延後、風、10 Hz 任務更新造成的 ≤ 0.1 s 開／關延遲
+    （對帶長 ±2 m ⇒ 個別條帶 ±1 張，無系統偏差）。
+    """
+    if speed_mps is not None:
+        sp = float(speed_mps)
+        if not (math.isfinite(sp) and sp > 0.0):
+            raise ValueError(f"speed_mps 須為正的有限值（m/s），得 {speed_mps!r}")
+    t_min = float(intrval_min_s)
+    if not (math.isfinite(t_min) and 0.0 <= t_min <= 10.0):
+        raise ValueError(f"intrval_min_s（CAM1_INTRVAL_MIN）須在 0–10 s，得 {intrval_min_s!r}")
+    hz = float(tick_hz)
+    if not (math.isfinite(hz) and hz > 0.0):
+        raise ValueError(f"tick_hz 須為正的有限值，得 {tick_hz!r}")
+    dt = 1.0 / hz
+    v: float | None = float(speed_mps) if speed_mps is not None else None
+    warned = False
+
+    def spacing(d: float) -> float:
+        nonlocal warned
+        if v is None:
+            if not warned:
+                _log.warning(
+                    "expected_photo_count：任務沒有 DO_CHANGE_SPEED 空速、也沒給 speed_mps ⇒ 不做 %g Hz tick 量化，"
+                    "間距用 d 本身（每條帶可能多估 1 張）%s", hz,
+                    "；CAM1_INTRVAL_MIN 也無法換算成距離" if t_min > 0 else "")
+                warned = True
+            return d
+        step = v * dt
+        m = max(1, math.ceil(d / step - 1e-9))
+        if t_min > 0.0:
+            m = max(m, math.ceil(t_min / dt - 1e-9))
+        return m * step
+
+    count = 0
+    d = 0.0                 # 0 ＝ 相機關
+    acc = 0.0               # 上一張之後走過的距離
+    s = 0.0                 # 航線累積水平距離（到最近一個 NAV 頂點）
+    s_cam = 0.0             # 相機狀態已推進到的位置（最近一個抵達點）
+    reach_prev = 0.0
+    prev: tuple[float, float] | None = None
+    for it in items:
+        cmd = int(it["command"])
+        if int(it.get("seq", 1)) == 0:                      # Home 槽：航線起點
+            lat, lon = float(it.get("lat", 0.0) or 0.0), float(it.get("lon", 0.0) or 0.0)
+            if not (lat == 0.0 and lon == 0.0):
+                prev = (lat, lon)
+            continue
+        if cmd in _PHOTO_NAV_CMDS:
+            lat, lon = float(it["lat"]), float(it["lon"])
+            if lat == 0.0 and lon == 0.0:
+                continue
+            here = (lat, lon)
+            if prev is not None:
+                s += _ground_dist_m(prev, here)
+            prev = here
+            reach = max(reach_prev, s - _nav_accept_m(it))  # 抵達點：其後的 DO_ 在這裡執行
+            reach_prev = reach
+            if d > 0.0 and reach > s_cam:
+                acc += reach - s_cam
+                q = spacing(d)
+                n = int(math.floor(acc / q + 1e-9))
+                count += n
+                acc -= n * q
+            s_cam = max(s_cam, reach)
+        elif cmd == 178:
+            if speed_mps is None and float(it.get("param1", 0.0) or 0.0) == 0.0:
+                p2 = float(it.get("param2", 0.0) or 0.0)
+                if math.isfinite(p2) and p2 > 0.0:
+                    v = p2                                  # 空速型 DO_CHANGE_SPEED（無風：地速 ＝ 空速）
+        elif cmd == 206:
+            dist = float(it["param1"])
+            if dist > 0.0:
+                if d <= 0.0:                                # 開：距離從這裡起算
+                    acc = 0.0
+                d = dist
+            else:
+                d, acc = 0.0, 0.0                           # 關
+            if float(it["param3"]) == 1.0:
+                # ArduPlane：p3 = 1 一律立即拍一張（開、地形重發、甚至關都拍；AP_Mission_Commands.cpp 4.5.7:138-142）
+                count += 1
+                acc = 0.0
+    return count
 
 
 # ---------------------------------------------------------------------------
@@ -1642,12 +2028,25 @@ class HvDccppCoordinator:
     on_report
         ``f(payload: dict)``；規劃結束時以 ``{"status", "errors", "warnings", "notes",
         "makespan_s", "timing_ms", "uncovered"}`` 呼叫一次，供 GUI 顯示（AeroPlan 已有
-        ``_dccpp_metrics`` 欄位，REPO/ui/main_window.py:5046-5054）。
+        ``_dccpp_metrics`` 欄位，REPO/ui/main_window.py:5046-5054）。建圖模式時另含 ``"mapping_mode"``。
+    mapping_mode
+        建圖模式 :class:`hv_dccpp.mission.MappingModeConfig`（接縫共用重疊、不分層、偏流餘裕、引入段、碎區塊警告）；
+        ``None``（預設）＝ 舊行為逐位元不變。經 :func:`to_mission_inputs` 變成 ``MappingMissionInputs.mapping_mode``。
+        有效值記在 ``notes`` 的 ``mapping_mode_effective(...)``、``on_report`` 的 ``"mapping_mode"`` 與
+        :attr:`mapping_effective`；匯出器的 camera_lead_in_m 請直接用 ``self.mapping_mode.lead_in_m``。
+    forward_overlap
+        轉接層**自己推導** PayloadRequirement 時用的前向重疊（預設 0.70 ＝ 舊行為）；見 :func:`to_mission_inputs`。
+    camera_cfg
+        這份計畫上傳／匯出時用的 :class:`hv_dccpp.ardupilot.CameraTriggerConfig`（只是存放，規劃不讀它）。
+        與 ``mapping_mode`` 同給時，``camera_lead_in_m`` 必須等於 ``mapping_mode.lead_in_m``，否則丟例外
+        （規劃器把條帶外延 lead_in_m、匯出器在帶起點後 camera_lead_in_m 才開相機——兩個數不同就會掉覆蓋）。
 
     屬性
     ----
     last_inputs / last_ctx / last_plan / last_result / notes / id_map
         最近一次規劃的中間物件與警告，供除錯與 A/B 比較。
+    mapping_effective
+        建圖模式最近一次規劃的有效值（``{"config", "per_class", "seam_by_area"}``）；未開建圖模式 → ``None``。
     """
 
     def __init__(self, *, platform_a: PlatformSpec = PLATFORM_PIONEER, platform_b: PlatformSpec = PLATFORM_HERO,
@@ -1658,6 +2057,9 @@ class HvDccppCoordinator:
                  cfg: HvPlannerConfig | None = None,
                  fence_zones: Iterable[Any] | None = None,
                  alternates: Sequence[Any] | None = None,
+                 recovery_sites: Mapping[str, str] | None = None,
+                 per_uav_takeoff_sites: bool = True,
+                 land_at_takeoff_site: bool = True,
                  wind: tuple[float, float] | None = None,
                  c2_range_km: float = 25.0,
                  terrain_clearance_m: float | None = None,
@@ -1670,7 +2072,29 @@ class HvDccppCoordinator:
                  home: tuple[float, float] | Site | None = None,
                  types: HvTypeRegistry | None = None,
                  reduce_waypoints: bool = True,
-                 raise_on_no_go: bool = True) -> None:
+                 raise_on_no_go: bool = True,
+                 mapping_mode: MappingModeConfig | None = None,
+                 forward_overlap: float = 0.70,
+                 camera_cfg: CameraTriggerConfig | None = None,
+                 mapping_max_wind_mps: float | None = None) -> None:
+        if mapping_mode is not None and not isinstance(mapping_mode, MappingModeConfig):
+            raise AeroPlanAdapterError(f"mapping_mode 須為 MappingModeConfig 或 None，得 {type(mapping_mode).__name__}")
+        self.mapping_mode = mapping_mode
+        # 建圖作業風速上限（m/s；2026-10-15 首飛 ≤ 3）：只在建圖模式有意義 ⇒ 沒開建圖卻給了 → 拒絕（不靜默忽略）
+        if mapping_max_wind_mps is not None:
+            if mapping_mode is None:
+                raise AeroPlanAdapterError(
+                    f"mapping_max_wind_mps={mapping_max_wind_mps!r} 只在建圖模式（mapping_mode）有作用；沒開建圖不要給")
+            _w = float(mapping_max_wind_mps)
+            if not (math.isfinite(_w) and _w > 0.0):
+                raise AeroPlanAdapterError(f"建圖作業風速上限須為 > 0 的有限數，得 {mapping_max_wind_mps!r}")
+            mapping_max_wind_mps = _w
+        self.mapping_max_wind_mps = mapping_max_wind_mps
+        self.mapping_effective: dict[str, Any] | None = None
+        self.forward_overlap = _check_forward_overlap(forward_overlap)
+        if camera_cfg is not None:
+            self._check_camera_cfg(camera_cfg)
+        self.camera_cfg = camera_cfg
         self.platform_a = platform_a
         self.platform_b = platform_b
         self.class_of = class_of
@@ -1680,6 +2104,24 @@ class HvDccppCoordinator:
         self.cfg = cfg if cfg is not None else HvPlannerConfig(dem_step_m=25.0)
         self.fence_zones = list(fence_zones) if fence_zones else None
         self.alternates = list(alternates) if alternates else None
+        # vendored #4：逐機回收站（{uav_id 或 drone_id: site_id}）；None ⇒ 全員走全域 recovery
+        self.recovery_sites = dict(recovery_sites) if recovery_sites else None
+        # vendored #7：n 台 ⇒ n 個起飛站（由每台的 position 推），比照 DCCPP。
+        #   座標全部相同時自動 no-op，所以既有情境逐位元不變。
+        # ⚠⚠⚠ 這個功能一度**不安全**（2026-09-09 實測）；根因與修法記在 vendored #8 ——
+        #   同坪豁免比場坪**座標** ≤ SAME_PAD_TOL_M(50 m)，而走廊排程以 site_id 字串為鍵
+        #   ⇒ 兩個相距 < 50 m 的**不同**站被豁免卻沒被互斥。改比站點**身分**後：
+        #     站點間距   最小水平間距(修前→修後)   makespan(修前→修後)   被豁免的真違規
+        #       全部同點      148.2 → 148.2 m       1401.3 → 1401.3 s      0 → 0
+        #       200 m          17.9 →  17.9 m       1177.3 → 1177.3 s      0 → 0
+        #        60 m          30.0 →  52.5 m       1259.0 → 1589.2 s    496 → 0
+        #        30 m          15.0 → 101.2 m       1188.3 → 1277.9 s   1037 → 0
+        #        15 m           7.5 → 101.6 m       1190.1 → 1279.0 s   1062 → 0
+        #        10 m          15.0 → 107.2 m       1192.0 → 1281.3 s      — → 0
+        #   ⇒ 現在 10 m 間距也合法（4D 修復自己把起降錯開），代價是 makespan +7～26%。
+        self.per_uav_takeoff_sites = bool(per_uav_takeoff_sites)
+        # 各機預設降回自己的起飛站（2026-10-09 使用者定調）；只在逐機起飛站生效時有作用
+        self.land_at_takeoff_site = bool(land_at_takeoff_site)
         self.wind = (float(wind[0]), float(wind[1])) if wind else (0.0, 0.0)
         self.c2_range_km = float(c2_range_km)
         self.terrain_clearance_m = terrain_clearance_m
@@ -1702,6 +2144,37 @@ class HvDccppCoordinator:
         self.last_result: dict[str, Any] | None = None
 
     # -- 內部 ---------------------------------------------------------------
+    def _check_camera_cfg(self, camera_cfg: Any) -> CameraTriggerConfig:
+        """型別 + 引入段值鎖：``camera_lead_in_m`` 必須等於規劃時生效的 ``mapping_mode.lead_in_m``（沒開建圖 ＝ 0）。
+
+        規劃器把每條帶兩端外延 lead_in_m，匯出器在帶起點後 camera_lead_in_m 才開相機；兩者不同 ⇒ 條帶頭
+        少拍（外延不夠）或多飛（外延白費），而且沒有任何地方會報錯，所以在這裡拒絕。
+        """
+        if not isinstance(camera_cfg, CameraTriggerConfig):
+            raise AeroPlanAdapterError(f"camera_cfg 須為 CameraTriggerConfig，得 {type(camera_cfg).__name__}")
+        lead = float(self.mapping_mode.lead_in_m) if self.mapping_mode is not None else 0.0
+        if abs(float(camera_cfg.camera_lead_in_m) - lead) > 1e-9:
+            raise AeroPlanAdapterError(
+                f"相機引入段 camera_lead_in_m={camera_cfg.camera_lead_in_m:g} m ≠ 規劃時生效的引入段 lead_in_m="
+                f"{lead:g} m（{'建圖模式' if self.mapping_mode is not None else '沒開建圖模式'}）；兩者必須是同一個數")
+        return camera_cfg
+
+    def _plan_of(self, drone_id: Any) -> tuple[str, UAVPlan]:
+        """AeroPlan drone_id → (hv uav_id, UAVPlan)；沒規劃或不認得 ⇒ AeroPlanAdapterError。"""
+        if self.last_plan is None or self.last_ctx is None:
+            raise AeroPlanAdapterError("尚未規劃：請先呼叫 plan_coverage_dccpp")
+        try:
+            did = int(drone_id)
+        except (TypeError, ValueError):
+            raise AeroPlanAdapterError(f"drone_id 須為整數，得 {drone_id!r}") from None
+        uid = self.id_map.get(did)
+        up = self.last_plan.plans.get(uid) if uid is not None else None
+        if up is None:
+            flying = sorted(d for d, u in self.id_map.items() if u in self.last_plan.plans)
+            raise AeroPlanAdapterError(f"drone_id={did} 在這份計畫裡沒有任務（機隊 {sorted(self.id_map)}，"
+                                       f"有任務的 {flying}）")
+        return uid, up
+
     def _tick(self, frac: float, msg: str) -> None:
         if self.progress is not None:
             try:
@@ -1778,10 +2251,14 @@ class HvDccppCoordinator:
             home=self.home, fence_zones=self.fence_zones, class_of=self.class_of,
             platform_a=self.platform_a, platform_b=self.platform_b,
             sensor_a=self.sensor_a, sensor_b=self.sensor_b, payload_reqs=self.payload_reqs,
-            alternates=self.alternates, wind=self.wind, c2_range_km=self.c2_range_km,
+            alternates=self.alternates, recovery_sites=self.recovery_sites,
+            per_uav_takeoff_sites=self.per_uav_takeoff_sites,
+            land_at_takeoff_site=self.land_at_takeoff_site,
+            wind=self.wind, c2_range_km=self.c2_range_km,
             terrain_clearance_m=self.terrain_clearance_m, waiver_max_agl_m=self.waiver_max_agl_m,
             dem_step_m=self.dem_step_m, dem_margin_m=self.dem_margin_m,
-            mounting_angle_deg=float(mounting_angle_deg), energy=self.energy, warnings=note)
+            mounting_angle_deg=float(mounting_angle_deg), energy=self.energy, warnings=note,
+            mapping_mode=self.mapping_mode, forward_overlap=self.forward_overlap)
         self.last_inputs = inputs
         self.id_map = id_map
 
@@ -1796,12 +2273,51 @@ class HvDccppCoordinator:
         self._tick(0.40, "規劃中（分解 → 配置 → IDP → 組裝 → 去衝突）")
         plan = plan_mission(inputs, self.cfg, ctx=ctx)
         self.last_plan = plan
+        # 讀回：偏好不等於保證（能量吃不下會退回別的站）。沒降回自己的起飛站就明說，
+        # 不要讓使用者在 3D 圖上才發現「又降到同一點」。
+        for _u in inputs.fleet:
+            _want = getattr(_u, "recovery_site_id", None)
+            _p = plan.plans.get(_u.uav_id)
+            _got = getattr(_p, "landing_site", None) if _p is not None else None
+            if _want and _p is not None and _got is not None and str(_got) != str(_want):
+                note.append(f"landing_not_at_requested_site({_u.uav_id}: 要降 {_want}，實際降 {_got}；"
+                            f"能量或走廊不允許)")
         rep = plan.feasibility
         note.extend(f"preflight:{w}" for w in rep.warnings)
+        self.mapping_effective = None
+        if self.mapping_mode is not None:
+            # 有效值契約：使用者開了建圖模式，就把實際用的偏流角／間距／接縫重疊／外擴／引入段寫出來
+            per_class = {c: d.get("mapping") for c, d in (rep.derived or {}).items() if isinstance(d, dict)}
+            seam = {aid: r.get("mapping_seam") for aid, r in (rep.per_area or {}).items() if isinstance(r, dict)}
+            self.mapping_effective = {"config": self.mapping_mode.to_dict(), "per_class": per_class,
+                                      "seam_by_area": seam}
+            if getattr(self.mapping_mode, "cross_strips", False):
+                # 交叉航帶有效值：規劃器的 mapping_cross(...) 摘要（逐機逐區塊）＋略過／退回的區塊
+                self.mapping_effective["cross"] = [str(w) for w in (rep.warnings or [])
+                                                   if str(w).startswith(("mapping_cross(", "mapping_cross_skipped(",
+                                                                         "mapping_cross_dropped("))]
+            if self.mapping_max_wind_mps is not None:
+                w_plan = float(ctx.wind.max_speed()) if getattr(ctx, "wind", None) is not None else float("nan")
+                self.mapping_effective["wind"] = {"limit_mps": self.mapping_max_wind_mps, "planning_wind_mps": w_plan}
+                note.append(f"mapping_wind(規劃風速 {w_plan:g} m/s {'≤' if w_plan <= self.mapping_max_wind_mps + 1e-9 else '＞'}"
+                            f" 建圖作業風速上限 {self.mapping_max_wind_mps:g} m/s"
+                            + ("" if w_plan <= self.mapping_max_wind_mps + 1e-9 else " ⇒ 不可上傳")
+                            + "；上限指**現場實際風速**，起飛前必須實測)")
+            note.append("mapping_mode_effective(" + "; ".join(
+                f"{c}: ψ={m.get('crab_deg', float('nan')):.2f}°, w={m.get('w_m', float('nan')):.1f} m, "
+                f"w_eff={m.get('w_eff_m', float('nan')):.1f} m, s={m.get('s_m', float('nan')):.1f} m, "
+                f"e_ext(含 lead_in {m.get('lead_in_m', 0.0):g})={m.get('e_ext_m', float('nan')):.1f} m"
+                for c, m in sorted(per_class.items()) if m) + "; " + "; ".join(
+                f"{aid}: 接縫重疊目標 {s_['overlap_target_m']:.1f} m、胞外擴 {s_['delta_cell_m']:.1f} m、"
+                f"往鄰區長 {s_['neighbor_growth_m']:.1f} m、殘帶外擴 {s_['delta_residual_m']:.1f} m、"
+                f"區域外緣 {s_['delta_area_outer_m']:.1f} m"
+                for aid, s_ in sorted(seam.items()) if s_ and s_.get("overlap_target_m") is not None) + ")")
         payload = {"status": rep.status, "errors": list(rep.errors), "warnings": list(rep.warnings),
                    "notes": list(note), "makespan_s": float(plan.makespan_s),
                    "timing_ms": dict(plan.timing_ms),
                    "uncovered": [list(u) for u in plan.uncovered]}
+        if self.mapping_effective is not None:
+            payload["mapping_mode"] = self.mapping_effective
         if self.on_report is not None:
             try:
                 self.on_report(payload)
@@ -1827,7 +2343,9 @@ class HvDccppCoordinator:
         REPO/mission/sitl_link.py:264 ``upload_mission``（派送方式同 REPO/ui/main_window.py:6188-6210）。
 
         ``cruise_speed_mps`` / ``turn_radius_m`` 為 ``None`` 時逐機取該構型之
-        ``spec.cruise_airspeed_mps`` 與 ``spec.r_eff(W)``。
+        ``spec.cruise_airspeed_mps`` 與 ``spec.r_eff(W)``。``NAV_WAYPOINT`` 的 param2 是由轉彎半徑推導的
+        **接受半徑** min(R_eff/2, 30) m（與 hv 匯出器同一條，見 :func:`to_upload_tuples`）。
+        ⚠ 這條路徑沒有拍照指令（206）；建圖模式請用 :meth:`mission_items`。
         """
         if self.last_result is None or self.last_ctx is None:
             raise AeroPlanAdapterError("尚未規劃：請先呼叫 plan_coverage_dccpp")
@@ -1843,11 +2361,125 @@ class HvDccppCoordinator:
                                              vtol_transition_alt_m=vtol_transition_alt_m)
         return out
 
-    def qgc_waypoints(self, *, key: Literal["uav_id", "drone_id"] = "drone_id") -> dict[str, list[str]]:
-        """最近一次規劃 → ``{key: QGC WPL 110 行串列}``（見 :func:`plan_to_aeroplan_waypoints`）。"""
+    def mission_items(self, drone_id: int, *, camera_cfg: CameraTriggerConfig,
+                      alt_frame: Literal["relative", "msl", "terrain"] = "relative") -> list[dict[str, Any]]:
+        """某架的任務項目 → ``SITLLink.upload_mission_items`` 吃的 dict 串列（形狀見 :func:`mission_item_dicts`）。
+
+        內容就是 hv 匯出器 :func:`hv_dccpp.ardupilot.plan_to_mission_items` ``(camera_trigger=True,
+        camera_cfg=camera_cfg)`` 的輸出 —— 與 ``export_all(..., camera_cfg=同一份)`` 寫出的 ``.waypoints`` 逐項相同
+        （206 每條帶開／關、DO_LAND_START 後緊接 206(0)、接受半徑 min(R_eff/2, 30)、空速型 DO_CHANGE_SPEED）。
+
+        ``camera_cfg`` 必給；其 ``camera_lead_in_m`` ≠ 規劃時生效的 ``mapping_mode.lead_in_m``（沒開建圖 ＝ 0）
+        ⇒ :class:`AeroPlanAdapterError`。
+
+        第 0 列 home 與所有相對高度以**這架的起飛坪**為基準（飛控解鎖時 home 重設到那裡；見
+        :func:`hv_dccpp.ardupilot.fc_home`）。任務**不帶**錯開起飛時間（不插 NAV_DELAY：武裝的飛機在地上等幾十分鐘
+        不安全）⇒ 放行時刻見 :meth:`takeoff_schedule`。
+        """
+        _uid, up = self._plan_of(drone_id)
+        cc = self._check_camera_cfg(camera_cfg)
+        items = plan_to_mission_items(up, self.last_ctx, self.cfg, alt_frame=alt_frame, camera_trigger=True,
+                                      camera_cfg=cc)
+        return mission_item_dicts(items)
+
+    def takeoff_schedule(self) -> dict[int, float]:
+        """最近一次計畫的錯開起飛：``{drone_id: t_takeoff_s − min(t_takeoff_s)}``（秒；只列有任務的機）。
+
+        hv_dccpp 的 4D 去衝突有一部分靠**延後起飛**（``UAVPlan.t_takeoff_s``）；建圖模式不分高度層，時間錯開就是唯一的
+        分隔（R1：GUI 情境同時放行時最小間距 293 m → 12 m，要求 100 m）。:meth:`mission_items` 的任務本身不帶時間
+        （預設不插 NAV_DELAY：武裝的飛機在地上等幾十分鐘不安全），所以地面站必須在 t0 + offset 才放行／MISSION_START
+        該機；要把錯開寫進任務請用 ``hv_dccpp.ardupilot.export_all(..., takeoff_delay='nav_delay')``（此時就不要再由地面站
+        延後）。同一份數字也寫在 ``export_all`` 摘要的 ``takeoff.offset_s``。
+        """
+        if self.last_plan is None:
+            raise AeroPlanAdapterError("尚未規劃：請先呼叫 plan_coverage_dccpp")
+        plans = self.last_plan.plans
+        if not plans:
+            return {}
+        t0 = min(p.t_takeoff_s for p in plans.values())
+        return {int(did): plans[uid].t_takeoff_s - t0 for did, uid in sorted(self.id_map.items()) if uid in plans}
+
+    def expected_camera_params(self, drone_id: int, *, camera_cfg: CameraTriggerConfig) -> dict[str, float]:
+        """上傳前讀回閘門要比對的**相機**參數（CAM1_*／CAM_*／RELAY*／相機用的 SERVOn_FUNCTION）。
+
+        值由 hv 匯出器同一支 :func:`hv_dccpp.ardupilot.recommended_params` ``(sensor_kinds=('rgb',),
+        camera_cfg=camera_cfg)`` 算出 ⇒ 與 ``export_all`` 寫出的 ``.param`` 同值（含 CAM1_TRIGG_DIST = 0：206 會把
+        距離寫進 RAM，任務被打斷時殘值留在飛控上）。其餘飛控參數（空速、圍籬、電池…）不在這裡。
+        """
+        from ..ardupilot import recommended_params
+        _uid, up = self._plan_of(drone_id)
+        cc = self._check_camera_cfg(camera_cfg)
+        spec = self.last_ctx.specs[up.cls]
+        p = recommended_params(spec, None, self.cfg, sensor_kinds=("rgb",), camera_cfg=cc, warnings=[])
+        return {k: float(v) for k, v in p.items()
+                if k.startswith(("CAM1_", "CAM_", "RELAY")) or re.fullmatch(r"SERVO\d+_FUNCTION", k)}
+
+    def mapping_gate(self, *, max_wind_mps: float | None = None) -> dict[str, Any]:
+        """建圖上傳閘門：``{"uploadable": bool, "reasons": [原因, ...]}``（形狀不變；風速有效值見
+        ``mapping_effective["wind"]``）。
+
+        ``max_wind_mps`` 缺省 ⇒ 用建構時的 ``mapping_max_wind_mps``（GUI：面板「建圖作業風速上限」；
+        MainWindow 的 ``hv_upload_gate`` 呼叫 ``mapping_gate()`` 不帶參數，所以上限一定要放在建構參數裡）。
+
+        ⚠ preflight 的 GO_WITH_WARNINGS **不夠**：實測有 GO_WITH_WARNINGS 卻丟掉約 35% 面積的計畫。拼圖要的是
+        「整區都有人拍」，所以下列任一 ⇒ 不可上傳：
+
+        * 還沒規劃／preflight NO_GO；
+        * ``plan.uncovered`` 非空（有區塊沒人飛；含能量排不進的交叉航帶 ``cross_energy_infeasible``）；
+        * 規劃器或轉接層 notes 裡有 ``mapping_incomplete(``（建圖模式的破洞警告）；
+        * ``max_wind_mps``（建圖作業風速上限，2026-10-15 使用者定調首飛 ≤ 3 m/s）給了，而**規劃實際用的風速**
+          （``last_ctx.wind`` 各層最大值 ＝ 面板／呼叫端送進來的 HARVEST 風速）超過它。比較容差 1e-9 m/s
+          （3.0 過、3.1 擋）。⚠ 這只檢查「規劃用的風」；現場實際風速要操作員起飛前實測 —— 上限適用的是現場的風。
+        """
+        reasons: list[str] = []
+        plan = self.last_plan
+        wind_eff: dict[str, Any] | None = None
+        if max_wind_mps is None:
+            max_wind_mps = getattr(self, "mapping_max_wind_mps", None)
+        if max_wind_mps is not None:
+            lim = float(max_wind_mps)
+            if not (math.isfinite(lim) and lim > 0.0):
+                raise AeroPlanAdapterError(f"建圖作業風速上限須為 > 0 的有限數，得 {max_wind_mps!r}")
+            w_plan = None
+            if self.last_ctx is not None and getattr(self.last_ctx, "wind", None) is not None:
+                w_plan = float(self.last_ctx.wind.max_speed())
+            wind_eff = {"limit_mps": lim, "planning_wind_mps": w_plan,
+                        "ok": (w_plan is not None and w_plan <= lim + 1e-9)}
+        if plan is None:
+            return {"uploadable": False, "reasons": ["尚未規劃"]}
+        if wind_eff is not None and not wind_eff["ok"]:
+            reasons.append(
+                f"建圖作業風速上限 {wind_eff['limit_mps']:g} m/s：規劃風速 "
+                + ("未知" if wind_eff["planning_wind_mps"] is None else f"{wind_eff['planning_wind_mps']:g} m/s")
+                + " 超過上限（有風時轉彎後改平不夠、照片側傾，SITL 5 m/s 實測 2.5% 照片在 10–15° 側傾）；"
+                  "請在風速 ≤ 上限時再規劃與上傳（上限指現場實際風速，起飛前要實測）")
+        feas = getattr(plan, "feasibility", None)
+        if str(getattr(feas, "status", "")) == "NO_GO":
+            reasons.append("preflight NO_GO")
+        unc = list(getattr(plan, "uncovered", None) or [])
+        if unc:
+            reasons.append(f"未覆蓋 {len(unc)} 項：" + ", ".join(":".join(map(str, u)) if isinstance(u, (tuple, list))
+                                                              else str(u) for u in unc))
+        for w in list(getattr(feas, "warnings", None) or []) + list(self.notes or []):
+            s = str(w)
+            i = s.find("mapping_incomplete(")
+            if i >= 0:
+                reasons.append(s[i:])
+                break
+        return {"uploadable": not reasons, "reasons": reasons}
+
+    def qgc_waypoints(self, *, key: Literal["uav_id", "drone_id"] = "drone_id",
+                      camera_cfg: CameraTriggerConfig | None = None) -> dict[str, list[str]]:
+        """最近一次規劃 → ``{key: QGC WPL 110 行串列}``（見 :func:`plan_to_aeroplan_waypoints`）。
+
+        ``camera_cfg`` 原樣交給匯出器（給了就套用 :meth:`mission_items` 同一條引入段值鎖）。
+        """
         if self.last_plan is None or self.last_ctx is None:
             raise AeroPlanAdapterError("尚未規劃：請先呼叫 plan_coverage_dccpp")
-        return plan_to_aeroplan_waypoints(self.last_plan, self.last_ctx, self.cfg, id_map=self.id_map, key=key)
+        if camera_cfg is not None:
+            self._check_camera_cfg(camera_cfg)
+        return plan_to_aeroplan_waypoints(self.last_plan, self.last_ctx, self.cfg, id_map=self.id_map, key=key,
+                                          camera_cfg=camera_cfg)
 
     def events_from_telemetry(self, frames: Iterable[Any], **kw: Any) -> list[Any]:
         """最近一次規劃 + AeroPlan 遙測 → 動態事件（見 :func:`telemetry_frames_to_events`）。"""

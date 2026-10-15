@@ -4,6 +4,10 @@
     python scripts/hv_sitl_run.py plan  gui_uniform_1a3b
     python scripts/hv_sitl_run.py fly   gui_uniform_1a3b
 
+    # SITL S1（航測建圖）：旋鈕全部預設關閉，見 `survey_knobs`；飛完用 survey_sitl_s1.py 分析
+    HV_TRIAL=S1_xxx HV_MAPPING=1 HV_CAMERA=hq6 HV_SHUTTER_HZ=2 HV_SIDE_OVERLAP=0.7 \\
+        HV_FWD_OVERLAP=0.8 python scripts/hv_sitl_run.py fly gui_legal_120_1a2b
+
 與 `scripts/hv_sitl_flight.py` 的關係
 ------------------------------------
 那一支是 HV4SITL1/2 用的，機隊與作業區寫死在模組層，**刻意不動它**，
@@ -23,7 +27,9 @@
 """
 from __future__ import annotations
 
+import contextlib
 import csv
+import dataclasses
 import json
 import logging
 import math
@@ -165,6 +171,323 @@ def expected_params(from_file: dict[str, float]) -> dict[str, tuple[float, str, 
     return out
 
 
+# ══════════════════════════════════════════════════════════════════════
+#  航測建圖／相機旋鈕（SITL S1）
+# ══════════════════════════════════════════════════════════════════════
+#   ⚠⚠ 全部預設關閉：一個都沒給 ⇒ `survey_knobs()` 回 None ⇒ 規劃、匯出、上傳與舊版逐位元相同
+#     （export_all／plan_to_mission_items 不帶 camera_cfg、不寫 survey_knobs.json）。
+#   任何一個給了 ⇒ 整組 S1 相機設定生效：
+#     HV_MAPPING=1     建圖模式（MappingModeConfig；引入段 HV_LEAD_IN_M，預設 50 m）
+#     HV_CAMERA        hq6｜hq8｜cm3｜gs8｜panel（預設 panel ＝ 面板 HFOV/VFOV 反推的相機）
+#     HV_SIDE_OVERLAP  側向重疊（覆寫情境的 overlap_rate）
+#     HV_FWD_OVERLAP   前向重疊（覆寫寫死的 0.70；注入點與 phase-1 planner_experiment 相同）
+#     HV_SHUTTER_HZ    相機最高拍照率：規劃器 max_shutter_rate_hz 與 CAM1_INTRVAL_MIN 由同一個數而來
+#     HV_CAM_MAX_ROLL  CAM_MAX_ROLL（度，預設 15）
+#     HV_CROSS=1       交叉航帶（MappingModeConfig.cross_strips；**需要 HV_MAPPING=1**；預設關）
+#       HV_CROSS_FRACTION    面積比例 (0, 1]（預設 0.2）；HV_CROSS_ALT_OFFSET  高度差 m（預設 0）
+#       ⚠ 只給 HV_CROSS=0（或都不給）＝ 沒有交叉航帶，與舊版逐位元相同；比例／高度差沒開 HV_CROSS=1 卻給了 ⇒ 拒絕
+#   匯出用 CameraTriggerConfig(servo, 0.1 s, INTRVAL_MIN = ceil_0.02(1/HV_SHUTTER_HZ), AUTO_ONLY,
+#   MAX_ROLL, camera_lead_in_m = 引入段)。SITL 沒有 relay GPIO；servo 後端在 SITL 已實測會寫 CAM。
+#   ⚠ 只支援 path='gui' 的情境（direct 路徑的酬載由 payload_reqs 決定，不注入）。
+#   ⚠ 有效值契約：規劃後**讀回**規劃器真正用的重疊／拍照率／相機／建圖設定，與旋鈕不一致就停，
+#     全部寫進 `survey_knobs.json`；飛完再補 SITL 日誌路徑（給 scripts/survey_sitl_s1.py 用）。
+#: (焦距 mm, 感測器寬 mm, 感測器高 mm, 像素 µm)；與 phase-1 planner_experiment 的 CAMS 同值。
+#: 拍照率不在這裡：一律由 HV_SHUTTER_HZ 給（不給 ⇒ CameraHardware 預設），與 INTRVAL_MIN 同源。
+SURVEY_CAMERAS: dict[str, tuple[float, float, float, float] | None] = {
+    "hq6": (6.0, 4056 * 1.55e-3, 3040 * 1.55e-3, 1.55),
+    "hq8": (8.0, 4056 * 1.55e-3, 3040 * 1.55e-3, 1.55),
+    "cm3": (4.74, 4608 * 1.4e-3, 2592 * 1.4e-3, 1.40),
+    "gs8": (8.0, 1456 * 3.45e-3, 1088 * 3.45e-3, 3.45),
+    "panel": None,
+}
+SURVEY_ENV = ("HV_MAPPING", "HV_LEAD_IN_M", "HV_CAMERA", "HV_SIDE_OVERLAP", "HV_FWD_OVERLAP",
+              "HV_SHUTTER_HZ", "HV_CAM_MAX_ROLL")
+SURVEY_LEAD_IN_DEFAULT_M = 50.0
+#: 交叉航帶旋鈕（另列：只給 HV_CROSS=0 不算「有給旋鈕」⇒ survey_knobs() 仍回 None）
+SURVEY_CROSS_ENV = ("HV_CROSS", "HV_CROSS_FRACTION", "HV_CROSS_ALT_OFFSET")
+SURVEY_CROSS_FRACTION_DEFAULT = 0.2
+SURVEY_CROSS_ALT_OFFSET_DEFAULT_M = 0.0
+SURVEY_CAM_MAX_ROLL_DEFAULT_DEG = 15.0
+#: LOG_* 刻意不動（寫進 survey_knobs.json，讀產物的人才知道）。
+SURVEY_LOGGING_NOTE = ("LOG_* 參數沒有改：沿用 SITL 預設（LOG_DISARMED=0 ⇒ 未解鎖時的拍照不寫 CAM；"
+                       "S1 的照片全在 AUTO 解鎖中拍，不受影響。地面試拍 F0 要另外處理）")
+
+
+def _ceil_002(x: float) -> float:
+    """向上取整到 0.02 s（評估 §4：CAM1_INTRVAL_MIN = 1/實測頻率，向上取整到 0.02 s）。"""
+    return round(math.ceil(round(x / 0.02, 9)) * 0.02, 2)
+
+
+#: SITL 匯出用的 CAM1_DURATION（servo 後端）
+SURVEY_TRIGGER_DURATION_S = 0.1
+
+#: 首飛建圖風速上限（2026-10-15 使用者定調 ≤ 3 m/s）；與 mission.swarm_coordinator.MAPPING_MAX_WIND_DEFAULT_MPS
+#: 同值（tests/test_survey_sitl_s1.py 鎖住）。SITL 只拿來印 GUI 閘門的結果，不擋。
+MAPPING_FIRST_FLIGHT_MAX_WIND_MPS = 3.0
+
+
+def _min_trigger_spacing_s(duration_s: float) -> float:
+    """servo／relay 後端兩次觸發之間的最短間隔（秒）＝ (floor(DURATION/0.02) + 2) × 0.02。
+
+    與 mission.swarm_coordinator.trigger_min_spacing_s 同一條公式（GUI 路徑用那支；這裡不匯入它，免得
+    SITL 腳本把整個協調器拖進來）。tests/test_survey_sitl_s1.py 鎖住兩者相等。"""
+    n = math.floor(float(duration_s) / 0.02 + 1e-6)
+    return round((n + 2) * 0.02, 6)
+
+
+@dataclasses.dataclass(frozen=True)
+class SurveyKnobs:
+    """解析後的旋鈕（皆為有效值；預設值的來源記在 ``shutter_source`` 與 ``env``）。"""
+    env: dict                    # 有給的環境變數原字串
+    mapping: bool
+    lead_in_m: float             # 建圖模式關閉時為 0
+    camera: str
+    side_overlap: float | None   # None ＝ 沿用情境的 overlap_rate
+    fwd_overlap: float | None    # None ＝ 沿用規劃器（0.70）
+    shutter_hz: float
+    shutter_source: str
+    cam_max_roll_deg: float
+    interval_min_s: float        # ceil_0.02(1/shutter_hz)
+    cross: bool = False                      # HV_CROSS=1（交叉航帶；需要建圖模式）
+    cross_fraction: float | None = None      # 只在 cross 時有值
+    cross_alt_offset_m: float | None = None  # 只在 cross 時有值
+
+    def mapping_config(self):
+        if not self.mapping:
+            return None
+        from hv_dccpp.mission import MappingModeConfig
+        if self.cross:
+            return MappingModeConfig(lead_in_m=self.lead_in_m, cross_strips=True,
+                                     cross_fraction=self.cross_fraction, cross_alt_offset_m=self.cross_alt_offset_m)
+        return MappingModeConfig(lead_in_m=self.lead_in_m)
+
+    def camera_hw(self):
+        """具名相機 → CameraHardware；panel → None（沿用面板反推的相機，只改拍照率）。"""
+        spec = SURVEY_CAMERAS[self.camera]
+        if spec is None:
+            return None
+        from hv_dccpp.platform import CameraHardware
+        f, sw, sh, pp = spec
+        return CameraHardware(focal_length_mm=f, sensor_width_mm=sw, sensor_height_mm=sh,
+                              pixel_pitch_um=pp, max_shutter_rate_hz=self.shutter_hz,
+                              is_default_example=False)
+
+    def fov_deg(self) -> tuple[float, float] | None:
+        spec = SURVEY_CAMERAS[self.camera]
+        if spec is None:
+            return None
+        f, sw, sh, _pp = spec
+        return (math.degrees(2.0 * math.atan(sw / 2.0 / f)), math.degrees(2.0 * math.atan(sh / 2.0 / f)))
+
+    def trigger_config(self):
+        from hv_dccpp.ardupilot import CameraTriggerConfig
+        try:
+            # first_shot_immediate=False：與 GUI 建圖模式相同（build_mapping_setup）；理由見那裡
+            return CameraTriggerConfig(backend="servo", duration_s=SURVEY_TRIGGER_DURATION_S,
+                                       interval_min_s=self.interval_min_s, auto_only=True,
+                                       max_roll_deg=self.cam_max_roll_deg,
+                                       camera_lead_in_m=self.lead_in_m, first_shot_immediate=False)
+        except ValueError as e:
+            raise SystemExit(f"相機觸發設定被拒絕：{e}") from None
+
+    def to_dict(self) -> dict:
+        d = dataclasses.asdict(self)
+        if not self.cross:
+            # 沒開交叉航帶 ⇒ 不列 cross_* 鍵（survey_knobs.json 與加入交叉航帶前逐位元相同）
+            for k in ("cross", "cross_fraction", "cross_alt_offset_m"):
+                d.pop(k, None)
+        fc_hz = 1.0 / self.interval_min_s
+        d["camera_spec"] = (None if SURVEY_CAMERAS[self.camera] is None else dict(zip(
+            ("focal_length_mm", "sensor_width_mm", "sensor_height_mm", "pixel_pitch_um"),
+            SURVEY_CAMERAS[self.camera])))
+        d["fov_deg"] = self.fov_deg()
+        d["fc_max_rate_hz"] = fc_hz
+        d["notes"] = ([] if fc_hz >= self.shutter_hz - 1e-9 else [
+            f"CAM1_INTRVAL_MIN 向上取整成 {self.interval_min_s:g} s ⇒ 飛控最高 {fc_hz:.4f} Hz "
+            f"< 規劃用 {self.shutter_hz:g} Hz：規劃速度上限處的觸發會被飛控延後，"
+            f"間距最多長 {(self.shutter_hz * self.interval_min_s - 1.0) * 100.0:.2f}%"])
+        return d
+
+
+def survey_knobs(env=None) -> SurveyKnobs | None:
+    """讀旋鈕。全部沒給（或只給 HV_MAPPING=0）⇒ None ＝ 與舊版逐位元相同。
+
+    :raises SystemExit: 值不合法、或給了卻不會生效（有效值契約：拒絕，不靜默忽略）。
+    """
+    env = os.environ if env is None else env
+    given = {k: str(env[k]).strip() for k in SURVEY_ENV if str(env.get(k) or "").strip()}
+    cross_given = {k: str(env[k]).strip() for k in SURVEY_CROSS_ENV if str(env.get(k) or "").strip()}
+    mapping_s = given.get("HV_MAPPING", "0")
+    if mapping_s not in ("0", "1"):
+        raise SystemExit(f"HV_MAPPING 只能是 0 或 1，收到 {mapping_s!r}")
+    mapping = mapping_s == "1"
+    cross_s = cross_given.get("HV_CROSS", "0")
+    if cross_s not in ("0", "1"):
+        raise SystemExit(f"HV_CROSS 只能是 0 或 1，收到 {cross_s!r}")
+    cross = cross_s == "1"
+    if not cross and any(k != "HV_CROSS" for k in cross_given):
+        raise SystemExit(f"{sorted(k for k in cross_given if k != 'HV_CROSS')} 只在 HV_CROSS=1 時有作用；"
+                         "沒開交叉航帶卻給了 ⇒ 拒絕，不靜默忽略")
+    if cross and not mapping:
+        raise SystemExit("HV_CROSS=1 需要 HV_MAPPING=1（交叉航帶是建圖模式的一部分）")
+    if not mapping and not any(k != "HV_MAPPING" for k in given):
+        return None
+
+    def cross_num(name: str, default: float, *, lo: float | None = None, hi: float | None = None) -> float:
+        if name not in cross_given:
+            return default
+        s = cross_given[name]
+        try:
+            v = float(s)
+        except ValueError:
+            raise SystemExit(f"{name} 必須是數字，收到 {s!r}") from None
+        if not math.isfinite(v) or (lo is not None and v <= lo) or (hi is not None and v > hi):
+            raise SystemExit(f"{name}={s} 超出範圍 ({lo if lo is not None else '-inf'}, {hi if hi is not None else 'inf'}]")
+        return v
+
+    cross_frac = cross_num("HV_CROSS_FRACTION", SURVEY_CROSS_FRACTION_DEFAULT, lo=0.0, hi=1.0) if cross else None
+    cross_dh = cross_num("HV_CROSS_ALT_OFFSET", SURVEY_CROSS_ALT_OFFSET_DEFAULT_M) if cross else None
+
+    def num(name: str, lo: float, hi: float, *, lo_open: bool = False, hi_open: bool = False) -> float:
+        s = given[name]
+        try:
+            v = float(s)
+        except ValueError:
+            raise SystemExit(f"{name} 必須是數字，收到 {s!r}") from None
+        if not (math.isfinite(v) and (v > lo if lo_open else v >= lo) and (v < hi if hi_open else v <= hi)):
+            raise SystemExit(f"{name}={s} 超出範圍 {'(' if lo_open else '['}{lo:g}, {hi:g}{')' if hi_open else ']'}")
+        return v
+
+    if "HV_LEAD_IN_M" in given and not mapping:
+        raise SystemExit("HV_LEAD_IN_M 只在 HV_MAPPING=1 時有作用（引入段要靠建圖模式把條帶外伸）；"
+                         "沒開建圖模式卻給了 ⇒ 拒絕，不靜默忽略")
+    lead = (num("HV_LEAD_IN_M", 0.0, 1000.0) if "HV_LEAD_IN_M" in given
+            else (SURVEY_LEAD_IN_DEFAULT_M if mapping else 0.0))
+    camera = given.get("HV_CAMERA", "panel").lower()
+    if camera not in SURVEY_CAMERAS:
+        raise SystemExit(f"HV_CAMERA 只能是 {sorted(SURVEY_CAMERAS)}，收到 {given['HV_CAMERA']!r}")
+    side = num("HV_SIDE_OVERLAP", 0.0, 1.0, lo_open=True, hi_open=True) if "HV_SIDE_OVERLAP" in given else None
+    fwd = num("HV_FWD_OVERLAP", 0.0, 1.0, lo_open=True, hi_open=True) if "HV_FWD_OVERLAP" in given else None
+    if "HV_SHUTTER_HZ" in given:
+        # 下限 0.1 Hz ⇐ CAM1_INTRVAL_MIN 上限 10 s；上限 50 Hz ⇐ AP_Camera 50 Hz 更新
+        hz, hz_src = num("HV_SHUTTER_HZ", 0.1, 50.0), "HV_SHUTTER_HZ"
+    else:
+        from hv_dccpp.platform import CameraHardware
+        hz, hz_src = float(CameraHardware().max_shutter_rate_hz), "CameraHardware 預設"
+    roll = (num("HV_CAM_MAX_ROLL", 0.0, 180.0) if "HV_CAM_MAX_ROLL" in given
+            else SURVEY_CAM_MAX_ROLL_DEFAULT_DEG)
+    interval = _ceil_002(1.0 / hz)
+    spacing = _min_trigger_spacing_s(SURVEY_TRIGGER_DURATION_S)
+    if interval < spacing - 1e-9:
+        # 有效值契約：servo 後端在 CAM1_DURATION 內拒絕新觸發，再要一個週期放回 OFF ⇒ 飛控給不出這個頻率，
+        # 只會靜默拉長照片間距（前向重疊不足）。拒絕，不靜默照飛
+        raise SystemExit(
+            f"{hz_src}={hz:g} Hz ⇒ CAM1_INTRVAL_MIN {interval:.2f} s，但 CAM1_DURATION "
+            f"{SURVEY_TRIGGER_DURATION_S:g} s 時 servo 後端兩次觸發至少要隔 {spacing:.2f} s ⇒ 上限 "
+            f"{1.0 / spacing:.3f} Hz；請把 HV_SHUTTER_HZ 設到 ≤ {1.0 / spacing:.3f}")
+    env_rec = dict(given)
+    env_rec.update(cross_given)                     # 交叉航帶旋鈕也記進 survey_knobs.json（只在有給時）
+    return SurveyKnobs(env=env_rec, mapping=mapping, lead_in_m=lead, camera=camera, side_overlap=side,
+                       fwd_overlap=fwd, shutter_hz=hz, shutter_source=hz_src, cam_max_roll_deg=roll,
+                       interval_min_s=interval, cross=cross, cross_fraction=cross_frac,
+                       cross_alt_offset_m=cross_dh)
+
+
+def apply_survey_knobs(sc: Scenario, knobs: SurveyKnobs) -> Scenario:
+    """情境層的旋鈕：具名相機的 FOV、側向重疊。只接受 GUI 路徑。"""
+    if sc.path != "gui":
+        raise SystemExit(f"建圖／相機旋鈕 {sorted(knobs.env)} 只支援 path='gui' 的情境"
+                         f"（{sc.key} 是 {sc.path!r}；direct 路徑的酬載由 payload_reqs 決定，不注入）")
+    rep: dict = {}
+    fov = knobs.fov_deg()
+    if fov is not None:
+        rep.update(hfov_deg=fov[0], vfov_deg=fov[1])
+    if knobs.side_overlap is not None:
+        rep["overlap_rate"] = knobs.side_overlap
+    return dataclasses.replace(sc, **rep) if rep else sc
+
+
+@contextlib.contextmanager
+def _inject_survey(knobs: SurveyKnobs | None):
+    """只在這個 with 裡把相機、前向重疊、建圖模式注入 GUI 路徑（離開即還原）。
+
+    注入點與 phase-1 planner_experiment 相同：``swarm_coordinator._uniform_camera`` 與
+    ``aeroplan_adapter.HvDccppCoordinator``（swarm_coordinator 在規劃當下才 import 它）。
+    """
+    if knobs is None:
+        yield
+        return
+    import hv_dccpp.integration.aeroplan_adapter as ad
+    import mission.swarm_coordinator as swc
+    base_coord, base_cam = ad.HvDccppCoordinator, swc._uniform_camera
+    mm, fwd, hw, hz = knobs.mapping_config(), knobs.fwd_overlap, knobs.camera_hw(), knobs.shutter_hz
+
+    class _SurveyCoordinator(base_coord):            # type: ignore[misc,valid-type]
+        def __init__(self, *a, **kw):
+            if mm is not None:
+                if kw.get("mapping_mode") is not None and kw["mapping_mode"] != mm:
+                    raise SystemExit(f"呼叫端已給 mapping_mode={kw['mapping_mode']!r}，與 HV_MAPPING 的 {mm!r} 不同")
+                kw["mapping_mode"] = mm
+            super().__init__(*a, **kw)
+            if fwd is not None and self.payload_reqs:
+                self.payload_reqs = {k: (dataclasses.replace(r, forward_overlap=fwd) if r.kind == "rgb" else r)
+                                     for k, r in self.payload_reqs.items()}
+
+    ad.HvDccppCoordinator = _SurveyCoordinator
+    if hw is not None:
+        swc._uniform_camera = lambda **_kw: hw
+    else:
+        swc._uniform_camera = lambda **kw: dataclasses.replace(base_cam(**kw), max_shutter_rate_hz=hz)
+    try:
+        yield
+    finally:
+        ad.HvDccppCoordinator, swc._uniform_camera = base_coord, base_cam
+
+
+def survey_effective(hv, knobs: SurveyKnobs, cam_cfg, sc: Scenario) -> dict:
+    """規劃後**讀回**規劃器真正用的值，與旋鈕逐項比對；任何一項沒到 ⇒ SystemExit（不飛）。"""
+    from hv_dccpp.ardupilot import trigger_distance_m
+    want_hw = knobs.camera_hw()
+    bad, sensors = [], {}
+    for (cls, rid), s in sorted(hv.last_ctx.sensors.items()):
+        hw, r = s.hw, s.r
+        if getattr(hw, "kind", None) != "rgb":
+            continue
+        tag = f"{cls}:{rid}"
+        geom = tuple(getattr(hw, k, None) for k in
+                     ("focal_length_mm", "sensor_width_mm", "sensor_height_mm", "pixel_pitch_um"))
+        sensors[tag] = {"forward_overlap": r.forward_overlap, "side_overlap": r.side_overlap,
+                        "shutter_rate_hz": r.shutter_rate_hz,
+                        "max_shutter_rate_hz": getattr(hw, "max_shutter_rate_hz", None),
+                        "camera": dict(zip(("focal_length_mm", "sensor_width_mm", "sensor_height_mm",
+                                            "pixel_pitch_um"), geom)),
+                        "trigger_distance_m": trigger_distance_m(s, float(sc.coverage_altitude_m)),
+                        "at_agl_m": float(sc.coverage_altitude_m)}
+        if knobs.fwd_overlap is not None and not math.isclose(r.forward_overlap, knobs.fwd_overlap, abs_tol=1e-9):
+            bad.append(f"{tag} 前向重疊 {r.forward_overlap} ≠ HV_FWD_OVERLAP {knobs.fwd_overlap}"
+                       f"（情境沒有 target_gsd 時轉接層自己合成需求，前向重疊注入不到）")
+        if knobs.side_overlap is not None and (r.side_overlap is None or not math.isclose(
+                r.side_overlap, knobs.side_overlap, abs_tol=1e-9)):
+            bad.append(f"{tag} 側向重疊 {r.side_overlap} ≠ HV_SIDE_OVERLAP {knobs.side_overlap}")
+        if r.shutter_rate_hz is None or not math.isclose(r.shutter_rate_hz, knobs.shutter_hz, abs_tol=1e-9):
+            bad.append(f"{tag} 拍照率 {r.shutter_rate_hz} Hz ≠ {knobs.shutter_hz} Hz（{knobs.shutter_source}）")
+        if want_hw is not None and geom != (want_hw.focal_length_mm, want_hw.sensor_width_mm,
+                                            want_hw.sensor_height_mm, want_hw.pixel_pitch_um):
+            bad.append(f"{tag} 相機 {geom} ≠ HV_CAMERA={knobs.camera}")
+    if not sensors:
+        bad.append("規劃器沒有任何 rgb 相機 ⇒ 相機旋鈕無處生效")
+    mm = getattr(hv, "mapping_mode", None)
+    if mm != knobs.mapping_config():
+        bad.append(f"規劃器的建圖模式 {mm!r} ≠ HV_MAPPING 要的 {knobs.mapping_config()!r}")
+    lead_plan = float(mm.lead_in_m) if mm is not None else 0.0
+    if not math.isclose(float(cam_cfg.camera_lead_in_m), lead_plan, abs_tol=1e-9):
+        bad.append(f"匯出引入段 {cam_cfg.camera_lead_in_m} m ≠ 規劃條帶外伸的 lead_in {lead_plan} m")
+    if bad:
+        raise SystemExit("建圖／相機旋鈕沒有照設定到達規劃器（不匯出、不飛）：\n  " + "\n  ".join(bad))
+    return {"sensors": sensors, "mapping_mode": None if mm is None else mm.to_dict(),
+            "mapping_effective": getattr(hv, "mapping_effective", None)}
+
+
 def out_dir(sc: Scenario) -> Path:
     return ROOT / "runs" / "artifacts" / os.environ.get("HV_TRIAL", sc.trial)
 
@@ -222,8 +545,8 @@ def _fence_zones(sc: Scenario):
             for i, v in enumerate(sc.nfz)]
 
 
-def _plan_gui(sc: Scenario):
-    """AeroPlan 介面按下去真正會走的那一條。兩型共用單光相機。"""
+def _plan_gui(sc: Scenario, knobs: SurveyKnobs | None = None):
+    """AeroPlan 介面按下去真正會走的那一條。兩型共用單光相機。``knobs`` 見 :func:`survey_knobs`。"""
     from mission.swarm_coordinator import SwarmCoordinator
     cls_of = {i + 1: c for i, (_n, c, _s, _v, _r) in enumerate(sc.fleet)}
     report: dict = {}
@@ -255,11 +578,12 @@ def _plan_gui(sc: Scenario):
         c.harvest_params["hv_dh_band_min_m"] = float(sc.dh_band_min_m)
     if sc.target_gsd is not None:
         c.harvest_params["target_gsd"] = float(sc.target_gsd)
-    c.plan_coverage_dccpp(areas=sc.areas, drones=sc.drones(),
-                          coverage_width_m=sc.coverage_width_m,
-                          overlap_rate=sc.overlap_rate,
-                          coverage_altitude=sc.coverage_altitude_m,
-                          mounting_angle_deg=0.0)
+    with _inject_survey(knobs):
+        c.plan_coverage_dccpp(areas=sc.areas, drones=sc.drones(),
+                              coverage_width_m=sc.coverage_width_m,
+                              overlap_rate=sc.overlap_rate,
+                              coverage_altitude=sc.coverage_altitude_m,
+                              mounting_angle_deg=0.0)
     return c.hv_coordinator, report
 
 
@@ -283,13 +607,15 @@ def _plan_direct(sc: Scenario):
     return coord, report
 
 
-def plan_and_export(sc: Scenario):
+def plan_and_export(sc: Scenario, knobs: SurveyKnobs | None = None):
     import hv_dccpp as hvlib
+    if knobs is not None:
+        sc = apply_survey_knobs(sc, knobs)
     out = out_dir(sc)
     out.mkdir(parents=True, exist_ok=True)
 
     t0 = time.perf_counter()
-    hv, report = (_plan_gui if sc.path == "gui" else _plan_direct)(sc)
+    hv, report = _plan_gui(sc, knobs) if sc.path == "gui" else _plan_direct(sc)
     dt = time.perf_counter() - t0
     plan, ctx, cfg = hv.last_plan, hv.last_ctx, hv.cfg
 
@@ -307,6 +633,24 @@ def plan_and_export(sc: Scenario):
           f"makespan {plan.makespan_s:.1f}s  status {report.get('status')}")
     print(f"validate passed={v.passed} conflicts={len(v.conflicts)} "
           f"uncovered={len(plan.uncovered)}")
+    vrec = {"passed": v.passed, "conflicts": len(v.conflicts), "coverage_ok": v.coverage_ok,
+            "energy_ok": v.energy_ok, "min_sep_h_m": v.min_sep_h_m, "min_sep_v_m": v.min_sep_v_m}
+    if knobs is not None and knobs.mapping:
+        # GUI 的建圖上傳閘門（含首飛風速上限 3 m/s）在這裡**只印不擋**：SITL 情境刻意用 5 m/s 規劃風
+        gate = hv.mapping_gate(max_wind_mps=MAPPING_FIRST_FLIGHT_MAX_WIND_MPS)
+        vrec["gui_mapping_gate"] = {"max_wind_mps": MAPPING_FIRST_FLIGHT_MAX_WIND_MPS, **gate}
+        print(f"GUI 建圖上傳閘門（風速上限 {MAPPING_FIRST_FLIGHT_MAX_WIND_MPS:g} m/s；SITL 只提示不擋）："
+              f"{'可上傳' if gate['uploadable'] else '✘ ' + '；'.join(gate['reasons'])}")
+    allow_conflicts = os.environ.get("HV_ALLOW_CONFLICTS", "0") == "1"
+    if knobs is not None and knobs.cross and not v.passed:
+        # 交叉航帶會飛進鄰機獨占區塊（同高度、只靠 4D 時間錯開）⇒ validate 不過就不飛（GUI 也會擋）
+        vrec["allow_conflicts"] = allow_conflicts
+        if not allow_conflicts:
+            (out / "validation.json").write_text(json.dumps(vrec, ensure_ascii=False, indent=1, default=str),
+                                                 encoding="utf-8")
+            raise SystemExit(f"交叉航帶計畫 validate 不過（殘留衝突 {len(v.conflicts)}）⇒ 不匯出、不飛；"
+                             "真的要飛請明確設 HV_ALLOW_CONFLICTS=1（會記在 validation.json）")
+        print(f"⚠⚠ HV_ALLOW_CONFLICTS=1：validate 不過（衝突 {len(v.conflicts)}）仍照飛")
     kinds = {cls: sen.hw.kind for (cls, _rid), sen in ctx.sensors.items()}
     print(f"感測器 {kinds}   酬載需求 "
           f"{ {r.req_id: r.kind for r in hv.last_inputs.payload_reqs.values()} }")
@@ -315,15 +659,17 @@ def plan_and_export(sc: Scenario):
               f"{p.distance_m / 1000:.2f}km  t_off={p.t_takeoff_s:.0f}s "
               f"t_land={p.t_land_s:.0f}s  E={p.energy_used_wh:.0f}/{p.energy_margin_wh:.0f}Wh")
 
+    cam_cfg = survey_eff = None
+    if knobs is not None:
+        cam_cfg = knobs.trigger_config()
+        survey_eff = survey_effective(hv, knobs, cam_cfg, sc)     # 讀回；沒到就停（不匯出）
     plan_dir = out / "plan"
     if plan_dir.exists():
         shutil.rmtree(plan_dir)
     summary = hvlib.export_all(plan, ctx, cfg, plan_dir, alt_frame="relative",
-                               camera_trigger=True, takeoff_delay="operator")
-    (out / "validation.json").write_text(json.dumps(
-        {"passed": v.passed, "conflicts": len(v.conflicts), "coverage_ok": v.coverage_ok,
-         "energy_ok": v.energy_ok, "min_sep_h_m": v.min_sep_h_m,
-         "min_sep_v_m": v.min_sep_v_m}, ensure_ascii=False, indent=1), encoding="utf-8")
+                               camera_trigger=True, takeoff_delay="operator", camera_cfg=cam_cfg)
+    (out / "validation.json").write_text(json.dumps(vrec, ensure_ascii=False, indent=1, default=str),
+                                         encoding="utf-8")
     (out / "report.json").write_text(json.dumps(
         {k: report.get(k) for k in ("status", "errors", "warnings", "notes",
                                     "uncovered", "timing_ms")},
@@ -349,6 +695,32 @@ def plan_and_export(sc: Scenario):
          "dh_band_min_m": cfg.dh_band_min_m,
          "target_gsd": sc.target_gsd},
         ensure_ascii=False, indent=1), encoding="utf-8")
+    if knobs is not None:
+        if summary.get("camera_cfg") != dataclasses.asdict(cam_cfg):
+            raise SystemExit(f"匯出器讀回的 camera_cfg {summary.get('camera_cfg')} ≠ 送進去的 "
+                             f"{dataclasses.asdict(cam_cfg)}")
+        (out / "survey_knobs.json").write_text(json.dumps(
+            {"knobs": knobs.to_dict(), "camera_trigger_config": dataclasses.asdict(cam_cfg),
+             "scenario_effective": {"key": sc.key, "hfov_deg": sc.hfov_deg, "vfov_deg": sc.vfov_deg,
+                                    "overlap_rate": sc.overlap_rate,
+                                    "coverage_altitude_m": sc.coverage_altitude_m},
+             "planner_readback": survey_eff, "logging": SURVEY_LOGGING_NOTE,
+             **({"cross_uncovered": [list(u_) for u_ in plan.uncovered if "_cross_" in str(u_[0])]}
+                if knobs.cross else {})},
+            ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+        print(f"⚠ 航測旋鈕生效（有效值見 survey_knobs.json）：建圖 {knobs.mapping}"
+              f"（引入段 {knobs.lead_in_m:g} m）、相機 {knobs.camera}、側向重疊 {sc.overlap_rate:g}、"
+              f"前向重疊 {sorted({v['forward_overlap'] for v in survey_eff['sensors'].values()})}、"
+              f"拍照率 {knobs.shutter_hz:g} Hz（{knobs.shutter_source}）→ CAM1_INTRVAL_MIN "
+              f"{knobs.interval_min_s:g} s、CAM_MAX_ROLL {knobs.cam_max_roll_deg:g}°")
+        for n in knobs.to_dict()["notes"]:
+            print("  ⚠", n)
+        if knobs.cross:
+            _cx = [w for w in (report.get("warnings") or []) if str(w).startswith("mapping_cross")]
+            _cu = [u_ for u_ in plan.uncovered if "_cross_" in str(u_[0])]
+            print(f"⚠ 交叉航帶：面積比例 {knobs.cross_fraction:g}、高度差 {knobs.cross_alt_offset_m:+g} m；"
+                  f"{len(_cx)} 則摘要／略過／退回（見 report.json warnings）"
+                  + (f"；⚠⚠ {len(_cu)} 條交叉帶沒排進去（{sorted({r for _s, r in _cu})}），GUI 會擋上傳" if _cu else ""))
     print("匯出:", {u: summary["uavs"][u]["n_items"] for u in summary["uavs"]})
     return hv, plan, ctx, cfg, summary
 
@@ -446,6 +818,34 @@ def launch(sc: Scenario, hv) -> list[dict]:
     return procs
 
 
+def _lastlog(i: int) -> int | None:
+    """該 instance 的 logs/LASTLOG.TXT（最新 .BIN 編號）。讀不到回 None（不要猜）。"""
+    try:
+        return int((_instance_dir(i) / "logs" / "LASTLOG.TXT").read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _record_sitl_logs(out: Path, procs: list[dict], before: dict) -> dict:
+    """把這一趟每架的 .BIN 路徑補進 survey_knobs.json（只在旋鈕開著時呼叫）。
+
+    LASTLOG 起飛前後沒變 ⇒ 這一趟沒有新日誌 ⇒ ``bin`` 記 None，不拿舊檔充數。
+    """
+    rows = {}
+    for p in procs:
+        logs = _instance_dir(p["instance"]) / "logs"
+        b, a = before.get(p["uav"]), _lastlog(p["instance"])
+        rows[p["uav"]] = {"instance": p["instance"], "log_dir": str(logs), "lastlog_before": b,
+                          "lastlog_after": a,
+                          "bin": str(logs / f"{a:08d}.BIN") if a is not None and a != b else None}
+    path = out / "survey_knobs.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["sitl_logs"] = rows
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+    print("SITL 日誌（給 scripts/survey_sitl_s1.py）:", {u: r["bin"] for u, r in rows.items()})
+    return rows
+
+
 # ══════════════════════════════════════════════════════════════════════
 #  3. 飛
 # ══════════════════════════════════════════════════════════════════════
@@ -459,12 +859,22 @@ def _param_file_values(sc: Scenario, uav: str) -> dict[str, float]:
     return vals
 
 
-def fly(sc: Scenario) -> int:
+def _mission_for_upload(plan, uav: str, ctx, cfg, cam_cfg=None, summary: dict | None = None):
+    """上傳用的任務項目：與匯出同一份 camera_cfg（上傳＝匯出）。給了 ``summary`` 就比對項數，不一致就停。"""
     from hv_dccpp import ardupilot as ap
+    items = ap.plan_to_mission_items(plan.plans[uav], ctx, cfg, alt_frame="relative", camera_trigger=True,
+                                     camera_cfg=cam_cfg)
+    if summary is not None and len(items) != summary["uavs"][uav]["n_items"]:
+        raise SystemExit(f"{uav} 上傳 {len(items)} 項 ≠ 匯出檔 {summary['uavs'][uav]['n_items']} 項")
+    return items
+
+
+def fly(sc: Scenario, knobs: SurveyKnobs | None = None) -> int:
     from hv_dccpp.mavlink_link import VehicleLink
 
     out = out_dir(sc)
-    hv, plan, ctx, cfg, _summary = plan_and_export(sc)
+    hv, plan, ctx, cfg, summary = plan_and_export(sc, knobs)
+    cam_cfg = knobs.trigger_config() if knobs is not None else None     # 與匯出同一份（上傳＝匯出）
     uavs = sorted(plan.plans)
     print(f"\n機隊 {uavs}  makespan {plan.makespan_s:.0f}s  speedup {SPEEDUP}"
           f"  → 牆鐘約 {plan.makespan_s / SPEEDUP / 60:.1f} 分鐘\n")
@@ -472,6 +882,7 @@ def fly(sc: Scenario) -> int:
     stop_ours()                       # 只收拾上一趟殘留的「我們的」
     procs = launch(sc, hv)
     print("SITL 已啟動:", [(p["uav"], p["port"], p["pid"]) for p in procs])
+    log0 = {p["uav"]: _lastlog(p["instance"]) for p in procs} if knobs is not None else {}
 
     links: dict[str, VehicleLink] = {}
     try:
@@ -702,8 +1113,8 @@ def fly(sc: Scenario) -> int:
         # ── 上傳 + 下載比對 ────────────────────────────────────────
         upload_rows = []
         for uav, lk in links.items():
-            items = ap.plan_to_mission_items(plan.plans[uav], ctx, cfg,
-                                             alt_frame="relative", camera_trigger=True)
+            items = _mission_for_upload(plan, uav, ctx, cfg, cam_cfg,
+                                        summary if knobs is not None else None)
             lk.upload_mission(items, timeout_s=60.0)
             back = lk.download_mission(timeout_s=60.0)
             same = len(back) == len(items)
@@ -833,6 +1244,8 @@ def fly(sc: Scenario) -> int:
              "actual_release_wall_s": {u: round(v, 1) for u, v in released.items()},
              "mode_change_rejected": sorted(rejected), "link_lost": sorted(dead)},
             ensure_ascii=False, indent=1), encoding="utf-8")
+        if knobs is not None:
+            _record_sitl_logs(out, procs, log0)
         print(f"\n落地 {len(done)}/{len(links)}：{sorted(done)}")
         if rejected:
             print(f"⚠ 切 AUTO 三次都被拒（沒起飛）：{sorted(rejected)}")
@@ -909,11 +1322,13 @@ def main() -> int:
               f"{SCENARIOS[key].coverage_altitude_m} m）")
     logging.basicConfig(level=logging.WARNING,
                         format="%(levelname)s %(name)s: %(message)s")
+    # ★ 航測建圖／相機旋鈕（SITL S1）。都不給 ⇒ None ⇒ 與舊版逐位元相同。
+    knobs = survey_knobs() if cmd in ("plan", "fly") else None
     if cmd == "plan":
-        plan_and_export(sc)
+        plan_and_export(sc, knobs)
         return 0
     if cmd == "fly":
-        return fly(sc)
+        return fly(sc, knobs)
     if cmd == "stop":
         stop_ours()
         return 0

@@ -27,6 +27,13 @@
 3. **兩邊用同一個物理刈幅** `2·h·tan(HFOV/2)`，因為要問的是「同一台相機飛
    這個圖案蓋不蓋得到」，不是各自宣稱的條帶間距。
 
+⚠⚠ 2026-09-09 訂正過兩格的說明文字。(c)(d) 原本寫的是
+「HARVEST 在單一胞混編機隊下不派任何飛機（0 台）」與「切開拯救了它：0 → 8 台」，
+那是 `mission.swarm_coordinator.split_area_for_fleet` **還不存在時**的行為。
+本腳本走 `SwarmCoordinator` 且 `use_harvest=True` ⇒ 現在會**自動**切區，
+(c) 實測就是 8 台 / 99.6%。說明文字與自己的數字對不上會讓整張圖失去可信度，
+所以改名時也要順手重量一次每一格的敘述。
+
 自檢
 ----
 第一格是 HV4SITL3 真的飛過的幾何與參數，它匯出的航點與實飛航跡**都是 100%**。
@@ -90,12 +97,12 @@ def plan(use_hv: bool, areas, n_a, n_b, *, alt, width, overlap, hfov=60.0, vfov=
     drones, cls = _drones(n_a, n_b, width)
     c = SwarmCoordinator()
     if use_hv:
-        c.use_hv_dccpp = True
+        c.use_harvest = True
         c.hv_class_of = lambda d: cls[int(d["drone_id"])]
         c.hv_home = HOME
         c.hv_wind = wind
         c.hv_fence_zones = []
-        c.hv_params = {"hfov_deg": hfov, "vfov_deg": vfov, "hv_c2_range_km": 25.0,
+        c.harvest_params = {"hfov_deg": hfov, "vfov_deg": vfov, "hv_c2_range_km": 25.0,
                        "hv_waiver_max_agl_m": 200.0, "hv_dem_margin_m": 3000.0}
     try:
         res = c.plan_coverage_dccpp(areas=areas, drones=drones, coverage_width_m=width,
@@ -150,20 +157,31 @@ SCENARIOS = [
                         "panel convention: pitch 113.2 m, overlap_rate 0",
          areas=[{"area_id": 1, "priority": 1.0, "polygon": rect(0, 0, 2500, 2000)}],
          n_a=4, n_b=4, alt=140.0, width=113.16, overlap=0.0,
-         note="HARVEST assigns no aircraft on a single-cell area with a mixed fleet"),
+         note="HARVEST now splits the single area for the fleet automatically"),
     dict(key="d", title="(d) Same 20 km$^2$ split into 4 areas, 4 Pioneer + 4 HERO\n"
                         "panel convention: pitch 113.2 m, overlap_rate 0",
          areas=[{"area_id": i + 1, "priority": 1.0,
                  "polygon": rect(-1875 + 1250 * i, 0, 625, 2000)} for i in range(4)],
          n_a=4, n_b=4, alt=140.0, width=113.16, overlap=0.0,
-         note="splitting the same area rescues HARVEST: 0 -> 8 aircraft"),
+         note="pre-splitting by hand adds nothing once the split is automatic"),
 ]
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--pdf", action="store_true", help="另外輸出向量檔")
+    ap.add_argument("--fleet", metavar="A+B", default=None,
+                    help="覆寫每一格的機隊，例如 --fleet 1+3（1 Pioneer + 3 HERO）"
+                         "或 --fleet 2+2。不給就用各格原本的設定。")
+    ap.add_argument("--out", default=None, help="輸出檔名（預設 harvest_vs_dccpp.png）")
     args = ap.parse_args()
+
+    if args.fleet:
+        _a, _b = (int(x) for x in args.fleet.split("+"))
+        for _sc in SCENARIOS:
+            _sc["n_a"], _sc["n_b"] = _a, _b
+            head = _sc["title"].splitlines()[0]
+            _sc["title"] = head + f"\nfleet overridden: {_a} Pioneer + {_b} HERO"
 
     fig, axes = plt.subplots(2, 2, figsize=(15.0, 11.0))
     rows = []
@@ -245,7 +263,7 @@ def main() -> int:
 
     out = ROOT / "exports"
     out.mkdir(exist_ok=True)
-    png = out / "harvest_vs_dccpp.png"
+    png = out / (args.out or "harvest_vs_dccpp.png")
     fig.savefig(png, dpi=170)
     print("寫出", png)
     if args.pdf:

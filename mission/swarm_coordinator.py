@@ -2658,6 +2658,16 @@ class SwarmCoordinator:
                 try:
                     result = _plan_once(_rec0)
                 except AeroPlanAdapterError as _e:
+                    # ⚠ 轉接層 NO_GO 是**先送 report 再 raise** ⇒ 緩衝裡那份（status=NO_GO、coverage_altitude_clamped、
+                    #   alternate_auto_placed…）不放行的話，失敗對話框只帶得到上面的 _prenotes。
+                    #   這裡的緩衝只有這一次規劃的那份（_plan_once 開頭清過），還沒有任何試跑。
+                    #   消費端壞掉不能把 NO_GO 換成別的例外（轉接層自己送時也是吞掉）。
+                    for _payload in _rep_buf:
+                        if _real_report is not None:
+                            try:
+                                _real_report(_payload)
+                            except Exception:                  # noqa: BLE001
+                                pass
                     # NO_GO 的訊息只寫「所有區域皆無可行構型」，看不出是地形起伏吃掉高度帶 ⇒ 把算好的提示接上
                     _hint = getattr(self, '_terrain_hint', '')
                     if _hint and 'no_coverable_area' in str(_e):

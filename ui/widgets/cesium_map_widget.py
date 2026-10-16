@@ -424,6 +424,10 @@ class CesiumMapWidget(MapWidgetBase):
         self._photo_pose_layers: dict = {}
         # GCP／檢核點佈設的點圖層（survey.gcp_plan）：圖層代號 → 統計
         self._survey_point_layers: dict = {}
+        # 風場圖層：_load_cesium 把這三個套回頁面（重載也不丟）；即時更新走 _js
+        self._wind_field: Optional[dict] = None
+        self._wind_arrows: dict = {}
+        self._wind_options: dict = {}
 
         self._cesium_html_file = None
 
@@ -534,7 +538,21 @@ class CesiumMapWidget(MapWidgetBase):
 
         ion_token = self._resolve_token()
 
+        # 風場圖層：引擎 <script>（缺檔 ⇒ 換成註解、記 error，其餘照常）＋ 膠水 ＋ 把 Python 端狀態套回去
+        from ui.widgets import wind_layer as wl
+        try:
+            wind_script = f'<script src="{wl.wind_flow_js_uri()}"></script>'
+        except FileNotFoundError as e:
+            logger.error(f'[Wind/3D] {e}')
+            wind_script = '<!-- wind_flow.js 缺檔：風場圖層停用 -->'
+        wind_restore = wl.restore_js(self.__dict__.get('_wind_field'),
+                                     list((self.__dict__.get('_wind_arrows') or {}).values()),
+                                     self.__dict__.get('_wind_options'))
+
         html = (_CESIUM_HTML
+                .replace('__WIND_FLOW_SCRIPT__', wind_script)
+                .replace('/*__WIND_GLUE__*/', wl.glue_js('cesium'))
+                .replace('/*__WIND_RESTORE__*/', wind_restore)
                 .replace('__CESIUM_JS__',   cesium_js)
                 .replace('__CESIUM_CSS__',  cesium_css)
                 .replace('__CESIUM_TOKEN__', ion_token)
@@ -1995,6 +2013,53 @@ class CesiumMapWidget(MapWidgetBase):
         existed = self.__dict__.setdefault('_survey_point_layers', {}).pop(layer_id, None) is not None
         self._js(f'clearSurveyPoints({json.dumps(layer_id)})')
         return existed
+
+    # ── 風場圖層（資料：core.wind_field；引擎：web_shared/wind_flow.js；膠水：ui.widgets.wind_layer）──
+    #   與 2D MapWidget 同名同義；狀態留在 Python（_load_cesium 重載時套回去）。clear_all() 不清它。
+    def set_wind_field(self, field) -> dict:
+        from ui.widgets import wind_layer as wl
+        f = wl.check_wind_field(field)
+        self._wind_field = f
+        self._js(wl.js_call('setWindField', f))
+        return {'cells': len(f['lats']) * len(f['lons']), 'label': f['label'], 'mode': f['mode']}
+
+    def clear_wind_field(self) -> bool:
+        existed = self.__dict__.get('_wind_field') is not None
+        self._wind_field = None
+        self._js('clearWindField()')
+        return existed
+
+    def set_wind_arrows(self, arrows) -> dict:
+        """每架一支風箭頭（飛控 WIND 估計）。整批取代：沒在這批裡的機就不畫。"""
+        from ui.widgets import wind_layer as wl
+        rows, stats = wl.wind_arrows_to_compact(arrows)
+        if stats['skipped']:
+            logger.warning(f'[Wind/3D] {stats["skipped"]} 架沒有位置或風值無效，未畫箭頭')
+        self._wind_arrows = {r[0]: r for r in rows}
+        self._js(wl.js_call('setWindArrows', rows))
+        return stats
+
+    def clear_wind_arrows(self) -> bool:
+        existed = bool(self.__dict__.get('_wind_arrows'))
+        self._wind_arrows = {}
+        self._js('clearWindArrows()')
+        return existed
+
+    def set_wind_options(self, **opts) -> dict:
+        from ui.widgets import wind_layer as wl
+        import math as _math
+        lim = opts.get('limitMps')
+        if lim is not None and not (isinstance(lim, (int, float)) and _math.isfinite(lim) and lim > 0):
+            raise ValueError(f'limitMps 要是正數：{lim!r}')
+        cur = dict(self.__dict__.get('_wind_options') or {})
+        cur.update(opts)
+        self._wind_options = cur
+        self._js(wl.js_call('setWindOptions', cur))
+        return dict(cur)
+
+    def query_wind(self, callback) -> None:
+        """向頁面查風場圖層狀態。callback(dict)。"""
+        self._page.runJavaScript('windInfo()', callback)
 
     def render_coverage_heatmap(self, display_grid: dict):
         """用 SAR 熱力圖呈現偵察覆蓋率分布（紅=漏掃，藍=已充分掃過）。

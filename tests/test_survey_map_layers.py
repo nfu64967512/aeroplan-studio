@@ -935,7 +935,8 @@ def test_the_whole_main_html_template_loads_and_exposes_the_survey_functions(_pw
     html = MAIN_HTML.read_text(encoding="utf-8")
     for k, v in {"__CESIUM_JS__": (CESIUM_DIR / "Cesium.js").as_uri(),
                  "__CESIUM_CSS__": (CESIUM_DIR / "Widgets" / "widgets.css").as_uri(),
-                 "__CESIUM_TOKEN__": "", "__INIT_LAT__": str(LAT0), "__INIT_LON__": str(LON0),
+                 "__CESIUM_TOKEN__": "", "__WIND_FLOW_SCRIPT__": "",
+                 "__INIT_LAT__": str(LAT0), "__INIT_LON__": str(LON0),
                  "__INIT_HEIGHT__": "2000", "__PLANE_MODEL_URI__": "", "__COPTER_MODEL_URI__": "",
                  "__VTOL_MODEL_URI__": "", "__VTOL_MODEL_SCALE__": "0.01", "__VTOL_HEADING_OFFSET__": "-90",
                  "__VTOL_PITCH_OFFSET__": "90", "__VTOL_ROLL_OFFSET__": "180"}.items():

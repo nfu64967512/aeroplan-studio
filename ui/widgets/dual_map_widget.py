@@ -923,6 +923,34 @@ class DualMapWidget(MapWidgetBase):
         b = self.map_2d.clear_survey_points(layer_id)
         return bool(a or b)
 
+    # ── 風場圖層（core.wind_field）：2D + 3D 都要畫（理由同上，不能靠 __getattr__）──
+    def set_wind_field(self, field) -> dict:
+        """風場（規劃風均勻場／外部網格）畫到 2D 與 3D；回傳 ``{'3d': …, '2d': …}``。"""
+        eff3d = self.map_3d.set_wind_field(field)
+        eff2d = self.map_2d.set_wind_field(field)
+        return {'3d': eff3d, '2d': eff2d}
+
+    def clear_wind_field(self) -> bool:
+        a = self.map_3d.clear_wind_field()
+        b = self.map_2d.clear_wind_field()
+        return bool(a or b)
+
+    def set_wind_arrows(self, arrows) -> dict:
+        arrows = list(arrows)
+        eff3d = self.map_3d.set_wind_arrows(arrows)
+        eff2d = self.map_2d.set_wind_arrows(arrows)
+        return {'3d': eff3d, '2d': eff2d}
+
+    def clear_wind_arrows(self) -> bool:
+        a = self.map_3d.clear_wind_arrows()
+        b = self.map_2d.clear_wind_arrows()
+        return bool(a or b)
+
+    def set_wind_options(self, **opts) -> dict:
+        eff3d = self.map_3d.set_wind_options(**opts)
+        eff2d = self.map_2d.set_wind_options(**opts)
+        return {'3d': eff3d, '2d': eff2d}
+
     # ── 屬性代理（讓 main_window 直接存取 corners 等）─────────────────
     @property
     def corners(self) -> List[Tuple[float, float]]:

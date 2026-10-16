@@ -159,6 +159,9 @@ class VTOLReconPanel(QWidget):
     find_flat_requested = pyqtSignal(dict)    # 找平坦位置（參數；作業區由 MainWindow 補）
     flat_apply_requested = pyqtSignal(float, float, float)   # 平移作業區到（緯度, 經度），縮放倍率
     flat_undo_requested = pyqtSignal()        # 復原上次平移
+    wind_display_changed = pyqtSignal(dict)   # 風場顯示勾選／規劃風值變了：{'plan','live','speed_mps','dir_from_deg'}
+    wind_grid_requested = pyqtSignal(dict)    # 抓氣象網格：{'height': '10m'|'120m'}（作業區由 MainWindow 補）
+    wind_grid_clear_requested = pyqtSignal()  # 清除氣象網格
     verify_coverage_requested = pyqtSignal(dict)   # 覆蓋率驗算
     show_missed_requested = pyqtSignal()      # 在地圖標出漏掃格（紅點）
     show_heatmap_requested = pyqtSignal()     # 用 SAR 熱力圖呈現覆蓋分布
@@ -943,6 +946,59 @@ class VTOLReconPanel(QWidget):
         self.hv_wind_dir_spin.setSuffix(" °")
         self.hv_wind_dir_spin.setToolTip("風**從哪個方位吹來**（氣象慣例，0=北）。影響逆風進場方向。")
         form.addRow("風向（風從何方來）:", self.hv_wind_dir_spin)
+
+        # ── 風場顯示（地圖圖層；使用者 2026-10-16：規劃風＋飛機即時風＋外部氣象網格，2D/3D 都畫）──
+        #   三種風的意義不同，圖例會寫明來源：規劃風＝面板假設；氣象網格＝模式預報；即時風＝飛控 EKF 估計。
+        self.wind_show_plan_check = QCheckBox("規劃風")
+        self.wind_show_plan_check.setChecked(False)
+        self.wind_show_plan_check.setToolTip(
+            "把上面的平均風速／風向畫成作業區一帶**全區均勻**的流動層＋作業區中心一支箭頭。\n"
+            "這是面板假設，不是實測；有抓氣象網格時流動層改畫網格，規劃風只剩箭頭。")
+        self.wind_show_live_check = QCheckBox("飛機即時風")
+        self.wind_show_live_check.setChecked(True)
+        self.wind_show_live_check.setToolTip(
+            "每架飛控的 EKF 風估計（MAVLink WIND）畫成跟著飛機走的箭頭，長度＝風速、顏色依風速上限。\n"
+            "⚠ 是估計不是量測：定翼飛行中（轉過彎、有空速計）才可信；起飛前仍要現場實測。")
+        self.wind_grid_height_combo = QComboBox()
+        self.wind_grid_height_combo.addItem("10 m（目前）", "10m")
+        self.wind_grid_height_combo.addItem("120 m（這小時）", "120m")
+        self.wind_grid_height_combo.setToolTip("氣象網格的高度：10 m 是目前值（15 分鐘級）；120 m 是這個小時的逐時預報。")
+        self.btn_wind_grid = IconButton("radar", "抓氣象網格", tone="primary", compact=True)
+        self.btn_wind_grid.setToolTip(
+            "向 Open-Meteo 抓作業區一帶 6×6 格點的模式預報風（不是實測；解析度約 1–11 km，地形與陣風不反映）。\n"
+            "要網路；會送出作業區附近的格點經緯度。沒圈作業區時不能抓。")
+        self.btn_wind_grid.setEnabled(False)
+        self.btn_wind_grid_clear = IconButton("clear", "清除網格", tone="ghost", compact=True)
+        self.btn_wind_grid_clear.setEnabled(False)
+        _wrow = QHBoxLayout()
+        _wrow.setContentsMargins(0, 0, 0, 0)
+        _wrow.addWidget(self.wind_show_plan_check)
+        _wrow.addWidget(self.wind_show_live_check)
+        _wrow.addStretch(1)
+        _wwrap = QWidget()
+        _wwrap.setLayout(_wrow)
+        form.addRow("風場顯示:", _wwrap)
+        _grow = QHBoxLayout()
+        _grow.setContentsMargins(0, 0, 0, 0)
+        _grow.addWidget(self.wind_grid_height_combo)
+        _grow.addWidget(self.btn_wind_grid, 1)
+        _grow.addWidget(self.btn_wind_grid_clear)
+        _gwrap = QWidget()
+        _gwrap.setLayout(_grow)
+        form.addRow("氣象網格:", _gwrap)
+        self.wind_status_label = QLabel("")
+        self.wind_status_label.setWordWrap(True)
+        self.wind_status_label.setProperty("role", "caption")
+        form.addRow("", self.wind_status_label)
+        self._wind_grid_busy = False
+        self._wind_grid_loaded = False
+        self.wind_show_plan_check.toggled.connect(self._emit_wind_display)
+        self.wind_show_live_check.toggled.connect(self._emit_wind_display)
+        self.hv_wind_speed_spin.valueChanged.connect(self._emit_wind_display)
+        self.hv_wind_dir_spin.valueChanged.connect(self._emit_wind_display)
+        self.btn_wind_grid.clicked.connect(
+            lambda: self.wind_grid_requested.emit({"height": str(self.wind_grid_height_combo.currentData())}))
+        self.btn_wind_grid_clear.clicked.connect(self.wind_grid_clear_requested.emit)
 
         self.hv_note_label = QLabel(
             "作業高度、條帶間距、最小間距與高度錯開量沿用上方欄位。\n"
@@ -1937,6 +1993,8 @@ class VTOLReconPanel(QWidget):
         _ff = getattr(self, "btn_find_flat", None)             # 面板建構中途也會走到這裡
         if _ff is not None and not getattr(self, "_flat_busy", False):
             _ff.setEnabled(bool(_has_area and getattr(self, "_flat_token_ok", False)))
+        if getattr(self, "btn_wind_grid", None) is not None:
+            self._sync_wind_buttons()
         self.btn_verify.setEnabled(self._has_plan)
         # 熱力圖只要驗算過就能看（即使 100% 覆蓋，也能看出分布）；
         # 紅點標示則要真的有漏掃才有東西可標。
@@ -1944,6 +2002,38 @@ class VTOLReconPanel(QWidget):
         self.btn_show_missed.setEnabled(self._has_missed)
         self.btn_export.setEnabled(self._has_plan)
         self.btn_upload.setEnabled(self._has_plan)
+
+    # ── 風場顯示 ────────────────────────────────────────────
+    def get_wind_display(self) -> dict:
+        """目前的風場顯示設定（規劃風值直接帶出來，MainWindow 不必再去讀兩個 spin）。"""
+        return {"plan": bool(self.wind_show_plan_check.isChecked()),
+                "live": bool(self.wind_show_live_check.isChecked()),
+                "speed_mps": float(self.hv_wind_speed_spin.value()),
+                "dir_from_deg": float(self.hv_wind_dir_spin.value()),
+                "grid_height": str(self.wind_grid_height_combo.currentData())}
+
+    def _emit_wind_display(self, *_a) -> None:
+        self.wind_display_changed.emit(self.get_wind_display())
+
+    def set_wind_grid_busy(self, busy: bool, text: str = "") -> None:
+        """抓取中：鎖住按鈕；結束（成功／失敗）再放開。"""
+        self._wind_grid_busy = bool(busy)
+        self._sync_wind_buttons()
+        self.wind_status_label.setText(text)
+
+    def set_wind_grid_loaded(self, loaded: bool, text: str = "") -> None:
+        """有沒有網格在圖上（決定「清除網格」能不能按）。"""
+        self._wind_grid_loaded = bool(loaded)
+        self._sync_wind_buttons()
+        self.wind_status_label.setText(text)
+
+    def set_wind_status(self, text: str) -> None:
+        self.wind_status_label.setText(text)
+
+    def _sync_wind_buttons(self) -> None:
+        _has_area = (self._corner_count >= 3 or getattr(self, "_committed_areas", 0) >= 1)
+        self.btn_wind_grid.setEnabled(bool(_has_area and not self._wind_grid_busy))
+        self.btn_wind_grid_clear.setEnabled(bool(self._wind_grid_loaded and not self._wind_grid_busy))
 
     # ── 找平坦位置 ──────────────────────────────────────────
     def get_flat_request(self) -> dict:

@@ -4,6 +4,7 @@
 <title>AeroPlan Studio — 3D View</title>
 <script src="__CESIUM_JS__"></script>
 <link href="__CESIUM_CSS__" rel="stylesheet">
+__WIND_FLOW_SCRIPT__
 <style>
   html,body{width:100%;height:100%;margin:0;padding:0;overflow:hidden;background:#0d1117;font-family:sans-serif}
   #cesiumContainer{position:absolute;top:0;left:0;width:100%;height:100%}
@@ -6254,6 +6255,21 @@ function surveyPointsInfo() {
   return o;
 }
 // SURVEY_POINTS_END
+// ══════════════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════════════
+//  WIND_BEGIN —— 風場圖層（流動粒子＋每架風箭頭＋圖例）
+//
+//  引擎 ui/widgets/web_shared/wind_flow.js 由 head 的 WIND_FLOW_SCRIPT 佔位（Python 換成 <script src>）載入（window.AeroWind）；
+//  ⚠ 這段註解不可以寫出那個佔位字本身：Python 會把它換成含 "</" + "script>" 的標籤，HTML 剖析器不管 JS 註解，整段 script 會被截斷。
+//  頁面函式 setWindField / clearWindField / setWindArrows / clearWindArrows / setWindOptions / windInfo
+//  與 Cesium 投影 adapter 由 Python 端 ui/widgets/wind_layer.glue_js('cesium') 在 _load_cesium 時填進
+//  下面的 __WIND_GLUE__（2D folium 頁面用同一份膠水，只換 adapter），Python 端記住的狀態填進 __WIND_RESTORE__。
+//  兩個佔位都是註解：沒被替換（例如直接開這個模板）時什麼都不做、也不會報錯。
+// ══════════════════════════════════════════════════════════════════
+/*__WIND_GLUE__*/
+/*__WIND_RESTORE__*/
+// WIND_END
 // ══════════════════════════════════════════════════════════════════
 
 

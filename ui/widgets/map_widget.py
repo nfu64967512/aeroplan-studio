@@ -152,6 +152,11 @@ class MapWidget(MapWidgetBase):
         self._photo_pose_layers: dict = {}
         # GCP／檢核點佈設（持久化，隨 _render_map 重建）：圖層代號 → {'rows', 'stats'}
         self._survey_point_layers: dict = {}
+        # 風場圖層（持久化，隨 _render_map 重建；即時更新走 runJavaScript）：
+        #   _wind_field = core.wind_field.WindField.to_js()（檢查過）、_wind_arrows = sysid → 精簡列、_wind_options
+        self._wind_field: Optional[dict] = None
+        self._wind_arrows: dict = {}
+        self._wind_options: dict = {}
 
         self._init_ui()
         self._init_map()
@@ -1241,6 +1246,8 @@ html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden;
 }})();
 </script>
 """
+        js_code += self._wind_js_block()
+
         # 注入到 </html> 前（在 folium 的 Leaflet script 之後）
         if '</html>' in html:
             html = html.replace('</html>', js_code + '\n</html>')
@@ -1248,6 +1255,23 @@ html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden;
             html += js_code
 
         return html
+
+    def _wind_js_block(self) -> str:
+        """風場圖層：引擎 <script src> ＋ Leaflet 膠水 ＋ 把 Python 端記住的狀態套回去（folium 每次重繪整頁都要）。
+
+        引擎檔不在就不注入（記一次 error），其餘地圖功能照常。
+        """
+        from ui.widgets import wind_layer as wl
+        try:
+            uri = wl.wind_flow_js_uri()
+        except FileNotFoundError as e:
+            if not self.__dict__.get('_wind_missing_logged', False):
+                self._wind_missing_logged = True
+                logger.error(f'[Wind/2D] {e}')
+            return ''
+        rows = list((self.__dict__.get('_wind_arrows') or {}).values())
+        restore = wl.restore_js(self.__dict__.get('_wind_field'), rows, self.__dict__.get('_wind_options'))
+        return (f'\n<script src="{uri}"></script>\n<script>\n{wl.glue_js("leaflet")}\n{restore}\n</script>\n')
 
     # ─────────────────────────────────────
     # 地圖點擊處理
@@ -2402,6 +2426,60 @@ html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden;
                 tooltip=folium.Tooltip(_html.escape(label), permanent=True, direction='top'),
             ).add_to(fg)
         fg.add_to(m)
+
+    # ── 風場圖層（資料：core.wind_field；引擎：web_shared/wind_flow.js；膠水：ui.widgets.wind_layer）──
+    #   狀態留在 Python（folium 每次重繪整頁都要套回去，見 _wind_js_block）；set/clear 即時走 runJavaScript 不重繪。
+    #   ⚠ clear_all() 不清它（風不是規劃疊圖）；用 clear_wind_field / clear_wind_arrows。
+    def _run_wind_js(self, js: str) -> None:
+        page = self.__dict__.get('custom_page')
+        if page is not None:
+            page.runJavaScript(js)
+
+    def set_wind_field(self, field) -> dict:
+        """顯示一個風場（規劃風的均勻場或外部網格）。只有一個：再設一次 = 換掉。"""
+        from ui.widgets import wind_layer as wl
+        f = wl.check_wind_field(field)
+        self._wind_field = f
+        self._run_wind_js(wl.js_call('setWindField', f))
+        return {'cells': len(f['lats']) * len(f['lons']), 'label': f['label'], 'mode': f['mode']}
+
+    def clear_wind_field(self) -> bool:
+        existed = self.__dict__.get('_wind_field') is not None
+        self._wind_field = None
+        self._run_wind_js('clearWindField()')
+        return existed
+
+    def set_wind_arrows(self, arrows) -> dict:
+        """每架一支風箭頭（飛控 WIND 估計）。整批取代：沒在這批裡的機就不畫。"""
+        from ui.widgets import wind_layer as wl
+        rows, stats = wl.wind_arrows_to_compact(arrows)
+        if stats['skipped']:
+            logger.warning(f'[Wind/2D] {stats["skipped"]} 架沒有位置或風值無效，未畫箭頭')
+        self._wind_arrows = {r[0]: r for r in rows}
+        self._run_wind_js(wl.js_call('setWindArrows', rows))
+        return stats
+
+    def clear_wind_arrows(self) -> bool:
+        existed = bool(self.__dict__.get('_wind_arrows'))
+        self._wind_arrows = {}
+        self._run_wind_js('clearWindArrows()')
+        return existed
+
+    def set_wind_options(self, **opts) -> dict:
+        """圖層選項（limitMps 風速上限上色門檻、particles、opacity…）；回傳合併後的全部選項。"""
+        from ui.widgets import wind_layer as wl
+        lim = opts.get('limitMps')
+        if lim is not None and not (isinstance(lim, (int, float)) and math.isfinite(lim) and lim > 0):
+            raise ValueError(f'limitMps 要是正數：{lim!r}')
+        cur = dict(self.__dict__.get('_wind_options') or {})
+        cur.update(opts)
+        self._wind_options = cur
+        self._run_wind_js(wl.js_call('setWindOptions', cur))
+        return dict(cur)
+
+    def query_wind(self, callback) -> None:
+        """向頁面查風場圖層狀態（引擎有沒有載入、畫了幾格／幾架）。callback(dict)。"""
+        self.custom_page.runJavaScript('windInfo()', callback)
 
     def _photo_pose_cap_notice(self, layer_id: str, n: int, k: int = 0) -> str:
         # 只用行內樣式（不加全域 CSS：body > div 那類規則曾把圖例撐成全螢幕）；pointer-events:none 不擋點擊

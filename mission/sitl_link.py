@@ -397,6 +397,12 @@ class SITLLink(QThread):
     # STATUSTEXT「Mission: <seq> <type>」：(sysid, seq, type)。ArduPilot 對每一個開始執行的指令（DO 也算）都送，
     # 是 206 開／關真正執行時刻的唯一即時來源。原本的 status_text 照舊（不帶 sysid、不過濾來源）。
     mission_item_started = pyqtSignal(int, int, str)
+    # 飛控 EKF 的風估計（MAVLink WIND；只收**自駕儀元件**送的）：(sysid, dict)，每一則都送（約 1–2 Hz）。
+    #   {'dir_from_deg': 風的來向（氣象慣例，真北起順時針）, 'speed_mps': 水平風速, 'speed_z_mps': 垂直分量,
+    #    'lat','lon','alt_rel': 收到當下機卡的位置（還沒定位時三個都是 None）, 't': time.monotonic()}
+    #   ⚠ 這是估計不是量測：定翼飛行中（有空速計、轉過彎）才可信；多旋翼／剛起飛時數值可能是 0 或亂飄。
+    #   ⚠ 非有限值（NaN/inf）整則丟掉不送，不會靜默變 0。
+    wind = pyqtSignal(int, dict)
 
     def __init__(self, conn_str: str = 'udpin:0.0.0.0:14550',
                  sysid_label: int = 1, vehicle_hint: str = '',
@@ -440,6 +446,7 @@ class SITLLink(QThread):
         self._components: dict = {}          # sysid → {compid → 資訊 dict}
         self._cam_stats: dict = {}           # (sysid, cam_idx) → CAMERA_FEEDBACK 統計
         self._mission_current: dict = {}     # sysid → 最近一則 MISSION_CURRENT（dict）
+        self._wind: dict = {}                # sysid → 最近一則 WIND（dict，欄位見 wind 信號）
         self._state_lock = threading.Lock()  # 保護上面幾個（接收執行緒寫、GUI 執行緒讀）
         # ── 參數讀回（read_params）：等待者清單，由接收執行緒的 PARAM_VALUE 分支填值 ──
         self._param_cv = threading.Condition()
@@ -736,6 +743,13 @@ class SITLLink(QThread):
         with self._state_lock:
             mc = self._mission_current.get(key)
             return None if mc is None else dict(mc)
+
+    def get_wind(self, sysid: Optional[int] = None) -> Optional[dict]:
+        """某架（預設本鏈路 sysid_label）最近一則 WIND 風估計的複本（欄位見 wind 信號）；沒收過回 None。"""
+        key = self.sysid_label if sysid is None else int(sysid)
+        with self._state_lock:
+            w = self._wind.get(key)
+            return None if w is None else dict(w)
 
     def get_camera_stats(self, sysid: Optional[int] = None, cam_idx: int = 0) -> Optional[dict]:
         """某架（預設本鏈路 sysid_label）某相機的 CAMERA_FEEDBACK 統計複本；沒收過回 None。
@@ -1381,6 +1395,10 @@ class SITLLink(QThread):
                 self.mission_current.emit(src, dict(mc))
             return
 
+        if mtype == 'WIND':
+            self._on_wind(src, msg)
+            return
+
         f = self._frame_for(src)
         emit = False
 
@@ -1469,6 +1487,29 @@ class SITLLink(QThread):
                     hit = True
             if hit:
                 self._param_cv.notify_all()
+
+    # ── WIND → 飛控風估計（地圖風場圖層用）─────────────────────────────
+    def _on_wind(self, src: int, msg) -> None:
+        """WIND（ardupilotmega）：direction ＝ 風的**來向**（deg）、speed ＝ 水平風速、speed_z ＝ 垂直分量（m/s）。
+
+        每一則都存成最新值並 emit；三個欄位任一個不是有限數就整則丟掉（EKF 還沒收斂時 ArduPilot 可能送 NaN，
+        變成 0 會被當成「無風」）。附上當下機卡的位置讓地圖端不必再去撈 frame。
+        """
+        import math
+        try:
+            d, s, sz = float(msg.direction), float(msg.speed), float(msg.speed_z)
+        except (AttributeError, TypeError, ValueError):
+            return
+        if not (math.isfinite(d) and math.isfinite(s) and math.isfinite(sz)) or s < 0.0:
+            return
+        f = self._frames.get(src)
+        has_pos = f is not None and (f.lat != 0.0 or f.lon != 0.0)
+        w = {'dir_from_deg': d % 360.0, 'speed_mps': s, 'speed_z_mps': sz,
+             'lat': f.lat if has_pos else None, 'lon': f.lon if has_pos else None,
+             'alt_rel': f.alt_rel if has_pos else None, 't': time.monotonic()}
+        with self._state_lock:
+            self._wind[src] = w
+        self.wind.emit(src, dict(w))
 
     # ── CAMERA_FEEDBACK → 拍照計數 ──────────────────────────────────────
     def _on_camera_feedback(self, src: int, msg) -> None:

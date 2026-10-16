@@ -1921,6 +1921,10 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         self.vtol_recon_panel.find_flat_requested.connect(self._on_vtol_recon_find_flat)
         self.vtol_recon_panel.flat_apply_requested.connect(self._on_vtol_recon_apply_flat)
         self.vtol_recon_panel.flat_undo_requested.connect(self._on_vtol_recon_undo_flat)
+        # 風場顯示（規劃風／飛機即時風／氣象網格 → 2D+3D 風場圖層）
+        self.vtol_recon_panel.wind_display_changed.connect(self._on_wind_display_changed)
+        self.vtol_recon_panel.wind_grid_requested.connect(self._on_wind_grid_requested)
+        self.vtol_recon_panel.wind_grid_clear_requested.connect(self._on_wind_grid_clear)
         self.vtol_recon_panel.verify_coverage_requested.connect(
             self._on_vtol_recon_verify)
         self.vtol_recon_panel.show_missed_requested.connect(
@@ -2549,6 +2553,184 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
     def _on_flat_search_failed(self, msg: str) -> None:
         self.vtol_recon_panel.set_flat_busy(False, f"⚠ {msg}")
         self.statusBar().showMessage(f'找平坦位置失敗：{msg}', 10000)
+
+    # ══════════════════════════════════════════════════════════════
+    #  風場顯示（規劃風／飛機即時風／外部氣象網格 → 2D+3D 風場圖層）
+    #
+    #  流動層只有一個：有氣象網格就畫網格；否則勾了「規劃風」就畫作業區一帶的均勻場。
+    #  箭頭每架一支（飛控 WIND，太舊的不畫）＋ 規劃風在作業區中心一支（sysid 0）。
+    #  資料格式與圖例文字在 core.wind_field；頁面端在 ui.widgets.wind_layer。
+    # ══════════════════════════════════════════════════════════════
+    WIND_LIVE_PUSH_INTERVAL_S = 0.5      # 即時風箭頭最多每 0.5 s 推一次地圖（WIND 約 1–2 Hz × N 架）
+    WIND_LIVE_STALE_S = 10.0             # 超過這麼久沒收到 WIND 的機不再畫箭頭
+    WIND_PLAN_SYSID = 0                  # 規劃風箭頭用的代號（真機 sysid 從 1 起）
+    WIND_GRID_MARGIN_M = 500.0           # 網格／均勻場範圍 = 作業區外擴這麼多
+
+    def _wind_state(self) -> dict:
+        st = self.__dict__.get('_wind')
+        if st is None:
+            st = self.__dict__['_wind'] = {'live': {}, 'grid': None, 'grid_text': '', 'last_push': 0.0}
+        return st
+
+    def _wind_display(self) -> dict:
+        panel = getattr(self, 'vtol_recon_panel', None)
+        get = getattr(panel, 'get_wind_display', None)
+        if get is None:
+            return {'plan': False, 'live': True, 'speed_mps': 0.0, 'dir_from_deg': 0.0}
+        return get()
+
+    def _wind_limit_mps(self) -> float:
+        """箭頭／圖例上色門檻 = 面板的「建圖作業風速上限」；讀不到就用首飛預設 3 m/s。"""
+        from ui.widgets.wind_layer import WIND_LIMIT_MPS_DEFAULT
+        spin = getattr(getattr(self, 'vtol_recon_panel', None), 'hv_map_max_wind_spin', None)
+        try:
+            v = float(spin.value()) if spin is not None else WIND_LIMIT_MPS_DEFAULT
+        except Exception:
+            v = WIND_LIMIT_MPS_DEFAULT
+        return v if v > 0 else WIND_LIMIT_MPS_DEFAULT
+
+    def _wind_area_bbox(self):
+        """作業區外擴 WIND_GRID_MARGIN_M 的 bbox；沒圈作業區回 None。"""
+        from core.wind_field import area_bbox
+        polys = self.survey_area_polygons()
+        return area_bbox(polys, margin_m=self.WIND_GRID_MARGIN_M) if polys else None
+
+    def _on_wind(self, sysid: int, w: dict) -> None:
+        """飛控 WIND → 記最新值；依節流推箭頭到地圖。"""
+        st = self._wind_state()
+        st['live'][int(sysid)] = dict(w)
+        now = time.monotonic()
+        if now - st['last_push'] >= self.WIND_LIVE_PUSH_INTERVAL_S:
+            self._push_wind_arrows(now)
+
+    def _wind_arrow_rows(self, now: float) -> list:
+        st = self._wind_state()
+        disp = self._wind_display()
+        rows = []
+        if disp.get('live', True):
+            for sid, w in sorted(st['live'].items()):
+                if now - float(w.get('t', 0.0)) > self.WIND_LIVE_STALE_S:
+                    continue
+                rows.append({'sysid': sid, 'lat': w.get('lat'), 'lon': w.get('lon'), 'alt_rel': w.get('alt_rel'),
+                             'dir_from_deg': w['dir_from_deg'], 'speed_mps': w['speed_mps'],
+                             'label': f'UAV-{sid} 即時風（EKF 估計）'})
+        if disp.get('plan'):
+            bbox = self._wind_area_bbox()
+            if bbox is not None:
+                rows.append({'sysid': self.WIND_PLAN_SYSID, 'lat': 0.5 * (bbox[0] + bbox[2]),
+                             'lon': 0.5 * (bbox[1] + bbox[3]), 'alt_rel': 0.0,
+                             'dir_from_deg': disp['dir_from_deg'], 'speed_mps': disp['speed_mps'],
+                             'label': '規劃風（面板假設）'})
+        return rows
+
+    def _push_wind_arrows(self, now: float | None = None) -> None:
+        """即時風（每架一支，太舊的不畫）＋ 規劃風（作業區中心一支）→ 地圖；面板狀態列列出最近的即時風。"""
+        st = self._wind_state()
+        now = time.monotonic() if now is None else now
+        st['last_push'] = now
+        rows = self._wind_arrow_rows(now)
+        fn = getattr(self.map_widget, 'set_wind_arrows', None)
+        if fn is not None:
+            if rows:
+                fn(rows)
+            else:
+                self.map_widget.clear_wind_arrows()
+        live = [f"UAV-{r['sysid']} {r['speed_mps']:.1f} m/s 來自 {r['dir_from_deg']:.0f}°"
+                for r in rows if r['sysid'] != self.WIND_PLAN_SYSID]
+        st['live_text'] = ('即時風（EKF 估計）：' + '；'.join(live)) if live else ''
+        self._refresh_wind_status()
+
+    def _refresh_wind_status(self) -> None:
+        panel = getattr(self, 'vtol_recon_panel', None)
+        set_status = getattr(panel, 'set_wind_status', None)
+        if set_status is None:
+            return
+        st = self._wind_state()
+        set_status('\n'.join(t for t in (st.get('grid_text'), st.get('live_text')) if t))
+
+    def _refresh_wind_field(self) -> None:
+        """流動層：有網格就畫網格；否則勾了規劃風就畫均勻場；否則清掉。"""
+        from core.wind_field import uniform_field
+        st = self._wind_state()
+        disp = self._wind_display()
+        field = None
+        if st['grid'] is not None:
+            field = st['grid']
+        elif disp.get('plan'):
+            bbox = self._wind_area_bbox()
+            if bbox is None:
+                self.statusBar().showMessage('規劃風要先圈好作業區才畫得出範圍', 5000)
+            else:
+                field = uniform_field(bbox, disp['speed_mps'], disp['dir_from_deg'])
+        fn = getattr(self.map_widget, 'set_wind_field', None)
+        if fn is None:
+            return
+        if field is None:
+            self.map_widget.clear_wind_field()
+        else:
+            fn(field)
+
+    def _apply_wind_options(self) -> None:
+        fn = getattr(self.map_widget, 'set_wind_options', None)
+        if fn is not None:
+            fn(limitMps=self._wind_limit_mps())
+
+    def _on_wind_display_changed(self, _d: dict | None = None) -> None:
+        """面板勾選或規劃風值變了：選項、流動層、箭頭全部重推。"""
+        self._apply_wind_options()
+        self._refresh_wind_field()
+        self._push_wind_arrows()
+
+    def _on_wind_grid_requested(self, req: dict) -> None:
+        """按下「抓氣象網格」：作業區外擴 bbox → 背景執行緒抓 Open-Meteo。"""
+        from ui.workers.wind_grid_worker import WindGridWorker
+        panel = self.vtol_recon_panel
+        bbox = self._wind_area_bbox()
+        if bbox is None:
+            panel.set_wind_grid_busy(False, f"請先圈好作業區（網格範圍 = 作業區外擴 {self.WIND_GRID_MARGIN_M:.0f} m）")
+            return
+        old = getattr(self, '_wind_worker', None)
+        if old is not None and old.isRunning():
+            self.statusBar().showMessage('氣象網格還在抓，請稍候', 4000)
+            return
+        if old is not None:
+            try:
+                old.deleteLater()
+            except RuntimeError:
+                pass
+        height = str((req or {}).get('height') or '10m')
+        panel.set_wind_grid_busy(True, f"抓取 Open-Meteo {height} 風場中…（要網路，約 1–3 秒）")
+        # parent=None：視窗關閉時由 closeEvent 等它跑完（在還在跑的 QThread 上跑解構子是 qFatal）
+        self._wind_worker = WindGridWorker(bbox, height=height, parent=None)
+        self._wind_worker.finished_ok.connect(self._on_wind_grid_done)
+        self._wind_worker.failed.connect(self._on_wind_grid_failed)
+        self._wind_worker.start()
+        logger.info(f"[氣象網格] 開始：{height}，bbox={tuple(round(x, 5) for x in bbox)}")
+
+    def _on_wind_grid_done(self, field) -> None:
+        st = self._wind_state()
+        st['grid'] = field
+        st['grid_text'] = field.label + (('；' + '；'.join(field.notes)) if field.notes else '')
+        logger.info(f"[氣象網格] 完成：{field.label}；最大 {field.max_speed():.1f} m/s")
+        self.vtol_recon_panel.set_wind_grid_busy(False)
+        self.vtol_recon_panel.set_wind_grid_loaded(True, st['grid_text'])
+        self._refresh_wind_status()
+        self._apply_wind_options()
+        self._refresh_wind_field()
+
+    def _on_wind_grid_failed(self, msg: str) -> None:
+        st = self._wind_state()
+        self.vtol_recon_panel.set_wind_grid_busy(False)
+        self.vtol_recon_panel.set_wind_grid_loaded(st['grid'] is not None, f"⚠ {msg}")
+        self.statusBar().showMessage(f'氣象網格抓取失敗：{msg}', 10000)
+
+    def _on_wind_grid_clear(self) -> None:
+        st = self._wind_state()
+        st['grid'] = None
+        st['grid_text'] = ''
+        self.vtol_recon_panel.set_wind_grid_loaded(False, '')
+        self._refresh_wind_status()
+        self._refresh_wind_field()
 
     def _on_vtol_recon_apply_flat(self, lat: float, lon: float, scale: float) -> None:
         """把所有作業區（含正在畫的角點與起降場）平移到 (lat, lon)，並縮放 ``scale`` 倍。可復原。"""
@@ -7726,6 +7908,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         # 只有建圖上傳過、有監測器的機才處理；同樣在建立 link 時只接一次。
         link.mission_current.connect(self._on_mapping_mission_current)
         link.mission_item_started.connect(self._on_mapping_item_started)
+        # 飛控 EKF 風估計（WIND）→ 地圖上跟著飛機走的風箭頭（面板「飛機即時風」勾著才畫）
+        link.wind.connect(self._on_wind)
         link.start()
         self._sitl_links.append(link)
         if self._sitl_link is None:
@@ -7963,6 +8147,9 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 self.map_widget.clear_uav(sysid)
             except Exception:
                 pass
+        # 該機的即時風箭頭也拿掉（不然會留一支不會動的箭頭）
+        if self._wind_state()['live'].pop(sysid, None) is not None:
+            self._push_wind_arrows()
         # 維護主鏈路指標（向後相容）
         if self._sitl_link is link:
             self._sitl_link = self._sitl_links[0] if self._sitl_links else None
@@ -11033,6 +11220,14 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             if _fw is not None and _fw.isRunning():
                 _fw.stop()
                 _fw.wait(30000)
+        except Exception:
+            pass
+        # 氣象網格的背景執行緒：同上（urllib 沒有取消點，逾時 20 s）
+        try:
+            _ww = getattr(self, '_wind_worker', None)
+            if _ww is not None and _ww.isRunning():
+                _ww.stop()
+                _ww.wait(30000)
         except Exception:
             pass
         # 依時程放行還有飛機在倒數 ⇒ 關視窗就不會再放行了，取消並寫 log（不留一個看不到的計時器）

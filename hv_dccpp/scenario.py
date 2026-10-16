@@ -117,16 +117,23 @@ def scenario_frame(inputs: MissionInputs) -> GeoFrame:
     """由任務輸入建立 home 為原點之 :class:`geo.GeoFrame`（h0 = `home.alt_msl_m`，缺省由 DEM 取 (+alt_agl_m)）。
 
     與 `context.build_context` 的做法相同，供測試／viz 在不建 context 時取得座標框架。
+    大地起伏 N 也同 build_context（A6）：``dem.frame_undulation_m``（N 未知 ⇒ 0，框架的「MSL」即橢球高、幾何仍精確）；
+    N 未知而 home 給了絕對海拔 ``alt_msl_m`` ⇒ MissionInputError（與 build_context 同一條規則，不默默混用基準）。
     """
     home = inputs.home
+    dem = inputs.dem
     if home.alt_msl_m is not None:
+        if not dem.msl_known:
+            raise MissionInputError(
+                f"home {home.site_id!r} 給了絕對海拔 alt_msl_m，但 DEM 是橢球高而大地起伏 N 未知（只准相對高度）；"
+                f"請提供 DEM 的大地起伏 N，或改給 alt_agl_m／由 DEM 取地面高")
         h0 = float(home.alt_msl_m)
     else:
-        z = float(inputs.dem.sample_msl(home.lat_deg, home.lon_deg)[0])
+        z = float(dem.sample_msl(home.lat_deg, home.lon_deg)[0])
         if not math.isfinite(z):
             raise MissionInputError(f"home {home.site_id!r} 不在 DEM 範圍內，無法取地面高")
         h0 = z + (float(home.alt_agl_m) if home.alt_agl_m is not None else 0.0)
-    return GeoFrame(home.lat_deg, home.lon_deg, h0)
+    return GeoFrame(home.lat_deg, home.lon_deg, h0, geoid_undulation_m=dem.frame_undulation_m)
 
 
 # ---------------------------------------------------------------------------

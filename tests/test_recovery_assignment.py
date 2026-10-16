@@ -94,7 +94,7 @@ def test_single_aircraft_proposes_nothing():
 # ── 守衛：三個實測案例 ──────────────────────────────────────────────────
 
 _BASE = dict(passed=True, conflicts=0, uncovered=0, min_sep_h_m=148.4,
-             energy_wh={"A1": 1177.0, "B2": 321.3, "B3": 320.5, "B4": 320.4})
+             energy_wh={"A1": 1177.0, "B2": 321.3, "B3": 320.5, "B4": 320.4}, n_cross_flown=0)
 
 
 def test_guard_blocks_the_fast_but_unsafe_candidate():
@@ -157,3 +157,59 @@ def test_guard_survives_degenerate_baseline_separation(sep):
     base = dict(_BASE, min_sep_h_m=sep)
     ok, _why = recovery_regression_guard(base, dict(_BASE, min_sep_h_m=200.0))
     assert ok
+
+
+# ── 守衛：交叉航帶（建圖模式；2026-10-15 審查 L-e）────────────────────────
+
+def test_guard_blocks_a_candidate_that_flies_fewer_cross_strips():
+    """⭐ 少飛交叉帶的候選 makespan 自然較短 ⇒ 沒有這條會被「makespan 有變好」主動選中。
+
+    候選其餘每一項都更好（間距 188.7 m、能量不變），只有交叉帶 4 → 3 ⇒ 仍必須擋。"""
+    base = dict(_BASE, n_cross_flown=4)
+    better_but_fewer = dict(_BASE, min_sep_h_m=188.7, n_cross_flown=3)
+    ok, why = recovery_regression_guard(base, better_but_fewer)
+    assert not ok and "交叉航帶變少" in why and "4 → 3" in why, why
+    # 反向臂：一樣多或更多 ⇒ 放行（不是「有交叉帶就一律擋」）
+    for n in (4, 5):
+        ok, why = recovery_regression_guard(base, dict(better_but_fewer, n_cross_flown=n))
+        assert ok, (n, why)
+    ok, why = recovery_regression_guard(dict(_BASE, n_cross_flown=0), dict(_BASE, n_cross_flown=0))
+    assert ok, why
+
+
+@pytest.mark.parametrize("side", ["base", "cand"])
+def test_guard_refuses_when_the_cross_strip_count_is_missing(side):
+    """缺讀數 ⇒ 無從比較 ⇒ 擋（不默默當 0：當 0 的話基準缺讀數時任何候選都「沒變少」）。"""
+    base, cand = dict(_BASE, n_cross_flown=4), dict(_BASE, n_cross_flown=4)
+    (base if side == "base" else cand).pop("n_cross_flown")
+    ok, why = recovery_regression_guard(base, cand)
+    assert not ok and "n_cross_flown" in why, why
+
+
+def test_measure_harvest_plan_counts_flown_cross_strips(monkeypatch):
+    """量測字典的 ``n_cross_flown`` ＝ 各機 ``UAVPlan.strips``（(strip_id, 方向)）裡的交叉帶條數，含殘段 ``#r``。"""
+    import types
+
+    import hv_dccpp
+    from hv_dccpp.geometry import cross_strip_id
+    from mission.swarm_coordinator import measure_harvest_plan
+
+    v = types.SimpleNamespace(passed=True, conflicts=[])
+    monkeypatch.setattr(hv_dccpp, "validate", lambda *a, **k: v)
+    monkeypatch.setattr(hv_dccpp, "build_validation_cache", lambda *a, **k: None)
+    monkeypatch.setattr(hv_dccpp.sim, "min_separation", lambda plans, cfg: (150.0, None))
+    wp = [types.SimpleNamespace(energy_remaining_wh=300.0)]
+    x1, x2 = cross_strip_id("Z1_1", "B", "B2", 1), cross_strip_id("Z1_1", "B", "B2", 2)
+    plans = {
+        "B2": types.SimpleNamespace(strips=[("Z1_1_B_k10", 1), (x1, 0), (x2 + "#r", 1)], waypoints=wp,
+                                    t_land_s=900.0, landing_site="H"),
+        "B3": types.SimpleNamespace(strips=[("Z1_2_B_k3", 0)], waypoints=wp, t_land_s=950.0, landing_site="ALT1"),
+    }
+    hv = types.SimpleNamespace(last_plan=types.SimpleNamespace(plans=plans, uncovered=[]), last_ctx=None, cfg=None)
+    m = measure_harvest_plan(hv)
+    assert m["n_cross_flown"] == 2 and m["makespan_s"] == 950.0 and m["landing"] == {"B2": "H", "B3": "ALT1"}
+    plans["B2"].strips = [("Z1_1_B_k10", 1), (x1, 0)]                    # 少一條 ⇒ 量測跟著變、守衛擋下
+    m2 = measure_harvest_plan(hv)
+    assert m2["n_cross_flown"] == 1
+    ok, why = recovery_regression_guard(m, m2)
+    assert not ok and "交叉航帶變少" in why, why

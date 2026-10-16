@@ -85,8 +85,13 @@ REPO/utils/file_io.py:226、REPO/mission/vtol_mission_exporter.py:32、REPO/miss
 5. 地球半徑／投影不一致：AeroPlan 部分模組用 111111.0 m/deg（REPO/core/geometry/region_divider.py:260-283），
    hv_dccpp 用 WGS84 橢球（``geo.GeoFrame``）→ 距離與 makespan 與 AeroPlan 舊值差約 0.1%。
 6. ``dem_path`` 不在此讀取（需 rasterio）：請由呼叫端傳 ``terrain_func``
-   （REPO/sensors/dem_terrain.py:175 ``DEMTerrainManager.get_elevation``），本模組以
+   （REPO/sensors/dem_terrain.py:178 ``DEMTerrainManager.get_elevation``），本模組以
    :func:`terrain_func_to_dem` 取樣建網格。
+7. 高程基準（A6，2026-10-15）：``terrain_func`` 的高程基準依序取 **明確參數** ``vertical_datum``（建構子／
+   :func:`to_mission_inputs`）＞ **來源自我宣告**（``terrain_func.__self__.vertical_datum``，例如 Cesium World Terrain
+   = ``"ellipsoid"``）＞ 純函式沿用舊契約「AMSL」；兩者矛盾 ⇒ :class:`AeroPlanAdapterError`。橢球高而大地起伏 N
+   未給 ⇒ **只准相對高度**（GUI 一律 frame 3 上傳，逐位元不變）：MSL 匯出被拒、禁航區海拔上下限改整柱禁飛
+   （``nfz_vertical_limits_ignored``）。有效值寫在 note ``terrain_datum(...)``。
 
 執行緒
 ------
@@ -153,7 +158,7 @@ __all__ = [
     "PHASE_TO_SEGMENT", "SEGMENT_NAMES", "PARAM_KEY_NOTES",
     "DEFAULT_ENERGY_A", "DEFAULT_ENERGY_B",
     "to_mission_inputs", "to_planner_config", "from_mission_plan", "to_upload_tuples",
-    "mission_item_dicts", "expected_photo_count",
+    "mission_item_dicts", "expected_photo_count", "expected_photos_by_segment",
     "fence_zones_to_nofly", "terrain_func_to_dem", "telemetry_frames_to_events", "plan_to_aeroplan_waypoints",
     "qgc_wpl_lines", "MAV_CMD",
 ]
@@ -602,6 +607,9 @@ def fence_zones_to_nofly(zones: Iterable[Any] | None, *, alt_ref: Literal["msl",
         ``FenceZone.alt_min_m`` / ``alt_max_m`` 之基準（原始碼註解為「AMSL 或 AGL 依專案慣例」，
         REPO/mission/fence_zone.py:61-63 未定）。``"msl"``（預設）直接採用；``"agl"`` 時加上 ``home_msl_m``，
         因為 :class:`hv_dccpp.mission.NoFlyZone` 之樓層／天花板一律為 **MSL**（規格 §6.1、D42）。
+        ⚠ GUI 對話框（ui/dialogs/fence_zone_dialog.py）把這兩欄標成「海拔範圍」⇒ ``"msl"`` 是對的；但 DEM 為
+        橢球高而大地起伏 N 未知時海拔換不進框架 ⇒ :func:`to_mission_inputs` 會把上下限拿掉改**整柱**禁飛（保守）
+        並記 ``nfz_vertical_limits_ignored(...)``（本函式本身不看 DEM）。
     circle_segments
         圓形展開邊數（同原型預設 16，精度 < 2% R）。
     include_categories
@@ -666,19 +674,75 @@ def fence_zones_to_nofly(zones: Iterable[Any] | None, *, alt_ref: Literal["msl",
     return tuple(out)
 
 
+_VERTICAL_DATUMS: tuple[str, ...] = ("msl", "ellipsoid")
+
+
+def _resolve_terrain_datum(terrain_func: Callable[[float, float], float] | None,
+                           vertical_datum: str | None) -> tuple[str, str]:
+    """``terrain_func`` 的高程基準 → ``(datum, 來源說明)``（A6）。
+
+    優先序：明確 ``vertical_datum`` ＞ 來源自我宣告 ``getattr(getattr(f, "__self__", f), "vertical_datum", None)``
+    ＞ 純函式沿用舊契約（AMSL ⇒ ``"msl"``）。明確值與來源宣告**矛盾** ⇒ :class:`AeroPlanAdapterError`（不默默以哪一個
+    為準）。來源另有 ``vertical_datum_note``（例如 DEMTerrainManager 讀 GeoTIFF 垂直 CRS 的結果）時併進說明。
+    """
+    if vertical_datum is not None and vertical_datum not in _VERTICAL_DATUMS:
+        raise AeroPlanAdapterError(f"vertical_datum 須為 'msl'、'ellipsoid' 或 None，得 {vertical_datum!r}")
+    if terrain_func is None:
+        return (vertical_datum or "msl"), ("明確指定（平地 DEM）" if vertical_datum else "平地 DEM（base_msl_m）")
+    owner = getattr(terrain_func, "__self__", terrain_func)
+    pname = type(owner).__name__ if owner is not terrain_func else str(getattr(terrain_func, "__name__", "terrain_func"))
+    prov = getattr(owner, "vertical_datum", None)
+    pnote = str(getattr(owner, "vertical_datum_note", "") or "")
+    if prov is not None and prov not in _VERTICAL_DATUMS:
+        raise AeroPlanAdapterError(f"地形來源 {pname} 宣告的 vertical_datum={prov!r} 不是 'msl'／'ellipsoid'／None")
+    tail = f"；{pnote}" if pnote else ""
+    if vertical_datum is not None:
+        if prov is not None and prov != vertical_datum:
+            raise AeroPlanAdapterError(
+                f"vertical_datum={vertical_datum!r} 與地形來源 {pname} 自己宣告的 {prov!r} 矛盾（不默默以哪一個為準）")
+        return vertical_datum, f"明確指定{'，與 ' + pname + ' 宣告一致' if prov else ''}{tail}"
+    if prov is not None:
+        return str(prov), f"地形來源 {pname} 宣告{tail}"
+    return "msl", f"地形來源 {pname} 未宣告 ⇒ 依 terrain_func 的 AMSL 契約當正高（SRTM 等 DEM 檔的慣例）{tail}"
+
+
+def _check_undulation(n: Any) -> float | None:
+    """大地起伏 N：None（未給／未知）或有限數；其餘 ⇒ AeroPlanAdapterError（範圍另由 DemGrid 驗）。"""
+    if n is None:
+        return None
+    if isinstance(n, bool):
+        raise AeroPlanAdapterError(f"geoid_undulation_m 須為數值或 None，得 {n!r}")
+    try:
+        v = float(n)
+    except (TypeError, ValueError):
+        raise AeroPlanAdapterError(f"geoid_undulation_m 須為數值或 None，得 {n!r}") from None
+    if not math.isfinite(v):
+        raise AeroPlanAdapterError(f"geoid_undulation_m 須為有限數，得 {n!r}")
+    return v
+
+
 def terrain_func_to_dem(terrain_func: Callable[[float, float], float] | None,
                         bounds_latlon: tuple[float, float, float, float], step_m: float = 50.0, *,
                         base_msl_m: float = 0.0, sigma_z_m: float = 2.0, is_dsm: bool = False,
-                        max_nodes: int = 4_000_000) -> DemGrid:
+                        max_nodes: int = 4_000_000, vertical_datum: Literal["msl", "ellipsoid"] | None = None,
+                        geoid_undulation_m: float | None = None) -> DemGrid:
     """AeroPlan 的地形回呼 → :class:`hv_dccpp.geo.DemGrid`（規則經緯網格，雙線性內插）。
 
     參數
     ----
     terrain_func
-        ``f(lat, lon) -> 高程（公尺 AMSL）``，即 REPO/sensors/dem_terrain.py:175
+        ``f(lat, lon) -> 高程（公尺）``，即 REPO/sensors/dem_terrain.py:178
         ``DEMTerrainManager.get_elevation``（AeroPlan 於 REPO/mission/swarm_coordinator.py:975
         以 ``terrain_func`` 參數傳入）。``None`` → 建 ``base_msl_m`` 的**平地** DEM。
-        回呼回 ``None`` / ``nan`` 之處以 ``base_msl_m`` 填補。
+        回呼回 ``None`` / ``nan`` 之處以 ``base_msl_m`` 填補。高程基準見 ``vertical_datum``；純函式（沒有
+        ``vertical_datum`` 宣告）沿用舊契約 **AMSL**。
+    vertical_datum
+        （A6）``"msl"``／``"ellipsoid"``／None（＝不指定）。優先序：本參數 ＞ 來源自我宣告
+        （``terrain_func.__self__.vertical_datum``；Cesium World Terrain = ``"ellipsoid"``）＞ AMSL 舊契約；
+        本參數與來源宣告矛盾 ⇒ :class:`AeroPlanAdapterError`。
+    geoid_undulation_m
+        （A6）大地起伏 N（m）。橢球高 DEM：數值 = 已知 N（``sample_msl`` = 橢球高 − N）；None = **N 未知** ⇒
+        DemGrid ``msl_known`` False（只准相對高度；不會默默當 0）。正高 DEM：None ＝ 舊預設 0，數值只進框架原點。
     bounds_latlon
         ``(lat_min, lon_min, lat_max, lon_max)``，須已含足夠邊界裕度
         （建議 ≥ ``dem_margin_m``，見 :class:`HvDccppCoordinator`）。
@@ -695,8 +759,14 @@ def terrain_func_to_dem(terrain_func: Callable[[float, float], float] | None,
 
     返回
     ----
-    :class:`hv_dccpp.geo.DemGrid`（``z_msl`` 為 float32，rows 沿 lat、cols 沿 lon）。
+    :class:`hv_dccpp.geo.DemGrid`（``z_msl`` 為 float32，rows 沿 lat、cols 沿 lon；``vertical_datum``／
+    ``geoid_undulation_m`` 為上述解析後的有效值）。
     """
+    datum, _how = _resolve_terrain_datum(terrain_func, vertical_datum)
+    n_und = _check_undulation(geoid_undulation_m)
+    dem_kw: dict[str, Any] = {"vertical_datum": datum}
+    if datum == "ellipsoid" or n_und is not None:
+        dem_kw["geoid_undulation_m"] = n_und          # 橢球高 + None ⇒ N 未知（明確傳 None，不落到「沒給」）
     lat_min, lon_min, lat_max, lon_max = (float(x) for x in bounds_latlon)
     if not (lat_max > lat_min and lon_max > lon_min):
         raise AeroPlanAdapterError(f"terrain_func_to_dem: 邊界須 lat_max>lat_min 且 lon_max>lon_min，得 {bounds_latlon!r}")
@@ -726,8 +796,11 @@ def terrain_func_to_dem(terrain_func: Callable[[float, float], float] | None,
                 if v is None or not np.isfinite(float(v)):
                     v = base_msl_m
                 z[i, j] = float(v)
-    return DemGrid(lat0_deg=lat_min, lon0_deg=lon_min, dlat_deg=float(dlat), dlon_deg=float(dlon),
-                   z_msl=z, is_dsm=bool(is_dsm), sigma_z_m=float(sigma_z_m))
+    try:
+        return DemGrid(lat0_deg=lat_min, lon0_deg=lon_min, dlat_deg=float(dlat), dlon_deg=float(dlon),
+                       z_msl=z, is_dsm=bool(is_dsm), sigma_z_m=float(sigma_z_m), **dem_kw)
+    except ValueError as e:                            # N 超出合理範圍等
+        raise AeroPlanAdapterError(f"terrain_func_to_dem: {e}") from e
 
 
 PARAM_KEY_NOTES: dict[str, str] = {
@@ -828,7 +901,9 @@ def to_mission_inputs(areas: Sequence[Mapping[str, Any]], drones: Sequence[Mappi
                       energy: Mapping[str, Mapping[str, float]] | None = None,
                       warnings: list[str] | None = None,
                       mapping_mode: MappingModeConfig | None = None,
-                      forward_overlap: float = 0.70) -> tuple[MissionInputs, dict[int, str]]:
+                      forward_overlap: float = 0.70,
+                      vertical_datum: Literal["msl", "ellipsoid"] | None = None,
+                      geoid_undulation_m: float | None = None) -> tuple[MissionInputs, dict[int, str]]:
     """AeroPlan 的 ``areas`` / ``drones`` → :class:`hv_dccpp.mission.MissionInputs`。
 
     參數（前段照 REPO/mission/swarm_coordinator.py:975 之同名參數）
@@ -849,7 +924,12 @@ def to_mission_inputs(areas: Sequence[Mapping[str, Any]], drones: Sequence[Mappi
         目標作業高度（AGL, m）→ ``h_target_agl_m``；會被夾到
         ``[max_c spec.min_fw_operation_agl_m, 天花板]``（A 120 m、B 100 m；D12 豁免上限）並記警告。
     terrain_func
-        ``f(lat, lon) -> AMSL m``；``None`` → 平地 DEM（見 :func:`terrain_func_to_dem`）。
+        ``f(lat, lon) -> 高程 m``（純函式 = AMSL 舊契約；來源可自我宣告 ``vertical_datum``）；``None`` → 平地 DEM
+        （見 :func:`terrain_func_to_dem`）。
+    vertical_datum / geoid_undulation_m
+        （A6）高程基準與大地起伏 N → :func:`terrain_func_to_dem`（優先序與矛盾規則見該函式）。有 ``terrain_func``
+        （或明確給了基準／N）時一律記 note ``terrain_datum(...)``：基準、來源、N 值或「未知 ⇒ 只准相對高度」。
+        N 未知時 ``fence_zones`` 的海拔上下限改為**整柱**禁飛並記 ``nfz_vertical_limits_ignored(...)``。
     dem_path
         **不讀取**（本層無 rasterio 相依）；非空時記警告 ``dem_path_ignored``。
     home
@@ -985,8 +1065,22 @@ def to_mission_inputs(areas: Sequence[Mapping[str, Any]], drones: Sequence[Mappi
     m_lat, m_lon = _metres_per_deg(0.5 * (min(lats) + max(lats)))
     dlat = float(dem_margin_m) / m_lat
     dlon = float(dem_margin_m) / m_lon
+    # 高程基準（A6）：先解析（矛盾就在取樣前失敗），再以有效值建 DEM；有效值一律寫 note（有效值契約）
+    datum, datum_how = _resolve_terrain_datum(terrain_func, vertical_datum)
     dem = terrain_func_to_dem(terrain_func, (min(lats) - dlat, min(lons) - dlon, max(lats) + dlat, max(lons) + dlon),
-                              step_m=dem_step_m, base_msl_m=base_msl_m)
+                              step_m=dem_step_m, base_msl_m=base_msl_m, vertical_datum=datum,
+                              geoid_undulation_m=geoid_undulation_m)
+    if terrain_func is not None or vertical_datum is not None or geoid_undulation_m is not None:
+        _n = dem.geoid_undulation_m
+        if dem.vertical_datum == "msl":
+            _eff = "正高（MSL）" + (f"；N = {float(_n):.2f} m 只用於框架原點橢球高" if geoid_undulation_m is not None else "")
+        elif _n is not None:
+            _eff = f"橢球高；大地起伏 N = {float(_n):.2f} m ⇒ 海拔 = 橢球高 − N（絕對海拔輸出可用）"
+        else:
+            _eff = ("橢球高；大地起伏 N 未知 ⇒ 只准相對高度：上傳／匯出一律相對起飛坪（frame 3），MSL 匯出與絕對海拔輸入"
+                    "（坪 alt_msl、障礙 top_msl、空域 max_msl）會被拒絕，禁航區海拔上下限改整柱禁飛；"
+                    "要用絕對海拔請提供該地的大地起伏 N（hv_geoid_undulation_m）")
+        warn.append(f"terrain_datum(DEM 高程基準 = {_eff}；來源：{datum_how})")
 
     # -- 刈幅核對（障礙 1）----------------------------------------------------
     for c, hws in hw_used.items():
@@ -1002,6 +1096,17 @@ def to_mission_inputs(areas: Sequence[Mapping[str, Any]], drones: Sequence[Mappi
     if not math.isfinite(home_msl):
         home_msl = float(base_msl_m)
     nofly = fence_zones_to_nofly(fence_zones, home_msl_m=home_msl)
+    if not dem.msl_known:
+        # A6：FenceZone 上下限是海拔（GUI「海拔範圍」，alt_ref="msl"），N 未知時換不進橢球高框架 ⇒ 保守改整柱禁飛
+        #   （⚠ 會改變路由：原本可從上方飛越的禁航區要繞行，甚至 NO_GO）。alt_ref="agl" 不需要（home 與 DEM 同基準）。
+        _lim = [f"{z.zone_id}[{'—' if z.z_floor_msl_m is None else f'{z.z_floor_msl_m:g}'}～"
+                f"{'—' if z.z_ceiling_msl_m is None else f'{z.z_ceiling_msl_m:g}'} m]"
+                for z in nofly if z.z_floor_msl_m is not None or z.z_ceiling_msl_m is not None]
+        if _lim:
+            nofly = tuple(replace(z, z_floor_msl_m=None, z_ceiling_msl_m=None) for z in nofly)
+            warn.append(f"nfz_vertical_limits_ignored({', '.join(_lim)}：禁航區上下限是海拔（AMSL），DEM 是橢球高而"
+                        f"大地起伏 N 未知 ⇒ 改為整柱禁飛（保守：不再從上方飛越，路由可能改變或 NO_GO）；"
+                        f"要保留上下限請提供 N)")
     airspace = Airspace(max_agl_m=float(max_agl_m), waiver_max_agl_m=waiver_max_agl_m,
                         terrain_clearance_m=tc, no_fly=nofly)
     speed, dir_from = (float(wind[0]), float(wind[1]))
@@ -1778,7 +1883,19 @@ def _nav_accept_m(it: Mapping[str, Any]) -> float:
 
 def expected_photo_count(items: Sequence[Mapping[str, Any]], *, speed_mps: float | None = None,
                          intrval_min_s: float = 0.0, tick_hz: float = CAMERA_UPDATE_HZ) -> int:
-    """依任務項目（:func:`mission_item_dicts` 的 dict）**估**這架會拍幾張。
+    """依任務項目（:func:`mission_item_dicts` 的 dict）**估**這架會拍幾張（模型見
+    :func:`expected_photos_by_segment`；本函式 ＝ 逐段合計 ＋ 帶外）。"""
+    by_seg, outside = expected_photos_by_segment(items, speed_mps=speed_mps, intrval_min_s=intrval_min_s,
+                                                 tick_hz=tick_hz)
+    return int(sum(by_seg) + outside)
+
+
+def expected_photos_by_segment(items: Sequence[Mapping[str, Any]], *, speed_mps: float | None = None,
+                               intrval_min_s: float = 0.0, tick_hz: float = CAMERA_UPDATE_HZ
+                               ) -> tuple[list[int], int]:
+    """依任務項目**估**每一段「相機開著」（206 開窗；段序 ＝ ``survey.strip_monitor.camera_segments`` 的 index）
+    會拍幾張：回傳 (逐段張數, 帶外張數)。帶外 ＝ 相機關著時 p3 = 1 的立即拍（建圖匯出器不產生）。
+    關相機那一項若 p3 = 1，那一張算在剛關的那一段（與即時監測器「關後 grace 內的照片歸上一段」一致）。
 
     模型（與 core.recon.exposure_verifier.simulate_mission_photos 同一套 AP_Camera／AP_Mission 語意，但不跑逐 tick 模擬）：
 
@@ -1826,7 +1943,8 @@ def expected_photo_count(items: Sequence[Mapping[str, Any]], *, speed_mps: float
             m = max(m, math.ceil(t_min / dt - 1e-9))
         return m * step
 
-    count = 0
+    by_seg: list[int] = []  # 逐段張數
+    outside = 0             # 相機關著時的立即拍
     d = 0.0                 # 0 ＝ 相機關
     acc = 0.0               # 上一張之後走過的距離
     s = 0.0                 # 航線累積水平距離（到最近一個 NAV 頂點）
@@ -1854,7 +1972,7 @@ def expected_photo_count(items: Sequence[Mapping[str, Any]], *, speed_mps: float
                 acc += reach - s_cam
                 q = spacing(d)
                 n = int(math.floor(acc / q + 1e-9))
-                count += n
+                by_seg[-1] += n                             # d > 0 ⇒ 一定在某一段裡
                 acc -= n * q
             s_cam = max(s_cam, reach)
         elif cmd == 178:
@@ -1864,17 +1982,22 @@ def expected_photo_count(items: Sequence[Mapping[str, Any]], *, speed_mps: float
                     v = p2                                  # 空速型 DO_CHANGE_SPEED（無風：地速 ＝ 空速）
         elif cmd == 206:
             dist = float(it["param1"])
+            was_on = d > 0.0
             if dist > 0.0:
-                if d <= 0.0:                                # 開：距離從這裡起算
+                if d <= 0.0:                                # 開：距離從這裡起算；新的一段
                     acc = 0.0
+                    by_seg.append(0)
                 d = dist
             else:
                 d, acc = 0.0, 0.0                           # 關
             if float(it["param3"]) == 1.0:
                 # ArduPlane：p3 = 1 一律立即拍一張（開、地形重發、甚至關都拍；AP_Mission_Commands.cpp 4.5.7:138-142）
-                count += 1
+                if d > 0.0 or was_on:
+                    by_seg[-1] += 1                         # 開／重發：這一段；關：剛關的那一段
+                else:
+                    outside += 1
                 acc = 0.0
-    return count
+    return by_seg, outside
 
 
 # ---------------------------------------------------------------------------
@@ -2040,6 +2163,11 @@ class HvDccppCoordinator:
         這份計畫上傳／匯出時用的 :class:`hv_dccpp.ardupilot.CameraTriggerConfig`（只是存放，規劃不讀它）。
         與 ``mapping_mode`` 同給時，``camera_lead_in_m`` 必須等於 ``mapping_mode.lead_in_m``，否則丟例外
         （規劃器把條帶外延 lead_in_m、匯出器在帶起點後 camera_lead_in_m 才開相機——兩個數不同就會掉覆蓋）。
+    vertical_datum / geoid_undulation_m
+        （A6）``terrain_func`` 的高程基準（``"msl"``／``"ellipsoid"``／None＝由來源宣告或 AMSL 舊契約）與大地起伏 N
+        （None＝未知）→ :func:`to_mission_inputs`。放在**建構子**而不是 :meth:`plan_coverage_dccpp`：後者簽章與
+        swarm_coordinator 逐字相同（契約）。橢球高而 N 未知 ⇒ 只准相對高度（:meth:`mission_items` 的
+        ``alt_frame="msl"`` 被拒、禁航區海拔上下限改整柱）；有效值見 note ``terrain_datum(...)``。
 
     屬性
     ----
@@ -2076,7 +2204,14 @@ class HvDccppCoordinator:
                  mapping_mode: MappingModeConfig | None = None,
                  forward_overlap: float = 0.70,
                  camera_cfg: CameraTriggerConfig | None = None,
-                 mapping_max_wind_mps: float | None = None) -> None:
+                 mapping_max_wind_mps: float | None = None,
+                 vertical_datum: Literal["msl", "ellipsoid"] | None = None,
+                 geoid_undulation_m: float | None = None) -> None:
+        # 高程基準（A6）：先驗值（不合法 ⇒ 建構時就拒絕，不等到規劃）
+        if vertical_datum is not None and vertical_datum not in _VERTICAL_DATUMS:
+            raise AeroPlanAdapterError(f"vertical_datum 須為 'msl'、'ellipsoid' 或 None，得 {vertical_datum!r}")
+        self.vertical_datum = vertical_datum
+        self.geoid_undulation_m = _check_undulation(geoid_undulation_m)
         if mapping_mode is not None and not isinstance(mapping_mode, MappingModeConfig):
             raise AeroPlanAdapterError(f"mapping_mode 須為 MappingModeConfig 或 None，得 {type(mapping_mode).__name__}")
         self.mapping_mode = mapping_mode
@@ -2258,7 +2393,8 @@ class HvDccppCoordinator:
             terrain_clearance_m=self.terrain_clearance_m, waiver_max_agl_m=self.waiver_max_agl_m,
             dem_step_m=self.dem_step_m, dem_margin_m=self.dem_margin_m,
             mounting_angle_deg=float(mounting_angle_deg), energy=self.energy, warnings=note,
-            mapping_mode=self.mapping_mode, forward_overlap=self.forward_overlap)
+            mapping_mode=self.mapping_mode, forward_overlap=self.forward_overlap,
+            vertical_datum=self.vertical_datum, geoid_undulation_m=self.geoid_undulation_m)
         self.last_inputs = inputs
         self.id_map = id_map
 
@@ -2268,6 +2404,9 @@ class HvDccppCoordinator:
         except MissionInputError as e:
             raise AeroPlanAdapterError(f"HV-DCCPP build_context 失敗：{e}", [str(e)]) from e
         self.last_ctx = ctx
+        # A6：坪高（alt_msl_m）與 DEM 地面差 > 10 m 是基準混用的徵兆（高飛／低飛 ~N）——ctx 警告只會以
+        #   "preflight:" 前綴進 notes（GUI 不顯示），這裡原樣再放一份讓 _HV_LOUD_NOTES 的前綴比對得到
+        note.extend(w for w in ctx.warnings if str(w).startswith("site_alt_vs_dem("))
 
         self._tick(0.35, "前置檢查（preflight）")
         self._tick(0.40, "規劃中（分解 → 配置 → IDP → 組裝 → 去衝突）")
@@ -2292,10 +2431,18 @@ class HvDccppCoordinator:
             self.mapping_effective = {"config": self.mapping_mode.to_dict(), "per_class": per_class,
                                       "seam_by_area": seam}
             if getattr(self.mapping_mode, "cross_strips", False):
-                # 交叉航帶有效值：規劃器的 mapping_cross(...) 摘要（逐機逐區塊）＋略過／退回的區塊
+                # 交叉航帶有效值：規劃器全部 mapping_cross*(...) 警告（摘要、略過、退回、鄰機空域禁止／侵入、高度變換）
                 self.mapping_effective["cross"] = [str(w) for w in (rep.warnings or [])
-                                                   if str(w).startswith(("mapping_cross(", "mapping_cross_skipped(",
-                                                                         "mapping_cross_dropped("))]
+                                                   if str(w).startswith("mapping_cross")]
+                # 鄰機空域規則；排進的交叉帶數由計畫數出來，被禁止的組數＝mapping_cross_forbidden 的條目數（每組一個 →）
+                from hv_dccpp.geometry import is_cross_strip as _is_x
+                self.mapping_effective["cross_rule"] = {
+                    "allow_neighbor_airspace": bool(getattr(self.mapping_mode, "cross_allow_neighbor_airspace", False)),
+                    "flown_cross_strips_by_uav": {u: sum(1 for s, _d in up.strips if _is_x(s))
+                                                  for u, up in sorted(plan.plans.items())},
+                    "forbidden_sets": sum(str(w).count(" → ") for w in (rep.warnings or [])
+                                          if str(w).startswith("mapping_cross_forbidden(")),
+                }
             if self.mapping_max_wind_mps is not None:
                 w_plan = float(ctx.wind.max_speed()) if getattr(ctx, "wind", None) is not None else float("nan")
                 self.mapping_effective["wind"] = {"limit_mps": self.mapping_max_wind_mps, "planning_wind_mps": w_plan}
@@ -2370,7 +2517,8 @@ class HvDccppCoordinator:
         （206 每條帶開／關、DO_LAND_START 後緊接 206(0)、接受半徑 min(R_eff/2, 30)、空速型 DO_CHANGE_SPEED）。
 
         ``camera_cfg`` 必給；其 ``camera_lead_in_m`` ≠ 規劃時生效的 ``mapping_mode.lead_in_m``（沒開建圖 ＝ 0）
-        ⇒ :class:`AeroPlanAdapterError`。
+        ⇒ :class:`AeroPlanAdapterError`。``alt_frame="msl"`` 而 DEM 為橢球高、大地起伏 N 未知 ⇒
+        :class:`hv_dccpp.geo.VerticalDatumError`（A6，訊息含「大地起伏」；相對高度不受影響）。
 
         第 0 列 home 與所有相對高度以**這架的起飛坪**為基準（飛控解鎖時 home 重設到那裡；見
         :func:`hv_dccpp.ardupilot.fc_home`）。任務**不帶**錯開起飛時間（不插 NAV_DELAY：武裝的飛機在地上等幾十分鐘
@@ -2400,7 +2548,8 @@ class HvDccppCoordinator:
         return {int(did): plans[uid].t_takeoff_s - t0 for did, uid in sorted(self.id_map.items()) if uid in plans}
 
     def expected_camera_params(self, drone_id: int, *, camera_cfg: CameraTriggerConfig) -> dict[str, float]:
-        """上傳前讀回閘門要比對的**相機**參數（CAM1_*／CAM_*／RELAY*／相機用的 SERVOn_FUNCTION）。
+        """上傳前讀回閘門要比對的**相機**參數（CAM1_*／CAM_*／RELAY*／相機用的 SERVOn_FUNCTION），加上
+        ``MIS_RESTART``（0 ＝ 中斷後接續而不是整份重飛；建圖中斷 SOP 的前提，2026-10-15）。
 
         值由 hv 匯出器同一支 :func:`hv_dccpp.ardupilot.recommended_params` ``(sensor_kinds=('rgb',),
         camera_cfg=camera_cfg)`` 算出 ⇒ 與 ``export_all`` 寫出的 ``.param`` 同值（含 CAM1_TRIGG_DIST = 0：206 會把
@@ -2412,7 +2561,8 @@ class HvDccppCoordinator:
         spec = self.last_ctx.specs[up.cls]
         p = recommended_params(spec, None, self.cfg, sensor_kinds=("rgb",), camera_cfg=cc, warnings=[])
         return {k: float(v) for k, v in p.items()
-                if k.startswith(("CAM1_", "CAM_", "RELAY")) or re.fullmatch(r"SERVO\d+_FUNCTION", k)}
+                if k.startswith(("CAM1_", "CAM_", "RELAY")) or k == "MIS_RESTART"
+                or re.fullmatch(r"SERVO\d+_FUNCTION", k)}
 
     def mapping_gate(self, *, max_wind_mps: float | None = None) -> dict[str, Any]:
         """建圖上傳閘門：``{"uploadable": bool, "reasons": [原因, ...]}``（形狀不變；風速有效值見

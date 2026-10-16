@@ -98,6 +98,10 @@ class GcpPlanDialog(QDialog):
         crow.addWidget(self.spn_chk)
         crow.addWidget(self.chk_asprs30)
         f.addRow("檢核點數", crow)
+        # 預設＝首飛精度路線（使用者 2026-10-15 定：加密 GCP＋30 個檢核點；交叉航帶留到之後做對照）
+        self.cmb_preset.setCurrentIndex(self.cmb_preset.findData(gp.FIRST_FLIGHT_PRESET))
+        self.spn_chk.setValue(gp.FIRST_FLIGHT_N_CHECKPOINTS)
+        self.chk_asprs30.setChecked(gp.FIRST_FLIGHT_N_CHECKPOINTS >= 30)
         self.cmb_per_block = QComboBox()
         self.cmb_per_block.addItems(TRI)
         self.cmb_seam_gcp = QComboBox()
@@ -218,8 +222,12 @@ class GcpPlanDialog(QDialog):
         self.cmb_projection = QComboBox()
         self.cmb_projection.setEditable(True)
         self.cmb_projection.addItems(["EPSG:4326"])
+        self.cmb_projection.setCurrentIndex(-1)          # 空白 ＝ 自動帶作業區所在的 UTM 區（不是 EPSG:4326）
+        self.cmb_projection.lineEdit().setPlaceholderText(f"自動：{gp.DEFAULT_HEADER_RULE}")
+        self._projection_auto: Optional[str] = None      # 上次自動帶入的值（使用者改過就不再蓋掉）
         f.addRow("gcp_list 標頭（geo_x geo_y 的座標系）", self.cmb_projection)
-        self.lbl_projection = QLabel("ODM 只認 WGS84 UTM <區><N|S>、+proj=…、EPSG:xxxx 三種寫法。EPSG:4326 時 geo_x = 經度。")
+        self.lbl_projection = QLabel(f"預設＝{gp.DEFAULT_HEADER_RULE}；EPSG:4326 等其他寫法要明確選。"
+                                     "ODM 只認 WGS84 UTM <區><N|S>、+proj=…、EPSG:xxxx 三種寫法。EPSG:4326 時 geo_x = 經度。")
         self.lbl_projection.setWordWrap(True)
         f.addRow(self.lbl_projection)
         self.cmb_vertical = QComboBox()
@@ -389,6 +397,9 @@ class GcpPlanDialog(QDialog):
         self.lbl_errors.setText("")
         plan.effective["areas_source"] = asrc
         plan.effective["blocks_info"] = binfo
+        cw = gp.preset_consistency_warning(params.preset, binfo)
+        if cw:
+            plan.warnings.append(cw)
         self.plan, self.comparison, self.exported = plan, comp, None
         self._fill(plan, comp)
         self._fill_projection(plan)
@@ -436,16 +447,31 @@ class GcpPlanDialog(QDialog):
         from survey.gcp_plan import PURPOSE_TEXT
         return "、".join(f"{PURPOSE_TEXT.get(k, k).split('（')[0]} {v}" for k, v in d.items()) or "—"
 
-    def _fill_projection(self, plan):
-        lat = sum(p.lat for p in plan.points) / max(1, len(plan.points))
-        lon = sum(p.lon for p in plan.points) / max(1, len(plan.points))
-        utm = self._gp.utm_header_for(lat, lon)
+    def _auto_projection(self, latlons) -> Optional[str]:
+        """標頭是空白、或還是上次自動帶入的值 ⇒ 換成這些點所在的 UTM 區；使用者改過（含明確選 EPSG:4326）就保留。
+        點位跨區 ⇒ 標頭留空並報錯（要求明確選）。回傳目前的標頭（空白 ⇒ None）。"""
         cur = self.cmb_projection.currentText().strip()
+        if cur and cur != self._projection_auto:
+            return cur
+        try:
+            utm = self._gp.site_utm_header(latlons)
+        except self._gp.GcpPlanError as e:
+            self.cmb_projection.setCurrentIndex(-1)
+            self._projection_auto = None
+            self.lbl_errors.setText(f"✘ {e}")
+            return None
         self.cmb_projection.blockSignals(True)
         self.cmb_projection.clear()
         self.cmb_projection.addItems([utm, "EPSG:4326"])
-        self.cmb_projection.setCurrentText(cur if cur and cur not in (utm, "EPSG:4326") else utm)
+        self.cmb_projection.setCurrentText(utm)
         self.cmb_projection.blockSignals(False)
+        self._projection_auto = utm
+        if utm != cur:
+            self._log(f"gcp_list 標頭自動帶入 {utm}（{self._gp.DEFAULT_HEADER_RULE}；要別的寫法請明確選）")
+        return utm
+
+    def _fill_projection(self, plan):
+        self._auto_projection([(p.lat, p.lon) for p in plan.points])
 
     # ─────────────────────────────────────────────────────────────────
     # 地圖
@@ -491,8 +517,12 @@ class GcpPlanDialog(QDialog):
         if not out:
             self.lbl_errors.setText("✘ 輸出資料夾必填")
             return None
+        proj = self.cmb_projection.currentText().strip()
+        if not proj:
+            self.lbl_errors.setText("✘ gcp_list 標頭必填（點位跨 UTM 區時不自動選）")
+            return None
         try:
-            paths = gp.export_layout(self.plan, out, projection=self.cmb_projection.currentText().strip(),
+            paths = gp.export_layout(self.plan, out, projection=proj,
                                      vertical=self.cmb_vertical.currentData(),
                                      survey_frame=self.ed_survey_frame.text().strip() or gp.DEFAULT_SURVEY_FRAME,
                                      overwrite=self.chk_overwrite.isChecked())
@@ -520,8 +550,26 @@ class GcpPlanDialog(QDialog):
         if dst.exists() and not self.chk_overwrite.isChecked():
             self.lbl_errors.setText(f"✘ {dst} 已存在：請換資料夾或勾「已有檔案時覆寫」")
             return None
+        # 沒按「產生」就直接由實測 CSV 產生時，標頭也要是測點所在的 UTM 區（以前會用初始的 EPSG:4326）
         try:
-            txt = gp.gcp_list_from_survey(src, projection=self.cmb_projection.currentText().strip(),
+            pts = []
+            for r in gp.read_field_survey_csv(src):
+                if (r.get("type") or "GCP").strip().upper() != "GCP":
+                    continue
+                try:
+                    pts.append((float(r["lat"]), float(r["lon"])))
+                except (TypeError, ValueError):
+                    continue                             # 空白／非數字的列由 gcp_list_from_survey 逐列報錯
+        except gp.GcpPlanError as e:
+            self.lbl_errors.setText(f"✘ {e}")
+            return None
+        proj = self._auto_projection(pts) if pts else (self.cmb_projection.currentText().strip() or None)
+        if not proj:
+            if not pts:
+                self.lbl_errors.setText("✘ 實測 CSV 沒有可用的 GCP 經緯度，無法自動決定標頭：請明確選 gcp_list 標頭")
+            return None
+        try:
+            txt = gp.gcp_list_from_survey(src, projection=proj,
                                           vertical=self.cmb_vertical.currentData(),
                                           frame_crs=self.ed_frame_crs.text().strip() or None)
         except gp.GcpPlanError as e:

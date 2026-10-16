@@ -855,9 +855,10 @@ status `GO_WITH_WARNINGS`，7 條帶（A 4、B 3），`total_makespan` 1479.4 s�
 | 能量 | `append_rtb` 的能量安全檢查不含重飛能量 e_MA，validate 有 ⇒ 交叉帶把餘裕吃到兩者之間時規劃器照收、validate 不過（2×2 km、比例 0.2：B3 E(P_tc) 156.7 < 158.5） | 交叉帶進 `CostCache.add_strips`（每構型一次）→ `_rebuild_sequence`（與 IDP 同一套 `_apply_warm`／`_sequences_from` 算術，未插入時逐值相同）→ `append_rtb`；組裝後對有交叉帶的機再跑 `sim.check_energy`。任一不過 ⇒ 自最後插入的一組起逐組退回，退回的條帶留在 `plan.strips`（看得到）並列入 `plan.uncovered`（`cross_energy_infeasible`；找不到可行插入位置 `cross_insert_infeasible`）⇒ `mapping_incomplete` ⇒ 建圖閘門擋上傳 |
 | 去衝突 | `spatially_exclusive` 只看胞 ⊕ 主條帶迴轉帶 | `_cross_skip_filter`：飛交叉帶的機對把「交叉帶足跡 ⊕ 交叉方向迴轉帶」併進團隊帶重判，距離 < d_sep 就取消豁免（只會多檢查）。IDP 重排回呼（D-PL-2）遇到後綴含交叉帶時候選被「覆蓋不得減少」擋掉 ⇒ 該機只剩延後起飛／盤旋兩種修法 |
 | 建圖事後檢查 | 交叉帶不是「區塊」也不是「主作業高度」 | `_mapping_plan_notes` 的 `mapping_small_blocks`／`mapping_altitude_nonuniform` 不算交叉帶；另有 `mapping_cross(...)` 摘要（逐機逐區塊：條數、km、方向、高度與 GSD 比、有效面積比例、成像比例、插入位置、增加時間） |
-| 轉接層 | 掃描角中位數 | `from_mission_plan` 的 `scan_angle_deg` 不算交叉帶（比例大時中位數會翻成交叉方向）；`mapping_effective["cross"]` 收 `mapping_cross*` 警告 |
-| 空域（2026-10-15 審查更正） | 原說法「交叉帶不與他機共用空域」**不成立** | 交叉帶沿交叉方向貫穿區塊、兩端再加 e_ext＋引入段，帶間迴轉也在交叉方向 ⇒ 作業段本身就伸進鄰機獨占區塊（審查探針 `runs/artifacts/HDMAP_CROSS_GCP_2026-10-15/R_review/probes/probe_cross_v2.py`：作業航跡 300–2000 m／架、迴轉 750–4500 m／架；主條帶 0–2.6 m），而且建圖模式不分高度層 ⇒ 與鄰機同高、只靠 4D 時間錯開。固定翼迴轉半徑 137–267 m，區塊寬 300–600 m，把交叉帶連同迴轉裁進「本機區塊 ⊖ d_sep」幾乎一條都放不下 ⇒ **不裁**，改為量化並明講：`_cross_airspace_note` 發 `mapping_cross_airspace(…)`（實際飛的交叉帶足跡 ⊕ 迴轉帶 ∩ 他機主條帶足跡扣本機，逐機列 ha）。validate 不過時 GUI 閘門擋上傳；`scripts/hv_sitl_run.py` 在 HV_CROSS=1 且 validate 不過時 SystemExit（`HV_ALLOW_CONFLICTS=1` 才放行並記錄）。是否要求「交叉帶不得離開本機區塊」（等於多機時不能用交叉航帶）是**使用者決定** |
-| 動態重規劃（未處理） | `dynamic.py` 把 `plan.strips` 當一般條帶 | 失聯／重規劃時交叉帶可能被分給別架（不再保證同一架）；這次不處理，記在此 |
+| 轉接層 | 掃描角中位數 | `from_mission_plan` 的 `scan_angle_deg` 不算交叉帶（比例大時中位數會翻成交叉方向）；`mapping_effective["cross"]` 收**全部** `mapping_cross*` 警告（2026-10-15 前只收 `mapping_cross(`／`_skipped(`／`_dropped(`，`mapping_cross_airspace(`／`_altitude_change(` 漏收、GUI 看不到；已改 `startswith("mapping_cross")`）；另有 `mapping_effective["cross_rule"]`（放行與否、逐機實際排進的交叉帶數＝由計畫數出來、被禁止的組數） |
+| 空域（2026-10-15 審查更正） | 原說法「交叉帶不與他機共用空域」**不成立** | 交叉帶沿交叉方向貫穿區塊、兩端再加 e_ext＋引入段，帶間迴轉也在交叉方向 ⇒ 作業段本身就伸進鄰機獨占區塊（審查探針 `runs/artifacts/HDMAP_CROSS_GCP_2026-10-15/R_review/probes/probe_cross_v2.py`：作業航跡 300–2000 m／架、迴轉 750–4500 m／架；主條帶 0–2.6 m），而且建圖模式不分高度層 ⇒ 與鄰機同高、只靠 4D 時間錯開。固定翼迴轉半徑 137–267 m，區塊寬 300–600 m，把交叉帶連同迴轉裁進「本機區塊 ⊖ d_sep」幾乎一條都放不下 ⇒ **不裁**，改為量化並明講：`_cross_airspace_note` 發 `mapping_cross_airspace(…)`（實際飛的交叉帶足跡 ⊕ 迴轉帶 ∩ 他機主條帶足跡扣本機，逐機列 ha）。validate 不過時 GUI 閘門擋上傳；`scripts/hv_sitl_run.py` 在 HV_CROSS=1 且 validate 不過時 SystemExit（`HV_ALLOW_CONFLICTS=1` 才放行並記錄）。是否要求「交叉帶不得離開本機區塊」（等於多機時不能用交叉航帶）是**使用者決定** ⇒ 見下一列 |
+| 鄰機空域規則（使用者 2026-10-15 定：多機預設禁止，可明確放行） | 上一列只量不擋 | 新欄位 `MappingModeConfig.cross_allow_neighbor_airspace`（預設 False；沒開交叉帶卻設 True ⇒ MissionInputError；開交叉帶時進 `to_dict` ⇒ `mapping_mode(...)`、preflight derived、`mapping_effective["config"]`、SITL 讀回四處自動帶出）。`_insert_cross_strips` 第 1 步拿到 CrossSet 之後、佔號與 `cache.add_strips` 之前，用與量化**同一個**幾何（`_cross_band`＝足跡 ⊕ 交叉方向迴轉帶、`_cross_intrusion_m2`＝∩ 他機主條帶足跡扣本機、> `_CROSS_AIRSPACE_EPS_M2`＝1 m²）判斷：禁止模式下有侵入的組**不排**（不進快取、不算未覆蓋、上傳不擋；語意同 `mapping_cross_skipped`），列在 `mapping_cross_forbidden(...)`；全部被禁止時計畫與交叉帶關閉時相同（測試鎖 makespan 與逐機條帶序列）。6b 之後主條帶集合不再變 ⇒ 判斷用 `seqs` 的主條帶足跡與組裝後 `_cross_airspace_note` 用 `plans` 的相同（測試鎖兩邊逐組公頃數逐值相等）；禁止模式下組裝後仍量到侵入 ⇒ `cross_airspace_rule_violated(...)` NO_GO（不變量）。沒有他機（單機或他機沒任務）⇒ 侵入必為空，規則不看機隊架數。放行 ⇒ 舊行為，`mapping_cross_airspace(已明確放行…)`。GUI：面板「交叉帶可飛進鄰機區塊（同高度，只靠時間錯開）」（鍵 `hv_map_cross_allow_neighbor`，沒勾交叉 ⇒ None；勾了 ⇒ bool）、`mapping_setup(...)` 與 `_show_mapping_plan_status` 寫出規則與排進條數、`_HV_LOUD_NOTES` 加 `mapping_cross_forbidden`／`mapping_cross_airspace`。SITL：`HV_CROSS_ALLOW_NEIGHBOR=1`（只在 HV_CROSS=1 時有效），validation.json 記 `cross_allow_neighbor_airspace`／`cross_flown_by_uav`／`cross_forbidden`。⚠ 10-15 比較文件 (b)(c)(d) 的數字是**放行**下的結果，重現要設 1。GCP 佈設另加防呆：選「交叉航帶＋最少 GCP」而 HARVEST 計畫沒有任何交叉帶 ⇒ 警告（`survey.gcp_plan.preset_consistency_warning`） |
+| 動態重規劃（2026-10-15 已處理） | `dynamic.py` 曾把交叉帶當一般條帶 | 見下方「動態重規劃 × 建圖模式交叉航帶」一節 |
 | 建圖作業風速上限 | 使用者定調首飛 ≤ 3 m/s；引入段依機型 × 風速的函數**這次不做** | `HvDccppCoordinator(mapping_max_wind_mps=…)`（沒開建圖卻給 ⇒ 拒絕）；`mapping_gate(max_wind_mps=None)` 預設用建構值，比 `last_ctx.wind.max_speed()`（規劃實際用的風），> 上限 + 1e-9 ⇒ 不可上傳（3.0 過、3.1 擋）；回傳字典形狀不變，有效值在 `mapping_effective["wind"]`，notes 加 `mapping_wind(...)`（每次提醒「上限指現場實際風速，起飛前實測」）。MainWindow 的 `hv_upload_gate` 不帶參數呼叫 `mapping_gate()` ⇒ 上限一定要放建構參數 |
 
 ### 實測（2×2 km 平地、1 Pioneer + 2 HERO、split3、HQ6 2 Hz、120 m、0.70/0.80、引入段 50 m、能量預設值、無風）
@@ -866,3 +867,54 @@ status `GO_WITH_WARNINGS`，7 條帶（A 4、B 3），`total_makespan` 1479.4 s�
 重點：能量預設值下 HERO 的交叉帶幾乎都排不進（B2 原本餘裕只有 13.4 Wh），**所有開交叉帶的組態都因 `cross_energy_infeasible` 不可上傳**；
 排進去的只有 Pioneer 的一到兩組。makespan 增加的大頭是 4-D 去衝突把 HERO 延後起飛（建圖模式不分層、時間是唯一隔離，
 Pioneer 的交叉帶兩端伸進鄰塊），不是交叉帶本身。
+
+## 建圖中斷接續與條帶張數監測（2026-10-15；ardupilot / aeroplan_adapter；地面站端 survey/strip_monitor.py、mission/sitl_link.py、ui/main_window.py）
+
+依據：`docs/討論_2026-10-15_HARVEST航拍建圖_NotebookLM.md` A5、`docs/SOP_2026-10-15_建圖中斷接續.md`（草案，三項待使用者決定）。
+ArduPilot 行為讀 master 原始碼（AP_Mission.cpp/.h、GCS_Common.cpp、AP_Camera.cpp），**未在 SITL 驗**（SOP §6）。
+
+| 項 | 契約／原行為 | 實作 |
+|---|---|---|
+| MIS_RESTART | 推薦參數沒有；預設 0 只是飛控預設 | `_camera_params`（有 rgb 時）明寫 `MIS_RESTART=0`（`AP_Int8` exact；PARAM_COMMENTS 寫 0／1 語意：1 ＝ 空中重進 AUTO 從 VTOL 起飛整份重飛）；`HvDccppCoordinator.expected_camera_params` 一起回傳 ⇒ GUI 上傳前讀回閘門會比對（不符時照相機參數流程問使用者） |
+| 逐段預估張數 | `expected_photo_count` 只有總數 | 新增 `expected_photos_by_segment(items) -> (逐段, 帶外)`；段 ＝ 206 開窗（與 `survey.strip_monitor.camera_segments`、`exposure_verifier` 的 strip_no 同一規則）；p3=1 的關相機立即拍算剛關的那段，相機關著的 p3=1 算帶外；`expected_photo_count` 改成「合計 ＋ 帶外」，**數值不變**（既有值鎖測試全過） |
+| 即時監測 | 地面站沒有 MISSION_CURRENT／條帶層級資訊（`main_window` 註明「零張警報沒做」） | `SITLLink` 新信號 `mission_current`（變了才送）與 `mission_item_started`（STATUSTEXT「Mission: N」），都只收已確認飛機的自駕儀元件；`StripPhotoMonitor` 以 STATUSTEXT 為主、MISSION_CURRENT 區間 (arm_nav, end_nav] 為備援，警報 zero_photos／under_count（< floor(0.8·預期)）／unverified_count（遙測中斷 > 5 s）／interrupted／resumed_without_rewind／jumped／not_flown／off_strip_photos；只顯示在狀態列、HUD、面板，飛行中不跳對話框。段數 ≠ 計畫條帶數 ⇒ 不建監測器並在上傳結果說明（不靜默錯位）；任務寫入失敗 ⇒ 停用該機監測器 |
+| 實測驗證 | — | SITL `S1_HDMAP_20261015_PW3` 的 .BIN 離線重播（`runs/artifacts/S1_HDMAP_20261015_PW3/monitor_replay/`）：三架逐條帶張數與日誌相同、零誤報。⚠ 實測順序：最後一條帶 `帶終點 NAV → DO_LAND_START → 206(0)` 時，飛控**先開始下一個 NAV**、0.1 s 後才執行 206(0) ⇒ 監測器把「段外項目先開始」只當暫定，grace 內收到本段 206(0) ＝ 正常關閉 |
+| 已知限制 | — | CAMERA_FEEDBACK 只代表飛控觸發（沒接熱靴回授時相機端漏拍看不到）；MISSION_ITEM_REACHED 不用（每通道單槽會被覆寫）；沒有 Set WP 按鈕（SOP 待決）；最後一條帶正常完成與失效保護跳號的 MISSION_CURRENT 相同，只能靠 STATUSTEXT 與模式史區分 |
+
+## A6 高程基準（DEM 正高／橢球高、大地起伏 N 已知／未知；2026-10-15）
+
+| 項目 | 原因 | 實際做法 |
+|---|---|---|
+| `DemGrid.geoid_undulation_m` 三態 | 舊預設 0.0 讓「橢球高 DEM 沒給 N」靜默變成 N=0。GUI 的 World Terrain 就這樣被標成 msl。 | 預設值改成哨兵，分四種情況：(1) msl 沒給 → 0.0，逐位元不變；(2) ellipsoid 沒給 → ValueError；(3) ellipsoid 給 `None` → N 未知（`msl_known=False`，只准相對高度）；(4) 給數值 → 必須是有限數且在 `GEOID_UNDULATION_RANGE_M = [−110, 90]` m 內。msl 給 None 也是 ValueError。新增 `msl_known`、`frame_undulation_m`、`datum_label()`。`dataclasses.replace(msl_dem, vertical_datum="ellipsoid")` 會丟 ValueError（msl 沒給 N 時存的是 `_DefaultedZeroN(0.0)`，不算明確值）；改基準用 `DemGrid.with_datum(...)`。⚠ 經 JSON 往返（`_dem_to_dict`）後 0.0 變成一般值，再 replace 成橢球高仍是「已知 N = 0」——剩餘破口，有測試鎖住現況。 |
+| `DemGrid.sample_msl`（N 未知） | 沒有 N 可以減 | 回傳原生橢球高。搭配 `frame_undulation_m = 0` 建的 GeoFrame 時，相對幾何是精確的：實測 frame 3 任務與 N 已知時逐位元相同。 |
+| 補正第 13 行與第 107 行 | 第 13 行的「datum=msl 時 DEM 之 N 不使用」不精確；第 107 行寫 `GeoFrame.geoid_undulation_m = dem.geoid_undulation_m` | `build_context` 與 `scenario_frame` 一律用 `dem.frame_undulation_m` 建 GeoFrame：msl DEM 的 N 也會進框架原點的橢球高；N 未知時為 0。 |
+| `geo.require_true_msl` 與 `VerticalDatumError(ValueError)` | 第 0 層不能 import MissionInputError | 這是需要真海拔的出口的共用關卡，訊息含「大地起伏」。呼叫處：`ardupilot.plan_to_mission_items`／`export_all`（`alt_frame="msl"`，export 在建目錄前就擋）、`mavlink_link.plan_to_mission_items_fallback`（frame GLOBAL）、`mqtt_bridge.qgc_items_from_plan`（`frame="msl"`）。`rally_items` 一律相對 home，不需要擋。拿不到 DemGrid 時（舊的 duck-typed ctx、MQTT 的 ctx=None）無從判斷，不擋。 |
+| `build_context` 的絕對海拔輸入 | N 未知時海拔換不進框架 | `absolute_msl_inputs()` 涵蓋 Site 與 C2 地面站的 `alt_msl_m`、`Obstacle.top_msl_m`、`NoFlyZone` 上下限、`Airspace.max_msl_m`，命中就丟 MissionInputError 並列出鍵名。刻意**不含** `WindLayer(z_ref="msl")`：層界只會整體偏移約 N，對分層風沒有實質影響，而且 dataclass 預設就是 msl。另記一筆 `dem_vertical_datum(ellipsoid：…)`。 |
+| `site_alt_vs_dem(...)` | 反方向的危險（SRTM 正高 DEM ＋ e-GNSS 橢球高坪高，會低飛約 18.5 m）擋不住：兩邊都自稱 MSL，`msl_known` 判斷不出來 | 條件：N 已知或 DEM 為正高、DEM 不是常數平面、站點 `alt_msl_m` 與 DEM 地面差超過 `SITE_ALT_VS_DEM_TOL_M`（10 m）。結果是大聲警告、以 `alt_msl_m` 為準，不當成錯誤（屋頂坪、DEM 誤差都可能）。轉接層另外把它原樣放進 notes，因為 `preflight:` 前綴不會被 GUI 顯示。 |
+| 轉接層的基準解析 | `plan_coverage_dccpp` 的簽章必須與 swarm_coordinator 逐字相同（契約） | 基準與 N 放在 `HvDccppCoordinator.__init__`、`to_mission_inputs`、`terrain_func_to_dem` 的 keyword-only 參數。優先序：明確指定 ＞ 來源宣告（`f.__self__.vertical_datum`）＞ AMSL 舊契約；矛盾時丟 AeroPlanAdapterError。有效值寫進 note `terrain_datum(...)`。N 未知時，FenceZone 的海拔上下限改為整柱禁飛，並記 `nfz_vertical_limits_ignored(...)`（保守，可能改變路由）。 |
+| 地形來源宣告 | 純函式沒有基準資訊 | `CesiumWorldTerrain.vertical_datum = "ellipsoid"`。`DEMTerrainManager.vertical_datum` 依 GeoTIFF 垂直 CRS 或 numpy metadata 決定：EGM96／TWVD2001 → msl；橢球高 → ellipsoid；沒有或無法辨識 → None，以正高處理並在 note 說明。swarm_coordinator 的 World Terrain 分支明確傳 `"ellipsoid"`；N 取自 `harvest_params["hv_geoid_undulation_m"]`，沒給或空白代表未知。 |
+| `mission_summary.json` 讀回有效值 | 有效值契約 | 新增 `terrain{vertical_datum, geoid_undulation_m(null=未知), msl_known, alt_msl_m_fields_are}`，以及 `home.alt_datum`、`uavs[*].fc_home.alt_datum`。N 未知時 `.waypoints` 註解寫 "ellipsoidal height (geoid N unknown) - NOT MSL"。⚠ 為了讓 frame 3 輸出逐位元不變，N 未知時第 0 列 home（frame 0）與 QGC `.plan` 的 `plannedHomePosition` 數值仍是橢球高；ArduPlane 不採用第 0 列，所以只影響顯示。 |
+| `_dem_to_dict` 與 `_parse_dem` | `to_dict()` ↔ `load_mission()` 必須往返一致 | N 未知輸出 JSON null。mapping 是 `"ellipsoid"` 但缺 `geoid_undulation_m` 鍵時丟 MissionInputError（不會默默當成 N=0）。 |
+
+**審查後追加（同日）**：
+- DEM 檔的 CRS 是三維地理／投影座標（例如 EPSG:4979、WKT1 COMPD_CS＋VERT_CS "Ellipsoid"）⇒ 宣告 `ellipsoid`（以前被當成「沒有垂直 CRS」⇒ 正高）。
+- MQTT 平地合成 DEM：未知鍵或 `vertical_datum≠"msl"` ⇒ MissionInputError；`geoid_undulation_m` 生效並寫進 `dem_synthetic_flat` note。`plan_to_payloads` 在 ctx=None 時也用 inputs 的 DEM 擋 `frame="msl"`。
+- 面板 `hv_geoid_undulation_m` 給 bool／NaN／±inf ⇒ ValueError。
+- 協調器尾端的 `validation_notes` 報告帶上轉接層的 `terrain_datum(`／`nfz_vertical_limits_ignored(`／`site_alt_vs_dem(`（否則被 MainWindow 的最後一則報告蓋掉、操作員看不到）。⚠ 既有問題未修：尾端報告會整份覆蓋 `_hv_last_report`，轉接層報告的 uncovered／status 與其他 loud note 仍會從橫幅消失（World Terrain 路徑必發生）。
+- ⚠ 已知限制：遙測換算（`mavlink_link.to_planner_telemetry`、`aeroplan_adapter.telemetry_frames_to_events`）用飛控海拔 `alt_msl_m` 進框架；DEM 為橢球高且 N 未知時差 N（動態重規劃用；GUI 目前不呼叫）。
+
+## 動態重規劃 × 建圖模式交叉航帶：審查修正（2026-10-15 晚）
+
+| 項目 | 原因 | 實際做法 |
+|---|---|---|
+| area_id 保留字串 | `is_cross_strip` 用子字串判斷；area_id 帶 `_cross_`，或以 `_cross` 結尾（胞 id 接上 `_<n>` 就成了標記），該區所有主條帶都會被當成交叉帶 | `AreaSpec` 遇到 `geometry.forms_cross_strip_tag(area_id)` 為真就丟 MissionInputError，不看建圖模式開關，所有入口都經過這裡。`dynamic.handle_new_area` 對繞過驗證的物件再擋一次。`geometry.cross_strip_id` 拒收這種母胞 id（ValueError）。TargetCue 確認區 id 是 `CUE_{src_uav_id}_{t}`，機號含標記時由 AreaSpec 大聲拒收，不改名。 |
+| 交叉帶原機解析 | 母胞 id 已不可能含標記，機號則沒有限制 | `cross_strip_owner` 取**第一個** `_cross_` 之後、最後一個 `_` 之前的整段，機號可以含標記。 |
+| dynamic 交叉帶閘門 | 建圖模式關閉時，帶標記的 id 只可能來自舊輸入 | `_xstrip_gate(ctx.inputs)`：只有 `mapping_mode` 存在且 `cross_strips=True` 才開啟，每個 session 算一次，判斷走 `_Session.is_x`。關閉時與加入交叉帶處理之前逐值相同。 |
+| `_Session.reassign` 兩段式 | 交叉帶不得影響主條帶的接手人選、順序與名額（規劃器的不變量） | **第 1 段**：只處理主條帶，候選只依主條帶算 `affected_set`，就是 HEAD 原本的迴圈。**第 2 段**：交叉帶只還原機，原機須為候選、不是幽靈。原機若已在第 1 段接手主條帶，在 `main_first` 與 `cross_first` 之間依（少飛主條帶數、少飛交叉帶數、落地時刻）取最小，平手取 `main_first`；`cross_first` 只在交叉帶飛到一半被打斷時才試。原機在第 1 段沒動過時，佔一個名額、只排交叉帶（`append`）。拿回時記 `cross_retaken(<機>: [ids]; order=…; dmakespan=… s)`。回傳的未覆蓋清單主條帶在前、交叉帶在後。 |
+| 鄰機空域規則（dynamic） | `cross_allow_neighbor_airspace=False`（預設）時，原機飛交叉帶不應穿過已交給他機的主條帶區塊 | 母區塊 = `Strip.cell_id`；dynamic 跨構型重鋪子胞 `f"{母胞}_R{n}"` 由 `_relay_parent` 追回母塊。若在第 1 段之後有他機計畫持有該區塊主條帶（已飛加待飛，交叉帶不算）就不還，記 `(sid, cross_not_reassigned)` 與 note `cause=neighbor_airspace(<他機>)`、`owner=not_taken`。⚠ 這是區塊層級、偏保守的規則，不是規劃器的 `_cross_band` 幾何（計畫裡沒有保留 CrossSet）。放行時行為不變。 |
+| note 格式 | 有效值要看得到 | `cross_not_reassigned(<原機>: [ids]; cause=<reason 或 neighbor_airspace(...)>; owner=<ghost/excluded/not_in_plan/landed/not_candidate/not_taken>)`，格式寫在 `dynamic.XSTRIP_NOT_REASSIGNED` 的說明。同一 session 內（原機, ids, cause）相同只記第一筆。 |
+| 未處理 | — | 交叉帶高度轉換罰則（`_cross_vert_penalty`）在 dynamic 沒有套用；`UAVInstance.uav_id` 沒有擋保留字串。 |
+| 動態 × 交叉帶：仍未處理（已知限制） | — | ① 原機拿回（`main_first`／`cross_first`／`append`）不保證與既有那段交叉帶相鄰，也不套用 `_cross_vert_penalty`（`cross_alt_offset_m≠0` 時升降可能伸進作業段）。② 主條帶仍可能在後續事件被交給幽靈機（既有問題；為了主條帶逐值不變，沒有改）。③ `handle_cue` 擠掉的 pending（交叉帶在尾端時最先被擠掉）不進 uncovered（既有）。④ `handle_new_area` 不為新區產生交叉帶，也不警告。⑤ 自機重排（wind／priority／cue）與 `cut_to_fit` 半組切除會破壞「緊鄰母區塊」。⑥ 同一 sid 可能同時有 `cross_energy_infeasible` 與 `cross_not_reassigned` 兩筆（`finish` 只去掉完全相同的 tuple）。⑦ `relay_cross` 對沒選上的候選也會註冊重鋪條帶（x2 B2 失鏈：`strip_not_flown(Z1_1_R1_A_*)`），被重鋪的主條帶來源也報 `strip_not_flown`；兩者都是既有問題，與交叉帶無關。⑧ 幽靈閘門依賴呼叫端把上一個 `ReplanResult.ghosts` 傳回來，沒傳就視同原機連得上 |
+
+- 放行模式（`cross_allow_neighbor_airspace=True`）下，第 1 段可能把原機母區塊剩下的主條帶全交給他機，第 2 段仍讓原機單獨飛交叉帶（`order=append`）⇒ 交叉帶與主條帶由不同相機拍；放行本來就是「明確接受」，這裡只記錄。
+- `UAVInstance.uav_id` 沒擋保留字串：機號是 `cross`、以 `cross_` 開頭或以 `_cross` 結尾時，`handle_cue` 的確認區 id `CUE_{uav}_{t}` 會被 AreaSpec 拒收 ⇒ 該事件重規劃中斷（大聲 MissionInputError，不留半套狀態）。

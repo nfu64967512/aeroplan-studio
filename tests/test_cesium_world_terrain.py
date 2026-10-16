@@ -407,10 +407,11 @@ CLASSES = {1: "A", 2: "B"}
 
 
 class FakeWT:
-    """假的 World Terrain：1% 的東西向坡。記下被呼叫的情況。"""
+    """假的 World Terrain：1% 的東西向坡。記下被呼叫的情況。高程基準宣告同真的類別（橢球高，A6）。"""
     instances: list = []
     relief = (0.0, 46.0)
     failures_to_report: list = []
+    vertical_datum = "ellipsoid"
 
     def __init__(self, token, **kw):
         self.token, self.kw = token, kw
@@ -435,6 +436,7 @@ class FakeWT:
 @pytest.fixture
 def fake_wt(monkeypatch):
     FakeWT.instances, FakeWT.relief, FakeWT.failures_to_report = [], (0.0, 46.0), []
+    monkeypatch.setattr(FakeWT, "vertical_datum", "ellipsoid")
     monkeypatch.setattr("core.terrain.CesiumWorldTerrain", FakeWT)
     monkeypatch.setattr("utils.cesium_ion.configured_ion_token", lambda *a, **k: ("fake.tok.en", "測試"))
     return FakeWT
@@ -473,7 +475,11 @@ def _plan(over=None, *, terrain_func=None, use_harvest=True):
 
 
 def _notes(c, reports):
-    return [str(n) for r in reports for n in (r.get("validation_notes") or [])] + [str(n) for n in c.hv_coordinator.notes]
+    """所有 report 的 validation_notes ＋ 轉接層 notes，**去重**（保序）：A6 審查 M2 起轉接層的高程基準 note 會原樣
+    併進尾端 validation_notes，同一句話兩處都有。「最後一份 payload 裡有沒有、有沒有重複」另由
+    test_the_final_report_* 直接看 reports[-1]。"""
+    return list(dict.fromkeys([str(n) for r in reports for n in (r.get("validation_notes") or [])]
+                              + [str(n) for n in c.hv_coordinator.notes]))
 
 
 def test_world_terrain_really_reaches_the_planners_dem(fake_wt):
@@ -512,6 +518,185 @@ def test_the_operator_will_actually_see_the_terrain_notes():
     for prefix in ("terrain_source", "terrain_relief_exceeds_band", "landing_not_at_requested_site"):
         assert prefix in MainWindow._HV_LOUD_NOTES, prefix
     assert "terrain_attribution" not in MainWindow._HV_LOUD_NOTES      # 太長，只進 log
+
+
+# ── A6：高程基準（World Terrain 是橢球高；大地起伏 N 未知 ⇒ 只准相對高度）──────────────
+def test_the_real_sampler_declares_ellipsoidal_heights():
+    """真的取樣器自我宣告橢球高 ⇒ 不經 swarm_coordinator（直接把 get_elevation 當 terrain_func）也不會被當 MSL。"""
+    from hv_dccpp.integration.aeroplan_adapter import _resolve_terrain_datum
+    w = CesiumWorldTerrain(USER_TOKEN, session=FakeSession({}))
+    assert CesiumWorldTerrain.vertical_datum == "ellipsoid"
+    assert _resolve_terrain_datum(w.get_elevation, None)[0] == "ellipsoid"
+
+
+def _flying_drone(c):
+    h = c.hv_coordinator
+    return next(d for d, u in sorted(h.id_map.items()) if u in h.last_plan.plans)
+
+
+def test_world_terrain_dem_is_ellipsoidal_and_unknown_n_means_relative_only(fake_wt):
+    from hv_dccpp.ardupilot import CameraTriggerConfig
+    from hv_dccpp.geo import VerticalDatumError
+    c, _, reports = _plan()
+    dem = c.hv_coordinator.last_inputs.dem
+    assert dem.vertical_datum == "ellipsoid" and dem.geoid_undulation_m is None and not dem.msl_known
+    assert float(dem.sample_msl(*HOME)[0]) == pytest.approx(30.0, abs=0.05)      # 原生橢球高，不減任何值
+    notes = _notes(c, reports)
+    td = [n for n in notes if n.startswith("terrain_datum(")]
+    assert len(td) == 1 and "N 未知 ⇒ 只准相對高度" in td[0], notes
+    src = [n for n in notes if n.startswith("terrain_source(")]
+    assert src and "N 未知" in src[0], notes
+    did = _flying_drone(c)
+    rel = c.hv_coordinator.mission_items(did, camera_cfg=CameraTriggerConfig())
+    assert rel and {it["frame"] for it in rel[1:] if it["command"] == 16} == {3}
+    with pytest.raises(VerticalDatumError, match="大地起伏"):
+        c.hv_coordinator.mission_items(did, camera_cfg=CameraTriggerConfig(), alt_frame="msl")
+
+
+def test_panel_geoid_undulation_makes_true_msl_available(fake_wt):
+    from hv_dccpp.ardupilot import CameraTriggerConfig
+    c, _, reports = _plan({"hv_geoid_undulation_m": 18.5})
+    h = c.hv_coordinator
+    dem = h.last_inputs.dem
+    assert dem.vertical_datum == "ellipsoid" and dem.geoid_undulation_m == 18.5 and dem.msl_known
+    assert float(dem.sample_msl(*HOME)[0]) == pytest.approx(30.0 - 18.5, abs=0.05)
+    did = _flying_drone(c)
+    rel = h.mission_items(did, camera_cfg=CameraTriggerConfig())
+    msl = h.mission_items(did, camera_cfg=CameraTriggerConfig(), alt_frame="msl")
+    pad = msl[0]["alt"]                                                           # 本機起飛坪的海拔
+    offs = {round(m["alt"] - r["alt"], 6) for m, r in zip(msl[1:], rel[1:]) if m["command"] == 16}
+    assert offs == {round(pad, 6)} and pad == pytest.approx(30.0 - 18.5, abs=1.0)
+    assert any(n.startswith("terrain_datum(") and "N = 18.50 m" in n for n in _notes(c, reports))
+
+
+def test_world_terrain_branch_passes_the_datum_explicitly(fake_wt, monkeypatch):
+    """swarm_coordinator 明確傳 "ellipsoid"，不只靠取樣器的鴨子型別宣告：宣告被改成 msl ⇒ 矛盾 ⇒ 拒絕。"""
+    monkeypatch.setattr(FakeWT, "vertical_datum", "msl")
+    with pytest.raises(hv.AeroPlanAdapterError, match="矛盾"):
+        _plan()
+
+
+def test_panel_geoid_undulation_must_be_a_number(fake_wt):
+    with pytest.raises(ValueError, match="hv_geoid_undulation_m"):
+        _plan({"hv_geoid_undulation_m": "十八"})
+    c, _, _ = _plan({"hv_geoid_undulation_m": " "})                              # 空白 ＝ 未知
+    assert c.hv_coordinator.last_inputs.dem.geoid_undulation_m is None
+
+
+@pytest.mark.parametrize("bad", [True, False, np.bool_(True), float("nan"), float("inf"), "nan", "-inf"])
+def test_panel_geoid_undulation_refuses_bools_and_non_finite(fake_wt, bad):
+    """A6 審查 L-a：``float(True)`` 會靜默變成「已知 N = 1.0 m」；NaN／inf 也不是 N ⇒ ValueError（規劃前就擋）。"""
+    with pytest.raises(ValueError, match="hv_geoid_undulation_m"):
+        _plan({"hv_geoid_undulation_m": bad})
+    assert fake_wt.instances == [] or all(w.calls == 0 for w in fake_wt.instances)     # 沒拿去取樣規劃
+
+
+def test_parse_geoid_undulation_values():
+    from mission.swarm_coordinator import parse_geoid_undulation as p
+    assert p(None) is None and p("") is None and p("  ") is None
+    assert p(18.5) == 18.5 and p("18.5") == 18.5 and p(0) == 0.0 and p(np.float64(-3.25)) == -3.25
+    for bad in (True, np.bool_(False), "十八", float("nan"), "inf", [18.5]):
+        with pytest.raises(ValueError, match="hv_geoid_undulation_m"):
+            p(bad)
+
+
+def test_the_final_report_keeps_the_datum_notes(fake_wt):
+    """A6 審查 M2：尾端 ``validation_notes`` 那份 report 會整份蓋掉 GUI 的 `_hv_last_report` ⇒ 轉接層的
+    terrain_datum(...) 必須在**最後一份** payload 裡（不能只靠 `_notes()` 把所有 report 加總——那會掩蓋這個缺陷）。"""
+    c, _, reports = _plan()
+    last = reports[-1]
+    assert "validation_notes" in last, "前提：World Terrain 路徑一定有尾端 report（terrain_source）"
+    vn = list(last["validation_notes"])
+    td = [n for n in vn if n.startswith("terrain_datum(")]
+    assert len(td) == 1 and "N 未知 ⇒ 只准相對高度" in td[0], vn
+    assert td[0] in c.hv_coordinator.notes                                         # 原樣，不是改寫過的
+    # 接在前置 notes（terrain_source…）之後；尾端字串版也有
+    assert vn.index(td[0]) > vn.index(next(n for n in vn if n.startswith("terrain_source(")))
+    assert "terrain_datum(" in last["validation_note"]
+
+
+class _NfzStub:
+    """AeroPlan FenceZone 的鴨子型別（GUI 預設海拔 0–200 m）；在作業區北方 1.5 km，不擋航線。"""
+    category, shape, name, id = "NFZ", "POLYGON", "NFZ_N", "NFZ_N"
+    alt_min_m, alt_max_m = 0.0, 200.0
+    vertices = [_ll(3200, 1500), _ll(3600, 1500), _ll(3600, 1800), _ll(3200, 1800)]
+
+
+def test_the_final_report_forwards_nfz_vertical_limits_ignored_once(fake_wt):
+    """M2：N 未知 ⇒ 禁航區海拔上下限改整柱（路由會變）——這則也要到最後一份 payload，而且只一份。"""
+    c = _coordinator()
+    c.hv_fence_zones = [_NfzStub()]
+    _, reports = _run(c)
+    vn = list(reports[-1]["validation_notes"])
+    nz = [n for n in vn if n.startswith("nfz_vertical_limits_ignored(")]
+    assert len(nz) == 1 and "NFZ_N[0～200 m]" in nz[0] and "整柱" in nz[0], vn
+    assert sum(1 for n in vn if n.startswith("terrain_datum(")) == 1
+    assert len(vn) == len(set(vn)), vn                                                 # 不重複
+    # 已知 N ⇒ 上下限照用、沒有這則（不是無條件塞一句）
+    k = _coordinator({"hv_geoid_undulation_m": 18.5})
+    k.hv_fence_zones = [_NfzStub()]
+    _, rk = _run(k)
+    assert not any(n.startswith("nfz_vertical_limits_ignored(") for n in rk[-1]["validation_notes"])
+
+
+def test_without_a_final_report_the_adapters_report_is_last_and_carries_the_datum(tmp_path, monkeypatch):
+    """M2 的另一半：沒有尾端 report（_vnotes 空）時不多送一份（多送會蓋掉轉接層 report 的 uncovered／status），
+    而轉接層那份就是最後一份、notes 裡本來就有 terrain_datum(...)。"""
+    import json as _json
+    import mission.swarm_coordinator as SC
+    # 單架構型 B（drone_id 2）：兩架混編時 A 在 120 m 分不到工作 ⇒ partial_fleet_assigned ⇒ 一定有尾端 report
+    drones = [{"drone_id": 2, "name": "UAV-2", "position": HOME, "speed": 20.0, "heading": 0.0,
+               "turn_radius": 150.0, "vehicle_type": "vtol", "fov_width": 110.0}]
+    meta = {"lat_min": HOME[0] - 0.1, "lat_max": HOME[0] + 0.1, "lon_min": HOME[1] - 0.1, "lon_max": HOME[1] + 0.1,
+            "vertical_datum": "ellipsoidal"}
+    np.save(tmp_path / "ell.npy", np.full((120, 120), 30.0))
+    (tmp_path / "ell.json").write_text(_json.dumps(meta), encoding="utf-8")
+
+    class _V:                                     # validate 一律通過：讓尾端只剩「有沒有 _prenotes」決定
+        passed, conflicts, coverage_ok, energy_ok, min_sep_h_m = True, [], True, True, 999.0
+    monkeypatch.setattr("hv_dccpp.validate", lambda *a, **k: _V())
+    c = _coordinator({"hv_world_terrain": False})
+    reports = []
+    c.hv_on_report = reports.append
+    c.plan_coverage_dccpp(areas=AREAS, drones=drones, coverage_width_m=110.0, overlap_rate=0.2,
+                          coverage_altitude=120.0, dem_path=str(tmp_path / "ell.npy"))
+    assert all("validation_notes" not in r for r in reports), [list(r) for r in reports]
+    last = reports[-1]
+    assert any(str(n).startswith("terrain_datum(") and "N 未知" in str(n) for n in last["notes"]), last["notes"]
+    assert "uncovered" in last and "status" in last
+    assert SC.HV_FORWARDED_ADAPTER_NOTE_PREFIXES == (
+        "terrain_datum(", "nfz_vertical_limits_ignored(", "site_alt_vs_dem(")
+
+
+def test_dem_file_declares_its_datum_to_the_planner(tmp_path):
+    """DEM 檔的高程基準（numpy metadata／GeoTIFF 垂直 CRS）一路到規劃器；沒宣告 ⇒ 當正高並在 note 說出來。"""
+    import json as _json
+    pts = spawn_positions(HOME[0], HOME[1], 2, 0.0, 60.0)
+    drones = [{"drone_id": i + 1, "name": f"UAV-{i + 1}", "position": pts[i], "speed": 20.0, "heading": 0.0,
+               "turn_radius": 150.0, "vehicle_type": "vtol", "fov_width": 110.0} for i in range(2)]
+    meta = {"lat_min": HOME[0] - 0.1, "lat_max": HOME[0] + 0.1, "lon_min": HOME[1] - 0.1, "lon_max": HOME[1] + 0.1}
+    for stem, vd in (("ell", "ellipsoidal"), ("srtm", None)):
+        np.save(tmp_path / f"{stem}.npy", np.full((120, 120), 30.0))
+        (tmp_path / f"{stem}.json").write_text(_json.dumps({**meta, **({"vertical_datum": vd} if vd else {})}),
+                                               encoding="utf-8")
+        c = _coordinator({"hv_world_terrain": False})
+        c.plan_coverage_dccpp(areas=AREAS, drones=drones, coverage_width_m=110.0, overlap_rate=0.2,
+                              coverage_altitude=120.0, dem_path=str(tmp_path / f"{stem}.npy"))
+        dem = c.hv_coordinator.last_inputs.dem
+        td = [n for n in c.hv_coordinator.notes if n.startswith("terrain_datum(")]
+        assert len(td) == 1, c.hv_coordinator.notes
+        if vd:
+            assert dem.vertical_datum == "ellipsoid" and dem.geoid_undulation_m is None
+            assert "DEMTerrainManager" in td[0] and "N 未知" in td[0]
+        else:
+            assert dem.vertical_datum == "msl" and "未宣告" in td[0]
+
+
+def test_the_operator_will_see_the_datum_notes():
+    """A6 的三種 note 會改變能不能上傳／路由／實飛高度 ⇒ 必須進 `_HV_LOUD_NOTES`（只 import 類別，不建 MainWindow）。"""
+    from ui.main_window import MainWindow
+    for prefix in ("terrain_datum", "nfz_vertical_limits_ignored", "site_alt_vs_dem"):
+        assert prefix in MainWindow._HV_LOUD_NOTES, prefix
 
 
 def test_unticked_means_the_provider_is_never_built(fake_wt):

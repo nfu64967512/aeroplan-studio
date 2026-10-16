@@ -193,7 +193,13 @@ class CesiumWorldTerrain:
       並行越高反而越慢（服務端對同一 token 的並行連線會節流）。別調大。
     * 不吞錯：:meth:`prefetch` 失敗會丟 :class:`WorldTerrainError`；``get_elevation`` 在沒預抓到的地方
       才會臨時抓，失敗時記進 :attr:`failures` 並回 ``None``（轉接層會以平地值填補 ⇒ 呼叫端必須檢查 ``failures``）。
+    * :attr:`vertical_datum` = ``"ellipsoid"``：高程基準的**自我宣告**（A6）。HARVEST 轉接層
+      （``aeroplan_adapter._resolve_terrain_datum``）經 ``get_elevation.__self__`` 讀它，DEM 就標成橢球高，
+      而不是沿用 terrain_func 的 AMSL 舊契約（舊行為：被當 MSL、N = 0 ⇒ 禁航區上下限少 ~18.5 m 餘裕）。
+      本類別**不提供** N：大地起伏要由呼叫端給（沒給 ⇒ 只准相對高度）。
     """
+
+    vertical_datum: str = "ellipsoid"
 
     def __init__(self, token: str, *, asset_id: int = WORLD_TERRAIN_ASSET_ID, session: Any = None,
                  timeout: float = 20.0, max_tiles: int = 256, workers: int = 2):

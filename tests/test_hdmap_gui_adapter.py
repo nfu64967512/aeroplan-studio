@@ -269,7 +269,8 @@ def test_expected_camera_params_servo(hv_map):
     exp = hv_map.expected_camera_params(_flying(hv_map)[0], camera_cfg=CC)
     assert exp == {"CAM1_TYPE": 1.0, "CAM1_DURATION": 0.1, "CAM1_INTRVAL_MIN": 0.5, "CAM_AUTO_ONLY": 1.0,
                    "CAM_MAX_ROLL": 15.0, "CAM1_FEEDBAK_PIN": -1.0, "CAM1_FEEDBAK_POL": 1.0,
-                   "CAM1_TRIGG_DIST": 0.0, "SERVO10_FUNCTION": 10.0}
+                   "CAM1_TRIGG_DIST": 0.0, "SERVO10_FUNCTION": 10.0,
+                   "MIS_RESTART": 0.0}                      # 2026-10-15：中斷後接續（不是整份重飛），讀回閘門一起比
 
 
 def test_expected_camera_params_relay_45(hv_map):

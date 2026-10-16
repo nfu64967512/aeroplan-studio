@@ -1525,7 +1525,13 @@ def _insert_cross_strips(seqs: dict[str, UAVSequence], ctx: MissionContext, dc: 
     from .decompose import CrossStripRefused, build_cross_set
     sets_by_uav: dict[str, list[CrossSet]] = {}
     skipped: list[str] = []
+    forbidden: list[str] = []
     per_cell: dict[str, int] = {}
+    # 鄰機空域規則（MappingModeConfig.cross_allow_neighbor_airspace；預設禁止）：6b 之後各機主條帶集合不再變
+    # （重排只換順序、能量退回只退交叉帶）⇒ 用這裡的主條帶足跡判斷，與組裝後 `_cross_airspace_note` 量的是同一個東西
+    allow = bool(getattr(mapping, "cross_allow_neighbor_airspace", False))
+    main_fp = _main_footprints({v: [cache.strips[seqs[v].cls or cache.uav_cls[v]][it.strip_id] for it in seqs[v].items
+                                    if not is_cross_strip(it.strip_id)] for v in seqs})
     for u in sorted(seqs):
         sq = seqs[u]
         if not sq.items:
@@ -1548,10 +1554,21 @@ def _insert_cross_strips(seqs: dict[str, UAVSequence], ctx: MissionContext, dc: 
             if isinstance(res, str):
                 skipped.append(res)
                 continue
+            if not allow:
+                hits = _cross_intrusion_m2(_cross_band(res.strips, res), main_fp, u)
+                if hits:                                   # 不排、不佔號、不進快取、不算未覆蓋（同 skipped 的語意）
+                    forbidden.append(f"{u}:{cid} → " + "、".join(f"{v} {a / 1e4:.2f} ha" for v, a in hits.items()))
+                    continue
             per_cell[cid] = per_cell.get(cid, 0) + len(res.strips)
             sets_by_uav.setdefault(u, []).append(res)
     if skipped:
         warnings.append("mapping_cross_skipped(" + "；".join(skipped) + "；這些區塊沒有交叉航帶)")
+    if forbidden:
+        warnings.append("mapping_cross_forbidden(鄰機空域＝禁止（預設）：交叉帶（含 e_ext＋引入段與交叉方向迴轉帶）"
+                        "會伸進他機獨占主條帶區塊的組不排：" + "；".join(forbidden)
+                        + "；這些區塊沒有交叉航帶（不算未覆蓋、主條帶不變）。要放行請明確設 "
+                        "cross_allow_neighbor_airspace=True（面板「交叉帶可飛進鄰機區塊」、SITL HV_CROSS_ALLOW_NEIGHBOR=1）；"
+                        "放行後伸出的那段與鄰機同高、只靠 4D 時間錯開)")
     by_cls: dict[str, list[Strip]] = {}
     for u in sorted(sets_by_uav):
         for cs in sets_by_uav[u]:
@@ -1705,52 +1722,97 @@ def _cross_summary(placed: Mapping[str, Sequence[CrossPlacement]], mapping: Any)
                 f"{'接在' if pl.where == 'after' else '排在'} {pl.anchor} {'之後' if pl.where == 'after' else '之前'}、+{pl.added_s:.0f} s"
                 + (f"、{'；'.join(cs.notes)}" if cs.notes else ""))
     head = (f"mapping_cross(交叉航帶：面積比例 {float(mapping.cross_fraction):g}、高度差 {float(mapping.cross_alt_offset_m):+g} m、"
-            f"夾角 {float(mapping.cross_angle_offset_deg):g}°；")
+            f"夾角 {float(mapping.cross_angle_offset_deg):g}°；鄰機空域 "
+            f"{'已明確放行' if getattr(mapping, 'cross_allow_neighbor_airspace', False) else '禁止（預設）'}；")
     return head + ("；".join(parts) if parts else "沒有任何區塊排進交叉航帶") + ")"
 
 
+#: 交叉帶伸進他機獨占主條帶區塊的面積門檻（m²）：6b 的禁止判斷與組裝後的量化回報共用（shapely 雜訊 ≪ 1 m²，
+#: 實際侵入是數千 m² 以上）
+_CROSS_AIRSPACE_EPS_M2 = 1.0
+
+
+def _cross_band(strips: Sequence[Strip], cs: CrossSet) -> Any:
+    """交叉帶足跡（pL／pR 已含 e_ext＋引入段）⊕ 交叉方向迴轉帶；沒有條帶 ⇒ None。"""
+    from .geometry import strips_union_footprint, turn_band
+    ss = list(strips)
+    if not ss:
+        return None
+    fp = strips_union_footprint(ss)
+    geoms = [turn_band(part, cs.beta_rad, cs.d_turn_m, cs.lateral_m) for part in getattr(fp, "geoms", [fp])]
+    geoms = [g for g in geoms if g is not None and not g.is_empty]
+    return shapely.union_all(geoms) if geoms else None
+
+
+def _main_footprints(main: Mapping[str, Sequence[Strip]]) -> dict[str, Any]:
+    """{uav: 主條帶足跡}（沒有主條帶的機不列）。"""
+    from .geometry import strips_union_footprint
+    return {v: strips_union_footprint(list(ss)) for v, ss in main.items() if ss}
+
+
+def _cross_intrusion_m2(band: Any, main_fp: Mapping[str, Any], u: str) -> dict[str, float]:
+    """``band`` 伸進**他機獨占主條帶區塊**（他機主條帶足跡扣掉本機主條帶足跡；接縫重疊因此不算）的面積：
+    {他機: m²}，只列 > `_CROSS_AIRSPACE_EPS_M2` 者（依他機 id 排序）。沒有他機 ⇒ {}（單機時規則不適用）。"""
+    if band is None or band.is_empty:
+        return {}
+    own = main_fp.get(u)
+    out: dict[str, float] = {}
+    for v in sorted(main_fp):
+        if v == u:
+            continue
+        excl = main_fp[v] if own is None else main_fp[v].difference(own)
+        a = float(band.intersection(excl).area)
+        if a > _CROSS_AIRSPACE_EPS_M2:
+            out[v] = a
+    return out
+
+
+def _cross_set_violations(plans: Mapping[str, UAVPlan], strips_all: Mapping[str, Strip],
+                          placed: Mapping[str, Sequence[CrossPlacement]]) -> list[str]:
+    """禁止模式的不變量（組裝後）：**逐組**（與 6b 同一個粒度）量實際飛的交叉帶是否伸進他機獨占區塊。
+    逐組而不是逐機聯集：n 組各 ≤ 1 m² 的雜訊聯集起來可能 > 1 m²，會把合法計畫誤判 NO_GO。"""
+    from .geometry import is_cross_strip
+    main_fp = _main_footprints({v: [strips_all[sid] for sid, _d in p.strips if sid in strips_all
+                                    and not is_cross_strip(sid)] for v, p in plans.items()})
+    out: list[str] = []
+    for u in sorted(placed):
+        if u not in plans:
+            continue
+        flown = {sid for sid, _d in plans[u].strips}
+        for pl in placed[u]:
+            hits = _cross_intrusion_m2(_cross_band([s for s in pl.cs.strips if s.strip_id in flown], pl.cs),
+                                       main_fp, u)
+            if hits:
+                out.append(f"{u}:{pl.cs.cell_id} → " + "、".join(f"{v} {a / 1e4:.2f} ha" for v, a in hits.items()))
+    return out
+
+
 def _cross_airspace_note(plans: Mapping[str, UAVPlan], strips_all: Mapping[str, Strip],
-                         placed: Mapping[str, Sequence[CrossPlacement]]) -> str | None:
+                         placed: Mapping[str, Sequence[CrossPlacement]], *, allowed: bool = True) -> str | None:
     """`mapping_cross_airspace(...)`：實際飛的交叉帶足跡 ⊕ 交叉方向迴轉帶，與**他機獨占主條帶區塊**（他機主條帶足跡
-    扣掉本機主條帶足跡）的重疊面積。交叉帶沿交叉方向貫穿區塊、兩端再加 e_ext＋引入段與迴轉 ⇒ 幾何上必然伸進鄰機區塊
-    （審查探針 2026-10-15：作業航跡 300–2000 m／架、迴轉 750–4500 m／架）；建圖模式不分高度層，這段只靠 4D 時間錯開。
-    沒有重疊 ⇒ None（只報不擋：validate 不過時建圖閘門本來就擋）。"""
-    from .geometry import is_cross_strip, strips_union_footprint, turn_band
-    main_fp: dict[str, Any] = {}
-    for v, p in plans.items():
-        ss = [strips_all[sid] for sid, _d in p.strips if sid in strips_all and not is_cross_strip(sid)]
-        if ss:
-            main_fp[v] = strips_union_footprint(ss)
+    扣掉本機主條帶足跡）的重疊面積。交叉帶沿交叉方向貫穿區塊、兩端再加 e_ext＋引入段與迴轉 ⇒ 多機時幾何上幾乎必然
+    伸進鄰機區塊（審查探針 2026-10-15：作業航跡 300–2000 m／架、迴轉 750–4500 m／架）；建圖模式不分高度層，這段
+    只靠 4D 時間錯開。只在明確放行（``cross_allow_neighbor_airspace=True``）時才可能非 None；禁止模式下 6b 已用同一個
+    幾何（`_cross_band`／`_cross_intrusion_m2`）把這種組擋掉，非 None 就是不變量被破壞（呼叫端判 NO_GO）。"""
+    from .geometry import is_cross_strip
+    main_fp = _main_footprints({v: [strips_all[sid] for sid, _d in p.strips if sid in strips_all
+                                    and not is_cross_strip(sid)] for v, p in plans.items()})
     parts: list[str] = []
     for u in sorted(placed):
         if u not in plans:
             continue
         flown = {sid for sid, _d in plans[u].strips}
-        geoms = []
-        for pl in placed[u]:
-            ss = [s for s in pl.cs.strips if s.strip_id in flown]
-            if not ss:
-                continue
-            fp = strips_union_footprint(ss)
-            for part in getattr(fp, "geoms", [fp]):
-                geoms.append(turn_band(part, pl.cs.beta_rad, pl.cs.d_turn_m, pl.cs.lateral_m))
-        if not geoms:
+        bands = [_cross_band([s for s in pl.cs.strips if s.strip_id in flown], pl.cs) for pl in placed[u]]
+        bands = [b for b in bands if b is not None]
+        if not bands:
             continue
-        g = shapely.union_all(geoms)
-        own = main_fp.get(u)
-        hits = []
-        for v in sorted(main_fp):
-            if v == u:
-                continue
-            excl = main_fp[v] if own is None else main_fp[v].difference(own)
-            a = float(g.intersection(excl).area)
-            if a > 1.0:
-                hits.append(f"{v} {a / 1e4:.2f} ha")
+        hits = _cross_intrusion_m2(shapely.union_all(bands), main_fp, u)
         if hits:
-            parts.append(f"{u} → " + "、".join(hits))
+            parts.append(f"{u} → " + "、".join(f"{v} {a / 1e4:.2f} ha" for v, a in hits.items()))
     if not parts:
         return None
-    return ("mapping_cross_airspace(交叉航帶（含 e_ext＋引入段與交叉方向迴轉帶）伸進他機獨占主條帶區塊：" + "；".join(parts)
+    return ("mapping_cross_airspace(" + ("已明確放行（cross_allow_neighbor_airspace=True）：" if allowed else "")
+            + "交叉航帶（含 e_ext＋引入段與交叉方向迴轉帶）伸進他機獨占主條帶區塊：" + "；".join(parts)
             + "；建圖模式不分高度層 ⇒ 這段與鄰機同高、只靠 4D 時間錯開，起飛延誤或風造成的時程漂移會吃掉間隔)")
 
 
@@ -1761,7 +1823,6 @@ def _cross_skip_filter(skip: set[tuple[str, str]], teams: Sequence[Team], cells_
     （e_ext + 引入段 + 迴轉），所以飛交叉帶的機對要把「交叉帶足跡 ⊕ 交叉方向迴轉帶」併進去重判：距離 < d_sep
     就取消豁免（保守：只會多檢查、不會少檢查）。"""
     from .deconflict import _team_band
-    from .geometry import strips_union_footprint, turn_band
     if not skip or not placed:
         return skip
     margin = float(cfg.d_sep_m)
@@ -1776,13 +1837,9 @@ def _cross_skip_filter(skip: set[tuple[str, str]], teams: Sequence[Team], cells_
             team_of.setdefault(u, tm.team_id)
     extra: dict[str, Any] = {}
     for u, lst in placed.items():
-        geoms = []
-        for pl in lst:
-            fp = strips_union_footprint(list(pl.cs.strips))
-            for part in getattr(fp, "geoms", [fp]):
-                geoms.append(turn_band(part, pl.cs.beta_rad, pl.cs.d_turn_m, pl.cs.lateral_m))
-        if geoms:
-            extra[u] = shapely.union_all(geoms)
+        bands = [b for b in (_cross_band(pl.cs.strips, pl.cs) for pl in lst) if b is not None]
+        if bands:
+            extra[u] = shapely.union_all(bands)
     out: set[tuple[str, str]] = set()
     for a, b in skip:
         if a not in extra and b not in extra:
@@ -2148,9 +2205,19 @@ def plan_mission(inputs: MissionInputs, cfg: PlannerConfig = PlannerConfig(), *,
             if residual_conf:
                 warnings.append(f"residual_conflicts({len(residual_conf)})")
         if cross_placed:
-            note = _cross_airspace_note(plans, strips_all, cross_placed)
-            if note is not None:
-                warnings.append(note)
+            if getattr(mapping, "cross_allow_neighbor_airspace", False):
+                note = _cross_airspace_note(plans, strips_all, cross_placed, allowed=True)
+                if note is not None:
+                    warnings.append(note)
+            else:
+                # 不變量：禁止模式下 6b 已用同一個幾何、同一個粒度（逐組）擋掉 ⇒ 這裡不該量到侵入；
+                # 量到就是 bug（例如主條帶集合在 6b 之後被改了），不靜默上傳違規計畫
+                bad = _cross_set_violations(plans, strips_all, cross_placed)
+                if bad:
+                    report.status = "NO_GO"
+                    report.errors = list(report.errors) + [
+                        "cross_airspace_rule_violated(鄰機空域＝禁止，但組裝後的交叉帶仍伸進他機獨占區塊："
+                        + "；".join(bad) + ")"]
     lap("deconflict")
 
     makespan = max((p.t_land_s for p in plans.values()), default=0.0)

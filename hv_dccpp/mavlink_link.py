@@ -732,11 +732,17 @@ def plan_to_mission_items_fallback(plan: UAVPlan, ctx: Any, cfg: PlannerConfig |
       HOLD（有 arc）→ NAV_LOITER_TURNS；首個 RTB 航點前插 DO_LAND_START；
     * NAV_VTOL_LAND（降落點 lat/lon、alt 0、param4 yaw = 進場航跡）。
     每項目附 phase／strip_id／dir／wp_index／s_frac（seqmap）。與前一 NAV 航點距離 < `min_spacing_m` 之航點合併。
+
+    ⚠ frame GLOBAL（絕對海拔）需要真海拔：DEM 為橢球高且大地起伏 N 未知 ⇒ :class:`hv_dccpp.geo.VerticalDatumError`
+    （A6；與 `ardupilot.plan_to_mission_items(alt_frame='msl')` 同一個關卡）。相對／terrain 不受影響。
     """
     m = _require_pymavlink()
     if not plan.waypoints:
         raise ValueError("plan 無航點")
     fr = int(m.MAV_FRAME_GLOBAL_RELATIVE_ALT if frame is None else frame)
+    if fr == int(m.MAV_FRAME_GLOBAL):
+        from .geo import require_true_msl          # 延遲 import：本模組頂層只依賴 mission
+        require_true_msl(ctx, f"{getattr(plan, 'uav_id', '?')}: plan_to_mission_items_fallback(frame=MAV_FRAME_GLOBAL)")
     spec = ctx.specs[plan.cls] if hasattr(ctx, "specs") else None
     wps = plan.waypoints
     lat_h, lon_h, home_msl = _home_msl(plan, ctx)

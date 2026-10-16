@@ -7,6 +7,9 @@
     # SITL S1（航測建圖）：旋鈕全部預設關閉，見 `survey_knobs`；飛完用 survey_sitl_s1.py 分析
     HV_TRIAL=S1_xxx HV_MAPPING=1 HV_CAMERA=hq6 HV_SHUTTER_HZ=2 HV_SIDE_OVERLAP=0.7 \\
         HV_FWD_OVERLAP=0.8 python scripts/hv_sitl_run.py fly gui_legal_120_1a2b
+    # 建圖首飛規劃（規劃風 3 m/s，GUI 建圖閘門會放行）：情境 gui_legal_120_1a2b_pw3；模擬風另給 HV_SIM_WIND_SPD
+    HV_TRIAL=S1_HDMAP_<日期>_PW3 HV_SIM_WIND_SPD=3 HV_MAPPING=1 HV_CAMERA=hq6 HV_SHUTTER_HZ=2 \\
+        HV_SIDE_OVERLAP=0.7 HV_FWD_OVERLAP=0.8 python scripts/hv_sitl_run.py fly gui_legal_120_1a2b_pw3
 
 與 `scripts/hv_sitl_flight.py` 的關係
 ------------------------------------
@@ -186,6 +189,9 @@ def expected_params(from_file: dict[str, float]) -> dict[str, tuple[float, str, 
 #     HV_CROSS=1       交叉航帶（MappingModeConfig.cross_strips；**需要 HV_MAPPING=1**；預設關）
 #       HV_CROSS_FRACTION    面積比例 (0, 1]（預設 0.2）；HV_CROSS_ALT_OFFSET  高度差 m（預設 0）
 #       ⚠ 只給 HV_CROSS=0（或都不給）＝ 沒有交叉航帶，與舊版逐位元相同；比例／高度差沒開 HV_CROSS=1 卻給了 ⇒ 拒絕
+#       HV_CROSS_ALLOW_NEIGHBOR=1  明確放行交叉帶飛進鄰機區塊（MappingModeConfig.cross_allow_neighbor_airspace）；
+#         預設 0 ＝ 禁止（使用者 2026-10-15）：多機時會伸進他機區塊的交叉組不排（mapping_cross_forbidden）。
+#         ⚠ 要重現 10-15 比較文件 (b)(c)(d) 的數字必須設 1（那時還沒有這條規則）
 #   匯出用 CameraTriggerConfig(servo, 0.1 s, INTRVAL_MIN = ceil_0.02(1/HV_SHUTTER_HZ), AUTO_ONLY,
 #   MAX_ROLL, camera_lead_in_m = 引入段)。SITL 沒有 relay GPIO；servo 後端在 SITL 已實測會寫 CAM。
 #   ⚠ 只支援 path='gui' 的情境（direct 路徑的酬載由 payload_reqs 決定，不注入）。
@@ -204,7 +210,7 @@ SURVEY_ENV = ("HV_MAPPING", "HV_LEAD_IN_M", "HV_CAMERA", "HV_SIDE_OVERLAP", "HV_
               "HV_SHUTTER_HZ", "HV_CAM_MAX_ROLL")
 SURVEY_LEAD_IN_DEFAULT_M = 50.0
 #: 交叉航帶旋鈕（另列：只給 HV_CROSS=0 不算「有給旋鈕」⇒ survey_knobs() 仍回 None）
-SURVEY_CROSS_ENV = ("HV_CROSS", "HV_CROSS_FRACTION", "HV_CROSS_ALT_OFFSET")
+SURVEY_CROSS_ENV = ("HV_CROSS", "HV_CROSS_FRACTION", "HV_CROSS_ALT_OFFSET", "HV_CROSS_ALLOW_NEIGHBOR")
 SURVEY_CROSS_FRACTION_DEFAULT = 0.2
 SURVEY_CROSS_ALT_OFFSET_DEFAULT_M = 0.0
 SURVEY_CAM_MAX_ROLL_DEFAULT_DEG = 15.0
@@ -251,6 +257,7 @@ class SurveyKnobs:
     cross: bool = False                      # HV_CROSS=1（交叉航帶；需要建圖模式）
     cross_fraction: float | None = None      # 只在 cross 時有值
     cross_alt_offset_m: float | None = None  # 只在 cross 時有值
+    cross_allow_neighbor: bool | None = None  # 只在 cross 時有值（HV_CROSS_ALLOW_NEIGHBOR；預設 False＝禁止）
 
     def mapping_config(self):
         if not self.mapping:
@@ -258,7 +265,8 @@ class SurveyKnobs:
         from hv_dccpp.mission import MappingModeConfig
         if self.cross:
             return MappingModeConfig(lead_in_m=self.lead_in_m, cross_strips=True,
-                                     cross_fraction=self.cross_fraction, cross_alt_offset_m=self.cross_alt_offset_m)
+                                     cross_fraction=self.cross_fraction, cross_alt_offset_m=self.cross_alt_offset_m,
+                                     cross_allow_neighbor_airspace=bool(self.cross_allow_neighbor))
         return MappingModeConfig(lead_in_m=self.lead_in_m)
 
     def camera_hw(self):
@@ -294,7 +302,7 @@ class SurveyKnobs:
         d = dataclasses.asdict(self)
         if not self.cross:
             # 沒開交叉航帶 ⇒ 不列 cross_* 鍵（survey_knobs.json 與加入交叉航帶前逐位元相同）
-            for k in ("cross", "cross_fraction", "cross_alt_offset_m"):
+            for k in ("cross", "cross_fraction", "cross_alt_offset_m", "cross_allow_neighbor"):
                 d.pop(k, None)
         fc_hz = 1.0 / self.interval_min_s
         d["camera_spec"] = (None if SURVEY_CAMERAS[self.camera] is None else dict(zip(
@@ -347,6 +355,10 @@ def survey_knobs(env=None) -> SurveyKnobs | None:
 
     cross_frac = cross_num("HV_CROSS_FRACTION", SURVEY_CROSS_FRACTION_DEFAULT, lo=0.0, hi=1.0) if cross else None
     cross_dh = cross_num("HV_CROSS_ALT_OFFSET", SURVEY_CROSS_ALT_OFFSET_DEFAULT_M) if cross else None
+    allow_s = cross_given.get("HV_CROSS_ALLOW_NEIGHBOR", "0")
+    if allow_s not in ("0", "1"):
+        raise SystemExit(f"HV_CROSS_ALLOW_NEIGHBOR 只能是 0 或 1，收到 {allow_s!r}")
+    cross_allow = (allow_s == "1") if cross else None
 
     def num(name: str, lo: float, hi: float, *, lo_open: bool = False, hi_open: bool = False) -> float:
         s = given[name]
@@ -390,7 +402,7 @@ def survey_knobs(env=None) -> SurveyKnobs | None:
     return SurveyKnobs(env=env_rec, mapping=mapping, lead_in_m=lead, camera=camera, side_overlap=side,
                        fwd_overlap=fwd, shutter_hz=hz, shutter_source=hz_src, cam_max_roll_deg=roll,
                        interval_min_s=interval, cross=cross, cross_fraction=cross_frac,
-                       cross_alt_offset_m=cross_dh)
+                       cross_alt_offset_m=cross_dh, cross_allow_neighbor=cross_allow)
 
 
 def apply_survey_knobs(sc: Scenario, knobs: SurveyKnobs) -> Scenario:
@@ -636,12 +648,19 @@ def plan_and_export(sc: Scenario, knobs: SurveyKnobs | None = None):
     vrec = {"passed": v.passed, "conflicts": len(v.conflicts), "coverage_ok": v.coverage_ok,
             "energy_ok": v.energy_ok, "min_sep_h_m": v.min_sep_h_m, "min_sep_v_m": v.min_sep_v_m}
     if knobs is not None and knobs.mapping:
-        # GUI 的建圖上傳閘門（含首飛風速上限 3 m/s）在這裡**只印不擋**：SITL 情境刻意用 5 m/s 規劃風
+        # GUI 的建圖上傳閘門（含首飛風速上限 3 m/s）在這裡**只印不擋**：論文基準 gui_legal_120_1a2b 刻意用
+        # 5 m/s 規劃風（會被擋）；首飛規劃用 gui_legal_120_1a2b_pw3（規劃風 3 m/s，應印「可上傳」）
         gate = hv.mapping_gate(max_wind_mps=MAPPING_FIRST_FLIGHT_MAX_WIND_MPS)
         vrec["gui_mapping_gate"] = {"max_wind_mps": MAPPING_FIRST_FLIGHT_MAX_WIND_MPS, **gate}
         print(f"GUI 建圖上傳閘門（風速上限 {MAPPING_FIRST_FLIGHT_MAX_WIND_MPS:g} m/s；SITL 只提示不擋）："
               f"{'可上傳' if gate['uploadable'] else '✘ ' + '；'.join(gate['reasons'])}")
     allow_conflicts = os.environ.get("HV_ALLOW_CONFLICTS", "0") == "1"
+    if knobs is not None and knobs.cross:
+        from hv_dccpp.geometry import is_cross_strip as _is_x
+        vrec["cross_allow_neighbor_airspace"] = bool(knobs.cross_allow_neighbor)
+        vrec["cross_flown_by_uav"] = {u: sum(1 for s, _d in p_.strips if _is_x(s)) for u, p_ in sorted(plan.plans.items())}
+        vrec["cross_forbidden"] = [str(w) for w in (report.get("warnings") or [])
+                                   if str(w).startswith("mapping_cross_forbidden(")]
     if knobs is not None and knobs.cross and not v.passed:
         # 交叉航帶會飛進鄰機獨占區塊（同高度、只靠 4D 時間錯開）⇒ validate 不過就不飛（GUI 也會擋）
         vrec["allow_conflicts"] = allow_conflicts
@@ -718,8 +737,12 @@ def plan_and_export(sc: Scenario, knobs: SurveyKnobs | None = None):
         if knobs.cross:
             _cx = [w for w in (report.get("warnings") or []) if str(w).startswith("mapping_cross")]
             _cu = [u_ for u_ in plan.uncovered if "_cross_" in str(u_[0])]
-            print(f"⚠ 交叉航帶：面積比例 {knobs.cross_fraction:g}、高度差 {knobs.cross_alt_offset_m:+g} m；"
-                  f"{len(_cx)} 則摘要／略過／退回（見 report.json warnings）"
+            _cf = [w for w in _cx if str(w).startswith("mapping_cross_forbidden(")]
+            print(f"⚠ 交叉航帶：面積比例 {knobs.cross_fraction:g}、高度差 {knobs.cross_alt_offset_m:+g} m、鄰機空域 "
+                  f"{'已明確放行' if knobs.cross_allow_neighbor else '禁止（預設）'}；"
+                  f"{len(_cx)} 則摘要／略過／退回／空域（見 report.json warnings）"
+                  + (f"；⚠ 因鄰機空域不排 {sum(str(w).count(' → ') for w in _cf)} 組（mapping_cross_forbidden）"
+                     if _cf else "")
                   + (f"；⚠⚠ {len(_cu)} 條交叉帶沒排進去（{sorted({r for _s, r in _cu})}），GUI 會擋上傳" if _cu else ""))
     print("匯出:", {u: summary["uavs"][u]["n_items"] for u in summary["uavs"]})
     return hv, plan, ctx, cfg, summary

@@ -31,7 +31,10 @@ from hv_dccpp.sim import build_validation_cache, validate
 
 from .test_mapping_mode import CFG, _inputs
 
-ON = MappingModeConfig(cross_strips=True, cross_fraction=0.2)
+#: 明確放行（＝ 2026-10-15 鄰機空域規則之前的行為）：這個檔案的交叉帶幾何、能量、匯出測試都在這個設定上量
+ON = MappingModeConfig(cross_strips=True, cross_fraction=0.2, cross_allow_neighbor_airspace=True)
+#: 預設（使用者 2026-10-15 定）：多機時鄰機空域禁止
+FORBID = MappingModeConfig(cross_strips=True, cross_fraction=0.2)
 
 
 def _plan(mm):
@@ -47,6 +50,11 @@ def off():
 @pytest.fixture(scope="module")
 def on():
     return _plan(ON)
+
+
+@pytest.fixture(scope="module")
+def forbid():
+    return _plan(FORBID)
 
 
 @pytest.fixture(scope="module")
@@ -83,6 +91,8 @@ def test_config_off_by_default_and_to_dict_unchanged():
     dict(cross_strips=True, cross_angle_offset_deg=0.0), dict(cross_strips=True, cross_angle_offset_deg=180.0),
     dict(cross_strips=True, cross_angle_offset_deg=9.0), dict(cross_strips=True, cross_angle_offset_deg=171.0),
     dict(cross_strips=1),
+    dict(cross_strips=False, cross_allow_neighbor_airspace=True),   # 沒開交叉帶卻放行 ⇒ 不會生效 ⇒ 拒絕
+    dict(cross_strips=True, cross_allow_neighbor_airspace=1), dict(cross_strips=True, cross_allow_neighbor_airspace="yes"),
 ])
 def test_config_rejects(bad):
     with pytest.raises(MissionInputError):
@@ -95,6 +105,16 @@ def test_config_rejects(bad):
 def test_config_accepts_edges(ok):
     m = MappingModeConfig(cross_strips=True, **ok)
     assert m.cross_strips is True and isinstance(m.cross_alt_offset_m, float)
+
+
+def test_neighbour_airspace_is_forbidden_by_default_and_reported_as_an_effective_value():
+    assert MappingModeConfig().cross_allow_neighbor_airspace is False
+    assert FORBID.cross_allow_neighbor_airspace is False and ON.cross_allow_neighbor_airspace is True
+    assert FORBID.to_dict()["cross_allow_neighbor_airspace"] is False                 # 開交叉帶 ⇒ 有效值帶出
+    assert ON.to_dict()["cross_allow_neighbor_airspace"] is True
+    assert "cross_allow_neighbor_airspace" not in MappingModeConfig().to_dict()      # 沒開 ⇒ 與加入前逐鍵相同
+    back = load_mission(_inputs(ON).to_dict())
+    assert back.mapping_mode == ON and back.mapping_mode.cross_allow_neighbor_airspace is True
 
 
 def test_mapping_inputs_roundtrip_with_cross():
@@ -529,3 +549,137 @@ def test_cross_airspace_intrusion_into_neighbour_blocks_is_reported(on, off):
     assert not any(x.startswith("mapping_cross_airspace(") for x in plan0.feasibility.warnings)
     # 只算實際飛的交叉帶：計畫裡沒有任何交叉帶 ⇒ 沒有重疊 ⇒ None
     assert P._cross_airspace_note(plan0.plans, plan0.strips, {}) is None
+
+
+# ---------------------------------------------------------------------------
+# 8. 鄰機空域規則（使用者 2026-10-15：多機預設禁止，可明確放行）
+# ---------------------------------------------------------------------------
+def _ha_pairs(text, head):
+    """'A1:cell → B2 3.41 ha、B3 0.88 ha；…' 或 'A1 → B2 3.41 ha、…' → {(uav, 他機): ha}"""
+    body = text[len(head):]
+    out = {}
+    for part in body.split("；"):
+        if " → " not in part:
+            continue
+        lhs, rhs = part.split(" → ", 1)
+        u = lhs.split("：")[-1].split(":")[0].strip()
+        for t in rhs.split("、"):
+            toks = t.replace(")", " ").split()
+            if len(toks) >= 3 and toks[2] == "ha":
+                out[(u, toks[0])] = float(toks[1])
+    return out
+
+
+def test_default_forbids_cross_sets_that_reach_a_neighbours_block(forbid, off, on):
+    """1 Pioneer + 2 HERO 單一區：每一架的交叉組都會伸進他機區塊（放行時 `mapping_cross_airspace` 量得到）⇒ 預設全部
+    不排：計畫與交叉帶關閉時相同（不算未覆蓋、上傳不因此擋），`mapping_cross_forbidden` 逐組列出伸進哪幾架幾公頃，
+    而且那些公頃數與放行時組裝後量到的**逐值相同**（判斷與量化是同一個幾何定義）。"""
+    plan, _inp = forbid
+    ref, _ = off
+    assert not _cross_ids(plan) and not any(is_cross_strip(s) for s in plan.strips)
+    assert not any(r.startswith("cross_") for _s, r in plan.uncovered)
+    assert plan.makespan_s == ref.makespan_s
+    assert {u: p.strips for u, p in plan.plans.items()} == {u: p.strips for u, p in ref.plans.items()}
+    ws = plan.feasibility.warnings
+    head = "mapping_cross_forbidden("
+    w = next(x for x in ws if x.startswith(head))
+    assert "cross_allow_neighbor_airspace=True" in w and "HV_CROSS_ALLOW_NEIGHBOR=1" in w
+    assert not any(x.startswith("mapping_cross_airspace(") for x in ws)
+    summ = next(x for x in ws if x.startswith("mapping_cross("))
+    assert "鄰機空域 禁止（預設）" in summ and "沒有任何區塊排進交叉航帶" in summ
+    got = _ha_pairs(w, head)
+    on_plan, _ = on
+    flying = sorted(u for u in on_plan.plans if _cross_ids(on_plan, u))
+    assert flying == sorted(on_plan.plans) and sorted({u for u, _v in got}) == flying
+    note = next(x for x in on_plan.feasibility.warnings if x.startswith("mapping_cross_airspace("))
+    assert note.startswith("mapping_cross_airspace(已明確放行")
+    assert got == _ha_pairs(note, "mapping_cross_airspace(") and all(a > 0.0 for a in got.values())
+    on_summ = next(x for x in on_plan.feasibility.warnings if x.startswith("mapping_cross("))
+    assert "鄰機空域 已明確放行" in on_summ
+
+
+def test_single_uav_is_not_affected_by_the_neighbour_rule():
+    """沒有他機 ⇒ 侵入必為空 ⇒ 預設（禁止）照樣排交叉帶，不發 forbidden／airspace 警告（規則不看機隊架數）。"""
+    from hv_dccpp.integration.aeroplan_adapter import to_mission_inputs
+    from hv_dccpp.mission import PayloadRequirement
+    from hv_dccpp.platform import PLATFORM_HERO
+    from .test_mapping_mode import CLASSES, HQ6, PLAT_A, SIDE, _areas, _drones, _ll
+    req = PayloadRequirement("default", "rgb", gsd_required_m=0.05, side_overlap=SIDE, forward_overlap=0.80,
+                             h_target_agl_m=120.0)
+    inp, _ = to_mission_inputs(_areas(1.0, 1), _drones(1.0)[:1], coverage_width_m=125.7, overlap_rate=SIDE,
+                               coverage_altitude=120.0, home=_ll(0.0, -900.0),
+                               class_of=lambda d: CLASSES[int(d["drone_id"])], platform_a=PLAT_A,
+                               platform_b=PLATFORM_HERO, sensor_a=(HQ6,), sensor_b=(HQ6,),
+                               payload_reqs={"default": req}, wind=(0.0, 0.0), waiver_max_agl_m=None,
+                               dem_margin_m=3000.0, mapping_mode=FORBID)
+    plan = plan_mission(inp, CFG)
+    assert len(plan.plans) == 1
+    (u,) = plan.plans
+    assert _cross_ids(plan, u)
+    ws = plan.feasibility.warnings
+    assert not any(x.startswith(("mapping_cross_forbidden(", "mapping_cross_airspace(")) for x in ws)
+    assert "鄰機空域 禁止（預設）" in next(x for x in ws if x.startswith("mapping_cross("))
+
+
+def test_intrusion_helper_threshold_and_own_overlap():
+    """他機獨占區塊＝他機主條帶足跡扣掉本機的（接縫重疊不算）；> 1 m² 才算；沒有他機 ⇒ {}。"""
+    band = shapely.box(0.0, 0.0, 10.0, 10.0)
+    own = shapely.box(0.0, 0.0, 10.0, 5.0)
+    assert P._cross_intrusion_m2(band, {"u": own, "v": shapely.box(0.0, 0.0, 10.0, 5.05)}, "u") == {}      # 0.5 m²
+    hit = P._cross_intrusion_m2(band, {"u": own, "v": shapely.box(0.0, 0.0, 10.0, 5.2)}, "u")
+    assert set(hit) == {"v"} and hit["v"] == pytest.approx(2.0)
+    assert P._cross_intrusion_m2(band, {"u": own}, "u") == {}
+    assert P._cross_intrusion_m2(None, {"u": own, "v": own}, "u") == {}
+    two = P._cross_intrusion_m2(band, {"u": own, "w": shapely.box(0, 6, 10, 7), "v": shapely.box(0, 8, 10, 9)}, "u")
+    assert list(two) == ["v", "w"] and two == {"v": pytest.approx(10.0), "w": pytest.approx(10.0)}
+    assert P._CROSS_AIRSPACE_EPS_M2 == 1.0
+
+
+def test_rule_violation_after_assembly_is_no_go(monkeypatch):
+    """不變量：禁止模式下組裝後還量得到侵入（6b 與事後量化不一致）⇒ NO_GO，不靜默上傳違規計畫。"""
+    real_ins, real_int = P._insert_cross_strips, P._cross_intrusion_m2
+    inside = {"on": False}
+
+    def ins(*a):
+        inside["on"] = True
+        try:
+            return real_ins(*a)
+        finally:
+            inside["on"] = False
+
+    monkeypatch.setattr(P, "_insert_cross_strips", ins)
+    monkeypatch.setattr(P, "_cross_intrusion_m2", lambda *a, **k: {} if inside["on"] else real_int(*a, **k))
+    plan, _inp = _plan(FORBID)
+    assert str(plan.feasibility.status) == "NO_GO"
+    err = next(e for e in plan.feasibility.errors if e.startswith("cross_airspace_rule_violated("))
+    assert " ha" in err and " → " in err and "已明確放行" not in err
+
+
+def test_invariant_is_per_set_not_a_union_of_sub_threshold_noise():
+    """一架兩組、每組各伸進他機區塊 0.8 m²（< 1 m² 門檻）：逐組判斷都不算侵入 ⇒ 組裝後的不變量不觸發；
+    若改成逐機聯集會是 1.6 m² 而把合法計畫誤判 NO_GO。超過門檻的一組則照樣抓到。"""
+    from types import SimpleNamespace as NS
+
+    def strip(sid, p0, p1, w):
+        th = math.atan2(p1[0] - p0[0], p1[1] - p0[1])                   # 航向角（北 0、順時針；方向 = (sin, cos)）
+        return NS(strip_id=sid, pL=np.array(p0, float), pR=np.array(p1, float), theta_LR_rad=th, width_m=w)
+
+    main_u = strip("Z_A_0", (0.0, 5.0), (100.0, 5.0), 10.0)           # 本機區塊 y ∈ [0, 10]
+    main_v = strip("Z_B_0", (0.0, 15.0), (100.0, 15.0), 10.0)         # 他機區塊 y ∈ [10, 20]
+
+    def cross(k, x0, y1):
+        st = strip(cross_strip_id("Z", "A", "u", k), (x0, 0.0), (x0, y1), 0.8)
+        return P.CrossPlacement(NS(strips=[st], beta_rad=0.0, d_turn_m=0.0, lateral_m=0.0, cell_id=f"C{k}"),
+                                "after", "Z_A_0", 0.0, [])
+    pls = [cross(1, 10.0, 11.0), cross(2, 50.0, 11.0)]                # 各伸進 1 m × 0.8 m
+    strips_all = {s.strip_id: s for s in (main_u, main_v, *(pl.cs.strips[0] for pl in pls))}
+    plans = {"u": NS(strips=[(main_u.strip_id, 1)] + [(pl.cs.strips[0].strip_id, 1) for pl in pls]),
+             "v": NS(strips=[(main_v.strip_id, 1)])}
+    assert P._cross_set_violations(plans, strips_all, {"u": pls}) == []
+    union = shapely.union_all([P._cross_band(pl.cs.strips, pl.cs) for pl in pls])
+    assert union.intersection(shapely.box(0.0, 10.0, 100.0, 20.0)).area == pytest.approx(1.6, abs=1e-6)
+    big = cross(3, 80.0, 13.0)                                         # 伸進 3 m × 0.8 m = 2.4 m²
+    strips_all[big.cs.strips[0].strip_id] = big.cs.strips[0]
+    plans["u"].strips.append((big.cs.strips[0].strip_id, 1))
+    bad = P._cross_set_violations(plans, strips_all, {"u": pls + [big]})
+    assert bad == ["u:C3 → v 0.00 ha"]

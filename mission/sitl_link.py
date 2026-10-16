@@ -28,6 +28,11 @@ from utils.logger import get_logger
 
 logger = get_logger()
 
+#: ArduPilot ``AP_Mission::start_command`` 的 ``GCS_SEND_TEXT(..., "Mission: %u %s", cmd.index, cmd.type())``；
+#: 與飛後解析 ``survey/dflog.py`` 的 ``_MISSION_MSG_RE`` 同一個格式
+import re as _re_mod
+_MISSION_TEXT_RE = _re_mod.compile(r"^Mission: (\d+) (\S+)")
+
 
 # ──────────────────────────────────────────────────────────────────────
 # 資料結構
@@ -385,6 +390,13 @@ class SITLLink(QThread):
     # 同 sysid 底下**非自駕儀**元件（相機、雲台、伴隨電腦…）的心跳：(sysid, compid, 資訊)
     # 這些心跳不會更新機卡；資訊欄位見 _note_component。
     component_heartbeat = pyqtSignal(int, int, dict)
+    # 建圖條帶監測（A5，survey.strip_monitor）用的任務進度；都只收**自駕儀元件**送的：
+    # MISSION_CURRENT：(sysid, {'seq','total','mission_state','mission_mode'})，任一欄位變了才送。
+    #   ⚠ seq ＝ 正飛向的 NAV；ArduPilot 不在 AUTO 時 mission_mode 送 0（＝不知道），模式要看心跳。
+    mission_current = pyqtSignal(int, dict)
+    # STATUSTEXT「Mission: <seq> <type>」：(sysid, seq, type)。ArduPilot 對每一個開始執行的指令（DO 也算）都送，
+    # 是 206 開／關真正執行時刻的唯一即時來源。原本的 status_text 照舊（不帶 sysid、不過濾來源）。
+    mission_item_started = pyqtSignal(int, int, str)
 
     def __init__(self, conn_str: str = 'udpin:0.0.0.0:14550',
                  sysid_label: int = 1, vehicle_hint: str = '',
@@ -427,7 +439,8 @@ class SITLLink(QThread):
         self._autopilot_compid: dict = {}    # sysid → 自駕儀 compid
         self._components: dict = {}          # sysid → {compid → 資訊 dict}
         self._cam_stats: dict = {}           # (sysid, cam_idx) → CAMERA_FEEDBACK 統計
-        self._state_lock = threading.Lock()  # 保護上面兩個（接收執行緒寫、GUI 執行緒讀）
+        self._mission_current: dict = {}     # sysid → 最近一則 MISSION_CURRENT（dict）
+        self._state_lock = threading.Lock()  # 保護上面幾個（接收執行緒寫、GUI 執行緒讀）
         # ── 參數讀回（read_params）：等待者清單，由接收執行緒的 PARAM_VALUE 分支填值 ──
         self._param_cv = threading.Condition()
         self._param_waiters: list = []
@@ -716,6 +729,13 @@ class SITLLink(QThread):
         if sysid is None:
             return snap
         return snap.get(int(sysid), {})
+
+    def get_mission_current(self, sysid: Optional[int] = None) -> Optional[dict]:
+        """某架（預設本鏈路 sysid_label）最近一則 MISSION_CURRENT 的複本；沒收過回 None。"""
+        key = self.sysid_label if sysid is None else int(sysid)
+        with self._state_lock:
+            mc = self._mission_current.get(key)
+            return None if mc is None else dict(mc)
 
     def get_camera_stats(self, sysid: Optional[int] = None, cam_idx: int = 0) -> Optional[dict]:
         """某架（預設本鏈路 sysid_label）某相機的 CAMERA_FEEDBACK 統計複本；沒收過回 None。
@@ -1307,7 +1327,15 @@ class SITLLink(QThread):
 
         if mtype == 'STATUSTEXT':
             text = msg.text if isinstance(msg.text, str) else msg.text.decode('utf-8', 'ignore')
-            self.status_text.emit(int(msg.severity), text.strip('\x00'))
+            text = text.strip('\x00')
+            self.status_text.emit(int(msg.severity), text)
+            # 任務進度（條帶監測）：只認已確認是飛機的自駕儀元件（相機／伴隨電腦或別的 sysid 不能偽造）
+            m = _MISSION_TEXT_RE.match(text)
+            if m:
+                src = int(msg.get_srcSystem())
+                if src not in (0, 255) and (src in self._vehicle_srcs or src == self.sysid_label) \
+                        and self._is_autopilot_component(src, self._src_component(msg)):
+                    self.mission_item_started.emit(src, int(m.group(1)), m.group(2))
             return
 
         # ── 遙測類：依來源 system 分流到各自的 TelemetryFrame ──
@@ -1340,6 +1368,17 @@ class SITLLink(QThread):
 
         if mtype == 'CAMERA_FEEDBACK':
             self._on_camera_feedback(src, msg)
+            return
+
+        if mtype == 'MISSION_CURRENT':
+            mc = {'seq': int(msg.seq), 'total': int(getattr(msg, 'total', 0) or 0),
+                  'mission_state': int(getattr(msg, 'mission_state', 0) or 0),
+                  'mission_mode': int(getattr(msg, 'mission_mode', 0) or 0)}
+            with self._state_lock:
+                changed = self._mission_current.get(src) != mc
+                self._mission_current[src] = mc
+            if changed:
+                self.mission_current.emit(src, dict(mc))
             return
 
         f = self._frame_for(src)

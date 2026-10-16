@@ -71,6 +71,8 @@ __all__ = [
     "resolve_terrain_clearance",
     "resolve_ceiling",
     "site_ground_msl",
+    "absolute_msl_inputs",
+    "SITE_ALT_VS_DEM_TOL_M",
     "polygon_enu",
     "obstacles_to_enu",
     "burn_obstacles",
@@ -91,6 +93,9 @@ UNBOUNDED_LINK_RADIUS_M: float = 1.0e7
 
 MIN_POLYGON_AREA_M2: float = 1.0
 """輸入多邊形（區域、禁區、coverage、面障礙）之最小有效面積；小於此值視為退化（MissionInputError）。"""
+
+SITE_ALT_VS_DEM_TOL_M: float = 10.0
+"""站點 `alt_msl_m` 與 DEM 地面差超過此值 ⇒ 大聲警告 ``site_alt_vs_dem(...)``（A6；不是錯誤：屋頂坪／DEM 誤差都可能）。"""
 
 _RGB_REQ_SUFFIX: str = "_rgb"
 """``both``／``any`` 區之 rgb 需求鍵約定（= req_id + 此尾碼；與 `decompose.RGB_REQ_SUFFIX` 同值）。"""
@@ -309,13 +314,79 @@ def apply_platform_overrides(base_specs: dict[str, PlatformSpec],
 # ---------------------------------------------------------------------------
 
 def site_ground_msl(site: Site, dem: DemGrid) -> float:
-    """站點高程 MSL：`alt_msl_m` → 原值；`alt_agl_m` → DEM MSL + AGL；皆 None → DEM MSL（規格 §6.1）。"""
+    """站點高程 MSL：`alt_msl_m` → 原值；`alt_agl_m` → DEM MSL + AGL；皆 None → DEM MSL（規格 §6.1）。
+
+    ⚠ 橢球高 DEM 且 N 未知時，DEM 分支回傳的是**橢球高**（見 `DemGrid.sample_msl`）；此時 `alt_msl_m` 已被
+    :func:`build_context` 以 :func:`absolute_msl_inputs` 擋下，不會與橢球高混用。
+    """
     if site.alt_msl_m is not None:
         return float(site.alt_msl_m)
     msl = float(dem.sample_msl(site.lat_deg, site.lon_deg)[0])
     if not math.isfinite(msl):
         raise MissionInputError(f"Site[{site.site_id}] 位於 DEM 範圍外（無法由 DEM 取地面高）")
     return msl + (float(site.alt_agl_m) if site.alt_agl_m is not None else 0.0)
+
+
+def absolute_msl_inputs(inputs: MissionInputs) -> list[str]:
+    """任務輸入中所有**絕對海拔（MSL）**的欄位鍵名（A6；DEM 為橢球高且 N 未知時這些值無法換進框架）。
+
+    涵蓋：站點 ``alt_msl_m``（home／備降點／C2 地面站）、``Obstacle.top_msl_m``、``NoFlyZone`` 上下限、
+    ``Airspace.max_msl_m``（含它在 ``altitude.py``／``sim.py`` 的使用——在 :func:`build_context` 一處擋住即全部涵蓋）。
+    ⚠ 刻意**不含** ``WindLayer(z_ref="msl")`` 的層界：N 未知時層界只會整體偏移 N（約 15–22 m），而風層厚度是
+    數百公尺～數公里、層內風速為常數 ⇒ 對規劃結果的影響可忽略；擋下它反而讓 dataclass 預設（``z_ref="msl"``）的
+    每個風層都變成錯誤。
+    """
+    bad: list[str] = []
+    for sid, site in inputs.sites.items():
+        if site.alt_msl_m is not None:
+            bad.append(f"Site[{sid}].alt_msl_m")
+    gs = inputs.c2.ground_station
+    if gs.alt_msl_m is not None and f"Site[{gs.site_id}].alt_msl_m" not in bad:
+        bad.append(f"c2.ground_station[{gs.site_id}].alt_msl_m")
+    for o in inputs.obstacles:
+        if o.top_msl_m is not None:
+            bad.append(f"Obstacle[{o.obs_id}].top_msl_m")
+    for z in inputs.airspace.no_fly:
+        if z.z_floor_msl_m is not None:
+            bad.append(f"NoFlyZone[{z.zone_id}].z_floor_msl_m")
+        if z.z_ceiling_msl_m is not None:
+            bad.append(f"NoFlyZone[{z.zone_id}].z_ceiling_msl_m")
+    if inputs.airspace.max_msl_m is not None:
+        bad.append("Airspace.max_msl_m")
+    return bad
+
+
+def _site_alt_vs_dem_warnings(inputs: MissionInputs, dem: DemGrid) -> list[str]:
+    """站點 `alt_msl_m` 與 DEM 地面差 > :data:`SITE_ALT_VS_DEM_TOL_M` ⇒ ``site_alt_vs_dem(...)``（A6 反方向危險）。
+
+    抓的是「兩邊基準不一致」：SRTM 正高 DEM（標 msl）＋ e-GNSS 量的橢球高坪高 ⇒ 坪被當成高出地面 ~N，整份任務
+    （相對坪）**低飛**約 N；或反過來高飛。這件事 `msl_known` 擋不到（兩邊都自稱 MSL），只能比數值。
+    只在 DEM **不是常數平面**時比（合成平地 DEM 本來就沒有地形資訊，以站點高為準是正確的）。不是錯誤：屋頂坪、
+    DEM 誤差都可能 ⇒ 大聲警告、以 `alt_msl_m` 為準。
+    """
+    zf = np.asarray(dem.z_msl, dtype=np.float64)
+    zf = zf[np.isfinite(zf)]
+    if zf.size == 0 or float(zf.max() - zf.min()) == 0.0:
+        return []
+    out: list[str] = []
+    sites = list(inputs.sites.values())
+    gs = inputs.c2.ground_station
+    if gs.site_id not in inputs.sites or inputs.sites[gs.site_id] != gs:
+        sites.append(gs)
+    for s in sites:
+        if s.alt_msl_m is None:
+            continue
+        g = float(dem.sample_msl(s.lat_deg, s.lon_deg)[0])
+        if not math.isfinite(g):
+            continue
+        d = float(s.alt_msl_m) - g
+        if abs(d) > SITE_ALT_VS_DEM_TOL_M:
+            out.append(
+                f"site_alt_vs_dem({s.site_id}: alt_msl_m {float(s.alt_msl_m):.2f} m vs DEM 地面 {g:.2f} m"
+                f"（{dem.datum_label()}），差 {d:+.2f} m > {SITE_ALT_VS_DEM_TOL_M:g} m ⇒ 以 alt_msl_m 為準；"
+                f"若不是屋頂坪，多半是基準混用（正高 vs 橢球高差 N，台灣約 15–22 m），"
+                f"相對此坪的整份任務會{'低' if d > 0 else '高'}飛約 {abs(d):.1f} m)")
+    return out
 
 
 def _latlon_to_xy(frame: GeoFrame, dem: DemGrid, latlon: Sequence[tuple[float, float]]) -> np.ndarray:
@@ -717,9 +788,27 @@ def build_context(inputs: MissionInputs, cfg: PlannerConfig, *,
     不可用時 None）＋ 障礙燒入（D24，只做一次）→ 感測器（D43）→ EnergyModel 逐機與逐構型代表 → P_link,c、ρ^sym。
 
     輸入不完整（terrain_clearance / C2 / E_nom）一律丟 :class:`MissionInputError`（preflight 轉 NO_GO 並列鍵名）。
+
+    高程基準（A6）：DEM 為橢球高且大地起伏 N 未知（``dem.msl_known`` False）⇒「只准相對高度」：任何絕對海拔輸入
+    （:func:`absolute_msl_inputs`）丟 MissionInputError 並列出鍵名；GeoFrame 以 N = 0 建（h0 與地形同取自橢球高 DEM ⇒
+    幾何精確，框架的「MSL」即橢球高）；警告 ``dem_vertical_datum(...)``。N 已知或正高 DEM 時，站點 `alt_msl_m` 與 DEM
+    地面差 > 10 m 另發 ``site_alt_vs_dem(...)``（基準混用的反方向危險，見 :func:`_site_alt_vs_dem_warnings`）。
     """
     warnings: list[str] = []
     dem = inputs.dem
+
+    # 0) 高程基準（A6）：N 未知 ⇒ 絕對海拔輸入一律拒絕（不默默把海拔當橢球高、也不默默當 N = 0）
+    if not dem.msl_known:
+        bad = absolute_msl_inputs(inputs)
+        if bad:
+            raise MissionInputError(
+                f"DEM 是橢球高而大地起伏 N 未知（只准相對高度）⇒ 不能使用絕對海拔（MSL）輸入：{bad}；"
+                f"請提供 DEM 的大地起伏 N（geoid_undulation_m），或改用相對地面的值"
+                f"（站點 alt_agl_m／省略高度由 DEM 取、障礙 height_agl_m、禁航區不給上下限＝整柱、空域 max_agl_m）")
+    if dem.vertical_datum == "ellipsoid":
+        warnings.append(f"dem_vertical_datum(ellipsoid：{dem.datum_label()})")
+    if dem.msl_known:                           # N 未知時站點 alt_msl_m 已在上面被拒絕
+        warnings += _site_alt_vs_dem_warnings(inputs, dem)
 
     # 1) spec（覆寫）
     base, w = base_specs_from_fleet(inputs.fleet)
@@ -730,7 +819,8 @@ def build_context(inputs: MissionInputs, cfg: PlannerConfig, *,
     # 2) 座標框架與站點
     home = inputs.home
     h0 = site_ground_msl(home, dem)
-    frame = GeoFrame(home.lat_deg, home.lon_deg, h0, geoid_undulation_m=float(dem.geoid_undulation_m))
+    # N 未知 ⇒ frame_undulation_m = 0：h0（橢球高）與地形（同一份橢球高）一致 ⇒ ENU 幾何／相對高度精確
+    frame = GeoFrame(home.lat_deg, home.lon_deg, h0, geoid_undulation_m=dem.frame_undulation_m)
     sites_enu: dict[str, tuple[np.ndarray, float]] = {}
     for sid, site in inputs.sites.items():
         msl = site_ground_msl(site, dem)

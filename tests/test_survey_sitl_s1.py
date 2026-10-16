@@ -144,13 +144,27 @@ def test_sitl_first_flight_wind_limit_equals_the_gui_default():
     assert runner.MAPPING_FIRST_FLIGHT_MAX_WIND_MPS == MAPPING_MAX_WIND_DEFAULT_MPS == 3.0
 
 
+def test_first_flight_scenario_differs_from_s1_only_in_wind():
+    """建圖首飛規劃情境（規劃風 3 m/s）：與 S1 逐欄相同，只有 key／trial／wind／note 不同；
+    風速不超過首飛上限（否則 GUI 建圖閘門會擋）；trial 不是論文證據 HV4SITL15；不共用可變物件。"""
+    a = scenarios.SCENARIOS["gui_legal_120_1a2b"]
+    b = scenarios.SCENARIOS["gui_legal_120_1a2b_pw3"]
+    diff = {f.name for f in dataclasses.fields(a) if getattr(a, f.name) != getattr(b, f.name)}
+    assert diff == {"key", "trial", "wind", "note"}
+    assert b.wind == (3.0, 270.0) and a.wind == (5.0, 270.0)
+    assert b.wind[0] <= runner.MAPPING_FIRST_FLIGHT_MAX_WIND_MPS
+    assert b.trial == "S1_HDMAP_PW3" and b.trial != a.trial == "HV4SITL15"
+    assert b.areas is not a.areas and b.areas[0] is not a.areas[0] and b.min_fw_agl_m is not a.min_fw_agl_m
+    assert len({s.trial for s in scenarios.SCENARIOS.values()}) == len(scenarios.SCENARIOS)   # 不搶別人的輸出目錄
+
+
 def test_cross_strip_plan_that_fails_validate_is_not_exported(monkeypatch, tmp_path):
     """交叉航帶 validate 不過 ⇒ SystemExit、不匯出（只寫 validation.json）；HV_ALLOW_CONFLICTS=1 才放行並記錄。"""
     import types
     k = runner.survey_knobs({**FULL_ENV, "HV_CROSS": "1"})
     assert k is not None and k.cross
     sc = scenarios.SCENARIOS["gui_legal_120_1a2b"]
-    up = dict(strips=[1], waypoints=[], distance_m=0.0, t_takeoff_s=0.0, t_land_s=0.0, energy_used_wh=0.0,
+    up = dict(strips=[("Z1_1_A_0", 1)], waypoints=[], distance_m=0.0, t_takeoff_s=0.0, t_land_s=0.0, energy_used_wh=0.0,
               energy_margin_wh=0.0)
     plan = types.SimpleNamespace(plans={u: types.SimpleNamespace(cls=u[0], **up) for u in ("A1", "B2", "B3")},
                                  makespan_s=0.0, uncovered=[])
@@ -177,6 +191,9 @@ def test_cross_strip_plan_that_fails_validate_is_not_exported(monkeypatch, tmp_p
     rec = json.loads((tmp_path / "validation.json").read_text(encoding="utf-8"))
     assert rec["passed"] is False and rec["conflicts"] == 2 and rec["allow_conflicts"] is False
     assert rec["gui_mapping_gate"] == {"max_wind_mps": 3.0, "uploadable": True, "reasons": []}
+    # 鄰機空域規則（2026-10-15）：預設禁止、逐機實際排進的交叉帶數、被禁止的組，都寫進 validation.json
+    assert rec["cross_allow_neighbor_airspace"] is False and rec["cross_forbidden"] == []
+    assert rec["cross_flown_by_uav"] == {"A1": 0, "B2": 0, "B3": 0}
 
 
 # ── 情境層 ──────────────────────────────────────────────────────────

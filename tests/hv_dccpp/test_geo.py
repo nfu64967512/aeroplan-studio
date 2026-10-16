@@ -203,6 +203,67 @@ def test_dem_ellipsoid_datum(frame: GeoFrame):
     assert np.abs(t_msl.z - t_ell.z).max() < 1e-3
 
 
+def test_dem_ellipsoid_unknown_undulation_keeps_relative_geometry():
+    """A6：橢球高 DEM、N 未知 ⇒ 框架 N = 0、原點高取同一份橢球高 ⇒ ENU 地形與「N 已知」逐點相同（相對幾何與基準無關）。"""
+    undulation = 18.5
+    z_ell = lambda lat, lon: 100.0 + undulation + 50.0 * np.sin((lon - LON0) * 300.0)  # noqa: E731
+    known = make_dem(fn=z_ell, vertical_datum="ellipsoid", geoid_undulation_m=undulation)
+    unknown = make_dem(fn=z_ell, vertical_datum="ellipsoid", geoid_undulation_m=None)
+    with pytest.raises(ValueError, match="不會默默當 N = 0"):
+        make_dem(fn=z_ell, vertical_datum="ellipsoid")
+    assert known.msl_known and not unknown.msl_known
+    h_known = float(known.sample_msl(LAT0, LON0)[0])
+    h_unknown = float(unknown.sample_msl(LAT0, LON0)[0])
+    assert h_unknown - h_known == pytest.approx(undulation, abs=1e-4)
+    f_known = GeoFrame(LAT0, LON0, h_known, geoid_undulation_m=known.frame_undulation_m)
+    f_unknown = GeoFrame(LAT0, LON0, h_unknown, geoid_undulation_m=unknown.frame_undulation_m)
+    assert f_unknown.geoid_undulation_m == 0.0 and f_known.h0_ell_m == pytest.approx(f_unknown.h0_ell_m, abs=1e-4)
+    b = (-500.0, -500.0, 500.0, 500.0)
+    t_k = TerrainGrid.from_dem(known, f_known, 10.0, b)
+    t_u = TerrainGrid.from_dem(unknown, f_unknown, 10.0, b)
+    assert np.abs(t_k.z - t_u.z).max() < 1e-3
+
+
+def test_replace_msl_dem_to_ellipsoid_is_refused_with_datum_is_the_way():
+    """A6 審查 L-d：``dataclasses.replace(msl_dem, vertical_datum="ellipsoid")`` 以前會把 msl「沒給 N」解析出的 0.0
+    當**明確值**帶過去 ⇒ 靜默變成「已知 N = 0」的橢球高 DEM。現在：沒給過 N ⇒ 拒絕並指向 with_datum。"""
+    import dataclasses
+    import pickle
+
+    msl = make_dem(step_m=100.0, half_size_m=300.0)
+    # msl 沒給 N：仍是 0.0（舊預設、與 0.0 相等、運算結果是一般 float）
+    assert msl.geoid_undulation_m == 0.0 and msl.frame_undulation_m == 0.0
+    assert type(msl.geoid_undulation_m + 1.0) is float and type(msl.frame_undulation_m) is float
+    with pytest.raises(ValueError, match="不會默默當 N = 0") as e:
+        dataclasses.replace(msl, vertical_datum="ellipsoid")
+    assert "with_datum" in str(e.value)
+    # replace 其他欄位不受影響；「沒給」的身分跟著走（pickle 往返也是）⇒ 之後再改基準照樣被擋
+    for again in (dataclasses.replace(msl, sigma_z_m=2.0), pickle.loads(pickle.dumps(msl))):
+        with pytest.raises(ValueError, match="不會默默當 N = 0"):
+            dataclasses.replace(again, vertical_datum="ellipsoid")
+
+    # 受支援的作法：with_datum（N 必填；只改標籤，z_msl 數值原封不動）
+    with pytest.raises(TypeError):
+        msl.with_datum("ellipsoid")                                       # type: ignore[call-arg]
+    unk = msl.with_datum("ellipsoid", None)
+    assert unk.vertical_datum == "ellipsoid" and unk.geoid_undulation_m is None and not unk.msl_known
+    kn = msl.with_datum("ellipsoid", 18.5)
+    assert kn.geoid_undulation_m == 18.5 and kn.msl_known
+    np.testing.assert_array_equal(kn.z_msl, msl.z_msl)                   # 不換算
+    assert float(kn.sample_msl(LAT0, LON0)[0]) == pytest.approx(100.0 - 18.5, abs=1e-4)
+    assert kn.with_datum("msl", 18.5).sample_msl(LAT0, LON0)[0] == pytest.approx(100.0, abs=1e-4)
+    for bad in (True, float("nan"), 500.0):
+        with pytest.raises(ValueError):
+            msl.with_datum("ellipsoid", bad)
+    with pytest.raises(ValueError, match="只適用"):
+        msl.with_datum("msl", None)
+
+    # 鎖住文件化的剩餘行為：msl 而**明確**給 0.0（例如 JSON 讀回的 "geoid_undulation_m": 0.0）再 replace ⇒ 明確值照用
+    explicit0 = make_dem(step_m=100.0, half_size_m=300.0, geoid_undulation_m=0.0)
+    e0 = dataclasses.replace(explicit0, vertical_datum="ellipsoid")
+    assert e0.geoid_undulation_m == 0.0 and e0.msl_known
+
+
 # ---------------------------------------------------------------------------
 # TerrainGrid：雙線性 / from_dem
 # ---------------------------------------------------------------------------

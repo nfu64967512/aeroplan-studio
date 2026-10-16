@@ -16,6 +16,7 @@
 (i) R1 #9  讀回期間重新規劃 ⇒ 不送舊計畫的任務。
 (j) R1 #10 只送 HUD 指令對象；已解鎖／AUTO／狀態不明的飛控不換任務。
 (l) R2     航測處理對話框收到已完成的測區多邊形。
+(m) B3     飛前曝光驗證（視數）：內部破洞／沒驗過 ⇒ 擋上傳；邊緣帶、接縫只顯示；面板寫摘要與假設。
 """
 from __future__ import annotations
 
@@ -231,6 +232,35 @@ def _fc(hv, did):
 
 def _links(hv, **kw):
     return [Link(did, _fc(hv, did), **kw) for did in sorted(hv.id_map)]
+
+
+def _x_summary(**over):
+    """B3 飛前曝光驗證摘要（形狀＝sc_mod.mapping_exposure_summary 的回傳）：預設內部沒有破洞、邊緣帶有一點、接縫 0.73。"""
+    s = {"ok": True, "level": "曝光層級（視數）", "cell_size_m": 4.0, "min_views": 5, "ks": (5, 9), "area_m2": 1.2e6,
+         "frac_ge": {5: 0.9998, 9: 0.97}, "edge_band_m": 62.9, "edge_band_source": "w/2",
+         "interior": {"area_m2": 9.4e5, "frac_ge": {5: 1.0, 9: 1.0}, "min_views": 12, "undercovered_area_m2": 0.0,
+                      "undercovered_frac": 0.0},
+         "edge_band": {"area_m2": 2.6e5, "frac_ge": {5: 0.9989, 9: 0.87}, "min_views": 4, "undercovered_area_m2": 288.0,
+                       "undercovered_frac": 0.0011},
+         "undercovered_interior_area_m2": 0.0, "interior_hole_count": 0, "interior_holes": [],
+         "undercovered_edge_band_area_m2": 276.0, "edge_band_short_count": 6, "seam_overlap_min": 0.73,
+         "seams": [{"uav_a": "A1", "uav_b": "B2", "frac_min": 0.73, "gap_m": None, "cells": 16500}],
+         "forward_overlap_p05": 0.797, "side_overlap_p05": 0.694, "photos_per_uav": {"A1": 700, "B2": 414},
+         "photos_excluded": {}, "drone_of": {"A1": 1, "B2": 2},
+         "effective": {"wind": (0.0, 0.0), "wind_source": "規劃風（單層）", "cell_size_m": 4.0, "terrain": "規劃 DEM",
+                       "polygon_source": "規劃器作業區聯集", "airspeed_initial_mps": {"A1": 21.5, "B2": 19.0},
+                       "intrval_min_s": 0.6, "trigger_duration_s": 0.1},
+         "assumptions": ["規劃風 0 m/s 來自 0°", "格 4 m", "CAM_MAX_ROLL 15° 未建模"], "verifier_notes": [],
+         "elapsed_s": 0.5}
+    s.update(over)
+    return s
+
+
+def _x_hole(area=1234.0):
+    """內部有一個視數不足的破洞（region == interior）。"""
+    return _x_summary(undercovered_interior_area_m2=area, interior_hole_count=1,
+                      interior_holes=[{"area_m2": area, "cells": 77, "min_views": 2,
+                                       "centroid_latlon": (23.96, 120.90)}])
 
 
 def _plan_offsets(hv):
@@ -787,15 +817,18 @@ def test_g_mavlink_backend_is_not_duration_limited():
 # ═══════════════════════════ (h) R1 #8 validate 失敗擋上傳 ═══════════════════════════
 def test_h_gate_combines_validate_reasons():
     hv = types.SimpleNamespace(mapping_gate=lambda: {"uploadable": True, "reasons": []})
-    sc = types.SimpleNamespace(hv_coordinator=hv, hv_validation_reasons=[])
+    # B3：曝光驗證摘要也要在（沒跑到 ⇒ 擋）；這裡給一份內部沒有破洞的
+    sc = types.SimpleNamespace(hv_coordinator=hv, hv_validation_reasons=[], hv_exposure_summary=_x_summary())
     assert mw.hv_upload_gate(hv, sc) == {"uploadable": True, "reasons": []}
     sc.hv_validation_reasons = ["validate_failed(conflicts=2)"]
     assert mw.hv_upload_gate(hv, sc) == {"uploadable": False, "reasons": ["validate_failed(conflicts=2)"]}
     sc.hv_validation_reasons = None
     g = mw.hv_upload_gate(hv, sc)
     assert g["uploadable"] is False and "validate 沒有跑到" in g["reasons"][0]
-    g = mw.hv_upload_gate(hv, types.SimpleNamespace(hv_coordinator=object(), hv_validation_reasons=[]))
+    g = mw.hv_upload_gate(hv, types.SimpleNamespace(hv_coordinator=object(), hv_validation_reasons=[],
+                                                    hv_exposure_summary=_x_summary()))
     assert g["uploadable"] is False and "找不到這份計畫的 validate 結果" in g["reasons"][0]
+    assert any("找不到這份計畫的飛前曝光驗證結果" in r for r in g["reasons"])   # 別台協調器的摘要不算
     assert mw.hv_upload_gate(hv, None)["uploadable"] is False
 
 
@@ -974,3 +1007,89 @@ def test_l_old_dialog_without_polygons_is_explained_not_silently_degraded(qt_app
     win.survey_areas = [[(25.0, 121.0), (25.0, 121.01), (25.01, 121.01)]]
     win.on_survey_process()
     assert made == [] and any("polygons" in t for t in _texts(qmb, "warning"))
+
+
+# ═══════════════════════════ (m) B3 飛前曝光驗證接上傳閘門 ═══════════════════════════
+#   擋：內部（離測區邊界 > 半刈幅）視數 < 5 的面積 > 0；驗證沒跑到／沒跑成功（沒驗過不能當驗過）。
+#   不擋、只顯示：邊緣帶視數不足、跨機接縫最小重疊（驗證器不建模側傾門檻與轉彎動態，有風時偏樂觀）。
+#   真規劃的值測試（summary 本身、挖掉一架相機 ⇒ 內部破洞）在 tests/test_hdmap_exposure_gate.py。
+def _gate_with(summary):
+    hv = types.SimpleNamespace(mapping_gate=lambda: {"uploadable": True, "reasons": []})
+    return mw.hv_upload_gate(hv, types.SimpleNamespace(hv_coordinator=hv, hv_validation_reasons=[],
+                                                       hv_exposure_summary=summary))
+
+
+def test_m_interior_hole_blocks_with_area_and_location():
+    g = _gate_with(_x_hole(1234.0))
+    assert g["uploadable"] is False and len(g["reasons"]) == 1
+    r = g["reasons"][0]
+    assert r.startswith("exposure_interior_hole(") and "曝光層級（視數）" in r
+    for frag in ("1,234 m²", "視數 < 5", "離測區邊界 > 63 m", "(23.960000, 120.900000)", "最少 2 視", "格 4 m"):
+        assert frag in r, frag
+
+
+def test_m_a_sliver_of_interior_hole_still_blocks():
+    assert _gate_with(_x_hole(0.5))["uploadable"] is False
+
+
+@pytest.mark.parametrize("over", [
+    {},                                                                          # 邊緣帶 276 m² 視數不足
+    {"undercovered_edge_band_area_m2": 5.0e4, "edge_band_short_count": 40},      # 邊緣帶很多也不擋
+    {"seam_overlap_min": 0.05,
+     "seams": [{"uav_a": "A1", "uav_b": "B2", "frac_min": 0.05, "gap_m": None, "cells": 3}]},
+    {"seam_overlap_min": 0.0,                                                    # 兩架之間有縫（重疊 0）
+     "seams": [{"uav_a": "A1", "uav_b": "B2", "frac_min": 0.0, "gap_m": 12.0, "cells": 0}]},
+])
+def test_m_edge_band_and_seams_are_shown_not_blocking(over):
+    assert _gate_with(_x_summary(**over)) == {"uploadable": True, "reasons": []}
+
+
+@pytest.mark.parametrize("summary, frag", [
+    (None, "exposure_not_run("),
+    ({"ok": False, "error": "ValueError: 格網 9000×9000 超過上限"}, "ValueError: 格網 9000×9000 超過上限"),
+])
+def test_m_not_verified_is_not_verified(summary, frag):
+    g = _gate_with(summary)
+    assert g["uploadable"] is False and any(frag in r for r in g["reasons"])
+
+
+def test_m_plan_status_shows_the_exposure_summary(mapped, qmb, qt_app):
+    hv = mapped.hv_coordinator
+    s = mapped.hv_exposure_summary
+    assert s["ok"] is True and s["undercovered_interior_area_m2"] == 0.0        # 前提：真規劃內部沒有破洞
+    win = Win(mapped, [])
+    win._show_mapping_plan_status(hv)
+    text, ok = win.vtol_recon_panel.map_status[-1]
+    assert ok is True and "建圖閘門：可上傳" in text
+    for frag in ("曝光層級（視數）", "與「覆蓋率驗算」的航跡 ± 刈幅覆蓋率不同", "格 4 m", "內部視數 < 5 的破洞：0 處",
+                 "邊緣帶（≤ ", "—— 只顯示不擋", "跨機接縫最窄", "CAM_MAX_ROLL", "規劃風 0 m/s", "有效值："):
+        assert frag in text, frag
+    for did, uid in hv.id_map.items():
+        assert f"機 {did}（{uid}） {s['photos_per_uav'][uid]} 張" in text
+    assert not _texts(qmb, "warning")
+
+
+def test_m_interior_hole_blocks_status_export_and_upload(mapped, qmb, qt_app, monkeypatch, tmp_path):
+    monkeypatch.setattr(mapped, "hv_exposure_summary", _x_hole(1234.0))
+    hv = mapped.hv_coordinator
+    links = _links(hv)
+    win = Win(mapped, links)
+    win._show_mapping_plan_status(hv)
+    text, ok = win.vtol_recon_panel.map_status[-1]
+    assert ok is False and "內部視數 < 5 的破洞 1 處 1,234 m² ⇒ 擋上傳" in text and "exposure_interior_hole(" in text
+    assert any("exposure_interior_hole(" in t for t in _texts(qmb, "warning"))
+    win._export_hv_mapping(str(tmp_path))
+    assert any("exposure_interior_hole(" in t and "不允許上傳" in t for t in _texts(qmb, "warning"))
+    win.on_sitl_upload_mission()
+    assert not any(l.read_calls or l.uploads for l in links)
+    assert "exposure_interior_hole(" in _texts(qmb, "critical")[-1]
+
+
+def test_m_status_ignores_a_summary_from_another_plan(mapped, qmb, qt_app):
+    hv = mapped.hv_coordinator
+    win = Win(mapped, [])
+    win._hv_swarm_coordinator = types.SimpleNamespace(hv_coordinator=object(), hv_validation_reasons=[],
+                                                      hv_exposure_summary=_x_summary())
+    win._show_mapping_plan_status(hv)
+    text, ok = win.vtol_recon_panel.map_status[-1]
+    assert ok is False and "exposure_not_run(" in text and "破洞：0 處" not in text

@@ -615,6 +615,34 @@ def nfz_defeats_fleet_split(areas, zones, *, swath_m: float):
     return out
 
 
+#: 轉接層 notes 裡要原樣併進 HARVEST 尾端 ``validation_notes`` 的前綴（A6 高程基準；審查 M2）。
+#: ⚠ 尾端那份 report 會整份蓋掉 GUI 的 ``_hv_last_report`` ⇒ 不併進來的話操作員看不到。
+HV_FORWARDED_ADAPTER_NOTE_PREFIXES: Tuple[str, ...] = (
+    'terrain_datum(', 'nfz_vertical_limits_ignored(', 'site_alt_vs_dem(')
+
+
+def parse_geoid_undulation(raw) -> Optional[float]:
+    """面板鍵 ``hv_geoid_undulation_m``（大地起伏 N，公尺）→ ``float`` 或 ``None``（A6）。
+
+    ``None``／空白字串 ⇒ ``None``（N 未知 ⇒ 橢球高 DEM 只准相對高度、MSL 匯出被拒）。
+    ⚠ bool（含 numpy bool）⇒ ValueError：``float(True)`` 會靜默變成「已知 N = 1.0 m」（2026-10-15 審查 L-a）。
+    非數字、NaN、±inf ⇒ ValueError。合理範圍（−110～90 m）由 :class:`hv_dccpp.geo.DemGrid` 驗。
+    """
+    if raw is None or (isinstance(raw, str) and raw.strip() == ''):
+        return None
+    import numpy as _np
+    if isinstance(raw, (bool, _np.bool_)):
+        raise ValueError(f"hv_geoid_undulation_m={raw!r} 是布林值，不是大地起伏 N（公尺；空白＝未知）"
+                         "——不會默默當成 N = 1／0")
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"hv_geoid_undulation_m={raw!r} 不是數字（大地起伏 N，公尺；空白＝未知）") from None
+    if not math.isfinite(v):
+        raise ValueError(f"hv_geoid_undulation_m={raw!r} 不是有限數（大地起伏 N，公尺；空白＝未知）")
+    return v
+
+
 def propose_recovery_assignment(plan, cfg, site_ids) -> dict:
     """由**基準計畫的降落窗**推出逐機回收站指派。回傳 ``{uav_id: site_id}``（只含要改的機）。
 
@@ -657,7 +685,11 @@ def recovery_regression_guard(base, cand, *, sep_tol_m: float = 1.0,
     """換場坪的**回歸守衛**：不准拿間距或能量餘裕換時間。
 
     ``base`` / ``cand`` 是兩份量測字典，需含
-    ``passed`` / ``conflicts`` / ``uncovered`` / ``min_sep_h_m`` / ``energy_wh``（{uav: Wh}）。
+    ``passed`` / ``conflicts`` / ``uncovered`` / ``min_sep_h_m`` / ``energy_wh``（{uav: Wh}）/ ``n_cross_flown``。
+
+    ⚠⚠ 交叉航帶（建圖模式）：候選實際飛的交叉帶**比基準少** ⇒ 擋（2026-10-15 審查 L-e）。少飛交叉帶的計畫
+    makespan 自然比較短，沒有這條就會被「makespan 有變好」**主動**選中——等於拿建圖品質換時間，而且不出聲。
+    兩邊任一缺 ``n_cross_flown`` ⇒ 擋（無從比較就不放行，不默默當 0）。
 
     ⚠⚠⚠ 為什麼這道守衛不是可選的：實測**最快的指派同時是最不安全的**——
     基準最近接 148.4 m、100 m 內 0 筆；最快那組掉到 **51.9 m**、100 m 內 6 筆、
@@ -672,6 +704,11 @@ def recovery_regression_guard(base, cand, *, sep_tol_m: float = 1.0,
         return False, f"validate 未通過（conflicts={cand.get('conflicts')}）"
     if int(cand.get("uncovered", 0)) > int(base.get("uncovered", 0)):
         return False, f"未覆蓋變多（{base.get('uncovered')} → {cand.get('uncovered')}）"
+    b_x, c_x = base.get("n_cross_flown"), cand.get("n_cross_flown")
+    if b_x is None or c_x is None:
+        return False, f"缺交叉航帶讀數 n_cross_flown（基準 {b_x!r}、候選 {c_x!r}）⇒ 無從比較，不放行"
+    if int(c_x) < int(b_x):
+        return False, f"交叉航帶變少（{int(b_x)} → {int(c_x)} 條；少飛的 makespan 自然較短，不准拿建圖品質換時間）"
 
     b_sep, c_sep = float(base.get("min_sep_h_m", 0.0)), float(cand.get("min_sep_h_m", 0.0))
     if math.isfinite(b_sep) and c_sep < b_sep - float(sep_tol_m):
@@ -696,12 +733,15 @@ def measure_harvest_plan(hv) -> dict:
     的那一趟就是這個 status）⇒ 不可以拿 status 當通過與否的判準。
     """
     import hv_dccpp as _hvlib
+    from hv_dccpp.geometry import is_cross_strip
     plan, ctx, cfg = hv.last_plan, hv.last_ctx, hv.cfg
     v = _hvlib.validate(plan, ctx, _hvlib.build_validation_cache(plan, ctx, budget_only=False), cfg)
     return {
         'passed': bool(v.passed),
         'conflicts': len(v.conflicts),
         'uncovered': len(plan.uncovered or []),
+        # 實際排進各機航線的交叉航帶條數（UAVPlan.strips 是 (strip_id, 方向)；守衛不准候選比基準少）
+        'n_cross_flown': sum(1 for p in plan.plans.values() for sid, _d in (p.strips or ()) if is_cross_strip(sid)),
         'min_sep_h_m': float(_hvlib.sim.min_separation(plan.plans, cfg)[0]),
         'energy_wh': {u: float(p.waypoints[-1].energy_remaining_wh)
                       for u, p in plan.plans.items() if p.waypoints},
@@ -1023,11 +1063,17 @@ def build_mapping_setup(p) -> dict:
     if cross_on:
         cross_frac = _num('hv_map_cross_fraction', '交叉航帶面積比例', lo=0.0, lo_open=True, hi=1.0)
         cross_dh = _num('hv_map_cross_alt_offset_m', '交叉航帶高度差')
+        # 鄰機空域（使用者 2026-10-15：多機預設禁止，可明確放行）：缺鍵／None ⇒ False（禁止），寫進有效值
+        cross_allow = p.get('hv_map_cross_allow_neighbor')
+        if cross_allow is not None and not isinstance(cross_allow, bool):
+            raise ValueError(f"交叉帶可飛進鄰機區塊（hv_map_cross_allow_neighbor）須為 bool，得 {cross_allow!r}")
+        cross_allow = bool(cross_allow)
     else:
-        _given = [k for k in ('hv_map_cross_fraction', 'hv_map_cross_alt_offset_m') if p.get(k) is not None]
+        _given = [k for k in ('hv_map_cross_fraction', 'hv_map_cross_alt_offset_m', 'hv_map_cross_allow_neighbor')
+                  if p.get(k) is not None]
         if _given:
             raise ValueError(f"沒勾交叉航帶卻給了 {', '.join(_given)} ⇒ 這些值不會生效；要用就勾「交叉航帶」")
-        cross_frac, cross_dh = None, None
+        cross_frac, cross_dh, cross_allow = None, None, None
     backend = str(p.get('hv_map_backend') or '')
     if backend not in CAMERA_BACKEND_TYPE:
         raise ValueError(f"相機後端須為 {tuple(CAMERA_BACKEND_TYPE)} 之一，得 {backend!r}")
@@ -1072,7 +1118,7 @@ def build_mapping_setup(p) -> dict:
     try:
         if cross_on:
             mm = MappingModeConfig(lead_in_m=lead, cross_strips=True, cross_fraction=cross_frac,
-                                   cross_alt_offset_m=cross_dh)
+                                   cross_alt_offset_m=cross_dh, cross_allow_neighbor_airspace=cross_allow)
         else:
             mm = MappingModeConfig(lead_in_m=lead)
     except MissionInputError as e:
@@ -1104,6 +1150,12 @@ def build_mapping_setup(p) -> dict:
     if cross_on:
         warnings.append(f"交叉航帶：每架在自己飛的每個區塊多飛一組垂直條帶（面積比例 {cross_frac:g}、高度差 {cross_dh:+g} m）；"
                         "文獻只在平地、GCP 少時效益大（Gerke 2016），同高度效果有限（Štroner 2021）——請與加密 GCP 對照")
+        if cross_allow:
+            warnings.append("交叉帶已明確放行飛進鄰機區塊：伸出區塊的那段（含迴轉）與鄰機同高、只靠起飛時間錯開，"
+                            "起飛延誤或風造成的時程漂移會吃掉間隔")
+        else:
+            warnings.append("交叉帶鄰機空域＝禁止（預設）：多機時會伸進他機區塊的交叉組不排（計畫照樣可上傳，"
+                            "那些區塊沒有交叉航帶；規劃後看 mapping_cross_forbidden）")
     effective = {
         'focal_mm': f_mm, 'pixel_um': pix_um, 'width_px': int(w_px), 'height_px': int(h_px),
         'trigger_rate_hz': rate, 'trigger_verified': verified, 'interval_min_s': interval,
@@ -1115,6 +1167,7 @@ def build_mapping_setup(p) -> dict:
         'preset': p.get('hv_map_camera_preset'),
         'max_wind_mps': max_wind,
         'cross_strips': cross_on, 'cross_fraction': cross_frac, 'cross_alt_offset_m': cross_dh,
+        'cross_allow_neighbor_airspace': cross_allow,
     }
     return {'camera': cam, 'camera_cfg': cc, 'mapping_mode': mm, 'forward_overlap': fwd, 'side_overlap': side,
             'trigger_rate_hz': rate, 'interval_min_s': interval, 'trigger_rate_planned_hz': rate_eff,
@@ -1135,9 +1188,193 @@ def mapping_setup_note(setup) -> str:
             f"地形重觸發 {('關' if e['terrain_retrigger_tol'] is None else format(e['terrain_retrigger_tol'], 'g'))}"
             + (f"；建圖作業風速上限 {e['max_wind_mps']:g} m/s（指現場實際風速，起飛前實測）"
                if e.get('max_wind_mps') is not None else '')
-            + (f"；交叉航帶 開（面積比例 {e['cross_fraction']:g}、高度差 {e['cross_alt_offset_m']:+g} m）"
+            + (f"；交叉航帶 開（面積比例 {e['cross_fraction']:g}、高度差 {e['cross_alt_offset_m']:+g} m、鄰機空域 "
+               f"{'已明確放行' if e.get('cross_allow_neighbor_airspace') else '禁止'}）"
                if e.get('cross_strips') else '；交叉航帶 關')
             + ")")
+
+
+# ── B3（2026-10-16）：飛前曝光驗證接上傳閘門 ─────────────────────────────────
+#: 飛前曝光驗證（core.recon.exposure_verifier.verify_preflight）的格距（m）。4 m：1.2 km² 約 7.5 萬格、數秒；
+#: 2 m 時格數 ×4（views_by_uav 每架一張 int32 全格網）。只用來找「視數 < 門檻的破洞」，不是精度驗收。
+MAPPING_EXPOSURE_CELL_M = 4.0
+#: 視數門檻（SfM 常用 5 視）：**內部**（離測區邊界 > 半刈幅）有格視數 < 這個值 ⇒ 不可上傳
+MAPPING_EXPOSURE_MIN_VIEWS = 5
+#: 驗證器沒建模、會讓接縫／張數預測偏樂觀的事（有效值契約：摘要與面板一定寫出來）
+MAPPING_EXPOSURE_SEAM_CAVEAT = ('驗證器不建模 CAM_MAX_ROLL 側傾門檻與轉彎動態，有風時接縫預測偏樂觀'
+                                '（SITL：規劃 0.78、5 m/s 風飛後 0.32）')
+
+
+def _mapping_planning_wind(ctx):
+    """規劃生效的風 → ``((風速 m/s, 來向°), 來源說明)``。多層風取最大那一層（偏流最大 ⇒ 足跡最斜）；陣風不計。"""
+    layers = tuple(getattr(getattr(ctx, 'inputs', None), 'wind', None) or ())
+    if not layers:
+        return (0.0, 0.0), '規劃沒有風層 ⇒ 無風'
+    lay = max(layers, key=lambda l: float(l.speed_mps))
+    src = '規劃風（' + ('單層' if len(layers) == 1 else f'{len(layers)} 層取最大') + '）'
+    if any(float(getattr(l, 'gust_mps', 0.0) or 0.0) > 0.0 for l in layers):
+        src += '；陣風不計'
+    return (float(lay.speed_mps), float(lay.dir_from_deg) % 360.0), src
+
+
+def _mapping_survey_polygons(ctx):
+    """規劃器要蓋的面（與 decompose 的 F 同一個：作業區聯集 − 禁航區 ⊕ b_trk）→ ``(多邊形, 扣掉的禁航區數)``；
+    多邊形是 verify_preflight 吃的 ``[{'exterior': [(lat, lon), …], 'holes': [...]}, …]``。
+    禁航區不扣的話，區中央的禁航區會被當成內部破洞。"""
+    import numpy as _np
+    import shapely as _shp
+    surv = _shp.union_all([g for g in ctx.areas_enu.values() if g is not None and not g.is_empty])
+    nofly = list(getattr(ctx, 'nofly_buffered', None) or [])
+    if nofly:
+        surv = surv.difference(_shp.union_all(nofly))
+
+    def _ring(r):
+        xy = _np.asarray(r.coords, dtype=float)[:, :2]
+        ll = ctx.frame.to_wgs84(_np.column_stack([xy, _np.zeros(len(xy))]))
+        return [(float(a), float(b)) for a, b in ll[:, :2]]
+    return [{'exterior': _ring(g.exterior), 'holes': [_ring(h) for h in g.interiors]}
+            for g in getattr(surv, 'geoms', [surv])
+            if g.geom_type == 'Polygon' and not g.is_empty and g.area > 0.0], len(nofly)
+
+
+def mapping_exposure_summary(hv, camera, *, cell_size_m: float = MAPPING_EXPOSURE_CELL_M) -> dict:
+    """B3：飛前曝光驗證（:func:`core.recon.exposure_verifier.verify_preflight`）→ **只留摘要**的 dict。
+
+    輸入全部取「上傳／規劃當時生效的值」：
+
+    * 任務項目＝上傳那一支 ``hv.mission_items(did, camera_cfg=hv.camera_cfg)``（相對本機起飛坪；第 0 列 home）；
+    * 測區＝規劃器要蓋的面（:func:`_mapping_survey_polygons`）；地形＝規劃用 DEM（``ctx.inputs.dem.sample_msl``，
+      與第 0 列 home 同一基準；N 未知的橢球高 DEM 兩邊都是橢球高，AGL 照樣對）；
+    * 風＝規劃風（:func:`_mapping_planning_wind`）；初始空速與 AIRSPEED_MIN/MAX＝匯出 .param 的值
+      （``recommended_params``，上傳讀回閘門也比這組）；CAM1_INTRVAL_MIN／CAM1_DURATION＝``hv.camera_cfg``。
+
+    ⚠ 報告本身不留（``grid.views_by_uav`` 每架一張 int32 全格網、照片、模擬結果；大面積上百 MB），
+    只回傳下列純資料：``ok``、視數比例、內部／邊緣帶統計、內部破洞（前 5 大）、接縫、照片數、``effective``（用了哪些值）、
+    ``assumptions``（沒建模的事）、``verifier_notes``（驗證器原樣的 notes）。驗證失敗讓例外往上丟（呼叫端決定）。
+    """
+    from core.recon.exposure_verifier import verify_preflight
+    from hv_dccpp.ardupilot import recommended_params
+    ctx, cc = hv.last_ctx, hv.camera_cfg
+    if ctx is None or getattr(hv, 'last_plan', None) is None:
+        raise ValueError('尚未規劃')
+    if cc is None:
+        raise ValueError('這份計畫沒有相機觸發設定（camera_cfg）⇒ 產生不了拍照指令')
+    k = int(MAPPING_EXPOSURE_MIN_VIEWS)
+    ks = tuple(sorted({k, 9}))
+    missions, spd, lim, drone_of = {}, {}, {}, {}
+    for did, uid in sorted(hv.id_map.items()):
+        up = hv.last_plan.plans.get(uid)
+        if up is None:
+            continue
+        missions[uid] = hv.mission_items(did, camera_cfg=cc)
+        drone_of[uid] = int(did)
+        spec = ctx.specs[up.cls]
+        p = recommended_params(spec, None, hv.cfg, sensor_kinds=('rgb',), camera_cfg=cc, warnings=[])
+        spd[uid] = float(p.get('AIRSPEED_CRUISE', spec.cruise_airspeed_mps))
+        lim[uid] = ((float(p['AIRSPEED_MIN']), float(p['AIRSPEED_MAX']))
+                    if 'AIRSPEED_MIN' in p and 'AIRSPEED_MAX' in p else None)
+    if not missions:
+        raise ValueError('這份計畫沒有任何一架有任務')
+    wind, wind_src = _mapping_planning_wind(ctx)
+    polygons, n_nofly = _mapping_survey_polygons(ctx)
+    dem = ctx.inputs.dem
+
+    def _ground(lat, lon):
+        return float(dem.sample_msl(lat, lon)[0])
+
+    rep = verify_preflight(missions, polygons, camera, airspeed_mps=spd, wind=wind, terrain=_ground,
+                           intrval_min_s=float(cc.interval_min_s), trigger_duration_s=float(cc.duration_s),
+                           accept_radius='mission', airspeed_limits_mps=lim, cell_size_m=float(cell_size_m),
+                           ks=ks, undercover_k=k)
+
+    def _region(r):
+        if r is None:
+            return None
+        return {'area_m2': float(r.area_m2), 'frac_ge': {int(a): float(b) for a, b in r.frac_ge.items()},
+                'min_views': r.min_views, 'undercovered_area_m2': float(r.undercovered_area_m2),
+                'undercovered_frac': float(r.undercovered_frac)}
+    holes = [a for a in rep.undercovered if a.region == 'interior']
+    edge = [a for a in rep.undercovered if a.region == 'edge_band']
+    roll = getattr(cc, 'max_roll_deg', None)
+    out = {
+        'ok': True, 'level': '曝光層級（視數）', 'cell_size_m': float(rep.cell_size_m), 'min_views': k, 'ks': ks,
+        'area_m2': float(rep.area_m2), 'frac_ge': {int(a): float(b) for a, b in rep.frac_ge.items()},
+        'edge_band_m': rep.edge_band_m, 'edge_band_source': rep.effective.get('edge_band_source'),
+        'interior': _region(rep.interior), 'edge_band': _region(rep.edge_band),
+        'undercovered_interior_area_m2': float(rep.undercovered_interior_area_m2),
+        'interior_hole_count': len(holes),
+        'interior_holes': [{'area_m2': float(a.area_m2), 'cells': int(a.cells), 'min_views': int(a.min_views),
+                            'centroid_latlon': tuple(a.centroid_latlon)} for a in holes[:5]],
+        'undercovered_edge_band_area_m2': float(rep.undercovered_edge_band_area_m2),
+        'edge_band_short_count': len(edge),
+        'seam_overlap_min': rep.seam_overlap_min,
+        'seams': [{'uav_a': s.uav_a, 'uav_b': s.uav_b, 'frac_min': float(s.frac_min), 'gap_m': s.gap_m,
+                   'cells': int(s.cells)} for s in rep.seams],
+        'forward_overlap_p05': rep.forward_overlap.p05, 'side_overlap_p05': rep.side_overlap.p05,
+        'photos_per_uav': dict(rep.photos_per_uav), 'photos_excluded': dict(rep.photos_excluded),
+        'drone_of': drone_of,
+        'effective': {'wind': wind, 'wind_source': wind_src, 'cell_size_m': float(rep.cell_size_m),
+                      'terrain': f"規劃 DEM（{dem.datum_label()}）", 'polygons': len(polygons),
+                      'polygon_source': '規劃器作業區聯集' + (f' − 禁航區 {n_nofly} 個 ⊕ b_trk' if n_nofly else ''),
+                      'camera_model': rep.effective.get('camera_model'),
+                      'airspeed_initial_mps': spd, 'airspeed_limits_mps': lim,
+                      'intrval_min_s': float(cc.interval_min_s), 'trigger_duration_s': float(cc.duration_s),
+                      'accept_radius': 'mission（NAV_WAYPOINT param2）', 'cam_max_roll_deg': roll},
+        'assumptions': [
+            f'規劃風 {wind[0]:g} m/s 來自 {wind[1]:g}°（{wind_src}）—— 不是現場實測風',
+            f'格 {float(rep.cell_size_m):g} m（視數以格心計，量化約 ±1 格）',
+            f'CAM_MAX_ROLL{"" if roll is None else f" {float(roll):g}°"} 未建模：轉彎改出時側傾超過門檻的觸發會被延後，'
+            '實際張數可能較少',
+            '轉彎切角與轉彎動態未建模（路徑＝相鄰 NAV 間直線）；足跡一律 pitch = roll = 0',
+        ],
+        'verifier_notes': [str(n) for n in rep.notes],
+        'elapsed_s': float(rep.elapsed_s),
+    }
+    del rep       # 報告（含全格網）不留：只回摘要
+    return out
+
+
+def mapping_exposure_block_reasons(summary) -> list:
+    """飛前曝光驗證 → 擋上傳的原因（空串列 ＝ 不擋）。
+
+    只擋「確定是破洞」的：**內部**（離測區邊界 > 半刈幅）有視數 < 門檻的面積（``undercovered_interior_area_m2 > 0``）。
+    沒跑到（None）或沒跑成功（``ok`` 不是 True）⇒ 也擋：沒驗過不能當驗過（與 validate 同一條規則）。
+    接縫最小重疊、邊緣帶視數不足**不擋**（:data:`MAPPING_EXPOSURE_SEAM_CAVEAT`）。
+    """
+    if summary is None:
+        return ['exposure_not_run(飛前曝光驗證沒有跑到 ⇒ 內部有沒有視數不足的破洞沒驗過，不能當驗過)']
+    if summary.get('ok') is not True:
+        return [f"exposure_verify_failed(飛前曝光驗證沒跑成功：{summary.get('error') or '原因不明'}"
+                " ⇒ 內部有沒有視數不足的破洞沒驗過，不能當驗過)"]
+    area = float(summary.get('undercovered_interior_area_m2') or 0.0)
+    if not area > 0.0:
+        return []
+    k = summary.get('min_views', MAPPING_EXPOSURE_MIN_VIEWS)
+    eb = summary.get('edge_band_m')
+    where = (f'離測區邊界 > {float(eb):.0f} m（半刈幅）' if eb is not None else '沒有可用照片 ⇒ 不分邊緣帶，全部算內部')
+    big = (summary.get('interior_holes') or [None])[0]
+    big_txt = ''
+    if big:
+        lat, lon = big['centroid_latlon']
+        big_txt = f"；最大一處 {big['area_m2']:,.0f} m²、最少 {big['min_views']} 視、中心 ({lat:.6f}, {lon:.6f})"
+    cell = float(summary.get('cell_size_m') or MAPPING_EXPOSURE_CELL_M)
+    return [f"exposure_interior_hole(曝光層級（視數）：內部（{where}）視數 < {k} 共 "
+            f"{summary.get('interior_hole_count', '?')} 處 {area:,.0f} m²{big_txt}；格 {cell:g} m)"]
+
+
+def mapping_exposure_note(summary) -> str:
+    """一行（``validation_notes`` 用，前綴 ``mapping_exposure(``）：曝光層級摘要＋用了哪些假設。"""
+    if summary is None or summary.get('ok') is not True:
+        return 'mapping_exposure(' + mapping_exposure_block_reasons(summary)[0] + ')'
+    k = summary['min_views']
+    inter = summary.get('interior') or {}
+    seam = summary.get('seam_overlap_min')
+    return (f"mapping_exposure(曝光層級（視數），格 {summary['cell_size_m']:g} m：內部視數 ≥{k} "
+            f"{float((inter.get('frac_ge') or {}).get(k, 0.0)):.2%}、內部破洞 {summary['interior_hole_count']} 處 "
+            f"{summary['undercovered_interior_area_m2']:,.0f} m²；邊緣帶視數 < {k} {summary['edge_band_short_count']} 處 "
+            f"{summary['undercovered_edge_band_area_m2']:,.0f} m²（不擋）；跨機接縫最窄 "
+            + ('—' if seam is None else f'{float(seam):.2f} 刈幅') + '（不擋）；假設：'
+            + '；'.join(summary.get('assumptions') or []) + ')')
 
 
 # ==========================================
@@ -1188,6 +1425,9 @@ class SwarmCoordinator:
         #   沒開建圖 ⇒ 兩者都是 None（舊行為不變）。相機觸發設定同時存在 hv_coordinator.camera_cfg。
         self.hv_mapping_setup = None
         self.hv_mapping_gate = None
+        # B3：建圖規劃後的飛前曝光驗證**摘要**（mapping_exposure_summary；不留報告／格網）。None ＝ 沒跑到；
+        #   {'ok': False, 'error': …} ＝ 沒跑成功。兩者與「內部有視數不足的破洞」都會讓建圖閘門擋上傳。
+        self.hv_exposure_summary = None
         # ── 單光相機（uniform sensor）─────────────────────────────────
         #   True（預設）：兩個構型掛**同一台**單光相機 ⇒ 酬載不再是分工依據，
         #   分工完全由平台性能（續航、速度、轉彎半徑、作業高度下限）決定。
@@ -1927,11 +2167,16 @@ class SwarmCoordinator:
         self._world_terrain = None
         self._terrain_relief = None
         self._terrain_hint = ''
+        # 高程基準（A6）：地形來源的基準，交給 HARVEST 轉接層（None ＝ 交給來源自我宣告／AMSL 舊契約）
+        self._terrain_vdatum = None
         if (self.use_harvest and terrain_func is None
                 and bool((self.harvest_params or {}).get('hv_world_terrain'))):
             _world, _relief = self._setup_world_terrain(areas, drones, dem_path)
             terrain_func = _world.get_elevation
             self._world_terrain, self._terrain_relief = _world, _relief
+            # ⚠ 明確給 "ellipsoid"，不只靠 CesiumWorldTerrain.vertical_datum 的鴨子型別宣告
+            #   （取樣器被包裝或替換時宣告會掉；轉接層對「明確 vs 宣告矛盾」會直接拒絕）
+            self._terrain_vdatum = 'ellipsoid'
 
         # ── DEM 地形載入（可選）────────────────────────
         if dem_path and terrain_func is None:
@@ -1940,6 +2185,8 @@ class SwarmCoordinator:
                 dem_mgr = DEMTerrainManager(default_elevation=0.0)
                 if dem_mgr.load_dem(dem_path):
                     terrain_func = dem_mgr.get_elevation
+                    # GeoTIFF 垂直 CRS／metadata 的判斷結果（None ＝ 沒宣告 ⇒ 轉接層依 AMSL 慣例並寫進 note）
+                    self._terrain_vdatum = getattr(dem_mgr, 'vertical_datum', None)
                     import logging as _log
                     _log.getLogger(__name__).info(f"DEM 載入成功: {dem_path}")
             except Exception as e:
@@ -1984,6 +2231,7 @@ class SwarmCoordinator:
                 #   設定不合法 ⇒ ValueError（繁中訊息），整趟不規劃（不默默退回範例相機）。
                 self.hv_mapping_setup = None
                 self.hv_mapping_gate = None
+                self.hv_exposure_summary = None
                 self.hv_validation = None
                 self.hv_validation_reasons = None
                 _map = None
@@ -2264,9 +2512,14 @@ class SwarmCoordinator:
                 _wt = getattr(self, '_world_terrain', None)
                 _rl = getattr(self, '_terrain_relief', None)
                 _relief_m = (_rl[1] - _rl[0]) if _rl else None
+                # 大地起伏 N（A6；面板鍵 hv_geoid_undulation_m，None／空白 ＝ 未知 ⇒ 橢球高 DEM 只准相對高度）
+                _geoid_n = parse_geoid_undulation(_hv_get('hv_geoid_undulation_m', default=None))
                 if _wt is not None:
                     _prenotes.append(
-                        "terrain_source(Cesium World Terrain，橢球高、取樣間距約 35 m；"
+                        "terrain_source(Cesium World Terrain，橢球高"
+                        + (f"（大地起伏 N = {_geoid_n:.2f} m ⇒ 可換海拔）" if _geoid_n is not None
+                           else "（大地起伏 N 未知 ⇒ 只准相對高度，MSL 匯出會被拒）")
+                        + "、取樣間距約 35 m；"
                         + (f"作業區起伏 {_relief_m:.0f} m；" if _relief_m is not None else "")
                         + "授權：個人/非商用，只放記憶體不存檔)")
                     if _wt.attribution_text:      # 資料來源（USGS／CGIAR-CSI／Copernicus…）：只進 log，不佔狀態列
@@ -2359,7 +2612,11 @@ class SwarmCoordinator:
                     forward_overlap=(_map['forward_overlap'] if _map is not None else 0.70),
                     camera_cfg=(_map['camera_cfg'] if _map is not None else None),
                     # 建圖作業風速上限：放在轉接層建構參數 ⇒ mapping_gate()（MainWindow 不帶參數呼叫）也擋
-                    **({'mapping_max_wind_mps': _map['max_wind_mps']} if _map is not None else {}))
+                    **({'mapping_max_wind_mps': _map['max_wind_mps']} if _map is not None else {}),
+                    # 高程基準（A6）：World Terrain = 橢球高；DEM 檔依垂直 CRS（沒宣告 ⇒ None ⇒ AMSL 慣例）；
+                    #   N 由面板給（沒給 ⇒ 未知 ⇒ 只准相對高度）。放建構子：plan_coverage_dccpp 簽章是契約
+                    vertical_datum=getattr(self, '_terrain_vdatum', None),
+                    geoid_undulation_m=_geoid_n)
                 self.hv_coordinator = _hv      # 供匯出／上傳（手冊 §12）與重規劃（§13）取用
 
                 _plan_kw = dict(
@@ -2580,7 +2837,19 @@ class SwarmCoordinator:
                     if self.hv_validation_reasons:
                         _g = {'uploadable': False,
                               'reasons': list(_g.get('reasons') or []) + list(self.hv_validation_reasons)}
+                    # B3：飛前曝光驗證（上傳那份任務項目 → AP_Camera 距離觸發模擬 → 每格視數）。只留摘要（全格網大面積
+                    #   上百 MB）；內部有視數不足的破洞、或驗證沒跑成功 ⇒ 擋。接縫／邊緣帶只顯示（不建模側傾門檻與轉彎動態）。
+                    try:
+                        self.hv_exposure_summary = mapping_exposure_summary(_hv, _map['camera'])
+                    except Exception as _e:      # noqa: BLE001 — 驗證壞掉不能吃掉規劃結果，也不能當驗過
+                        _log.getLogger(__name__).error(
+                            f"HARVEST 建圖：飛前曝光驗證沒跑成功（{type(_e).__name__}: {_e}）⇒ 不可上傳", exc_info=True)
+                        self.hv_exposure_summary = {'ok': False, 'error': f'{type(_e).__name__}: {_e}'}
+                    _xr = mapping_exposure_block_reasons(self.hv_exposure_summary)
+                    if _xr:
+                        _g = {'uploadable': False, 'reasons': list(_g.get('reasons') or []) + _xr}
                     self.hv_mapping_gate = _g
+                    _vnotes.append(mapping_exposure_note(self.hv_exposure_summary))
                     # 有效值：交叉航帶摘要（逐機逐區塊；退回／略過的區塊）與建圖作業風速上限（規劃風 vs 上限，
                     #   「上限指現場實際風速」）也進 validation_notes（GUI 大聲顯示），不只躺在轉接層 notes 裡
                     _eff = getattr(_hv, 'mapping_effective', None) or {}
@@ -2590,6 +2859,18 @@ class SwarmCoordinator:
                         _m = 'mapping_upload_blocked(' + '；'.join(self.hv_mapping_gate['reasons']) + ')'
                         _log.getLogger(__name__).error(f"HARVEST 建圖：{_m}")
                         _vnotes.append(_m)
+                # A6（2026-10-15 審查 M2）：轉接層的高程基準 note（terrain_datum／nfz_vertical_limits_ignored／
+                #   site_alt_vs_dem）只在它自己的 report 的 notes 裡；下面這份尾端 report 會**整份蓋掉**
+                #   MainWindow._hv_last_report ⇒ World Terrain 路徑（_prenotes 必有 terrain_source）操作員永遠看不到
+                #   「N 未知 ⇒ 只准相對高度」。⇒ 有尾端 report 時原樣併進來（勝出那次規劃的 _hv.notes；不重複；
+                #   接在前置 notes 之後）。沒有尾端 report 時轉接層那份就是最後一份、本來就帶著它們 ⇒ 不多送一份
+                #   （多送會把轉接層 report 的 uncovered／status 一起蓋掉）。
+                if _vnotes:
+                    _fwd: list[str] = []
+                    for _n in (str(x) for x in (_hv.notes or [])):
+                        if _n.startswith(HV_FORWARDED_ADAPTER_NOTE_PREFIXES) and _n not in _vnotes and _n not in _fwd:
+                            _fwd.append(_n)
+                    _vnotes[len(_prenotes):len(_prenotes)] = _fwd
                 if _vnotes and self.hv_on_report:
                     self.hv_on_report({'validation_note': ' ; '.join(_vnotes),
                                        'validation_notes': list(_vnotes)})

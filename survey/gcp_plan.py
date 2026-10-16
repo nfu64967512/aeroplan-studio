@@ -83,6 +83,12 @@ class GcpPlanError(ValueError):
 #: 交叉航帶方案的 GCP 超過這個數就大聲警告（它的意義是「少 GCP」；Gerke 2016 在 17–18 個時差異消失）
 CROSS_PRESET_GCP_WARN = 10
 
+#: 首飛精度路線（使用者 2026-10-15 定）：基準航線＋加密 GCP（S1 首飛規劃為 15 個）＋30 個檢核點（ASPRS 第 2 版），
+#: 交叉航帶留到之後做對照實驗。GUI 的 GCP／檢核點對話框以此為預設；函式庫 `LayoutParams` 的預設不動
+#: （C_compare 等證據腳本與既有測試都依賴它，而且呼叫端本來就明確給 preset）。
+FIRST_FLIGHT_PRESET = "dense_gcp"
+FIRST_FLIGHT_N_CHECKPOINTS = 30
+
 
 @dataclass(frozen=True)
 class Preset:
@@ -1024,8 +1030,47 @@ def parse_odm_srs_header(header: str) -> CRS:
 
 
 def utm_header_for(lat: float, lon: float) -> str:
-    zone = int((lon + 180.0) // 6.0) + 1
+    """(lat, lon) 所在的 WGS84 UTM 區標頭（ODM 寫法）。lon = 180 歸第 60 區（不產生 ODM 不認得的 61）。"""
+    lat, lon = float(lat), float(lon)
+    if not (math.isfinite(lat) and math.isfinite(lon) and -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+        raise GcpPlanError(f"經緯度 ({lat!r}, {lon!r}) 不合法，無法決定 UTM 區")
+    zone = min(int((lon + 180.0) // 6.0) + 1, 60)
     return f"WGS84 UTM {zone}{'N' if lat >= 0 else 'S'}"
+
+
+#: gcp_list.txt 標頭的預設（使用者 2026-10-15 定）：作業區所在的 WGS84 UTM 區（台灣本島 51N；120°E 以西的
+#: 澎湖、金門、南竿是 50N）。EPSG:4326 等其他寫法照收，但只在明確選擇時用。
+DEFAULT_HEADER_RULE = "作業區所在的 WGS84 UTM 區（台灣本島 51N；120°E 以西 50N）"
+
+
+def preset_consistency_warning(preset: str, blocks_info: Optional[Mapping[str, Any]]) -> Optional[str]:
+    """「交叉航帶＋最少 GCP」方案的前提是**每個區塊都真的飛了交叉航帶**。區塊來自 HARVEST（``blocks_from_hv`` 的 info
+    有 ``n_cross_excluded``）時：全部是 0 ⇒ 計畫裡沒有交叉帶（沒開，或多機時被鄰機空域規則擋掉）；部分是 0 ⇒ 那幾個
+    區塊沒有交叉帶補償少放的 GCP。區塊不是來自 HARVEST（沒有該欄）⇒ 無從判斷，回 None。"""
+    if preset != "cross_strips" or not blocks_info:
+        return None
+    vals = {k: v.get("n_cross_excluded") for k, v in blocks_info.items() if isinstance(v, Mapping)}
+    if not vals or any(n is None for n in vals.values()):
+        return None
+    missing = sorted(k for k, n in vals.items() if int(n) == 0)
+    if not missing:
+        return None
+    if len(missing) == len(vals):
+        return ("⚠ 選了「交叉航帶＋最少 GCP」，但 HARVEST 計畫裡沒有任何交叉航帶（沒開，或多機時被鄰機空域規則擋掉）"
+                "⇒ 少放的 GCP 沒有交叉航帶補償；請改用「加密 GCP」或確認交叉航帶真的有排進計畫")
+    return (f"⚠ 選了「交叉航帶＋最少 GCP」，但區塊 {'、'.join(missing)} 沒有交叉航帶（被鄰機空域規則擋掉、放不下或能量退回）"
+            "⇒ 那幾塊少放的 GCP 沒有補償；請改用「加密 GCP」或在那幾塊加 GCP")
+
+
+def site_utm_header(latlons) -> str:
+    """一組點位共同所在的 UTM 區標頭。點位跨區（例如馬祖：南竿 50N、東引 51N）⇒ GcpPlanError，要求明確選：
+    只看形心會在跨區時靜默選一邊。"""
+    hs = sorted({utm_header_for(a, b) for a, b in latlons})
+    if not hs:
+        raise GcpPlanError("沒有點位，無法決定 UTM 區")
+    if len(hs) > 1:
+        raise GcpPlanError(f"點位跨 UTM 區 {hs}（120°E 兩側：本島 51N；澎湖／金門／南竿 50N）：請明確選 gcp_list 標頭")
+    return hs[0]
 
 
 _PLACEHOLDER_RE = re.compile(r"[<>]")

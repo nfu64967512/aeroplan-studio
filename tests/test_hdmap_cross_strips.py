@@ -59,6 +59,7 @@ def params(**over) -> dict:
         "hv_map_feedback_pin": -1, "hv_map_feedback_servo": None, "hv_map_max_roll_deg": 15.0,
         "hv_map_lead_in_m": 50.0, "hv_map_terrain_retrigger_tol": 0.10, "hv_map_tlog": False,
         "hv_map_cross_enabled": False, "hv_map_cross_fraction": None, "hv_map_cross_alt_offset_m": None,
+        "hv_map_cross_allow_neighbor": None,
         "hv_map_max_wind_mps": 3.0,
     }
     p.update(over)
@@ -83,7 +84,9 @@ def plan(p: dict) -> SwarmCoordinator:
     return coord
 
 
-CROSS = dict(hv_map_cross_enabled=True, hv_map_cross_fraction=0.3, hv_map_cross_alt_offset_m=-20.0)
+CROSS = dict(hv_map_cross_enabled=True, hv_map_cross_fraction=0.3, hv_map_cross_alt_offset_m=-20.0,
+             hv_map_cross_allow_neighbor=True)          # 明確放行（鄰機空域規則之前的行為）
+CROSS_DEFAULT = dict(hv_map_cross_enabled=True, hv_map_cross_fraction=0.3, hv_map_cross_alt_offset_m=-20.0)
 
 
 @pytest.fixture(scope="module")
@@ -91,17 +94,39 @@ def crossed():
     return plan(params(**CROSS))
 
 
+@pytest.fixture(scope="module")
+def crossed_default():
+    """面板勾了交叉航帶、沒勾「可飛進鄰機區塊」（預設）。"""
+    return plan(params(**CROSS_DEFAULT))
+
+
 # ═══════════════════════ 1. build_mapping_setup ═══════════════════════
 def test_setup_passes_cross_values_into_mapping_mode():
     s = build_mapping_setup(params(**CROSS))
     mm = s["mapping_mode"]
     assert (mm.cross_strips, mm.cross_fraction, mm.cross_alt_offset_m, mm.cross_angle_offset_deg) == (True, 0.3, -20.0, 90.0)
+    assert mm.cross_allow_neighbor_airspace is True
     assert mm.lead_in_m == s["camera_cfg"].camera_lead_in_m == 50.0
     e = s["effective"]
     assert (e["cross_strips"], e["cross_fraction"], e["cross_alt_offset_m"]) == (True, 0.3, -20.0)
+    assert e["cross_allow_neighbor_airspace"] is True
     note = mapping_setup_note(s)
-    assert "交叉航帶 開（面積比例 0.3、高度差 -20 m）" in note
+    assert "交叉航帶 開（面積比例 0.3、高度差 -20 m、鄰機空域 已明確放行）" in note
     assert any("交叉航帶" in w and "Gerke" in w for w in s["warnings"])
+    assert any(w.startswith("交叉帶已明確放行飛進鄰機區塊") for w in s["warnings"])
+
+
+def test_setup_neighbour_airspace_defaults_to_forbidden():
+    """使用者 2026-10-15：多機預設禁止，可明確放行。面板沒送（缺鍵／None）⇒ False，寫進有效值與 mapping_setup。"""
+    for over in (CROSS_DEFAULT, {**CROSS_DEFAULT, "hv_map_cross_allow_neighbor": None},
+                 {**CROSS_DEFAULT, "hv_map_cross_allow_neighbor": False}):
+        s = build_mapping_setup(params(**over))
+        assert s["mapping_mode"].cross_allow_neighbor_airspace is False
+        assert s["effective"]["cross_allow_neighbor_airspace"] is False
+        assert "鄰機空域 禁止）" in mapping_setup_note(s)
+        assert any(w.startswith("交叉帶鄰機空域＝禁止（預設）") for w in s["warnings"])
+    s = build_mapping_setup(params())
+    assert s["effective"]["cross_allow_neighbor_airspace"] is None and "鄰機空域" not in mapping_setup_note(s)
 
 
 def test_setup_without_cross_is_the_old_mapping_mode():
@@ -110,7 +135,7 @@ def test_setup_without_cross_is_the_old_mapping_mode():
     assert s["effective"]["cross_strips"] is False and s["effective"]["cross_fraction"] is None
     assert "交叉航帶 關" in mapping_setup_note(s)
     p = params()
-    for k in ("hv_map_cross_enabled", "hv_map_cross_fraction", "hv_map_cross_alt_offset_m"):
+    for k in ("hv_map_cross_enabled", "hv_map_cross_fraction", "hv_map_cross_alt_offset_m", "hv_map_cross_allow_neighbor"):
         p.pop(k)
     assert build_mapping_setup(p)["mapping_mode"] == MappingModeConfig(lead_in_m=50.0)     # 缺鍵 ＝ 沒勾
 
@@ -124,6 +149,10 @@ def test_setup_without_cross_is_the_old_mapping_mode():
     (dict(hv_map_cross_enabled=True, hv_map_cross_fraction=0.2, hv_map_cross_alt_offset_m=None), "高度差"),
     (dict(hv_map_cross_enabled=True, hv_map_cross_fraction=0.2, hv_map_cross_alt_offset_m=float("nan")), "高度差"),
     (dict(hv_map_cross_enabled="yes"), "hv_map_cross_enabled"),
+    (dict(hv_map_cross_allow_neighbor=True), "沒勾交叉航帶卻給了 hv_map_cross_allow_neighbor"),
+    (dict(hv_map_cross_allow_neighbor=False), "沒勾交叉航帶卻給了 hv_map_cross_allow_neighbor"),
+    ({**CROSS_DEFAULT, "hv_map_cross_allow_neighbor": 1}, "hv_map_cross_allow_neighbor"),
+    ({**CROSS_DEFAULT, "hv_map_cross_allow_neighbor": "yes"}, "hv_map_cross_allow_neighbor"),
 ])
 def test_setup_rejects_bad_cross_values(over, frag):
     with pytest.raises(ValueError, match=frag):
@@ -157,10 +186,12 @@ def panel(qt_app):
 def test_panel_cross_fields_default_off_and_locked(panel):
     p = panel.get_params()
     assert (p["hv_map_cross_enabled"], p["hv_map_cross_fraction"], p["hv_map_cross_alt_offset_m"]) == (False, None, None)
+    assert p["hv_map_cross_allow_neighbor"] is None
     assert not panel.hv_map_cross_check.isEnabled()                  # 建圖沒開 ⇒ 交叉航帶也鎖
     panel.hv_map_check.setChecked(True)
     assert panel.hv_map_cross_check.isEnabled()
     assert not panel.hv_map_cross_frac_spin.isEnabled() and not panel.hv_map_cross_dh_spin.isEnabled()
+    assert not panel.hv_map_cross_allow_check.isEnabled() and not panel.hv_map_cross_allow_check.isChecked()
     assert panel.hv_map_cross_frac_spin.value() == pytest.approx(0.20)
     assert panel.hv_map_cross_dh_spin.value() == 0.0
 
@@ -174,11 +205,19 @@ def test_panel_cross_values_reach_mapping_mode(panel):
     panel.hv_map_backend_combo.setCurrentIndex(panel.hv_map_backend_combo.findData("servo"))   # relay 要韌體版本
     p = panel.get_params()
     assert (p["hv_map_cross_enabled"], p["hv_map_cross_fraction"], p["hv_map_cross_alt_offset_m"]) == (True, 0.35, -15.0)
+    assert p["hv_map_cross_allow_neighbor"] is False and panel.hv_map_cross_allow_check.isEnabled()   # 預設禁止
     mm = build_mapping_setup(p)["mapping_mode"]
     assert (mm.cross_strips, mm.cross_fraction, mm.cross_alt_offset_m) == (True, 0.35, -15.0)
+    assert mm.cross_allow_neighbor_airspace is False
+    panel.hv_map_cross_allow_check.setChecked(True)                   # 明確放行
+    p = panel.get_params()
+    assert p["hv_map_cross_allow_neighbor"] is True
+    assert build_mapping_setup(p)["mapping_mode"].cross_allow_neighbor_airspace is True
     panel.hv_map_cross_check.setChecked(False)                        # 取消勾 ⇒ 送 None（不送會被忽略的值）
     p = panel.get_params()
-    assert (p["hv_map_cross_fraction"], p["hv_map_cross_alt_offset_m"]) == (None, None)
+    assert (p["hv_map_cross_fraction"], p["hv_map_cross_alt_offset_m"], p["hv_map_cross_allow_neighbor"]) == \
+        (None, None, None)
+    assert not panel.hv_map_cross_allow_check.isEnabled()
     assert build_mapping_setup(p)["mapping_mode"].cross_strips is False
 
 
@@ -191,8 +230,15 @@ def test_coordinator_plans_cross_strips_with_the_panel_values(crossed):
     xs = [s for up in p.plans.values() for s, _d in up.strips if is_cross_strip(s)]
     assert xs and all(p.strips[s].h_op_m == pytest.approx(100.0) for s in xs)
     eff = hv.mapping_effective
-    assert eff["config"]["cross_fraction"] == 0.3
+    assert eff["config"]["cross_fraction"] == 0.3 and eff["config"]["cross_allow_neighbor_airspace"] is True
     assert any(w.startswith("mapping_cross(") and "高度差 -20 m" in w for w in eff["cross"])
+    # 放行 ⇒ 伸進鄰機區塊的面積照樣量化，而且現在會進 mapping_effective["cross"]（以前漏收）
+    assert any(w.startswith("mapping_cross_airspace(已明確放行") for w in eff["cross"])
+    rule = eff["cross_rule"]
+    assert rule["allow_neighbor_airspace"] is True and rule["forbidden_sets"] == 0
+    assert rule["flown_cross_strips_by_uav"] == {u: sum(1 for s, _d in up.strips if is_cross_strip(s))
+                                                for u, up in sorted(p.plans.items())}
+    assert sum(rule["flown_cross_strips_by_uav"].values()) == len(xs)
     # 多區塊的機（A1 飛三個子區的 A 殘帶）：每組交叉帶是一段連續的、緊鄰同一母胞的主條帶（之前或之後）
     multi = 0
     for u, up in p.plans.items():
@@ -205,6 +251,24 @@ def test_coordinator_plans_cross_strips_with_the_panel_values(crossed):
             nb = [ids[i] for i in (pos[0] - 1, pos[-1] + 1) if 0 <= i < len(ids)]
             assert any(not is_cross_strip(s) and p.strips[s].cell_id == cid for s in nb), (u, cid, nb)
     assert multi >= 1
+
+
+def test_coordinator_default_forbids_neighbour_airspace_end_to_end(crossed_default):
+    """GUI 路徑、面板只勾交叉航帶（預設禁止）：1 Pioneer + 2 HERO 的交叉組全都會伸進鄰機區塊 ⇒ 一條都不排；
+    計畫可上傳性不因此改變（不算未覆蓋）；mapping_cross_forbidden 進有效值，cross_rule 數出 0 條、被禁止的組數。"""
+    hv = crossed_default.hv_coordinator
+    assert hv.mapping_mode.cross_strips is True and hv.mapping_mode.cross_allow_neighbor_airspace is False
+    p = hv.last_plan
+    assert not [s for up in p.plans.values() for s, _d in up.strips if is_cross_strip(s)]
+    assert not any(r.startswith("cross_") for _s, r in p.uncovered)
+    eff = hv.mapping_effective
+    fb = [w for w in eff["cross"] if w.startswith("mapping_cross_forbidden(")]
+    assert len(fb) == 1 and not any(w.startswith("mapping_cross_airspace(") for w in eff["cross"])
+    rule = eff["cross_rule"]
+    assert rule["allow_neighbor_airspace"] is False
+    assert set(rule["flown_cross_strips_by_uav"].values()) == {0}
+    assert rule["forbidden_sets"] == fb[0].count(" → ") >= len(p.plans)
+    assert hv.mapping_gate()["uploadable"] is True                       # 等於基準航線：能上傳
 
 
 def test_coordinator_mission_items_have_206_per_cross_strip(crossed):
@@ -291,6 +355,12 @@ def test_sitl_knobs_cross_values_and_record():
     assert d["env"]["HV_CROSS"] == "1" and d["env"]["HV_CROSS_FRACTION"] == "0.3"
     k2 = runner.survey_knobs({"HV_MAPPING": "1", "HV_CROSS": "1"})
     assert (k2.cross_fraction, k2.cross_alt_offset_m) == (0.2, 0.0)
+    # 鄰機空域：預設 0＝禁止；1＝明確放行；都進 mapping_config()（survey_effective 用整體相等比對）與 survey_knobs.json
+    assert k.cross_allow_neighbor is False and k.mapping_config().cross_allow_neighbor_airspace is False
+    assert d["cross_allow_neighbor"] is False
+    k3 = runner.survey_knobs({"HV_MAPPING": "1", "HV_CROSS": "1", "HV_CROSS_ALLOW_NEIGHBOR": "1"})
+    assert k3.cross_allow_neighbor is True and k3.mapping_config().cross_allow_neighbor_airspace is True
+    assert k3.to_dict()["env"]["HV_CROSS_ALLOW_NEIGHBOR"] == "1"
 
 
 def test_sitl_knobs_default_off_is_unchanged():
@@ -298,7 +368,7 @@ def test_sitl_knobs_default_off_is_unchanged():
     assert runner.survey_knobs({"HV_CROSS": "0"}) is None                 # 只給 HV_CROSS=0 ＝ 沒給
     k = runner.survey_knobs({"HV_MAPPING": "1"})
     assert k.cross is False and k.mapping_config() == MappingModeConfig(lead_in_m=50.0)
-    assert not {"cross", "cross_fraction", "cross_alt_offset_m"} & set(k.to_dict())   # survey_knobs.json 不變
+    assert not {"cross", "cross_fraction", "cross_alt_offset_m", "cross_allow_neighbor"} & set(k.to_dict())   # survey_knobs.json 不變
 
 
 @pytest.mark.parametrize("env, frag", [
@@ -310,6 +380,8 @@ def test_sitl_knobs_default_off_is_unchanged():
     ({"HV_MAPPING": "1", "HV_CROSS": "1", "HV_CROSS_FRACTION": "1.5"}, "HV_CROSS_FRACTION"),
     ({"HV_MAPPING": "1", "HV_CROSS": "1", "HV_CROSS_FRACTION": "abc"}, "HV_CROSS_FRACTION"),
     ({"HV_MAPPING": "1", "HV_CROSS": "1", "HV_CROSS_ALT_OFFSET": "nan"}, "HV_CROSS_ALT_OFFSET"),
+    ({"HV_MAPPING": "1", "HV_CROSS_ALLOW_NEIGHBOR": "1"}, "只在 HV_CROSS=1"),
+    ({"HV_MAPPING": "1", "HV_CROSS": "1", "HV_CROSS_ALLOW_NEIGHBOR": "yes"}, "HV_CROSS_ALLOW_NEIGHBOR 只能是 0 或 1"),
 ])
 def test_sitl_knobs_reject(env, frag):
     with pytest.raises(SystemExit, match=frag):

@@ -1155,7 +1155,8 @@ class VTOLReconPanel(QWidget):
         self.hv_map_cross_check.setToolTip(
             "每架在自己飛的每個區塊多飛一組與主條帶垂直的條帶（區塊中央、同一架飛）。\n"
             "文獻：平地、GCP 少時效益大（Gerke & Przybilla 2016：同時換方向與高度、約兩成面積）；\n"
-            "同高度垂直重飛只有小幅改善（Štroner 2021）。代價是多飛、多轉彎，鄰區可能要錯開時間。")
+            "同高度垂直重飛只有小幅改善（Štroner 2021）。代價是多飛、多轉彎。\n"
+            "多機時交叉帶兩端與迴轉會伸進鄰機區塊（同高度）：預設這種組不排，要飛請勾下方「可飛進鄰機區塊」。")
         form.addRow("", self.hv_map_cross_check)
         self.hv_map_cross_frac_spin = QDoubleSpinBox()
         self.hv_map_cross_frac_spin.setRange(0.05, 1.0)
@@ -1175,6 +1176,15 @@ class VTOLReconPanel(QWidget):
         _cx.addWidget(QLabel("高度差"))
         _cx.addWidget(self.hv_map_cross_dh_spin, 1)
         form.addRow("", _cx)
+        # 鄰機空域（使用者 2026-10-15：多機預設禁止，可明確放行）
+        self.hv_map_cross_allow_check = QCheckBox("交叉帶可飛進鄰機區塊（同高度，只靠時間錯開）")
+        self.hv_map_cross_allow_check.setChecked(False)
+        self.hv_map_cross_allow_check.setToolTip(
+            "不勾（預設）：多機時會伸進他機區塊的交叉組不排，計畫照樣可上傳（那些區塊沒有交叉航帶，"
+            "規劃後看 mapping_cross_forbidden）。\n"
+            "勾選：照排，伸出區塊的那段（含迴轉）與鄰機同高、只靠起飛時間錯開；起飛延誤或風會吃掉間隔。\n"
+            "單機（或區塊互不相鄰）時不影響。")
+        form.addRow("", self.hv_map_cross_allow_check)
 
         self.hv_map_max_wind_spin = QDoubleSpinBox()
         self.hv_map_max_wind_spin.setRange(0.5, 15.0)
@@ -1337,6 +1347,7 @@ class VTOLReconPanel(QWidget):
         # 交叉航帶的比例／高度差只在勾了交叉航帶時可改（沒勾時送 None，不送會被忽略的值）
         self.hv_map_cross_frac_spin.setEnabled(on and self.hv_map_cross_check.isChecked())
         self.hv_map_cross_dh_spin.setEnabled(on and self.hv_map_cross_check.isChecked())
+        self.hv_map_cross_allow_check.setEnabled(on and self.hv_map_cross_check.isChecked())
         # 只對某一後端／回授腳有意義的欄位：用不到就鎖起來（送出的值也是 None，不會被默默吃掉）
         self.hv_map_relay_pin_spin.setEnabled(on and relay)
         self.hv_map_relay_aux_spin.setEnabled(on and relay)
@@ -1466,6 +1477,8 @@ class VTOLReconPanel(QWidget):
                                       if self.hv_map_cross_check.isChecked() else None),
             "hv_map_cross_alt_offset_m": (float(self.hv_map_cross_dh_spin.value())
                                           if self.hv_map_cross_check.isChecked() else None),
+            "hv_map_cross_allow_neighbor": (bool(self.hv_map_cross_allow_check.isChecked())
+                                            if self.hv_map_cross_check.isChecked() else None),
             # 建圖作業風速上限（規劃風速＝上方「平均風速」超過 ⇒ 不可上傳；指現場實際風速，起飛前實測）
             "hv_map_max_wind_mps": float(self.hv_map_max_wind_spin.value()),
         }

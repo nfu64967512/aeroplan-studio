@@ -40,6 +40,8 @@ MAP_KEYS = {
     "hv_map_lead_in_m", "hv_map_terrain_retrigger_tol", "hv_map_tlog",
     # 2026-10-15：交叉航帶（沒勾 ⇒ 比例／高度差送 None）＋建圖作業風速上限（預設 3.0 m/s）
     "hv_map_cross_enabled", "hv_map_cross_fraction", "hv_map_cross_alt_offset_m", "hv_map_max_wind_mps",
+    # 2026-10-15：交叉帶鄰機空域（沒勾交叉 ⇒ None；勾了 ⇒ bool，預設 False＝禁止）
+    "hv_map_cross_allow_neighbor",
 }
 
 
@@ -72,6 +74,7 @@ def test_mapping_is_off_by_default_and_every_key_is_explicit(panel):
         "hv_map_max_roll_deg": 15.0, "hv_map_lead_in_m": 50.0, "hv_map_terrain_retrigger_tol": 0.10,
         "hv_map_tlog": False,
         "hv_map_cross_enabled": False, "hv_map_cross_fraction": None, "hv_map_cross_alt_offset_m": None,
+        "hv_map_cross_allow_neighbor": None,
         "hv_map_max_wind_mps": 3.0,
     }
 

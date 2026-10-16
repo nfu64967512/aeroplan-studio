@@ -191,6 +191,31 @@ def test_area_spec_normalises_and_validates():
         AreaSpec("", SQUARE)
 
 
+def test_area_id_must_not_contain_the_cross_strip_tag():
+    """area_id 組成胞／條帶 id；會組出 geometry.CROSS_STRIP_TAG（"_cross_"）的 area_id 會讓該區每一條主條帶都被
+    is_cross_strip（子字串判斷）當成建圖模式交叉帶 ⇒ 一律拒收（不看建圖模式開關），訊息說明是保留字串並給改名建議。
+    以 "_cross" 結尾也算：胞 id 一接 "_<n>" 就成了標記（"river_cross" → 胞 "river_cross_1"）。"""
+    from hv_dccpp.geometry import CROSS_STRIP_TAG, forms_cross_strip_tag, is_cross_strip
+    assert CROSS_STRIP_TAG == "_cross_" and M.CROSS_STRIP_TAG is CROSS_STRIP_TAG
+    for bad in ("river_cross_1", "_cross_", "Z_cross_", "a_cross_b_cross_c", "river_cross", "_cross"):
+        assert forms_cross_strip_tag(bad)
+        with pytest.raises(MissionInputError, match=r"含保留字串 '_cross_'（或以 '_cross' 結尾") as ei:
+            AreaSpec(bad, SQUARE)
+        assert f"area_id={bad!r}" in str(ei.value) and "-cross-" in str(ei.value)
+        assert is_cross_strip(f"{bad}_1_A_3")                                 # 這就是被拒的原因（胞 _1、條帶 _A_3）
+    for ok in ("river-cross-1", "cross_river", "Z_crossing_1", "Z_CROSS_1", "Zcross", "river_crossX", "Z1"):
+        assert not forms_cross_strip_tag(ok)
+        assert AreaSpec(ok, SQUARE).area_id == ok and not is_cross_strip(f"{ok}_1_A_3")
+        assert not is_cross_strip(f"{ok}_1_B_k6_B_4") and not is_cross_strip(f"{ok}_1_R1_B_2")   # 子胞／重鋪子胞
+    base = AreaSpec("Z1", SQUARE)
+    with pytest.raises(MissionInputError, match="_cross_"):
+        dataclasses.replace(base, area_id="Z_cross_1")
+    d = mission_dict()
+    d["areas"][0]["area_id"] = "river_cross_1"
+    with pytest.raises(MissionInputError, match="river_cross_1"):
+        load_mission(d)
+
+
 def test_obstacle_height_exactly_one():
     o = Obstacle("T", "point", [[23.95, 120.93]], None, 40.0, category="tower")
     assert o.coords_wgs84 == ((23.95, 120.93),) and o.keepout_buffer_m is None

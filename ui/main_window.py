@@ -5,6 +5,7 @@
 
 import math
 import re
+import time
 from pathlib import Path
 from typing import Optional, Tuple
 from PyQt6.QtWidgets import (
@@ -890,6 +891,26 @@ def link_flight_state_problem(link):
     return link_flight_state(link)[1]
 
 
+def build_strip_monitor(hv, drone_id, items):
+    """建圖上傳的任務項目 → 條帶監測器（``survey.strip_monitor.StripPhotoMonitor``）：段表＋條帶 id＋逐段預估張數。
+
+    回傳 (monitor, None) 或 (None, 原因)。原因要給操作員看（沒有監測器 ⇒ 只剩總張數、沒有逐條帶警報）：
+    段數與計畫條帶數不符時**不**硬湊（不靜默錯位）。逐段預估與「預估 M 張」用同一個模型
+    （``expected_photos_by_segment``；合計 ＋ 帶外 ＝ ``expected_photo_count``）。
+    """
+    try:
+        from survey.strip_monitor import StripPhotoMonitor, camera_segments
+        from hv_dccpp.integration.aeroplan_adapter import expected_photos_by_segment
+        uid = hv.id_map[int(drone_id)]
+        up = hv.last_plan.plans[uid]
+        strip_ids = [s for s, _d in up.strips]
+        by_seg, _outside = expected_photos_by_segment(items)
+        segs = camera_segments(items, strip_ids=strip_ids, expected=by_seg)
+        return StripPhotoMonitor(segs), None
+    except Exception as e:          # noqa: BLE001 - 照實說，不讓上傳失敗
+        return None, f'{type(e).__name__}: {e}'
+
+
 def send_link_command(link, cmd: str, arg=None):
     """逐機送一個 HUD 指令。一鍵起飛（_sitl_broadcast）與「依時程放行」走**同一支**：
     auto_start ＝ SITLLink.auto_start()（AUTO + ARM + MISSION_START）。"""
@@ -1037,11 +1058,14 @@ def release_report_text(schedule, entries, source: str, *, mapping: bool) -> str
 
 
 def hv_upload_gate(hv, swarm_coordinator) -> dict:
-    """建圖上傳閘門 = 轉接層 ``mapping_gate()``（未覆蓋／mapping_incomplete／NO_GO）＋ validate 的原因（R1 #8）。
+    """建圖上傳閘門 = 轉接層 ``mapping_gate()``（未覆蓋／mapping_incomplete／NO_GO）＋ validate 的原因（R1 #8）
+    ＋ 飛前曝光驗證（B3，``mapping_exposure_block_reasons``：內部有視數不足的破洞、或驗證沒跑到／沒跑成功）。
 
-    validate 的結果在**產生這個 hv 的** SwarmCoordinator（``hv_validation_reasons``）。對不上（不是同一個 hv）、
-    或 validate 沒跑到 ⇒ 不可上傳（沒驗過不能當驗過）。
+    validate 與曝光驗證的結果都在**產生這個 hv 的** SwarmCoordinator（``hv_validation_reasons``、
+    ``hv_exposure_summary``）。對不上（不是同一個 hv）、或沒跑到 ⇒ 不可上傳（沒驗過不能當驗過）。
+    接縫最小重疊、邊緣帶視數不足**不在這裡**（只顯示，見 :func:`mapping_exposure_lines`）。
     """
+    from mission.swarm_coordinator import mapping_exposure_block_reasons
     gate = hv.mapping_gate()
     reasons = list(gate.get('reasons') or [])
     sc = swarm_coordinator
@@ -1051,9 +1075,74 @@ def hv_upload_gate(hv, swarm_coordinator) -> dict:
             reasons.append('validate 沒有跑到（這份計畫沒有經過時空去衝突與能量驗證）')
         else:
             reasons.extend(str(r) for r in vr)
+        reasons.extend(mapping_exposure_block_reasons(getattr(sc, 'hv_exposure_summary', None)))
     else:
         reasons.append('找不到這份計畫的 validate 結果（時空去衝突／能量驗證）')
+        reasons.append('找不到這份計畫的飛前曝光驗證結果（視數）')
     return {'uploadable': not reasons, 'reasons': reasons}
+
+
+def mapping_exposure_lines(summary) -> list:
+    """飛前曝光驗證摘要（``SwarmCoordinator.hv_exposure_summary``）→ 偵察頁「航測建圖」狀態的幾行字。
+
+    標明這是**曝光層級（視數）**：每格被幾張模擬照片看到；與「覆蓋率驗算」按鈕的航跡 ± 刈幅幾何覆蓋率是不同的量。
+    內部破洞會擋上傳；邊緣帶與跨機接縫只顯示（驗證器不建模側傾門檻與轉彎動態）。用了哪些值、沒建模什麼也列出來。
+    """
+    from mission.swarm_coordinator import MAPPING_EXPOSURE_SEAM_CAVEAT, mapping_exposure_block_reasons
+    head = '曝光層級（視數）—— 飛前模擬 AP_Camera 距離觸發、每格被幾張照片看到；與「覆蓋率驗算」的航跡 ± 刈幅覆蓋率不同'
+    if summary is None or summary.get('ok') is not True:
+        return [head + '：', '  ' + mapping_exposure_block_reasons(summary)[0] + ' ⇒ 不可上傳']
+    k = summary['min_views']
+    eb = summary.get('edge_band_m')
+    drone_of = summary.get('drone_of') or {}
+
+    def _who(u):
+        return f'機 {drone_of[u]}（{u}）' if u in drone_of else str(u)
+    lines = [head + f'（格 {summary["cell_size_m"]:g} m）：']
+    inter = summary.get('interior')
+    eb_txt = f'離測區邊界 > {float(eb):.1f} m＝半刈幅' if eb is not None else '沒有照片 ⇒ 不分邊緣帶'
+    if inter is not None:
+        mv = inter.get('min_views')
+        lines.append(f'  內部（{eb_txt}）：視數 ≥{k} {float(inter["frac_ge"].get(k, 0.0)):.2%}'
+                     + ('' if mv is None else f'、最少 {mv} 視'))
+    n_hole, a_hole = summary.get('interior_hole_count', 0), float(summary.get('undercovered_interior_area_m2') or 0.0)
+    if a_hole > 0.0:
+        lines.append(f'  內部視數 < {k} 的破洞 {n_hole} 處 {a_hole:,.0f} m² ⇒ 擋上傳：'
+                     + '、'.join(f'{h["area_m2"]:,.0f} m²（最少 {h["min_views"]} 視，中心 '
+                                 f'{h["centroid_latlon"][0]:.6f}, {h["centroid_latlon"][1]:.6f}）'
+                                 for h in (summary.get('interior_holes') or [])[:3]))
+    else:
+        lines.append(f'  內部視數 < {k} 的破洞：0 處（有就擋上傳）')
+    edge = summary.get('edge_band')
+    if edge is not None:
+        lines.append(f'  邊緣帶（≤ {float(eb):.1f} m）：視數 < {k} 共 {summary.get("edge_band_short_count", 0)} 處 '
+                     f'{float(summary.get("undercovered_edge_band_area_m2") or 0.0):,.0f} m²'
+                     f'（佔邊緣帶 {float(edge["undercovered_frac"]):.2%}'
+                     + ('' if edge.get('min_views') is None else f'，最少 {edge["min_views"]} 視')
+                     + '）—— 只顯示不擋')
+    seams = summary.get('seams') or []
+    if seams:
+        lines.append(f'  跨機接縫最窄 {float(summary["seam_overlap_min"]):.2f} 刈幅（'
+                     + '、'.join(f'{s["uav_a"]}/{s["uav_b"]} {s["frac_min"]:.2f}'
+                                 + (f'（隔 {float(s["gap_m"]):.0f} m）' if s.get('gap_m') else '') for s in seams)
+                     + f'）—— 只顯示不擋（{MAPPING_EXPOSURE_SEAM_CAVEAT}）')
+    else:
+        lines.append('  跨機接縫：沒有相鄰的兩架（單機或區塊不相接）')
+    ppu = summary.get('photos_per_uav') or {}
+    if ppu:
+        lines.append('  模擬張數：' + '、'.join(f'{_who(u)} {n} 張' for u, n in sorted(
+            ppu.items(), key=lambda kv: drone_of.get(kv[0], 0))))
+    eff = summary.get('effective') or {}
+    spd = eff.get('airspeed_initial_mps') or {}
+    lines.append('  有效值：' + '；'.join(x for x in (
+        (f'風 {eff["wind"][0]:g} m/s 來自 {eff["wind"][1]:g}°（{eff.get("wind_source", "")}）' if eff.get('wind') else ''),
+        f'地形 {eff.get("terrain", "?")}',
+        f'測區 {eff.get("polygon_source", "?")}',
+        ('初始空速 ' + '、'.join(f'{u} {v:g}' for u, v in spd.items()) + ' m/s') if spd else '',
+        (f'CAM1_INTRVAL_MIN {float(eff["intrval_min_s"]):.2f} s、CAM1_DURATION {float(eff["trigger_duration_s"]):g} s'
+         if eff.get('intrval_min_s') is not None else '')) if x))
+    lines.append('  假設：' + '；'.join(summary.get('assumptions') or []))
+    return lines
 
 
 def gcp_blocks_provider(win):
@@ -7038,6 +7127,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 pass
 
         self._hv_display_ctx = dict(display_ctx)
+        # _on_hv_report 是累加的 ⇒ 每次新規劃要從空的開始（否則上一趟的未覆蓋／警示會帶到這一趟）
+        self._hv_last_report = {}
         # ★ 必須存成成員：區域變數會被 GC 回收，QThread 直接消失。
         # ★ parent=None（不掛在 MainWindow 底下）：規劃沒跑完就關視窗時，
         #   Qt 會連同子物件一起銷毀，而在「還在跑的 QThread」上呼叫解構子是 qFatal
@@ -7094,9 +7185,18 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         # World Terrain：地形來源與授權（個人/非商用）要讓操作員看見；起伏吃掉高度帶時要說出需要多高的 AGL 上限
         'terrain_source',
         'terrain_relief_exceeds_band',
+        # 高程基準（A6）：DEM 是正高還是橢球高、大地起伏 N 已知或未知（未知 ⇒ 只准相對高度、MSL 匯出被拒）；
+        # N 未知時禁航區海拔上下限被改成整柱（路由會變）；坪高與 DEM 地面差 > 10 m（基準混用 ⇒ 高飛／低飛 ~N）
+        'terrain_datum',
+        'nfz_vertical_limits_ignored',
+        'site_alt_vs_dem',
         # 航測建圖：實際生效的相機／觸發間隔／重疊／引入段（有效值契約），與「這份計畫不能上傳」
         'mapping_setup',
         'mapping_upload_blocked',
+        # 交叉航帶鄰機空域（使用者 2026-10-15：多機預設禁止，可明確放行）：被禁止而沒排的組、與放行後伸進鄰機區塊
+        # 的面積，兩者都會改變「這份計畫實際飛了什麼」⇒ 要讓操作員看見
+        'mapping_cross_forbidden',
+        'mapping_cross_airspace',
     )
 
     def _on_hv_report(self, payload: dict):
@@ -7130,10 +7230,24 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 logger.info(f'[HARVEST] note: {text}')
         # 存起來給 _on_hv_finished 在後處理**之後**再顯示一次
         # （後處理最後一定會用「DCCPP 最佳化完成」蓋掉狀態列）
-        self._hv_last_report = {'loud_notes': loud,
-                                'uncovered': list(payload.get('uncovered') or []),
-                                'status': payload.get('status')}
-        for u in self._hv_last_report['uncovered']:
+        # ⚠⚠ 同一次規劃會送好幾則（SwarmCoordinator：前置 validation_notes → 轉接層 status/notes/uncovered
+        #   → 尾端 validation_notes），所以要**累加**，不能整份覆寫：覆寫的話尾端那則（沒有 uncovered／
+        #   status）會把轉接層的未覆蓋吃掉 ⇒「HARVEST 覆蓋不完整」不跳。新規劃開始時由 _start_hv_planning 清空。
+        rep = getattr(self, '_hv_last_report', None) or {}
+        acc_loud = list(rep.get('loud_notes') or [])
+        acc_unc = list(rep.get('uncovered') or [])
+        for n in loud:                       # 尾端會原樣轉送轉接層的 terrain_datum(…) 等 ⇒ 去重
+            if n not in acc_loud:
+                acc_loud.append(n)
+        new_unc = []
+        for u in (payload.get('uncovered') or []):     # 元素是 list（不可雜湊）⇒ 用 in 比對
+            if u not in acc_unc:
+                acc_unc.append(u)
+                new_unc.append(u)
+        self._hv_last_report = {'loud_notes': acc_loud,
+                                'uncovered': acc_unc,
+                                'status': payload.get('status') or rep.get('status')}
+        for u in new_unc:
             logger.error(f'[HARVEST] 未覆蓋：{u}')
 
     def _hv_show_report_banner(self):
@@ -7608,6 +7722,10 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         link.mission_uploaded.connect(self._on_mission_uploaded)
         # 相機回授（CAMERA_FEEDBACK）→ 航測建圖的「已拍 N / 預估 M」。只有建圖上傳過的機才顯示。
         link.camera_feedback.connect(self._on_camera_feedback)
+        # 建圖條帶監測（A5，survey.strip_monitor）：任務進度 → 逐條帶 0 張／中斷沒倒帶就接續／跳號警報。
+        # 只有建圖上傳過、有監測器的機才處理；同樣在建立 link 時只接一次。
+        link.mission_current.connect(self._on_mapping_mission_current)
+        link.mission_item_started.connect(self._on_mapping_item_started)
         link.start()
         self._sitl_links.append(link)
         if self._sitl_link is None:
@@ -7870,6 +7988,9 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         # 主機 (sysid_label==1) 才更新 HUD，避免多機資訊互相覆蓋
         # 所有 sysid 都送進 HUD（多機卡片）
         self.sitl_hud.on_telemetry(frame)
+        # 建圖條帶監測：模式／解鎖 → 中斷、沒倒帶就接續、落地收尾（只有建圖上傳過的機）
+        if getattr(self, '_map_photo_stats', None):
+            self._strip_monitor_on_frame(frame)
         # 投放讀回確認：PWM 真的動了才播落點模擬（見 on_release_store）
         if getattr(self, '_pending_releases', None):
             self._confirm_pending_release(frame)
@@ -9038,6 +9159,11 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 f'✅ UAV-{sysid} 任務寫入完成（已驗證）：{message}', 10000)
         else:
             logger.error(f'[WP] UAV-{sysid} 寫入失敗: {message}')
+            # 建圖條帶監測器的段表是照「這份任務」建的；沒寫進去就不能拿它去對飛控上的舊任務
+            _st = (getattr(self, '_map_photo_stats', None) or {}).get(int(sysid))
+            if _st is not None and _st.get('monitor') is not None:
+                _st['monitor'] = None
+                logger.error(f'[航測] UAV-{sysid} 任務沒寫成功 ⇒ 停用這架的條帶監測器')
             self.statusBar().showMessage(
                 f'❌ UAV-{sysid} 任務寫入失敗：{message}', 10000)
             QMessageBox.critical(
@@ -9702,8 +9828,12 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             n_on = sum(1 for it in items if int(it['command']) == 206 and float(it['param1']) > 0.0)
             n_off = sum(1 for it in items if int(it['command']) == 206 and float(it['param1']) == 0.0)
             n_exp = expected_photo_count(items)
+            monitor, mon_err = build_strip_monitor(hv, did, items)
+            if mon_err:
+                problems.append(f'UAV-{sysid} 條帶監測器沒建（只顯示總張數，沒有逐條帶警報）：{mon_err}')
             self._map_photo_stats[sysid] = {'expected': n_exp, 'taken': 0, 'fb_missing': 0, 'resets': 0,
-                                            'uav': did, 'link': link}
+                                            'uav': did, 'link': link, 'monitor': monitor, 'alarms': [],
+                                            'was_armed': False}
             off = offsets.get(did)
             off_txt = f'起飛時程 T+{off:.0f} s' if off is not None else '起飛時程：未知（不能依時程放行）'
             extra = ''.join(f'；{t}' for t in info.get(sysid, []))
@@ -9736,17 +9866,83 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
 
         ⚠ 張數用 payload['new_photos']（以 img_idx 增量算，鏈路忙時多則訊息會合併）加總，**不是**訊號次數；
         payload['gap'] 是**沒收到的回授訊息**，照片照常計入觸發數，不是漏拍。
-        只有建圖上傳過的機才記（不建圖的使用者畫面不變）。條帶層級的「零張」警報要 MISSION_CURRENT，沒做。
+        只有建圖上傳過的機才記（不建圖的使用者畫面不變）。逐條帶歸屬交給條帶監測器（survey.strip_monitor）。
         """
         st = (getattr(self, '_map_photo_stats', None) or {}).get(int(sysid))
         if st is None:
             return
-        st['taken'] += int(payload.get('new_photos') or 0)
+        n_new = int(payload.get('new_photos') or 0)
+        st['taken'] += n_new
         gap = payload.get('gap')
         if gap:
             st['fb_missing'] += (int(gap[1]) - int(gap[0])) % 0x10000 + 1
         if payload.get('reset'):
             st['resets'] += 1
+        mon = st.get('monitor')
+        if mon is not None:
+            mon.photos(n_new, time.monotonic(), reset=bool(payload.get('reset')))
+            self._poll_strip_monitor(int(sysid))
+        self._refresh_mapping_live_status()
+
+    def _on_mapping_mission_current(self, sysid: int, mc: dict):
+        """MISSION_CURRENT（正飛向的 NAV）→ 條帶監測器（STATUSTEXT 掉了時的備援）。"""
+        st = (getattr(self, '_map_photo_stats', None) or {}).get(int(sysid))
+        mon = st.get('monitor') if st else None
+        if mon is None:
+            return
+        mon.mission_current(int(mc.get('seq', 0)), time.monotonic())
+        self._poll_strip_monitor(int(sysid))
+
+    def _on_mapping_item_started(self, sysid: int, seq: int, _cmd_type: str):
+        """STATUSTEXT「Mission: N」（飛控開始執行第 N 項）→ 條帶監測器（206 開／關的精確時刻）。"""
+        st = (getattr(self, '_map_photo_stats', None) or {}).get(int(sysid))
+        mon = st.get('monitor') if st else None
+        if mon is None:
+            return
+        mon.item_started(int(seq), time.monotonic())
+        self._poll_strip_monitor(int(sysid))
+
+    def _strip_monitor_on_frame(self, frame) -> None:
+        """遙測幀的模式／解鎖 → 條帶監測器；解鎖→上鎖（落地）時收尾（沒飛到的條帶）。"""
+        st = (getattr(self, '_map_photo_stats', None) or {}).get(int(getattr(frame, 'sysid', -1)))
+        mon = st.get('monitor') if st else None
+        if mon is None:
+            return
+        t = time.monotonic()
+        armed = bool(getattr(frame, 'armed', False))
+        mon.mode(str(getattr(frame, 'mode', '') or ''), armed, t)
+        if st.get('was_armed') and not armed:
+            self._show_strip_alarms(int(frame.sysid), mon.finish(t))
+        st['was_armed'] = armed
+        self._poll_strip_monitor(int(frame.sysid), t)
+
+    def _poll_strip_monitor(self, sysid: int, t: float | None = None) -> None:
+        st = (getattr(self, '_map_photo_stats', None) or {}).get(int(sysid))
+        mon = st.get('monitor') if st else None
+        if mon is None:
+            return
+        self._show_strip_alarms(int(sysid), mon.poll(time.monotonic() if t is None else t))
+
+    def _show_strip_alarms(self, sysid: int, alarms: list) -> None:
+        """條帶警報：log＋狀態列＋HUD 訊息＋面板（飛行中**不**跳強制回應的對話框）。"""
+        if not alarms:
+            return
+        st = (getattr(self, '_map_photo_stats', None) or {}).get(int(sysid))
+        if st is not None:
+            st['alarms'].extend(alarms)
+        for a in alarms:
+            text = f'UAV-{sysid} {a.message}'
+            if a.severity == 'critical':
+                logger.error(f'[航測] {text}')
+            else:
+                logger.warning(f'[航測] {text}')
+            self.statusBar().showMessage(('⚠⚠ ' if a.severity == 'critical' else '⚠ ') + text, 30000)
+            hud = getattr(self, 'sitl_hud', None)
+            if hud is not None and hasattr(hud, 'on_status_text'):
+                try:
+                    hud.on_status_text(2 if a.severity == 'critical' else 4, f'[條帶] {text}')
+                except Exception:          # noqa: BLE001
+                    logger.debug('[航測] HUD 顯示條帶警報失敗', exc_info=True)
         self._refresh_mapping_live_status()
 
     def _refresh_mapping_live_status(self):
@@ -9760,6 +9956,11 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                          f'照片照常計入觸發數，不是漏拍）')
             if s['resets']:
                 line += f'（飛控重開機 {s["resets"]} 次，觸發計數從頭算）'
+            mon = s.get('monitor')
+            if mon is not None:
+                line += f'；{mon.progress_text()}'
+            for a in (s.get('alarms') or [])[-3:]:
+                line += f'\n    {"⚠⚠" if a.severity == "critical" else "⚠"} {a.message}'
             link = s.get('link')
             if link is not None and hasattr(link, 'tlog_status'):
                 try:
@@ -9929,8 +10130,10 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             self._show_mapping_plan_status(_hv)
 
     def _show_mapping_plan_status(self, hv):
-        """建圖有效值（觸發間隔、引入段、逐構型條帶間距與偏流、起飛時程）＋ 上傳閘門 → 偵察頁；不可上傳時大聲說。"""
-        gate = hv_upload_gate(hv, getattr(self, '_hv_swarm_coordinator', None))
+        """建圖有效值（觸發間隔、引入段、逐構型條帶間距與偏流、起飛時程）＋ 飛前曝光驗證（視數）＋ 上傳閘門 → 偵察頁；
+        不可上傳時大聲說。"""
+        _sc = getattr(self, '_hv_swarm_coordinator', None)
+        gate = hv_upload_gate(hv, _sc)
         cc = getattr(hv, 'camera_cfg', None)
         parts = []
         if cc is not None:
@@ -9941,6 +10144,12 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             if m:
                 parts.append(f'構型 {c}：條帶間距 {float(m.get("s_m", float("nan"))):.1f} m、'
                              f'偏流 {float(m.get("crab_deg", 0.0)):.1f}°')
+        rule = (getattr(hv, 'mapping_effective', None) or {}).get('cross_rule')
+        if rule:
+            flown = rule.get('flown_cross_strips_by_uav') or {}
+            parts.append('交叉航帶：鄰機空域 ' + ('已明確放行' if rule.get('allow_neighbor_airspace') else '禁止（預設）')
+                         + '；排進 ' + ('、'.join(f'{u} {n} 條' for u, n in flown.items()) or '0 條')
+                         + (f'；因鄰機空域不排 {rule["forbidden_sets"]} 組' if rule.get('forbidden_sets') else ''))
         try:
             offs, _src = harvest_takeoff_offsets(hv)
         except Exception as e:      # noqa: BLE001
@@ -9951,6 +10160,9 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                                                                                     key=lambda kv: (kv[1], kv[0])))
                          + ('（不同 ⇒ 上傳後用 HUD 的「依時程放行」，一鍵起飛會被擋）'
                             if spread > TAKEOFF_STAGGER_TOL_S else ''))
+        # B3：飛前曝光驗證（視數）。橫幅只顯示前 3 則 loud note ⇒ 摘要一定要寫在這裡
+        _xs = getattr(_sc, 'hv_exposure_summary', None) if getattr(_sc, 'hv_coordinator', None) is hv else None
+        parts.extend(mapping_exposure_lines(_xs))
         if gate['uploadable']:
             parts.append('建圖閘門：可上傳')
         else:

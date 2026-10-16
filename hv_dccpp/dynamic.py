@@ -9,6 +9,13 @@
   物件，之後只追加新尾段；`diff[u]` = 該機自錨點之後之航點。
 * 錨點（anchor）：接手機 = 其序列末條帶端點（`end_state`，時間／能量取自該航點）；正在返航者 = 現時內插狀態；
   切除（cut）= 被保留之最後條帶端點；立即中止／DIVERT = 現時狀態。
+* 建圖模式交叉航帶（``geometry.is_cross_strip``；id 內嵌原機 ``geometry.cross_strip_owner``）：**只有**
+  ``ctx.inputs.mapping_mode`` 存在且 ``cross_strips=True`` 時才當交叉帶看（`_xstrip_gate`，每個 session 算一次、
+  `_Session.is_x`）；否則含標記的 id 一律當主條帶（與加入交叉帶處理之前逐值相同）。設計上只由**原機**緊接自己的
+  主條帶飛（同機、不換機）。`_Session.reassign` 分兩段：先只分派主條帶（與「交叉帶不存在」逐值相同 ⇒ 交叉帶永遠
+  排擠不到主條帶），再把交叉帶還給原機（原機不是幽靈／失鏈機、是候選；``cross_allow_neighbor_airspace=False``
+  時另過鄰機空域規則）；永不跨構型重鋪。沒人能接者一律記 ``(sid, "cross_not_reassigned")`` 進 uncovered 並記
+  ``cross_not_reassigned(...)`` note（格式見 `XSTRIP_NOT_REASSIGNED`；不得靜默消失）。
 """
 from __future__ import annotations
 
@@ -29,9 +36,10 @@ from .costs import CostCache, PathCost, resolve_site_entry
 from .deconflict import (Conflict, CorridorSchedule, check_separation, insert_delay_orbit, orbit_insert_index,
                          orbit_lap_time_s)
 from .dubins import DubinsPath, DubinsSegment, Pose, dubins_path, path_time
-from .geometry import Cell, Strip, strips_union_footprint
-from .mission import (AreaSpec, MissionPlan, Mode, PayloadRequirement, Phase, PlannerConfig, UAVInstance, UAVPlan,
-                      UAVState, Waypoint, WeatherObs, WindLayer)
+from .geometry import (CROSS_STRIP_TAG, Cell, Strip, cross_strip_owner, forms_cross_strip_tag, is_cross_strip,
+                       strips_union_footprint)
+from .mission import (AreaSpec, MissionInputError, MissionPlan, Mode, PayloadRequirement, Phase, PlannerConfig,
+                      UAVInstance, UAVPlan, UAVState, Waypoint, WeatherObs, WindLayer)
 from .planner import EnergyInfeasible, SeqItem, UAVSequence, append_rtb, beam_idp
 from .platform import EnergyModel, PlatformSpec, sensor_model
 from .routing import RoutingError, avoid
@@ -43,7 +51,7 @@ __all__ = [
     "snapshot", "placeholder_plan", "ghost_track", "affected_set", "replan",
     "handle_uav_exit", "handle_new_area", "handle_energy_update", "handle_link_loss", "handle_link_restored",
     "handle_wind_update", "handle_cue", "handle_priority", "handle_weather_abort",
-    "cache_from_plan", "REPLAN_BUDGET_MS",
+    "cache_from_plan", "REPLAN_BUDGET_MS", "XSTRIP_NOT_REASSIGNED", "XSTRIP_CAUSE_NEIGHBOR_AIRSPACE",
 ]
 
 _INF = math.inf
@@ -55,6 +63,44 @@ _CUE_N_LAPS = 2                    # 規格 §12.7 orbit 確認圈數
 _GHOST_DT_S = 2.0
 _CORRIDOR_TURN_DEG = 45.0          # 規格 §12.6：起降風向變化 > 45° → 重算走廊
 _ORBIT_ROUNDS = 3
+#: 交叉航帶沒還給原機（只有原機能接）⇒ 進 uncovered 時的固定理由。詳因在 note（`_Session._note_xnr`）：
+#:
+#:     cross_not_reassigned(<原機>: [<ids>]; cause=<cause>; owner=<原機狀態>)
+#:
+#: * ``cause``：呼叫端給 `reassign` 的 reason（``energy``、``uncoverable_after_link_loss``、``uncoverable_after_exit``…），
+#:   或 ``neighbor_airspace(<他機,...>)``（`XSTRIP_CAUSE_NEIGHBOR_AIRSPACE`：原機能接，但
+#:   ``cross_allow_neighbor_airspace=False`` 而它母區塊的主條帶現在在這些他機的計畫裡）。
+#: * ``owner``（依序判定，取第一個成立者，`_Session._owner_state`）：``ghost``（失鏈中，收不到上傳）、``excluded``
+#:   （本事件的退出／失鏈／切除機）、``not_in_plan``（原機解析不出時記成 ``?``，也落在這裡）、``landed``、
+#:   ``not_candidate``（受影響集合沒有它：能量餘裕／感測不相容／呼叫端指定的候選不含它）、``not_taken``（是候選但沒
+#:   拿回：能量放不下、名額用完，或 cause 是 neighbor_airspace）。
+#: * 同一個 session 內 (原機, ids, cause) 相同的 note 只記第一筆（uncovered 也由 `finish` 去重）。
+XSTRIP_NOT_REASSIGNED = "cross_not_reassigned"
+#: 鄰機空域規則擋下時 note 的 cause 前綴：``neighbor_airspace(B2,B3)``
+XSTRIP_CAUSE_NEIGHBOR_AIRSPACE = "neighbor_airspace"
+#: `_Session.relay_cross` 建的跨構型重鋪子胞 id：``f"{母胞}{_RELAY_CELL_INFIX}{n}"``（`_relay_parent` 靠它追回母塊）
+_RELAY_CELL_INFIX = "_R"
+
+
+def _xstrip_gate(inputs: Any) -> tuple[bool, bool]:
+    """(交叉帶處理開啟, 鄰機空域放行)。只有 ``inputs.mapping_mode`` 存在且 ``cross_strips=True`` 才開啟：規劃器只在
+    那時產生交叉帶，關閉時含 `CROSS_STRIP_TAG` 的 id 只可能來自繞過 `AreaSpec` 驗證的舊 area_id（例如
+    ``"river_cross_1"``），必須照主條帶處理。放行旗標＝``cross_allow_neighbor_airspace``，只在開啟時有意義（關閉時恆 False）。"""
+    mm = getattr(inputs, "mapping_mode", None)
+    on = mm is not None and bool(mm.cross_strips)
+    return on, bool(on and mm.cross_allow_neighbor_airspace)
+
+
+def _relay_parent(cell: Cell) -> str | None:
+    """`_Session.relay_cross` 建的跨構型重鋪子胞（id ``f"{母胞}_R{n}"``、``parent_cell_id == residual_of == 母胞``）→ 母胞 id；
+    其他胞（含 decompose 的 A／B 子胞 ``…_A_k6``／``…_B_k6``，它們的 residual_of 也是母胞，但 id 不是 ``_R<n>``）→ None。"""
+    p = cell.parent_cell_id
+    if p is None or cell.residual_of != p:
+        return None
+    cid, p = str(cell.cell_id), str(p)
+    tail = cid[len(p):] if cid.startswith(p) else ""
+    n = tail[len(_RELAY_CELL_INFIX):]
+    return p if tail.startswith(_RELAY_CELL_INFIX) and n.isascii() and n.isdigit() else None
 
 
 # ---------------------------------------------------------------------------
@@ -691,6 +737,9 @@ class _Session:
         self.strips_all: dict[str, Strip] = dict(plan.strips)
         self.cell_by_id, self.strip_cell = _cell_maps(plan)
         self.exclude: set[str] = set()
+        # 建圖模式交叉航帶：每個 session 算一次（`is_x`）；note 去重鍵 (原機, ids, cause)
+        self.xstrips_on, self.xstrips_allow_neighbor = _xstrip_gate(ctx.inputs)
+        self._xnr_noted: set[tuple[str, tuple[str, ...], str]] = set()
 
     # ---- 計時 --------------------------------------------------------------
     def lap(self, name: str) -> None:
@@ -719,6 +768,34 @@ class _Session:
         if s is None:
             s = self.new_strips[sid]
         return s
+
+    def is_x(self, sid: str) -> bool:
+        """這個 session 是否把 ``sid`` 當建圖模式交叉航帶：`_xstrip_gate` 開啟（mapping_mode.cross_strips）且 id 帶標記。"""
+        return self.xstrips_on and is_cross_strip(sid)
+
+    def block_of(self, sid: str) -> str:
+        """條帶所屬「區塊」＝ Strip.cell_id（殘段 ``#r`` 沿用母條帶；交叉帶的 Strip.cell_id 就是它的母區塊）；
+        跨構型重鋪子胞（`_relay_parent`）逐層追回被重鋪的母塊。"""
+        cid = str(self.strip(sid).cell_id)
+        seen: set[str] = set()
+        while cid not in seen:
+            seen.add(cid)
+            cell = self.cell_by_id.get(cid)
+            parent = _relay_parent(cell) if cell is not None else None
+            if parent is None:
+                break
+            cid = parent
+        return cid
+
+    def main_block_holders(self) -> dict[str, set[str]]:
+        """{區塊: 計畫（已飛＋待飛）裡有該區塊主條帶的機}；鄰機空域規則用（交叉帶不算）。"""
+        out: dict[str, set[str]] = {}
+        for v, p in self.plans.items():
+            for s, _d in p.strips:
+                if self.is_x(s) or (s not in self.strips_all and s not in self.new_strips):
+                    continue
+                out.setdefault(self.block_of(s), set()).add(v)
+        return out
 
     def cell_of_strip(self, sid: str) -> Cell | None:
         base = sid.split("#", 1)[0]
@@ -816,8 +893,6 @@ class _Session:
     def idp_chain(self, u: str, anchor: _Anchor, groups: Sequence[Sequence[str]]) -> tuple[UAVSequence | None, list[str]]:
         """依序對每組條帶跑 `idp_tail`（前組全部完成後才進入次組：搶占／確認優先，規格 §12.7、§12.8）並串接；
         回傳 (含 RTB 之序列 | None, leftover)。"""
-        cache = self.cache
-        cls = self.plans[u].cls
         cur = anchor
         merged: UAVSequence | None = None
         leftover: list[str] = []
@@ -829,19 +904,20 @@ class _Session:
             leftover += left
             if seq is None or not seq.items:
                 continue
-            if merged is None:
-                merged = seq
-            else:
-                first = replace(seq.items[0], transfer=seq.entry)
-                merged = replace(merged, items=list(merged.items) + [first] + list(seq.items[1:]),
-                                 decisions=list(merged.decisions) + list(seq.decisions), rtb=seq.rtb,
-                                 landing_site=seq.landing_site, state_end=seq.state_end, t_end_s=seq.t_end_s,
-                                 e_end_wh=seq.e_end_wh, warnings=list(merged.warnings) + list(seq.warnings))
-            se = merged.state_end
-            R = float(cache.R_eff.get(cls, cur.state.r_eff_m))
-            cur = _Anchor(cur.keep_n, UAVState(se.x_m, se.y_m, se.theta_rad, float(se.z_m), float(se.t_s),
-                                                float(se.e_rem_wh), R, cur.state.v_air_mps), cur.strips_kept)
+            merged = seq if merged is None else _concat_seq(merged, seq)
+            cur = self._anchor_after_seq(u, cur, merged)
         return merged, list(dict.fromkeys(leftover))
+
+    def _anchor_after_seq(self, u: str, cur: _Anchor, seq: UAVSequence) -> _Anchor:
+        """序列末條帶端點（不含 RTB）當下一組的錨點；保留 ``cur`` 的 keep_n／strips_kept（同一段尾段）。"""
+        se = seq.state_end
+        R = float(self.cache.R_eff.get(self.plans[u].cls, cur.state.r_eff_m))
+        return _Anchor(cur.keep_n, UAVState(se.x_m, se.y_m, se.theta_rad, float(se.z_m), float(se.t_s),
+                                            float(se.e_rem_wh), R, cur.state.v_air_mps), cur.strips_kept)
+
+    def _t_land(self, u: str, seq: UAVSequence) -> float:
+        """序列（含 RTB）的落地時刻：末條帶 t_end + RTB + 固定降落時間。"""
+        return seq.t_end_s + (seq.rtb.t_s if seq.rtb is not None else 0.0) + _landing_fixed_time_s(self.spec(u))
 
     def apply_seq(self, u: str, anchor: _Anchor, seq: UAVSequence, tag: str,
                   pre: Sequence[PathSegment2D] = ()) -> UAVPlan:
@@ -1026,19 +1102,58 @@ class _Session:
                  reason: str = "no_candidate", allow_cross_class: bool = True,
                  candidates: Sequence[str] | None = None) -> list[str]:
         """L_uncov → 受影響集合 A（`affected_set`）→ 依 Δmakespan 最小者尾端追加（至多 max_changes 機）；
-        同構型保留原條帶、跨構型（rgb/any）殘區以接手構型重鋪。回傳仍未覆蓋之條帶 id。"""
+        同構型保留原條帶、跨構型（rgb/any）殘區以接手構型重鋪。回傳仍未覆蓋之條帶 id（主條帶在前、交叉帶在後）。
+
+        建圖模式交叉航帶（`is_x`：只在 ``mapping_mode.cross_strips`` 開啟時成立；含殘段 ``<sid>#r``）設計上只由原機緊接
+        自己的主條帶飛，所以分兩段：
+
+        1. **主條帶段**（`_reassign_main`，原本的分派迴圈）：只拿主條帶跑，候選也只依主條帶算 `affected_set` ⇒ 與
+           「交叉帶不存在」逐值相同 —— 交叉帶不影響接手人選、排序與名額，永遠排擠不到主條帶（規劃器的不變量：能量
+           不夠只退交叉帶）。
+        2. **交叉帶段**（`_return_cross`）：只有原機 `cross_strip_owner(s)` 可以接，且原機必須是候選、不是幽靈
+           （`self.ghosts`：失鏈中、收不到上傳；`exclude` 每個 session 重置，不能只靠它擋）。其他機一律不接，**同構型也
+           不行**（換機飛就不是「同一架、同一顆相機、同一段時間」的那組交叉量測）；永不跨構型重鋪（`relay_cross` 也擋）。
+           ``cross_allow_neighbor_airspace=False``（預設）時另過鄰機空域規則：母區塊（`block_of`）的主條帶在第 1 段之後
+           落在他機計畫裡（同構型接手或跨構型重鋪）⇒ 不還，cause ＝ ``neighbor_airspace(<他機>)``。拿回時的排序見
+           `_retake_cross`。
+        3. 沒人接的交叉帶 → ``(sid, XSTRIP_NOT_REASSIGNED)`` 進 uncovered（不是 `reason`）＋ note（格式與 owner 狀態見
+           `XSTRIP_NOT_REASSIGNED`）；主條帶照舊 ``(sid, reason)``。
+
+        沒有交叉帶（或 `_xstrip_gate` 關閉）時只有第 1 段，候選、分組、重鋪、uncovered 理由與加入交叉帶處理前逐值相同。"""
         cache, ctx, cfg = self.cache, self.ctx, self.cfg
         ids = [s for s in dict.fromkeys(strip_ids) if s in self.strips_all]
         if not ids:
             return []
         excl = set(exclude) | self.exclude
-        # 更新快照（變更後之計畫）
+        main_ids = [s for s in ids if not self.is_x(s)]
+        x_ids = [s for s in ids if self.is_x(s)]
+        # 更新快照（變更後之計畫）；兩段的候選都在動手之前算
         states = {u: (self.states.get(u) or _interp_state(p, self.t_now, self.spec(u), self.ctx.wind))
                   for u, p in self.plans.items() if p.waypoints}
         plan_view = replace(self.plan, plans=dict(self.plans), strips=dict(self.strips_all),
                             cells=list(self.plan.cells) + self.new_cells)
-        cands = candidates if candidates is not None else affected_set(plan_view, ids, states, ctx, cache, cfg)
-        cands = [u for u in cands if u not in excl and not self.status(u).landed]
+
+        def _cands(lst: list[str]) -> list[str]:
+            if not lst:
+                return []
+            c = candidates if candidates is not None else affected_set(plan_view, lst, states, ctx, cache, cfg)
+            return [u for u in c if u not in excl and not self.status(u).landed]
+
+        cands_m, cands_x = _cands(main_ids), _cands(x_ids)
+        taken: dict[str, tuple[UAVPlan, _Anchor, UAVSequence]] = {}
+        remaining, changes = self._reassign_main(main_ids, cands_m, max_changes, allow_cross_class, taken)
+        for s in remaining:
+            self.uncovered.append((s, reason))
+        x_left = self._return_cross(x_ids, cands_x, excl, reason, max_changes, changes, taken) if x_ids else []
+        for s in x_left:
+            self.uncovered.append((s, XSTRIP_NOT_REASSIGNED))
+        return remaining + x_left
+
+    def _reassign_main(self, ids: list[str], cands: list[str], max_changes: int, allow_cross_class: bool,
+                       taken: dict[str, tuple[UAVPlan, _Anchor, UAVSequence]]) -> tuple[list[str], int]:
+        """`reassign` 第 1 段（原本的分派迴圈；建圖模式交叉帶不在 ``ids`` 裡）。回傳 (仍未覆蓋, 已用名額)。
+        ``taken[u]`` ＝ 接手機動手前的 (計畫, 錨點, 序列)：交叉帶段要把原機自己的交叉帶併進同一段尾段時用。"""
+        cache = self.cache
         remaining = list(ids)
         changes = 0
         relay_n = 0
@@ -1073,7 +1188,7 @@ class _Session:
                 seq, leftover = self.idp_tail(u, anchor, use)
                 if seq is None:
                     continue
-                t_land_new = seq.t_end_s + (seq.rtb.t_s if seq.rtb is not None else 0.0) + _landing_fixed_time_s(self.spec(u))
+                t_land_new = self._t_land(u, seq)
                 others = max((p.t_land_s for v, p in self.plans.items() if v != u), default=0.0)
                 dms = max(others, t_land_new) - self.makespan()
                 score = (len(leftover), dms, t_land_new)
@@ -1088,11 +1203,13 @@ class _Session:
                     self.new_cells.append(relay_cell)
                     self.cell_by_id[relay_cell.cell_id] = relay_cell
                 relay_n += 1
+                # 交叉帶不會在這裡（第 1 段只有主條帶）⇒ 不會被當成「已由重鋪覆蓋」而從 remaining 靜默消失
                 covered_src = [s for s in remaining if self.strip(s).cls != self.plans[u].cls]
                 self.notes.append(f"relaid({','.join(covered_src)} -> {self.plans[u].cls}:{len(relaid)} strips)")
                 taken_src = covered_src
             else:
                 taken_src = [it.strip_id for it in seq.items]
+            taken[u] = (self.plans[u], anchor, seq)
             self.apply_seq(u, anchor, seq, f"replan_takeover({','.join(it.strip_id for it in seq.items)})")
             self.notes.append(f"takeover({u}: {[it.strip_id for it in seq.items]}, dmakespan={dms:.1f} s)")
             for s in taken_src:
@@ -1105,9 +1222,138 @@ class _Session:
                         remaining.append(s)
             changes += 1
             cands = [c for c in cands if c != u]
-        for s in remaining:
-            self.uncovered.append((s, reason))
-        return remaining
+        return remaining, changes
+
+    def _return_cross(self, x_ids: list[str], cands: list[str], excl: set[str], reason: str, max_changes: int,
+                      changes: int, taken: Mapping[str, tuple[UAVPlan, _Anchor, UAVSequence]]) -> list[str]:
+        """`reassign` 第 2 段：交叉帶只還給原機。回傳沒還回去的（依 ``x_ids`` 順序；每一組都已記 note）。
+
+        逐原機（``x_ids`` 首次出現順序；原機解析不出記成 ``?``）：`_owner_state` 不是 None ⇒ 整組不還，cause ＝ reason。
+        否則逐條：構型或感測不合 ⇒ 不還；鄰機空域規則（``cross_allow_neighbor_airspace=False``）：`main_block_holders`
+        （第 1 段之後的計畫，已飛＋待飛，含跨構型重鋪的條帶）顯示母區塊主條帶在他機手上 ⇒ 不還，cause ＝
+        ``neighbor_airspace(<他機,...>)``；其餘交給 `_retake_cross`（原機在第 1 段已動過就不再佔名額）。拿不回的 owner
+        狀態一律 ``not_taken``。"""
+        cache = self.cache
+        ghost_ids = {g.uav_id for g in self.ghosts}
+        by_owner: dict[str, list[str]] = {}
+        for s in x_ids:
+            by_owner.setdefault(cross_strip_owner(s) or "?", []).append(s)
+        holders = None if self.xstrips_allow_neighbor else self.main_block_holders()
+        left: set[str] = set()
+        for o, xs in by_owner.items():
+            state = self._owner_state(o, ghost_ids, excl, cands)
+            if state is not None:
+                self._note_xnr(o, xs, reason, state)
+                left.update(xs)
+                continue
+            cls = self.plans[o].cls
+            kinds = self.inst(o).available_kinds
+            ok: list[str] = []
+            air: dict[str, tuple[str, ...]] = {}
+            for s in xs:
+                st = self.strip(s)
+                c = self.cell_of_strip(s)
+                if st.cls != cls or not _dec.class_can_serve(c.sensor_req if c is not None else "any", cls, kinds):
+                    continue
+                if holders is not None:
+                    h = tuple(sorted(holders.get(self.block_of(s), set()) - {o}))
+                    if h:
+                        air[s] = h
+                        continue
+                if s not in cache.idx.get(cls, {}):
+                    self._add_to_cache(cls, [st], c)
+                ok.append(s)
+            got: list[str] = []
+            if ok:
+                got, used = self._retake_cross(o, ok, taken, may_add=changes < max_changes)
+                changes += int(used)
+            by_cause: dict[str, list[str]] = {}
+            for s in xs:
+                if s not in got:
+                    cause = f"{XSTRIP_CAUSE_NEIGHBOR_AIRSPACE}({','.join(air[s])})" if s in air else reason
+                    by_cause.setdefault(cause, []).append(s)
+            for cause, lst in by_cause.items():
+                self._note_xnr(o, lst, cause, "not_taken")
+                left.update(lst)
+        return [s for s in x_ids if s in left]
+
+    def _owner_state(self, o: str, ghost_ids: set[str], excl: set[str], cands: Sequence[str]) -> str | None:
+        """原機不能接的狀態（`XSTRIP_NOT_REASSIGNED` 的 owner 欄位，依序判定取第一個成立者）；能接 → None。"""
+        if o in ghost_ids:
+            return "ghost"
+        if o in excl:
+            return "excluded"
+        if o not in self.plans:
+            return "not_in_plan"
+        if self.status(o).landed:
+            return "landed"
+        if o not in cands:
+            return "not_candidate"
+        return None
+
+    def _retake_cross(self, o: str, xs: list[str], taken: Mapping[str, tuple[UAVPlan, _Anchor, UAVSequence]], *,
+                      may_add: bool) -> tuple[list[str], bool]:
+        """原機 ``o`` 拿回自己的交叉帶 ``xs``。回傳 (拿回的 id, 是否新佔一個名額)。
+
+        * ``o`` 在第 1 段已接了主條帶（``taken[o]``）⇒ 自同一錨點重組同一段尾段，候選順序：
+          ``main_first`` ＝ 第 1 段的序列**原樣**保留、交叉帶接在後面（主條帶一條都不會少、順序也不變）；
+          ``cross_first`` ＝ ``[交叉帶, 主條帶]``，只在錨點前最後一條就是 ``o`` 自己的交叉帶（交叉帶飛到一半被打斷、
+          接續原本那一段）時才試。取 (少飛的主條帶數, 少飛的交叉帶數, 落地時刻) 最小者、平手取 main_first ⇒ 交叉帶
+          永遠排擠不到主條帶，能量不夠時退的是交叉帶（與規劃器同一個不變量）。一條交叉帶都放不進 ⇒ 第 1 段結果不動。
+        * 否則需要新名額（``may_add``）⇒ 自 `anchor_end` 起只排交叉帶（``append``；不保證與既有序列裡的交叉帶相鄰）。
+        * ⚠ 不套規劃器的交叉帶高度轉換罰則（planner `_cross_vert_penalty`；``cross_alt_offset_m ≠ 0`` 時升降可能來不及
+          在轉場內完成）。
+        拿回時記 ``cross_retaken(<o>: [ids]; order=<main_first|cross_first|append>; dmakespan=<Δ> s)``。"""
+        xset = set(xs)
+        if o in taken:
+            p_before, anc, seq_m = taken[o]
+            main_items = [it.strip_id for it in seq_m.items]
+            options: list[tuple[tuple[int, int, float], str, UAVSequence]] = []
+
+            def _option(order: str, seq: UAVSequence) -> None:
+                flown = {it.strip_id for it in seq.items}
+                key = (sum(1 for m in main_items if m not in flown), sum(1 for x in xs if x not in flown),
+                       self._t_land(o, seq))
+                options.append((key, order, seq))
+
+            seq_x, _left = self.idp_tail(o, self._anchor_after_seq(o, anc, seq_m), xs)
+            _option("main_first", _concat_seq(seq_m, seq_x) if seq_x is not None and seq_x.items else seq_m)
+            kept = anc.strips_kept
+            if kept and self.is_x(kept[-1][0]) and cross_strip_owner(kept[-1][0]) == o:
+                seq_c, _left = self.idp_chain(o, anc, [xs, main_items])
+                if seq_c is not None and seq_c.items:
+                    _option("cross_first", seq_c)
+            _key, order, seq = min(options, key=lambda t: t[0])      # min 取第一個最小者 ⇒ 平手 main_first
+            got = [it.strip_id for it in seq.items if it.strip_id in xset]
+            if not got:
+                return [], False
+            anchor, restore, used = anc, p_before, False
+        else:
+            if not may_add:
+                return [], False
+            anchor = self.anchor_end(o)
+            seq, _left = self.idp_tail(o, anchor, xs)
+            if seq is None or not seq.items:
+                return [], False
+            order = "append"
+            got = [it.strip_id for it in seq.items if it.strip_id in xset]
+            restore, used = None, True
+        others = max((p.t_land_s for v, p in self.plans.items() if v != o), default=0.0)
+        dms = max(others, self._t_land(o, seq)) - self.makespan()
+        if restore is not None:
+            self.plans[o] = restore                                  # 第 1 段的尾段作廢，自同一錨點重組（含主條帶）
+        self.apply_seq(o, anchor, seq, f"replan_takeover({','.join(it.strip_id for it in seq.items)})")
+        self.notes.append(f"cross_retaken({o}: {got}; order={order}; dmakespan={dms:.1f} s)")
+        return got, used
+
+    def _note_xnr(self, owner: str, ids: Sequence[str], cause: str, state: str) -> None:
+        """記一筆 ``cross_not_reassigned(<原機>: [ids]; cause=<cause>; owner=<state>)``（`XSTRIP_NOT_REASSIGNED`）；
+        同一 session 內 (原機, ids, cause) 相同者只記第一筆（例如同一事件裡兩次 `reassign` 碰到同一組被擋的交叉帶）。"""
+        key = (owner, tuple(ids), cause)
+        if key in self._xnr_noted:
+            return
+        self._xnr_noted.add(key)
+        self.notes.append(f"{XSTRIP_NOT_REASSIGNED}({owner}: {list(ids)}; cause={cause}; owner={state})")
 
     def _add_to_cache(self, cls: str, strips: Sequence[Strip], cell: Cell | None) -> None:
         cache, ctx = self.cache, self.ctx
@@ -1123,10 +1369,16 @@ class _Session:
         self.register_strips(strips, cell)
 
     def relay_cross(self, strip_ids: Sequence[str], cls_new: str, inst: UAVInstance, n: int) -> tuple[Cell | None, list[Strip]]:
-        """跨構型接手（規格 §12.2：rgb/any 殘區以接手構型條帶重鋪）：殘區 = 未覆蓋條帶足跡 ∩ 母胞 → 新子胞 → `_solve_class`。"""
+        """跨構型接手（規格 §12.2：rgb/any 殘區以接手構型條帶重鋪）：殘區 = 未覆蓋條帶足跡 ∩ 母胞 → 新子胞 → `_solve_class`。
+
+        建圖模式交叉航帶（`is_x`，含殘段 ``#r``）**永不重鋪**：直接略過，不進足跡、不建子胞、不碰快取（全是交叉帶 →
+        ``(None, [])``、無副作用）。`reassign` 第 1 段本來就不會把交叉帶交進來；這裡是給直接呼叫者的第二道關口。
+        子胞 id ``f"{母胞}_R{n}"``（`_RELAY_CELL_INFIX`；`block_of` 靠它把重鋪的條帶追回母區塊）。"""
         ctx = self.ctx
         groups: dict[str, list[Strip]] = {}
         for s in strip_ids:
+            if self.is_x(s):
+                continue                      # 交叉帶只能由原機原樣飛（reassign 第 2 段），換構型重鋪就不是交叉量測
             st = self.strip(s)
             c = self.cell_of_strip(s)
             if c is None:
@@ -1144,7 +1396,7 @@ class _Session:
             return None, []
         poly = max(parts, key=lambda g: g.area)
         dc = ctx.decompose_ctx()
-        new_cell = _dec._new_cell(f"{cid}_R{n + 1}", cell, poly, dc)
+        new_cell = _dec._new_cell(f"{cid}{_RELAY_CELL_INFIX}{n + 1}", cell, poly, dc)
         new_cell.parent_cell_id = cell.cell_id
         new_cell.residual_of = cell.cell_id
         try:
@@ -1290,6 +1542,16 @@ def _drop_last(seq: UAVSequence, cache: CostCache, cls: str) -> UAVSequence:
                   seq.state_end.v_air_mps)
     return replace(seq, items=items, decisions=decisions, rtb=None, landing_site=None, state_end=se, t_end_s=last.t_end_s,
                    e_end_wh=last.e_end_wh)
+
+
+def _concat_seq(head: UAVSequence, tail: UAVSequence) -> UAVSequence:
+    """``tail``（自 ``head`` 末條帶端點起算的序列）接在 ``head`` 後面：tail 首條帶的轉場 = tail.entry；RTB／落點／末狀態
+    取 tail 的（`_Session.idp_chain` 的串接規則）。"""
+    first = replace(tail.items[0], transfer=tail.entry)
+    return replace(head, items=list(head.items) + [first] + list(tail.items[1:]),
+                   decisions=list(head.decisions) + list(tail.decisions), rtb=tail.rtb,
+                   landing_site=tail.landing_site, state_end=tail.state_end, t_end_s=tail.t_end_s,
+                   e_end_wh=tail.e_end_wh, warnings=list(head.warnings) + list(tail.warnings))
 
 
 # ---------------------------------------------------------------------------
@@ -1441,7 +1703,14 @@ def handle_uav_exit(plan: MissionPlan, event: UAVExit, telemetry: Mapping[str, T
 def handle_new_area(plan: MissionPlan, event: NewArea, telemetry: Mapping[str, Telemetry] | None, ctx: MissionContext,
                     cache: CostCache, cfg: PlannerConfig, ghosts: Sequence[GhostTrack] | None = None) -> ReplanResult:
     """規格 §12.3：DECOMPOSE 新區 → 新條帶 add_strips → 候選機（可行構型、能量）→ 拍賣插入（尾端追加，≤2 團隊變更）；
-    否則 UNCOVERABLE(energy) 待辦。"""
+    否則 UNCOVERABLE(energy) 待辦。
+
+    新區 area_id 會組出保留字串 `geometry.CROSS_STRIP_TAG`（`forms_cross_strip_tag`）⇒ MissionInputError（`AreaSpec`
+    建構時就擋；這裡再擋一次是給繞過驗證的物件：新胞／條帶 id 由 area_id 組成，含標記會被當成建圖模式交叉帶）。"""
+    if forms_cross_strip_tag(str(event.area.area_id)):
+        raise MissionInputError(f"NewArea: area_id={event.area.area_id!r} 含保留字串 {CROSS_STRIP_TAG!r}（或以 '_cross' 結尾；"
+                                f"建圖模式交叉航帶 id 標記，新胞／條帶 id 由 area_id 組成，會被當成交叉帶）；"
+                                f"請改名，例如用 '-cross-'")
     sess, t0 = _begin(plan, event, telemetry, ctx, cache, cfg, ghosts)
     area = event.area
     dc = ctx.decompose_ctx()

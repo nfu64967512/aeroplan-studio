@@ -63,16 +63,34 @@ __all__ = [
     "residual_subcell",
     "strips_union_footprint",
     "CROSS_STRIP_TAG",
+    "forms_cross_strip_tag",
     "cross_strip_id",
     "is_cross_strip",
+    "cross_strip_owner",
 ]
 
-#: 建圖模式交叉航帶的條帶 id 標記（`MappingModeConfig.cross_strips`；主條帶 id 是 f"{cell}_{cls}_{k}"，不含此字串）
+#: 建圖模式交叉航帶的條帶 id 標記（`MappingModeConfig.cross_strips`；主條帶 id 是 f"{cell}_{cls}_{k}"，不含此字串）。
+#: **保留字串**：胞／條帶 id 由 area_id 組成，所以 `mission.AreaSpec` 拒收會組出此字串的 area_id（MissionInputError），
+#: `cross_strip_id` 也拒收這樣的母胞 id —— 否則該區每一條主條帶都會被 `is_cross_strip`（子字串判斷）當成交叉帶。
+#: 判斷用 `forms_cross_strip_tag`（含標記本身，或以 ``"_cross"`` 結尾：後面一接 ``"_<n>"`` 就成了標記）。
 CROSS_STRIP_TAG: str = "_cross_"
 
 
+def forms_cross_strip_tag(prefix: str) -> bool:
+    """``prefix`` 當 id 前綴（後面一律接 ``"_"``：胞 ``f"{area_id}_{n}"``、條帶 ``f"{cell}_{cls}_{k}"``、交叉帶
+    ``f"{cell}_{cls}_cross_…"``）時，組出來的 id 會不會含 `CROSS_STRIP_TAG`：含標記本身（``"river_cross_1"``），或以
+    ``"_cross"`` 結尾（``"river_cross"`` → 胞 ``"river_cross_1"``）。"""
+    return CROSS_STRIP_TAG in f"{prefix}_"
+
+
 def cross_strip_id(cell_id: str, cls: str, uav_id: str, k: int) -> str:
-    """交叉航帶 id：``f"{cell}_{cls}_cross_{uav}_{k}"``（k 自 1 起；同一胞多架各自一組時以 uav 區分）。"""
+    """交叉航帶 id：``f"{cell}_{cls}_cross_{uav}_{k}"``（k 自 1 起；同一胞多架各自一組時以 uav 區分）。
+
+    母胞 id 會組出 CROSS_STRIP_TAG（`forms_cross_strip_tag`）⇒ ValueError（area_id 已在 `AreaSpec` 擋下；走到這裡代表
+    輸入繞過了驗證）：id 裡第一個標記必須就是這裡加的那一個，`cross_strip_owner` 才解析得出原機。"""
+    if forms_cross_strip_tag(str(cell_id)):
+        raise ValueError(f"cross_strip_id: 母胞 id {cell_id!r} 會組出保留字串 {CROSS_STRIP_TAG!r}（交叉航帶標記），"
+                         f"交叉帶 id 會無法辨識原機；area_id 不得含此字串或以 '_cross' 結尾（mission.AreaSpec 應已拒收）")
     return f"{cell_id}_{cls}{CROSS_STRIP_TAG}{uav_id}_{int(k)}"
 
 
@@ -82,6 +100,33 @@ def is_cross_strip(strip: "Strip | str | None") -> bool:
         return False
     sid = strip if isinstance(strip, str) else getattr(strip, "strip_id", "")
     return CROSS_STRIP_TAG in str(sid)
+
+
+def cross_strip_owner(strip: "Strip | str | None") -> str | None:
+    """交叉航帶的**原機**機號（``cross_strip_id`` 嵌在 id 裡的 uav）；不是交叉帶 → None。
+
+    交叉帶設計上只給「飛它母區塊的那一架」緊接著自己的主條帶飛（同機、不換機），dynamic 重規劃以此決定誰可以接
+    （``dynamic._Session.reassign``）。解析規則：
+
+    * 先去掉 ``#`` 之後的後綴（``dynamic._truncate_strip`` 的殘段 ``<sid>#r``）：
+      ``"Z1_1_B_k10_B_cross_B3_4#r"`` → ``"B3"``，殘段與母條帶同一個原機。
+    * 取 CROSS_STRIP_TAG **第一次**出現之後、**最後一個** ``_`` 之前的整段；``_`` 之後必須是整數 k。第一次出現就是
+      `cross_strip_id` 加的那一個：母胞 id 不可能組出標記（`AreaSpec` 拒收 area_id、`cross_strip_id` 拒收母胞 id），
+      機號則沒有限制 ⇒ 機號可含底線，甚至含標記本身（``"Z1_1_B_cross_U_cross_2_3"`` → ``"U_cross_2"``）。
+    * ⚠ 含 CROSS_STRIP_TAG 但格式不合（缺 k、k 非整數、機號空白）→ None：``is_cross_strip`` 仍為 True 而原機未知，
+      呼叫端必須把它當成「沒有任何一架可以接」處理，不得當成一般條帶放行。
+    """
+    if strip is None:
+        return None
+    sid = strip if isinstance(strip, str) else getattr(strip, "strip_id", "")
+    base = str(sid).split("#", 1)[0]
+    _head, tag, tail = base.partition(CROSS_STRIP_TAG)
+    if not tag:
+        return None
+    uav, sep, k = tail.rpartition("_")
+    if not sep or not uav or not (k.isascii() and k.isdigit()):
+        return None
+    return uav
 
 _TWO_PI = 2.0 * math.pi
 _CUT_OVERHANG_M = 1e-3        # 切線兩端外延量（保證與邊界確實相交，供 shapely.split 節點化）

@@ -10,14 +10,18 @@ A9（ENU z 已含地球曲率，論文 Eq.(35) 不需另作補償）。
 * 內部一律 ENU ``z``；MSL 只出現在輸入型別，於解析時以 :meth:`GeoFrame.msl_to_enu_z` 轉換。
   ENU z 與 MSL 之差 = h0 + 曲率項（位置相依；50 km 處 ≈ 196 m），不得手動相減。
 * 地形高度以雙線性內插（論文 Eq.(4)）取值；範圍外回 ``nan``。
+* 高程基準（A6，2026-10-15）：DemGrid 可為正高（``"msl"``）或橢球高（``"ellipsoid"``）；橢球高 DEM 的大地起伏 N
+  可以**未知**（``None``）⇒「只准相對高度」模式：幾何仍精確（原點高與地形同一份橢球高），但任何需要真海拔的介面
+  必須以 :func:`require_true_msl` 拒絕（訊息含「大地起伏」）。⚠ 本 repo **沒有**大地水準面模型；pyproj 缺 EGM96
+  格網時預設 ballpark 會靜默給 N=0（只有 ``allow_ballpark=False`` 會在 Transformer 建構時失敗）⇒ 不得拿它補 N。
 
 第 0 層模組：只依賴 numpy / shapely。
 """
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
-from typing import Literal
+from dataclasses import dataclass, replace
+from typing import Any, Literal
 
 import numpy as np
 import shapely
@@ -28,11 +32,14 @@ __all__ = [
     "WGS84_F",
     "WGS84_B",
     "WGS84_E2",
+    "GEOID_UNDULATION_RANGE_M",
     "geodetic_to_ecef",
     "ecef_to_geodetic",
     "GeoFrame",
     "DemGrid",
     "TerrainGrid",
+    "VerticalDatumError",
+    "require_true_msl",
 ]
 
 # ---------------------------------------------------------------------------
@@ -45,6 +52,38 @@ WGS84_E2: float = WGS84_F * (2.0 - WGS84_F)             # 第一離心率平方 
 _WGS84_EP2: float = (WGS84_A**2 - WGS84_B**2) / WGS84_B**2   # 第二離心率平方 e'²
 
 _CHUNK: int = 1 << 20   # from_dem 逐塊處理之節點數（限制記憶體峰值）
+
+GEOID_UNDULATION_RANGE_M: tuple[float, float] = (-110.0, 90.0)
+"""大地起伏 N 的合理範圍（m）：全球 EGM2008 約 −106.6～+85.8 m。超出 ⇒ 多半是把高程或別的數字當 N 填 ⇒ ValueError。"""
+
+
+class _NotGiven:
+    """DemGrid ``geoid_undulation_m`` 的「沒給」哨兵（≠ 0.0、≠ None）。"""
+    __slots__ = ()
+
+    def __repr__(self) -> str:  # pragma: no cover - 顯示用
+        return "<N 未給>"
+
+
+_N_NOT_GIVEN: Any = _NotGiven()
+
+
+class _DefaultedZeroN(float):
+    """``"msl"`` DemGrid 的 N「沒給」解析後存的 0.0：``== 0.0``、運算與一般 float 完全相同（舊預設逐位元不變）。
+
+    只為一件事（A6 審查 L-d）：``dataclasses.replace(msl_dem, vertical_datum="ellipsoid")`` 逐欄把它原樣傳回
+    ``__post_init__``——看到這個型別就知道 N **從來沒給過** ⇒ 照「橢球高沒給 N」規則拒絕，不會默默變成「已知 N = 0」。
+    改基準的受支援作法是 :meth:`DemGrid.with_datum`（N 必須明確給）。
+    ⚠ 只保護記憶體內的物件：``to_dict``／JSON 往返會把它寫成一般 0.0（＝明確值），讀回後再 replace 成橢球高仍是「N = 0」。
+    """
+    __slots__ = ()
+
+
+_DEFAULTED_ZERO_N: float = _DefaultedZeroN(0.0)
+
+
+class VerticalDatumError(ValueError):
+    """需要真海拔（MSL）的介面遇到「橢球高 DEM、大地起伏 N 未知」（只准相對高度模式）。"""
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +137,9 @@ class GeoFrame:
 
     * ``geoid_undulation_m`` = 大地水準面起伏 N：橢球高 = MSL + N。本框架為 MSL↔橢球 轉換的
       唯一依據（DemGrid 之 ``vertical_datum="ellipsoid"`` 亦先換成 MSL 再經本框架）。
+      ⚠ 橢球高 DEM 而 N **未知**時，`context.build_context` 以 N = 0 建框架（:attr:`DemGrid.frame_undulation_m`）：
+      此時本框架的「MSL」欄位其實是**橢球高**——h0 與地形取自同一份橢球高 DEM ⇒ ENU 幾何、相對高度仍精確，
+      但任何「MSL」數值都不是海拔（須以 :func:`require_true_msl` 擋住絕對高度輸出）。
     * ``rot``：ECEF→ENU 旋轉矩陣，列序 (E, N, U)；``enu = rot @ (ecef − origin_ecef)``。
     * ENU z 為「沿原點法向之高度」，遠離原點時因地球曲率而低於 MSL 差值：
       50 km 處平地 z ≈ −196 m（契約不變量）。
@@ -223,6 +265,23 @@ class DemGrid:
       （rows 沿 lat、cols 沿 lon）；float32、單位 m。
     * ``vertical_datum``：``"msl"``（預設）時 ``z_msl`` 即正高；``"ellipsoid"`` 時 ``z_msl`` 為橢球高，
       取用時以 ``z_msl − geoid_undulation_m`` 換成 MSL（本 DEM 自帶之起伏 N），再經 GeoFrame 進 ENU。
+    * ``geoid_undulation_m``（A6）三態——「沒給」≠ 0.0 ≠ None：
+
+      ====================  ==========================  =============================================
+      vertical_datum        geoid_undulation_m          結果
+      ====================  ==========================  =============================================
+      ``"msl"``             沒給                        N = 0.0（舊預設，逐位元不變；只進 GeoFrame）
+      ``"msl"``             有限數                      照用（只進 GeoFrame 的橢球高原點）
+      ``"msl"``             ``None``                    ValueError（未知 N 只對橢球高 DEM 有意義）
+      ``"ellipsoid"``       沒給                        **ValueError**——不會默默當 N = 0
+      ``"ellipsoid"``       有限數                      已知 N：``sample_msl`` = 橢球高 − N
+      ``"ellipsoid"``       ``None``                    **N 未知** ⇒ 只准相對高度（:attr:`msl_known` False）
+      ====================  ==========================  =============================================
+
+      數值須有限且在 :data:`GEOID_UNDULATION_RANGE_M` 內。改基準請用 :meth:`with_datum`（N 必須明確給，``z_msl`` 不換算）。
+      ``dataclasses.replace(msl_dem, vertical_datum="ellipsoid")``：msl「沒給 N」解析後存的是 :class:`_DefaultedZeroN`
+      （== 0.0），replace 原樣帶回 ⇒ 仍算「沒給」⇒ **ValueError**（2026-10-15 前這條路會靜默變成「已知 N = 0」）。
+      msl 而**明確**給 0.0（含 JSON 讀回的 ``"geoid_undulation_m": 0.0``）再 replace 成橢球高 ⇒ 明確值照用（N = 0）。
     * ``is_dsm=True``：D24——tree/building 類障礙不再燒入（由上層 KeepoutSet.build 判斷）。
     * ``sigma_z_m``：DEM 高程 1σ 誤差，進入 ``h_clr ≥ 3σ + 30`` 下限（D11；由 preflight 使用）。
     """
@@ -234,7 +293,7 @@ class DemGrid:
     z_msl: np.ndarray
     is_dsm: bool = False
     vertical_datum: Literal["msl", "ellipsoid"] = "msl"
-    geoid_undulation_m: float = 0.0
+    geoid_undulation_m: float | None = _N_NOT_GIVEN
     sigma_z_m: float | None = None
 
     def __post_init__(self) -> None:
@@ -245,7 +304,60 @@ class DemGrid:
             raise ValueError("DemGrid.dlat_deg / dlon_deg must be positive")
         if self.vertical_datum not in ("msl", "ellipsoid"):
             raise ValueError(f"DemGrid.vertical_datum must be 'msl' or 'ellipsoid', got {self.vertical_datum!r}")
+        n = self.geoid_undulation_m
+        if n is _N_NOT_GIVEN or type(n) is _DefaultedZeroN:   # 後者 = replace() 帶回 msl「沒給」的 0.0
+            if self.vertical_datum == "ellipsoid":
+                raise ValueError(
+                    "DemGrid: vertical_datum='ellipsoid' 必須明確給大地起伏 geoid_undulation_m"
+                    "（有限數 = 已知 N；None = N 未知 ⇒ 只准相對高度）——不會默默當 N = 0"
+                    + ("；這個 0.0 是 msl DEM「沒給 N」的預設，被 dataclasses.replace 帶過來的——"
+                       "改基準請用 DemGrid.with_datum(vertical_datum, geoid_undulation_m)"
+                       if n is not _N_NOT_GIVEN else ""))
+            n = _DEFAULTED_ZERO_N
+        elif n is None:
+            if self.vertical_datum != "ellipsoid":
+                raise ValueError("DemGrid: geoid_undulation_m=None（大地起伏未知）只適用 vertical_datum='ellipsoid'")
+        else:
+            if isinstance(n, (bool, np.bool_)):
+                raise ValueError(f"DemGrid.geoid_undulation_m 須為數值或 None，得 {n!r}")
+            try:
+                n = float(n)
+            except (TypeError, ValueError):
+                raise ValueError(f"DemGrid.geoid_undulation_m 須為數值或 None，得 {n!r}") from None
+            lo, hi = GEOID_UNDULATION_RANGE_M
+            if not (math.isfinite(n) and lo <= n <= hi):
+                raise ValueError(f"DemGrid.geoid_undulation_m={n!r} 不是合理的大地起伏（須為有限數且在 [{lo:g}, {hi:g}] m）")
+        object.__setattr__(self, "geoid_undulation_m", n)
         object.__setattr__(self, "z_msl", z)
+
+    # -- 高程基準（A6）----------------------------------------------------------
+    @property
+    def msl_known(self) -> bool:
+        """能否換成真海拔：``"msl"``，或 ``"ellipsoid"`` 且 N 已知。False ⇒ 只准相對高度。"""
+        return self.vertical_datum == "msl" or self.geoid_undulation_m is not None
+
+    @property
+    def frame_undulation_m(self) -> float:
+        """給 :class:`GeoFrame` 的 N：已知 → 該值；N 未知 → 0.0（框架的「MSL」即橢球高；幾何仍精確，見 GeoFrame）。"""
+        return 0.0 if self.geoid_undulation_m is None else float(self.geoid_undulation_m)
+
+    def datum_label(self) -> str:
+        """給操作員看的高程基準說明（摘要／註解／note 共用）。"""
+        if self.vertical_datum == "msl":
+            return "正高（MSL）"
+        if self.geoid_undulation_m is None:
+            return "橢球高（大地起伏 N 未知 ⇒ 不是海拔，只准相對高度）"
+        return f"橢球高 − N {float(self.geoid_undulation_m):.2f} m = 海拔（MSL）"
+
+    def with_datum(self, vertical_datum: Literal["msl", "ellipsoid"], geoid_undulation_m: float | None) -> "DemGrid":
+        """改高程基準**標籤**的受支援作法（A6 審查 L-d）：回傳新 DemGrid，其餘欄位與 ``z_msl`` **數值原封不動**
+        （不換算——這是「這份格網其實是哪種高」的宣告，不是基準轉換）。
+
+        ``geoid_undulation_m`` 必填、照三態規則驗證：``"ellipsoid"`` + 有限數 = 已知 N、+ ``None`` = N 未知；
+        ``"msl"`` + 有限數（只進 GeoFrame 原點橢球高）。⚠ 不要用 ``dataclasses.replace(dem, vertical_datum=...)``：
+        msl「沒給 N」的 DEM 那樣改會被拒（見類別說明），明確給過 N 的則照帶——意圖不明。
+        """
+        return replace(self, vertical_datum=vertical_datum, geoid_undulation_m=geoid_undulation_m)
 
     # -- 幾何 -----------------------------------------------------------------
     @property
@@ -279,7 +391,10 @@ class DemGrid:
     def sample_msl(self, lat_deg: ArrayLike, lon_deg: ArrayLike) -> np.ndarray:
         """於 ``(lat, lon)`` 雙線性內插（論文 Eq.(4)）→ **MSL** 高 ``(N,)``；範圍外 ``nan``。
 
-        ``vertical_datum="ellipsoid"`` 時已減去 ``geoid_undulation_m``。
+        ``vertical_datum="ellipsoid"`` 且 N 已知時已減去 ``geoid_undulation_m``。
+        ⚠ 橢球高且 **N 未知**（:attr:`msl_known` False）時回傳**原生橢球高**（不減任何值）：與以
+        :attr:`frame_undulation_m` = 0 建的 GeoFrame 搭配時 ENU 幾何與相對高度精確，但數值**不是海拔**——
+        需要真海拔的地方一律先過 :func:`require_true_msl`。
         """
         lat = np.atleast_1d(np.asarray(lat_deg, dtype=np.float64))
         lon = np.atleast_1d(np.asarray(lon_deg, dtype=np.float64))
@@ -287,9 +402,26 @@ class DemGrid:
         r = (lat - self.lat0_deg) / self.dlat_deg
         c = (lon - self.lon0_deg) / self.dlon_deg
         z = _bilinear(self.z_msl, r.ravel(), c.ravel()).reshape(lat.shape)
-        if self.vertical_datum == "ellipsoid":
-            z = z - self.geoid_undulation_m
+        if self.vertical_datum == "ellipsoid" and self.geoid_undulation_m is not None:
+            z = z - float(self.geoid_undulation_m)
         return z
+
+
+def require_true_msl(source: Any, what: str) -> None:
+    """需要**真海拔**的介面之共用關卡（A6）：DEM 為橢球高且大地起伏 N 未知 ⇒ :class:`VerticalDatumError`。
+
+    ``source`` = :class:`DemGrid`，或任何帶 ``.inputs.dem`` 的情境物件（``MissionContext``）。拿不到 DemGrid
+    （舊的 duck-typed ctx）⇒ 無從判斷、不擋——hv_dccpp 自己的 ``MissionContext`` 一律帶 ``inputs.dem``。
+    呼叫處：``ardupilot.plan_to_mission_items``／``export_all``（``alt_frame="msl"``）、``mavlink_link`` 後備匯出器
+    （frame GLOBAL）、``mqtt_bridge.qgc_items_from_plan``（``frame="msl"``）。相對高度（frame 3）與 AGL（terrain）
+    不受影響：同一份橢球高 DEM 內的高度差與基準無關。
+    """
+    dem = source if isinstance(source, DemGrid) else getattr(getattr(source, "inputs", None), "dem", None)
+    if isinstance(dem, DemGrid) and not dem.msl_known:
+        raise VerticalDatumError(
+            f"{what}：DEM 是橢球高而大地起伏 N 未知 ⇒ 只准相對高度（相對起飛坪 frame 3 或 AGL），"
+            f"不能輸出絕對海拔（MSL）——數值會差 N（台灣約 15–22 m，可能讓 120 m AGL 實飛到 138 m）。"
+            f"請提供該地的大地起伏 N（geoid_undulation_m），或改用相對高度")
 
 
 # ---------------------------------------------------------------------------

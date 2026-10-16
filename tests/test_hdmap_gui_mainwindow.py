@@ -157,7 +157,10 @@ _BOUND = ("on_sitl_upload_mission", "_hv_mapping_upload_applies", "_on_hv_mappin
           "_mapping_upload_stale_reason", "_abort_stale_mapping_upload", "_hv_upload_gate",
           "_refresh_release_countdown", "_sitl_broadcast", "on_release_by_schedule", "on_cancel_release",
           "_release_start_one", "_on_release_changed", "_on_mission_uploaded", "survey_area_polygons",
-          "_show_mapping_plan_status")
+          "_show_mapping_plan_status",
+          # 2026-10-15 條帶監測（A5）
+          "_on_mapping_mission_current", "_on_mapping_item_started", "_strip_monitor_on_frame",
+          "_poll_strip_monitor", "_show_strip_alarms")
 
 
 class FakeWin:
@@ -465,6 +468,109 @@ def test_feedback_without_mapping_upload_is_silent(qt_app):
     win = FakeWin(None, [])
     win._on_camera_feedback(1, {"new_photos": 3, "gap": None, "reset": False})
     assert win.vtol_recon_panel.live == []
+
+
+# ═══════════════════════════ 條帶監測（A5） ═══════════════════════════
+class _Clock:
+    def __init__(self, t=1000.0):
+        self.t = t
+
+    def monotonic(self):
+        return self.t
+
+
+def test_upload_builds_one_strip_monitor_per_uav(mapped, qmb, qt_app):
+    """上傳流程替每架建監測器：段數 ＝ 計畫條帶數、段的條帶 id ＝ 計畫順序、逐段預估合計 ＋ 帶外 ＝「預估 M 張」。"""
+    from hv_dccpp.integration.aeroplan_adapter import expected_photos_by_segment
+    hv = mapped.hv_coordinator
+    links = _links_for(hv)
+    win = FakeWin(mapped, links)
+    win.on_sitl_upload_mission()
+    assert win._map_photo_stats and all(l.uploads for l in links)
+    for sysid, st in win._map_photo_stats.items():
+        mon = st["monitor"]
+        uid = hv.id_map[st["uav"]]
+        strips = [s for s, _d in hv.last_plan.plans[uid].strips]
+        assert [g.strip_id for g in mon.segments] == strips
+        items = hv.mission_items(st["uav"], camera_cfg=hv.camera_cfg)
+        by, out = expected_photos_by_segment(items)
+        assert [g.expected for g in mon.segments] == by and sum(by) + out == st["expected"] == expected_photo_count(items)
+        assert st["alarms"] == [] and st["was_armed"] is False
+
+
+def test_strip_monitor_refuses_a_misaligned_segment_table():
+    """段數 ≠ 計畫條帶數 ⇒ 不硬湊，回原因（上傳照常，操作員看得到「沒有逐條帶警報」）。"""
+    def it(seq, cmd, p1=0.0, n=0.0):
+        return {"seq": seq, "command": cmd, "param1": p1, "param2": 0.0, "param3": 0.0,
+                "lat": 23.95 + n * 1e-3, "lon": 120.9}
+    items = [it(0, 16), it(1, 16, n=1), it(2, 206, 18.0), it(3, 16, n=5), it(4, 206, 0.0)]   # 只有 1 段
+    hv = types.SimpleNamespace(id_map={1: "A1"}, last_plan=types.SimpleNamespace(
+        plans={"A1": types.SimpleNamespace(strips=[("s1", 1), ("s2", 1)])}))
+    mon, err = mw.build_strip_monitor(hv, 1, items)
+    assert mon is None and "不靜默錯位" in err
+
+
+def test_progress_feedback_and_mode_drive_strip_alarms(mapped, qmb, qt_app, monkeypatch):
+    hv = mapped.hv_coordinator
+    did = sorted(hv.id_map)[0]
+    items = hv.mission_items(did, camera_cfg=hv.camera_cfg)
+    mon, err = mw.build_strip_monitor(hv, did, items)
+    assert err is None
+    clk = _Clock()
+    monkeypatch.setattr(mw, "time", types.SimpleNamespace(monotonic=clk.monotonic))   # 只換 main_window 的參考
+    win = FakeWin(None, [])
+    win._map_photo_stats = {1: {"expected": 100, "taken": 0, "fb_missing": 0, "resets": 0, "uav": did,
+                                "monitor": mon, "alarms": [], "was_armed": False}}
+    s1, s2 = mon.segments[0], mon.segments[1]
+    win._strip_monitor_on_frame(types.SimpleNamespace(sysid=1, mode="AUTO", armed=True))
+    win._on_mapping_item_started(1, s1.on_seq, "SetCamTrigDst")
+    clk.t += 1.0
+    win._on_camera_feedback(1, {"new_photos": s1.expected, "gap": None, "reset": False})   # 合併回授：整段一次
+    clk.t += 1.0
+    win._on_mapping_item_started(1, s1.off_seq, "SetCamTrigDst")
+    win._on_mapping_item_started(1, s2.on_seq, "SetCamTrigDst")      # 第 2 段：一張都沒拍
+    for _ in range(4):
+        clk.t += 1.0
+        win._on_mapping_mission_current(1, {"seq": s2.end_nav_seq})
+    win._on_mapping_item_started(1, s2.off_seq, "SetCamTrigDst")
+    clk.t += 3.0
+    win._poll_strip_monitor(1)
+    kinds = [a.kind for a in win._map_photo_stats[1]["alarms"]]
+    assert kinds == ["zero_photos"]
+    assert any("0 張" in m for m in win._status.msgs)
+    live = win.vtol_recon_panel.live[-1]
+    assert f"已拍 {s1.expected} / 預估 100" in live and f"條帶 2/{len(mon.segments)} 完成" in live and "⚠⚠" in live
+    # 第 3 段拍攝中切 LOITER ⇒ 中斷；上鎖（落地）⇒ 收尾：之後的段全部 not_flown
+    s3 = mon.segments[2]
+    win._on_mapping_item_started(1, s3.on_seq, "SetCamTrigDst")
+    clk.t += 1.0
+    win._strip_monitor_on_frame(types.SimpleNamespace(sysid=1, mode="LOITER", armed=True))
+    assert win._map_photo_stats[1]["alarms"][-1].kind == "interrupted"
+    clk.t += 10.0
+    win._strip_monitor_on_frame(types.SimpleNamespace(sysid=1, mode="QLAND", armed=False))
+    tail = win._map_photo_stats[1]["alarms"][2:]
+    assert [a.kind for a in tail].count("not_flown") == len(mon.segments) - 3
+    # 第 3 段：中斷後 10 s 沒有任何遙測就落地 ⇒ 0 張「不確定」（info），不是 critical 的 0 張
+    assert [(a.kind, a.segment) for a in tail if a.kind != "not_flown"] == [("unverified_count", 3)]
+
+
+def test_failed_upload_disables_the_strip_monitor(qmb, qt_app):
+    win = FakeWin(None, [])
+    win._map_photo_stats = {4: {"expected": 1, "taken": 0, "fb_missing": 0, "resets": 0, "uav": 4,
+                                "monitor": object(), "alarms": [], "was_armed": False}}
+    win._on_mission_uploaded(4, False, "MISSION_ACK 拒絕")
+    assert win._map_photo_stats[4]["monitor"] is None
+
+
+def test_mission_progress_signals_are_connected_once_in_on_sitl_connect():
+    tree = ast.parse(SRC)
+    fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "on_sitl_connect")
+    got = [(c.func.value.attr, ast.unparse(c.args[0])) for c in ast.walk(fn)
+           if isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute) and c.func.attr == "connect"
+           and isinstance(c.func.value, ast.Attribute) and c.func.value.attr in ("mission_current",
+                                                                                 "mission_item_started")]
+    assert sorted(got) == [("mission_current", "self._on_mapping_mission_current"),
+                           ("mission_item_started", "self._on_mapping_item_started")]
 
 
 def test_camera_feedback_is_connected_in_on_sitl_connect():

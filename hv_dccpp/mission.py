@@ -1,6 +1,7 @@
 """mission.py — 表 2 MissionInputs、規劃輸出型別、PlannerConfig、`load_mission`（模組契約 §3）。
 
-第 1 層模組：只依賴 `platform`、`geo`（第 0 層）；**不含** preflight（位於 `preflight.py`）。
+第 1 層模組：只依賴 `platform`、`geo`（第 0 層；另自第 0 層 `geometry` 取保留字串 `CROSS_STRIP_TAG`）；
+**不含** preflight（位於 `preflight.py`）。
 對應規格：§6.1（表 2 → 內部表示）、§16.2（PlannerConfig 全部參數與預設）、§5.7（可用電量解析順序）、
 §15（`legacy_mode` 退化條件）、D7（氣象門檻）、D11（c2 / terrain_clearance 必填，缺則 NO_GO — 由 preflight 判定）、
 D22（三種時間窗）、D25（重疊率預設）、D26（失鏈策略）、D40（落點政策：recovery_site_id None → home）。
@@ -32,6 +33,7 @@ from typing import Any, Literal, Mapping, Sequence
 import numpy as np
 
 from .geo import DemGrid
+from .geometry import CROSS_STRIP_TAG, forms_cross_strip_tag     # 第 0 層；只取保留字串（AreaSpec.area_id 驗證）
 from .platform import (
     PLATFORM_HERO,
     PLATFORM_PIONEER,
@@ -252,7 +254,14 @@ class Site:
 
 @dataclass(frozen=True, slots=True)
 class AreaSpec:
-    """任務區域（表 2「任務區域」；規格 §1.1、§6.1）。`polygon_wgs84` 為 `(lat, lon)` 外環、`holes_wgs84` 內環。"""
+    """任務區域（表 2「任務區域」；規格 §1.1、§6.1）。`polygon_wgs84` 為 `(lat, lon)` 外環、`holes_wgs84` 內環。
+
+    `area_id` 不得組出保留字串 :data:`hv_dccpp.geometry.CROSS_STRIP_TAG`（``"_cross_"``；判斷用
+    :func:`hv_dccpp.geometry.forms_cross_strip_tag`：含標記本身，或以 ``"_cross"`` 結尾）→ MissionInputError：胞 id 是
+    ``f"{area_id}_{n}"``、條帶 id 是 ``f"{cell}_{cls}_{k}"``，而交叉航帶靠 id 裡的這個標記辨識（`is_cross_strip` 是子字串
+    判斷）⇒ 例如 ``"river_cross_1"``、``"river_cross"``（胞 ``"river_cross_1"``）會讓該區每一條主條帶都被當成交叉帶
+    （動態重規劃不准他機接手）。改名即可（``"river-cross-1"``、``"cross_river"`` 都可以）。這條規則不看建圖模式開關
+    （`load_mission`、MQTT、動態 NewArea／TargetCue 建的區都經過這裡）。"""
     area_id: str
     polygon_wgs84: tuple[tuple[float, float], ...]
     holes_wgs84: tuple[tuple[tuple[float, float], ...], ...] = ()
@@ -263,6 +272,13 @@ class AreaSpec:
 
     def __post_init__(self) -> None:
         _str_id(self.area_id, "AreaSpec.area_id")
+        if forms_cross_strip_tag(self.area_id):
+            raise MissionInputError(
+                f"AreaSpec.area_id={self.area_id!r} 含保留字串 {CROSS_STRIP_TAG!r}（或以 '_cross' 結尾，胞 id 接上 '_<n>' "
+                f"就成了它）：那是建圖模式交叉航帶 id 的識別標記"
+                f"（hv_dccpp.geometry.is_cross_strip），而胞／條帶 id 由 area_id 組成，所以這一區的每一條主條帶都會被當成"
+                f"交叉帶（重規劃不准他機接手、匯出另算）。請改名，例如用 '-cross-' 代替 {CROSS_STRIP_TAG!r}、"
+                f"也不要以 '_cross' 結尾")
         n = f"AreaSpec[{self.area_id}]"
         object.__setattr__(self, "polygon_wgs84", _ring(self.polygon_wgs84, f"{n}.polygon_wgs84"))
         holes = self.holes_wgs84 or ()
@@ -828,8 +844,18 @@ class MappingModeConfig:
       ⇒ 每條交叉帶橫越該機全部主條帶（每條都綁到所有主帶），條帶數少、轉彎少（固定翼）。
     * 至少 2 條相鄰（互相連結）：比例算出來只要 1 條時，橫帶放寬到剛好 2 條（w + s），並以警告列出**有效比例**；
       區塊放不下 2 條（或交叉帶碰禁區／局部包絡不可行）⇒ 該區塊略過，列在 `mapping_cross_skipped(...)` 警告。
-    * 同一架飛（**同一架、不換機**；交叉帶本身在母區塊內，但兩端的 e_ext＋引入段＋迴轉會伸出區塊側邊，
-      進到鄰塊的空域 ⇒ 4-D 去衝突照常處理，鄰機可能被延後起飛）：交叉帶插在**同一架**的序列裡、緊鄰其母區塊
+    * **鄰機空域規則**（使用者 2026-10-15 定：「多機預設禁止，可明確放行」）：交叉帶本身在母區塊內，但兩端的
+      e_ext＋引入段＋交叉方向迴轉會伸出區塊側邊；建圖模式不分高度層 ⇒ 伸進**他機獨占主條帶區塊**（他機主條帶足跡
+      扣掉本機主條帶足跡）的那段與鄰機同高、只靠 4-D 時間錯開。``cross_allow_neighbor_airspace=False``（預設）
+      ⇒ 這樣的一組**不排**（不進成本快取、不算未覆蓋、上傳不擋；主條帶不變），列在 `mapping_cross_forbidden(...)`
+      警告（逐組列出伸進哪幾架、幾公頃）；全部被禁止時計畫與交叉帶關閉時相同。沒有他機（單機、或他機沒任務）
+      ⇒ 侵入必為空，規則不適用。``True`` ＝ 明確放行（舊行為；`mapping_cross_airspace(...)` 照樣量化回報）。
+      判斷與量化共用同一個幾何定義（`planner._cross_band`／`_cross_intrusion_m2`，面積 > 1 m² 才算）。
+    * 動態重規劃（`dynamic.replan`）同樣只准**原機**拿回自己的交叉帶（失鏈中的幽靈不給；鄰機空域禁止時，母區塊
+      主條帶已交給他機也不給）；他機一律不接、永不跨構型重鋪；接不了 ⇒ ``plan.uncovered`` 記 ``cross_not_reassigned``
+      並寫 note（不靜默少飛）。主條帶的接手與交叉帶無關（先排主條帶、再還交叉帶）。
+    * 同一架飛（**同一架、不換機**；放行時伸出區塊的那段 ⇒ 4-D 去衝突照常處理，鄰機可能被延後起飛）：
+      交叉帶插在**同一架**的序列裡、緊鄰其母區塊
       （母區塊每段主條帶之前或之後，取增加時間最少者；交叉帶內部的順序與掃向：≤ 12 條用精確 DP（子集 × 末條帶 ×
       掃向），更多條用 skip-k／折疊蛇形候選 + 逐帶掃向 DP）。
     * 高度：h_x = 母區塊作業高度 + ``cross_alt_offset_m``；必須在該區塊作業高度帶 [max(最低固定翼, 地形淨空),
@@ -861,9 +887,10 @@ class MappingModeConfig:
     cross_fraction: float = 0.2
     cross_alt_offset_m: float = 0.0
     cross_angle_offset_deg: float = 90.0
+    cross_allow_neighbor_airspace: bool = False
 
     def __post_init__(self) -> None:
-        for key in ("seam_tie", "no_altitude_layering", "crab_margin", "cross_strips"):
+        for key in ("seam_tie", "no_altitude_layering", "crab_margin", "cross_strips", "cross_allow_neighbor_airspace"):
             if not isinstance(getattr(self, key), bool):
                 raise MissionInputError(f"MappingModeConfig.{key} 須為 bool，得 {getattr(self, key)!r}")
         object.__setattr__(self, "lead_in_m", _nonneg(_num(self.lead_in_m, "MappingModeConfig.lead_in_m"),
@@ -903,7 +930,8 @@ class MappingModeConfig:
 
 
 #: 交叉航帶參數的預設值（`MappingModeConfig.cross_strips=False` 時必須維持這些值）
-_CROSS_DEFAULTS: dict[str, float] = {"cross_fraction": 0.2, "cross_alt_offset_m": 0.0, "cross_angle_offset_deg": 90.0}
+_CROSS_DEFAULTS: dict[str, float | bool] = {"cross_fraction": 0.2, "cross_alt_offset_m": 0.0, "cross_angle_offset_deg": 90.0,
+                                             "cross_allow_neighbor_airspace": False}
 
 
 @dataclass(frozen=True, slots=True)
@@ -1674,11 +1702,14 @@ def to_jsonable(obj: Any) -> Any:
 
 
 def _dem_to_dict(dem: DemGrid) -> dict[str, Any]:
+    """DemGrid → JSON 相容 dict。大地起伏 N 未知（橢球高 DEM）⇒ ``"geoid_undulation_m": None``（JSON null），
+    :func:`_parse_dem` 讀回仍是「未知」——不會變成 0（A6；to_dict ↔ load_mission 往返一致）。"""
+    n = dem.geoid_undulation_m
     return {
         "lat0_deg": dem.lat0_deg, "lon0_deg": dem.lon0_deg, "dlat_deg": dem.dlat_deg, "dlon_deg": dem.dlon_deg,
         "z_msl": np.asarray(dem.z_msl, dtype=np.float32).tolist(),
         "is_dsm": bool(dem.is_dsm), "vertical_datum": dem.vertical_datum,
-        "geoid_undulation_m": float(dem.geoid_undulation_m), "sigma_z_m": dem.sigma_z_m,
+        "geoid_undulation_m": None if n is None else float(n), "sigma_z_m": dem.sigma_z_m,
     }
 
 
@@ -1891,6 +1922,8 @@ def _parse_site(obj: Any, name: str, default_kind: str = "alternate", sites: Map
 
 
 def _parse_dem(obj: Any) -> DemGrid:
+    """mapping／DemGrid → DemGrid。高程基準（A6）原樣交給 DemGrid 驗證：``"vertical_datum": "ellipsoid"`` 而**沒有**
+    ``geoid_undulation_m`` 鍵 ⇒ MissionInputError（不默默當 msl 或 N = 0）；``null`` ＝ N 未知（只准相對高度）。"""
     if isinstance(obj, DemGrid):
         return obj
     if not isinstance(obj, Mapping):

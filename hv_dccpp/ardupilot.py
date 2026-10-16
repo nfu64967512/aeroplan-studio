@@ -34,6 +34,7 @@ from shapely.ops import unary_union
 from .context import MissionContext
 from .decompose import d_turn_from_r
 from .dubins import discretize_step_rad
+from .geo import require_true_msl
 from .geometry import is_cross_strip
 from .mission import FW_PHASES, MissionInputs, MissionPlan, Mode, Phase, PlannerConfig, UAVPlan, Waypoint
 from .platform import EnergyModel, PlatformSpec, Sensor
@@ -322,6 +323,7 @@ def _camera_params(cc: CameraTriggerConfig, warn: list[str]) -> dict[str, float]
         "CAM1_FEEDBAK_PIN": float(cc.feedback_pin),
         "CAM1_FEEDBAK_POL": float(cc.feedback_polarity),
         "CAM1_TRIGG_DIST": 0.0,                            # 距離由任務每條帶之 206 開／關
+        "MIS_RESTART": 0.0,                                # 0 = 中斷後回 AUTO 從目前航點接續（不是整份重飛）；見 PARAM_COMMENTS
     }
     if cc.backend == "servo":
         p[f"SERVO{cc.servo_channel}_FUNCTION"] = 10.0      # CameraTrigger
@@ -805,6 +807,9 @@ def plan_to_mission_items(uav_plan: UAVPlan, ctx: MissionContext, cfg: PlannerCo
     TRANS_IN 略；LAND → NAV_VTOL_LAND（落點；alt 0 相對 home）。
 
     `alt_frame`：relative（alt = MSL − **本機起飛坪** MSL）、msl、terrain（alt = AGL）。`wp_radius_m` None → min(R_eff/2, 30)。
+    ⚠ ``msl`` 需要真海拔：DEM 為橢球高且大地起伏 N 未知（``ctx.inputs.dem.msl_known`` False）⇒
+    :class:`hv_dccpp.geo.VerticalDatumError`（訊息含「大地起伏」；A6）。relative／terrain 與基準無關、照常輸出；
+    但第 0 列 home（frame 0）的 z 此時是**橢球高**——ArduPlane 不採用上傳任務第 0 列的 home（解鎖時重設），只影響顯示。
 
     **高度基準與第 0 列**：ArduPlane 解鎖時把 home 重設到飛機自己的位置（見 :func:`fc_home`），所以相對高度一律以
     **這架的起飛坪**（``uav_plan.takeoff_site``）MSL 為基準，第 0 列 home 也寫這個坪的經緯度與 MSL（frame 0）。
@@ -833,6 +838,9 @@ def plan_to_mission_items(uav_plan: UAVPlan, ctx: MissionContext, cfg: PlannerCo
     """
     if alt_frame not in FRAME_OF:
         raise ValueError(f"alt_frame must be one of {tuple(FRAME_OF)}, got {alt_frame!r}")
+    if alt_frame == "msl":
+        # A6：MAV_FRAME_GLOBAL 要真海拔；橢球高 DEM 且 N 未知 ⇒ VerticalDatumError（相對／terrain 不受影響）
+        require_true_msl(ctx, f"{uav_plan.uav_id}: plan_to_mission_items(alt_frame='msl')")
     if camera_cfg is not None and not isinstance(camera_cfg, CameraTriggerConfig):
         raise TypeError(f"camera_cfg 須為 CameraTriggerConfig，得 {type(camera_cfg).__name__}")
     if camera_cfg is not None and not camera_trigger:
@@ -1309,6 +1317,7 @@ PARAM_COMMENTS: dict[str, str] = {
     "CAM1_INTRVAL_MIN": "minimum time between photos [s]; an earlier trigger is postponed SILENTLY "
                         "(AP_Camera_Backend.cpp 4.5.7:131-136). Must be 1/(proven sustainable capture rate), the same "
                         "rate the planner uses",
+    "MIS_RESTART": "0 = resume: re-entering AUTO continues from the current NAV (AP_Mission.h AP_MISSION_RESTART_DEFAULT 0; start_or_resume()). 1 = restart from item 1 = VTOL takeoff in the air = a full re-fly the energy plan cannot carry, triggered by any short mode change. Resume over a strip flies straight to the strip end (oblique / missed photos) - follow docs/SOP_2026-10-15 (set the current item to the strip rejoin NAV first); survey/strip_monitor flags resumed_without_rewind",
     "CAM_AUTO_ONLY": "1 = distance triggering only in AUTO (AP_Camera.cpp 4.7.2:30-35). A failsafe RTL that jumps to "
                      "DO_LAND_START stays in AUTO, so this does not stop it — the 206(0) right after DO_LAND_START does",
     "CAM_MAX_ROLL": "max |roll| [deg] for distance triggers, 0 = no limit (AP_Camera.cpp 4.7.2:22-28); postpones distance "
@@ -1378,6 +1387,7 @@ _INT_PARAM_RULES: dict[str, tuple[str, str]] = {
     "BATT_CAPACITY": ("AP_Int32", "exact"),
     "CAM1_TYPE": ("AP_Int8", "exact"),
     "CAM_AUTO_ONLY": ("AP_Int8", "exact"),
+    "MIS_RESTART": ("AP_Int8", "exact"),                   # AP_Mission.h: AP_Int8 _restart
     "CAM1_FEEDBAK_PIN": ("AP_Int8", "exact"),
     "CAM1_FEEDBAK_POL": ("AP_Int8", "exact"),
     "CAM1_RELAY_ON": ("AP_Int8", "exact"),
@@ -1740,20 +1750,39 @@ def export_all(plan: MissionPlan, ctx: MissionContext, cfg: PlannerConfig, out_d
 
     `camera_cfg`（:class:`CameraTriggerConfig`）同時傳給 :func:`plan_to_mission_items`（206 擺放）與
     :func:`recommended_params`（`.param` 之相機參數），有效值另寫進 summary 之 ``camera_cfg``。
+
+    **高程基準**（A6）：``alt_frame="msl"`` 而 DEM 為橢球高、大地起伏 N 未知 ⇒ 在建目錄前就丟
+    :class:`hv_dccpp.geo.VerticalDatumError`。摘要的 ``terrain`` 區塊與 ``home``／``fc_home`` 的 ``alt_datum`` 寫明各
+    ``alt_msl_m`` 數值的真實基準；N 未知時 `.waypoints` 註解寫「ellipsoidal height (geoid N unknown) — NOT MSL」，
+    不再把橢球高標成 MSL。
     """
+    if alt_frame == "msl":
+        require_true_msl(ctx, "export_all(alt_frame='msl')")
     out_dir = os.fspath(out_dir)
     os.makedirs(out_dir, exist_ok=True)
     if takeoff_delay not in ("operator", "nav_delay"):
         raise ValueError(f"takeoff_delay must be 'operator' or 'nav_delay', got {takeoff_delay!r}")
     inputs = ctx.inputs
     home_msl = _home_msl(ctx)
+    _dem = inputs.dem
+    _msl_known = bool(_dem.msl_known)
+    alt_datum = _dem.datum_label()
+    # .waypoints 註解（ASCII；QGC/MP 讀檔只看數字列）：N 未知時不能寫 MSL
+    h_unit = "m MSL" if _msl_known else "m ellipsoidal height (geoid N unknown) - NOT MSL"
     fences: dict[str, list[MissionItem]] = {}
     t0 = float(t0_s) if t0_s is not None else (min(float(u.t_takeoff_s) for u in plan.plans.values())
                                                if plan.plans else 0.0)
     delays = {uid: max(0.0, float(up.t_takeoff_s) - t0) for uid, up in plan.plans.items()}
     summary: dict[str, Any] = {
         "home": {"site_id": inputs.home.site_id, "lat_deg": inputs.home.lat_deg, "lon_deg": inputs.home.lon_deg,
-                 "alt_msl_m": home_msl},
+                 "alt_msl_m": home_msl, "alt_datum": alt_datum},
+        "terrain": {"vertical_datum": _dem.vertical_datum,
+                    "geoid_undulation_m": (None if _dem.geoid_undulation_m is None
+                                           else float(_dem.geoid_undulation_m)),
+                    "msl_known": _msl_known,
+                    "alt_msl_m_fields_are": ("orthometric height (MSL)" if _msl_known
+                                             else "ellipsoidal height (geoid N unknown) - NOT MSL; "
+                                                  "only relative altitudes are valid")},
         "alt_frame": alt_frame, "makespan_s": float(plan.makespan_s), "feasibility": plan.feasibility.status,
         "uncovered": [list(u) for u in plan.uncovered],
         "takeoff": {"mode": takeoff_delay, "t0_s": t0, "spread_s": (max(delays.values()) if delays else 0.0),
@@ -1809,9 +1838,9 @@ def export_all(plan: MissionPlan, ctx: MissionContext, cfg: PlannerConfig, out_d
             wp_comments.append(f"START THIS MISSION AT t0 + {delays[uid]:.1f} s. The mission carries no time origin; "
                                f"starting all vehicles together voids the 60 s pad spacing and every 4D "
                                f"deconfliction delay.")
-        wp_comments.append(f"home (seq 0) = takeoff pad {ref_site} at {ref_msl:.2f} m MSL; relative altitudes are "
+        wp_comments.append(f"home (seq 0) = takeoff pad {ref_site} at {ref_msl:.2f} {h_unit}; relative altitudes are "
                            f"above this pad (ArduPlane resets home to the arming position); planning home "
-                           f"{inputs.home.site_id} is {home_msl:.2f} m MSL ({ref_msl - home_msl:+.2f} m)")
+                           f"{inputs.home.site_id} is {home_msl:.2f} {h_unit} ({ref_msl - home_msl:+.2f} m)")
         write_qgc_wpl(items, files["waypoints"], wp_comments)
         write_qgc_wpl(rally, files["rally"])
         write_qgc_wpl(fence, files["fence"])
@@ -1829,7 +1858,7 @@ def export_all(plan: MissionPlan, ctx: MissionContext, cfg: PlannerConfig, out_d
             "orbits_inserted": int(up.orbits_inserted), "warnings": list(up.warnings),
             "takeoff_delay_s": round(delays[uid], 1), "takeoff_offset_s": delays[uid], "param_warnings": p_warn,
             "fc_home": {"site_id": ref_site, "lat_deg": ref_lat, "lon_deg": ref_lon, "alt_msl_m": ref_msl,
-                        "offset_from_planning_home_m": ref_msl - home_msl},
+                        "alt_datum": alt_datum, "offset_from_planning_home_m": ref_msl - home_msl},
             "params": params, "files": files,
         }
     with open(os.path.join(out_dir, "mission_summary.json"), "w", encoding="utf-8") as f:

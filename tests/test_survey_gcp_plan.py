@@ -381,6 +381,42 @@ def test_odm_header_rules_match_opendm_location_parse_srs_header():
     assert gp.utm_header_for(25.07, 121.21) == "WGS84 UTM 51N"
 
 
+def test_default_header_is_the_sites_utm_zone_and_cross_zone_sites_must_choose():
+    """使用者 2026-10-15 定 gcp_list 標頭用 WGS84 UTM 51N：預設＝作業點共同所在的 UTM 區；120°E 是 50／51 區的
+    分界（本島 51N；澎湖、金門、南竿 50N）；跨區不自動選；lon=180 不產生 ODM 不認得的 61 區；不合法座標拒絕。"""
+    assert gp.site_utm_header([(23.95, 120.90), (25.07, 121.21)]) == "WGS84 UTM 51N"
+    assert gp.utm_header_for(23.0, 120.0) == "WGS84 UTM 51N"
+    assert gp.utm_header_for(23.0, 119.999) == "WGS84 UTM 50N"
+    assert gp.site_utm_header([(23.57, 119.58)]) == "WGS84 UTM 50N"                # 澎湖
+    with pytest.raises(GcpPlanError, match="跨 UTM 區"):
+        gp.site_utm_header([(26.16, 119.95), (26.37, 120.49)])                   # 南竿 50N、東引 51N
+    with pytest.raises(GcpPlanError, match="沒有點位"):
+        gp.site_utm_header([])
+    assert gp.utm_header_for(0.0, 180.0) == "WGS84 UTM 60N"
+    assert gp.parse_odm_srs_header(gp.utm_header_for(0.0, 180.0)).is_projected
+    for bad in ((float("nan"), 121.0), (23.0, float("inf")), (91.0, 121.0), (23.0, 181.0)):
+        with pytest.raises(GcpPlanError, match="不合法"):
+            gp.utm_header_for(*bad)
+    assert "51N" in gp.DEFAULT_HEADER_RULE
+
+
+def test_cross_preset_without_any_flown_cross_strip_warns():
+    """「交叉航帶＋最少 GCP」的前提是真的有飛交叉帶：HARVEST 區塊說明全是 n_cross_excluded=0 ⇒ 警告；
+    有任一架有交叉帶、加密方案、或區塊不是來自 HARVEST（沒有該欄）⇒ 不警告。"""
+    zero = {"A1": {"n_cross_excluded": 0}, "B2": {"n_cross_excluded": 0}}
+    w = gp.preset_consistency_warning("cross_strips", zero)
+    assert w and "沒有任何交叉航帶" in w and "加密 GCP" in w
+    part = gp.preset_consistency_warning("cross_strips", {**zero, "B3": {"n_cross_excluded": 4}})
+    assert part and "區塊 A1、B2 沒有交叉航帶" in part and "B3" not in part
+    assert gp.preset_consistency_warning("cross_strips", {k: {"n_cross_excluded": 2} for k in ("A1", "B2")}) is None
+    assert gp.preset_consistency_warning("dense_gcp", zero) is None
+    assert gp.preset_consistency_warning("cross_strips", {"A1": {}}) is None
+    assert gp.preset_consistency_warning("cross_strips", {}) is None
+    assert gp.preset_consistency_warning("cross_strips", None) is None
+    _blocks, info = gp.blocks_from_hv(_fake_hv())                                   # 真的 blocks_from_hv 說明格式
+    assert all("n_cross_excluded" in v for v in info.values())
+
+
 def test_template_has_header_comments_and_one_line_per_gcp_in_odm_order(cross):
     txt = gp.gcp_template_text(cross, projection="WGS84 UTM 51N")
     lines = txt.splitlines()

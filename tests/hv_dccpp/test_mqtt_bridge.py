@@ -277,6 +277,53 @@ def test_plan_to_payloads_options(result5):
     assert txt == res.payloads["A1"]["qgc_wpl"]
 
 
+def test_synthetic_flat_dem_refuses_keys_it_would_ignore():
+    """A6 審查 L-b：平地合成 DEM（無 z_msl）以前會默默忽略 vertical_datum／geoid_undulation_m 與打錯的鍵。"""
+    base = {"home": {"lat": HOME[0], "lon": HOME[1], "alt_msl": HOME_MSL},
+            "areas": [{"area_id": "Z1", "polygon": _latlon_ring(PENTAGON_ENU)}]}
+    with pytest.raises(MissionInputError, match="未知鍵.*flat_msl"):
+        mb.request_to_mission_inputs(dict(base, dem={"flat_msl": 30.0}))              # 打錯 flat_msl_m
+    with pytest.raises(MissionInputError, match="平地合成 DEM.*一律正高"):
+        mb.request_to_mission_inputs(dict(base, dem={"vertical_datum": "ellipsoid", "geoid_undulation_m": None}))
+    with pytest.raises(MissionInputError, match="一律正高"):
+        mb.request_to_mission_inputs(dict(base, dem={"vertical_datum": "wgs84"}))
+    for bad in (None, True, float("nan"), 500.0, "x"):
+        with pytest.raises(MissionInputError, match="geoid_undulation_m"):
+            mb.request_to_mission_inputs(dict(base, dem={"geoid_undulation_m": bad}))
+    # 明確 "msl" ＝ 本來就是正高 ⇒ 收；N（有限數）原樣進 DemGrid（只進框架原點橢球高）並寫進 note
+    notes: list[str] = []
+    inputs, _ = mb.request_to_mission_inputs(dict(base, dem={"vertical_datum": "msl", "geoid_undulation_m": 18.5,
+                                                             "flat_msl_m": 30.0}), notes=notes)
+    d = inputs.dem
+    assert (d.vertical_datum, d.geoid_undulation_m, d.msl_known) == ("msl", 18.5, True)
+    assert np.allclose(d.z_msl, 30.0)
+    (n,) = [x for x in notes if x.startswith("dem_synthetic_flat(")]
+    assert "30.0 m MSL" in n and "N = 18.50 m" in n
+    # 沒給 N ⇒ 舊行為逐位元不變（0.0、note 不提 N）
+    notes2: list[str] = []
+    d2 = mb.request_to_mission_inputs(dict(base, dem={"flat_msl_m": 30.0}), notes=notes2)[0].dem
+    assert d2.vertical_datum == "msl" and d2.geoid_undulation_m == 0.0
+    assert "dem_synthetic_flat(30.0 m MSL)" in notes2
+
+
+def test_plan_to_payloads_gates_msl_frame_on_the_inputs_dem_even_without_ctx(result5):
+    """A6 審查 L-b：``ctx=None`` 時 qgc_items_from_plan 無從判斷 ⇒ plan_to_payloads 必須自己用 inputs 的 DEM 擋。"""
+    from dataclasses import replace
+
+    from hv_dccpp.geo import VerticalDatumError
+    res = result5
+    ell_unknown = replace(res.inputs, dem=res.inputs.dem.with_datum("ellipsoid", None))
+    with pytest.raises(VerticalDatumError, match="大地起伏"):
+        mb.plan_to_payloads(res.plan, None, res.cfg, inputs=ell_unknown, qgc=mb.QgcOptions(frame="msl"))
+    with pytest.raises(VerticalDatumError, match="大地起伏"):                       # 有 ctx 而 inputs 另給：也看 inputs
+        mb.plan_to_payloads(res.plan, res.ctx, res.cfg, inputs=ell_unknown, qgc=mb.QgcOptions(frame="msl"))
+    # 對照：正高 DEM ＋ ctx=None ⇒ MSL 照常輸出；N 未知的相對高度 ⇒ 照常輸出（不誤擋）
+    ok = mb.plan_to_payloads(res.plan, None, res.cfg, inputs=res.inputs, qgc=mb.QgcOptions(frame="msl"))
+    assert ok["B1"]["summary"]["frame"] == "MAV_FRAME_GLOBAL" and ok["B1"]["qgc_wpl"]
+    rel = mb.plan_to_payloads(res.plan, None, res.cfg, inputs=ell_unknown)
+    assert rel["B1"]["summary"]["frame"] == "MAV_FRAME_GLOBAL_RELATIVE_ALT" and rel["B1"]["qgc_wpl"]
+
+
 def test_status_payload_nogo():
     """c2 範圍無效 → build_context/preflight NO_GO → 每架 payload NO_GO 且 status 含錯誤。"""
     req = {"mission_id": "nogo", "home": {"lat": HOME[0], "lon": HOME[1], "alt_msl": HOME_MSL},

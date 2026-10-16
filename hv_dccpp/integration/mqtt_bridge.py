@@ -50,8 +50,14 @@
      "obstacles"?: [{"obs_id", "geom_type": "point"|"line"|"polygon", "coords": [{"lat","lon"}…],
                      "height_agl_m" | "top_msl_m", "category"?: "tower"|"building"|"tree"|"powerline"|"other",
                      "keepout_buffer_m"?}],
-     "dem"?: {"lat0_deg", "lon0_deg", "dlat_deg", "dlon_deg", "z_msl": [[…]], "sigma_z_m"?, "is_dsm"?}
-             | {"flat_msl_m"?: 100, "step_m"?: 50, "margin_m"?: 4000, "sigma_z_m"?: 2},
+     "dem"?: {"lat0_deg", "lon0_deg", "dlat_deg", "dlon_deg", "z_msl": [[…]], "sigma_z_m"?, "is_dsm"?,
+              "vertical_datum"?: "msl"|"ellipsoid", "geoid_undulation_m"?: N|null}
+             | {"flat_msl_m"?: 100, "step_m"?: 50, "margin_m"?: 4000, "sigma_z_m"?: 2,
+                "vertical_datum"?: "msl", "geoid_undulation_m"?: N},
+             // ⚠ "ellipsoid" 必須帶 "geoid_undulation_m"（數值＝已知 N；null＝未知 ⇒ 只准相對高度，絕對海拔
+             //   輸入與 qgc frame "msl" 會被拒絕）；缺鍵 ⇒ MissionInputError（不默默當 N = 0）。
+             // ⚠ 平地合成（無 z_msl）一律正高：vertical_datum 只收 "msl"；"ellipsoid" 或未知鍵 ⇒ MissionInputError；
+             //   "geoid_undulation_m"（有限數）原樣進 DemGrid（只用於框架原點橢球高）。
      "payload_reqs"?: {"default": {"kind": "lidar", "density_pt_m2", "side_overlap", "h_target_agl_m", …},
                        "default_rgb": {"kind": "rgb", "gsd_required_m", …}},
      "planner"?: {"dem_step_m": 50, "d_sep_m": 100, …任何 PlannerConfig 欄位},
@@ -114,7 +120,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
 
-from ..geo import DemGrid, GeoFrame
+from ..geo import DemGrid, GeoFrame, require_true_msl
 from ..mission import (
     Airspace,
     AreaSpec,
@@ -662,6 +668,11 @@ def _all_points(home: Site, alternates: Sequence[Site], areas: Sequence[AreaSpec
     return np.asarray(pts, dtype=np.float64).reshape(-1, 2)
 
 
+#: 平地合成 DEM（``dem`` 無 ``z_msl``）可用的鍵；其餘 ⇒ MissionInputError（A6 審查 L-b：以前會默默忽略）
+_SYNTHETIC_DEM_KEYS: frozenset[str] = frozenset(
+    {"flat_msl_m", "base_msl_m", "step_m", "margin_m", "sigma_z_m", "vertical_datum", "geoid_undulation_m"})
+
+
 def _synthetic_flat_dem(pts: np.ndarray, base_msl_m: float, step_m: float, margin_m: float,
                         sigma_z_m: float | None) -> DemGrid:
     lat_min, lon_min = float(pts[:, 0].min()), float(pts[:, 1].min())
@@ -681,6 +692,8 @@ def request_to_mission_inputs(payload: Mapping[str, Any], *, default_drones: Seq
 
     * 無 ``dem``（或 ``dem`` 只含 ``flat_msl_m/step_m/margin_m``）→ :func:`scenario.synthetic_dem` 平地 DEM，
       涵蓋全部幾何外接矩形 ⊕ ``defaults.dem_margin_m``；高程 = ``dem.flat_msl_m`` → ``home.alt_msl`` → 0。
+      一律正高：未知鍵或 ``vertical_datum`` ≠ ``"msl"`` ⇒ MissionInputError；``geoid_undulation_m`` 經
+      :meth:`DemGrid.with_datum` 原樣帶入（A6 審查 L-b）。
     * 缺省之 c2 範圍／地形淨空／空域上限／風／氣象／電量皆依 :class:`BridgeDefaults` 補值並 append 至 ``notes``。
     * ``planner`` 區段以 :func:`dataclasses.replace` 套用於 PlannerConfig（平地 DEM 時 ``dem_step_m`` 預設 50 m）。
     * 輸入錯誤丟 :class:`MissionInputError`。
@@ -822,6 +835,18 @@ def request_to_mission_inputs(payload: Mapping[str, Any], *, default_drones: Seq
     synthetic = not (isinstance(dem_obj, DemGrid) or (isinstance(dem_obj, Mapping) and "z_msl" in dem_obj))
     if synthetic:
         d = dict(dem_obj) if isinstance(dem_obj, Mapping) else {}
+        # A6 審查 L-b：平地合成 DEM 以前會**默默忽略** vertical_datum／geoid_undulation_m（與任何打錯的鍵）。
+        #   未知鍵 ⇒ 拒絕；"ellipsoid" ⇒ 拒絕（平地高程 flat_msl_m 與預設的 home.alt_msl 都是海拔，橢球高的平地
+        #   要換算 N，不是改個標籤）；"msl" ＋ geoid_undulation_m（有限數）⇒ 原樣交給 DemGrid（只進框架原點橢球高）。
+        _bad = sorted(set(d) - _SYNTHETIC_DEM_KEYS)
+        if _bad:
+            raise MissionInputError(f"dem（平地合成，無 z_msl）未知鍵 {_bad}；可用 {sorted(_SYNTHETIC_DEM_KEYS)}"
+                                    "（要給地形格網請帶 z_msl）")
+        _vd = d.get("vertical_datum")
+        if _vd is not None and _vd != "msl":
+            raise MissionInputError(
+                f"dem.vertical_datum={_vd!r}：平地合成 DEM（無 z_msl）一律正高（flat_msl_m／home.alt_msl 是海拔）；"
+                "橢球高地形請給完整 z_msl 格網並帶 vertical_datum='ellipsoid' 與 geoid_undulation_m（數值或 null）")
         base = _opt(d, "flat_msl_m", "base_msl_m")
         if base is None:
             base = home.alt_msl_m if home.alt_msl_m is not None else (dfl.flat_dem_msl_m if dfl.flat_dem_msl_m is not None else 0.0)
@@ -830,7 +855,14 @@ def request_to_mission_inputs(payload: Mapping[str, Any], *, default_drones: Seq
             pts, float(base), _num(_opt(d, "step_m", default=dfl.dem_step_m), "dem.step_m"),
             _num(_opt(d, "margin_m", default=dfl.dem_margin_m), "dem.margin_m"),
             None if _opt(d, "sigma_z_m", default=dfl.dem_sigma_z_m) is None else float(_opt(d, "sigma_z_m", default=dfl.dem_sigma_z_m)))
-        nts.append(f"dem_synthetic_flat({float(base):.1f} m MSL)")
+        if "geoid_undulation_m" in d:
+            try:
+                dem = dem.with_datum("msl", d["geoid_undulation_m"])
+            except (TypeError, ValueError) as e:
+                raise MissionInputError(f"dem.geoid_undulation_m: {e}") from e
+        nts.append(f"dem_synthetic_flat({float(base):.1f} m MSL"
+                   + (f"；N = {float(dem.geoid_undulation_m):.2f} m 只用於框架原點橢球高" if "geoid_undulation_m" in d else "")
+                   + ")")
     else:
         dem = dem_obj
 
@@ -939,9 +971,13 @@ def qgc_items_from_plan(uplan: UAVPlan, spec: PlatformSpec, home_latlonalt: tupl
       ±R 只是給 QGC／人工判讀轉向與規劃半徑用；要飛出規劃半徑必須另外把機上的 ``WP_LOITER_RAD``
       設成該值（本橋接不輸出 .param）。
     * 首個 DECEL（或 TRANS_IN）前插 DO_LAND_START；LAND 航點 → 單一 NAV_VTOL_LAND（alt 0）。
+    * ``opt.frame == "msl"``（絕對海拔，MAV_FRAME_GLOBAL）而 ``ctx`` 的 DEM 為橢球高、大地起伏 N 未知 ⇒
+      :class:`hv_dccpp.geo.VerticalDatumError`（A6；訊息含「大地起伏」）。``ctx`` 為 None 時無從判斷（不擋）。
     """
     M = _MAV
     rel = opt.frame != "msl"
+    if not rel:
+        require_true_msl(ctx, f"{uplan.uav_id}: qgc_items_from_plan(frame='msl')")
     frame_id = int(M.MAV_FRAME_GLOBAL_RELATIVE_ALT if rel else M.MAV_FRAME_GLOBAL)
     h_lat, h_lon, h_msl = home_latlonalt
     items: list[QgcItem] = []
@@ -1144,8 +1180,12 @@ def plan_to_payloads(plan: MissionPlan, ctx: Any, cfg: PlannerConfig, *, mission
 
     機隊中未飛之 UAV 亦有一則（``summary.status`` = ``NOT_USED``；NO_GO 時 = ``NO_GO`` 並附 errors）。
     ``alt_rel`` = ``alt_msl − home_msl``（home_msl = ``ctx.frame.h0_msl_m``）。
+    ``qgc.frame == "msl"`` ⇒ 先以**輸入的 DEM**（``inputs`` 或 ``ctx.inputs``）過 :func:`hv_dccpp.geo.require_true_msl`：
+    ``ctx=None`` 時 :func:`qgc_items_from_plan` 無從判斷，閘門不能因此失效（A6 審查 L-b）。
     """
     inp: MissionInputs = inputs if inputs is not None else ctx.inputs
+    if qgc.frame == "msl":
+        require_true_msl(getattr(inp, "dem", None), "plan_to_payloads(qgc frame='msl')")
     home = _home_of(ctx, inp)
     h_msl = home[2]
     rep = plan.feasibility

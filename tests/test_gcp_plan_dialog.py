@@ -60,13 +60,34 @@ class FakeMap:
         return True
 
 
+def _cross20(dlg):
+    """這些測試鎖的是佈設／地圖／匯出流程本身，沿用寫測試時的「交叉航帶＋最少 GCP、20 個檢核點」
+    （對話框預設 2026-10-15 起改成首飛路線：加密 GCP＋30 個檢核點，見 test_defaults_are_the_first_flight_route）。"""
+    dlg.cmb_preset.setCurrentIndex(dlg.cmb_preset.findData("cross_strips"))
+    dlg.chk_asprs30.setChecked(False)
+    dlg.spn_chk.setValue(20)
+    return dlg
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # GcpPlanDialog
 # ─────────────────────────────────────────────────────────────────────────────
 
+def test_defaults_are_the_first_flight_route(qt_app):
+    """使用者 2026-10-15 定首飛精度路線：基準航線＋加密 GCP＋30 個檢核點（ASPRS 第 2 版），交叉航帶留到之後做對照。"""
+    assert (gp.FIRST_FLIGHT_PRESET, gp.FIRST_FLIGHT_N_CHECKPOINTS) == ("dense_gcp", 30)
+    dlg = GcpPlanDialog(polygons=[AREA], blocks=lambda: (BLOCKS, {"A1": {}}, "假 HARVEST"))
+    assert dlg.cmb_preset.currentData() == "dense_gcp" and dlg.spn_chk.value() == 30 and dlg.chk_asprs30.isChecked()
+    assert dlg.lbl_preset.text() == gp.PRESETS["dense_gcp"].description
+    assert dlg.generate() is True
+    assert dlg.plan.effective["preset"] == "dense_gcp"
+    assert (dlg.plan.counts["GCP"], dlg.plan.counts["CHK"]) == (14, 30)
+    assert "小專案聲明" not in dlg.lbl_counts.text()
+
+
 def test_generate_shows_counts_compares_presets_and_draws_on_the_map(qt_app):
     fm = FakeMap()
-    dlg = GcpPlanDialog(map_widget=fm, polygons=lambda: [AREA], blocks=lambda: (BLOCKS, {"A1": {}}, "假 HARVEST"))
+    dlg = _cross20(GcpPlanDialog(map_widget=fm, polygons=lambda: [AREA], blocks=lambda: (BLOCKS, {"A1": {}}, "假 HARVEST")))
     assert dlg.lbl_blocks.text() == "假 HARVEST" and dlg.lbl_areas.text().endswith("1 塊")
     assert dlg.generate() is True
     assert dlg.plan.counts["GCP"] == 8 and dlg.plan.counts["CHK"] == 20
@@ -87,7 +108,7 @@ def test_generate_shows_counts_compares_presets_and_draws_on_the_map(qt_app):
 
 
 def test_user_overrides_reach_the_planner_and_bad_text_is_refused(qt_app):
-    dlg = GcpPlanDialog(polygons=[AREA])
+    dlg = _cross20(GcpPlanDialog(polygons=[AREA]))
     assert "沒有 HARVEST 規劃" in dlg.lbl_blocks.text()
     dlg.ed_edge_band.setText("abc")
     assert dlg.generate() is False and "邊緣帶寬 不是數字" in dlg.lbl_errors.text()
@@ -120,7 +141,7 @@ def test_a_failing_block_provider_is_reported_not_silently_dropped(qt_app):
 
 
 def test_export_and_gcp_list_from_survey(qt_app, tmp_path):
-    dlg = GcpPlanDialog(polygons=[AREA], blocks=BLOCKS)
+    dlg = _cross20(GcpPlanDialog(polygons=[AREA], blocks=BLOCKS))
     assert dlg.export(str(tmp_path)) is None and "還沒有產生" in dlg.lbl_errors.text()
     assert dlg.generate() is True
     paths = dlg.export(str(tmp_path / "out"))
@@ -144,6 +165,54 @@ def test_export_and_gcp_list_from_survey(qt_app, tmp_path):
     data = [ln.split() for ln in dst.read_text(encoding="utf-8").splitlines()[1:] if not ln.startswith("#")]
     assert len(data) == 8 and all(d[2] == "51.200" for d in data)
     assert dlg.gcp_list_from_survey(str(tmp_path / "out")) is None and "已存在" in dlg.lbl_errors.text()
+
+
+def _survey_csv(path, pts):
+    path.write_text("id,type,lat,lon,h,frame,vertical_datum\n"
+                    + "".join(f"G{k + 1:02d},GCP,{la},{lo},51.2,EPSG:4326,ellipsoidal\n" for k, (la, lo) in enumerate(pts)),
+                    encoding="utf-8")
+    return path
+
+
+def test_header_defaults_to_the_sites_utm_zone_even_without_generating(qt_app, tmp_path):
+    """使用者 2026-10-15 定標頭用 UTM 51N：沒按「產生」就直接由實測 CSV 產生，以前會用初始的 EPSG:4326。"""
+    dlg = GcpPlanDialog(polygons=[AREA])
+    assert dlg.cmb_projection.currentText() == ""                       # 空白＝自動，不是 EPSG:4326
+    dlg.ed_survey_csv.setText(str(_survey_csv(tmp_path / "s.csv", [(25.07, 121.21), (25.071, 121.212)])))
+    dst = dlg.gcp_list_from_survey(str(tmp_path / "out"))
+    assert dst is not None and dst.read_text(encoding="utf-8").splitlines()[0] == "WGS84 UTM 51N"
+    assert dlg.cmb_projection.currentText() == "WGS84 UTM 51N"
+    assert "自動帶入 WGS84 UTM 51N" in dlg.export_log.toPlainText()
+    # 測點跨 50／51 區 ⇒ 不自動選、不寫檔
+    dlg2 = GcpPlanDialog(polygons=[AREA])
+    dlg2.ed_survey_csv.setText(str(_survey_csv(tmp_path / "x.csv", [(26.16, 119.95), (26.37, 120.49)])))
+    assert dlg2.gcp_list_from_survey(str(tmp_path / "out2")) is None
+    assert "跨 UTM 區" in dlg2.lbl_errors.text() and not (tmp_path / "out2" / "gcp_list.txt").exists()
+
+
+def test_explicit_header_is_kept_and_auto_header_follows_the_site(qt_app, tmp_path):
+    """明確選的 EPSG:4326 重按「產生」不會被改回 UTM；自動帶入的值換場址時跟著換（50N → 51N）。"""
+    area50 = [(la, lo - 1.61) for la, lo in AREA]                       # 平移到 119.6°E（澎湖，50 區）
+    cur = {"a": area50}
+    dlg = GcpPlanDialog(polygons=lambda: [cur["a"]])
+    assert dlg.generate() is True and dlg.cmb_projection.currentText() == "WGS84 UTM 50N"
+    cur["a"] = AREA
+    assert dlg.generate() is True and dlg.cmb_projection.currentText() == "WGS84 UTM 51N"
+    dlg.cmb_projection.setCurrentText("EPSG:4326")
+    assert dlg.generate() is True and dlg.cmb_projection.currentText() == "EPSG:4326"
+    paths = dlg.export(str(tmp_path / "o"))
+    assert paths and paths["gcp_template"].read_text(encoding="utf-8").splitlines()[0] == "EPSG:4326"
+
+
+def test_cross_preset_on_a_plan_without_cross_strips_is_flagged(qt_app):
+    info = {k: {"n_cross_excluded": 0} for k in BLOCKS}
+    dlg = GcpPlanDialog(polygons=[AREA], blocks=lambda: (BLOCKS, info, "HARVEST（沒有交叉帶）"))
+    dlg.cmb_preset.setCurrentIndex(dlg.cmb_preset.findData("cross_strips"))
+    assert dlg.generate() is True
+    assert "沒有任何交叉航帶" in dlg.lbl_warnings.text()
+    assert any("沒有任何交叉航帶" in w for w in dlg.plan.warnings)
+    dlg.cmb_preset.setCurrentIndex(dlg.cmb_preset.findData("dense_gcp"))
+    assert dlg.generate() is True and "沒有任何交叉航帶" not in dlg.lbl_warnings.text()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -478,7 +547,7 @@ def test_real_gcp_dialog_from_a_fake_window_draws_on_a_dual_map(qt_app):
     d.map_2d, d.map_3d = _bare2d(), _bare3d()
     win = types.SimpleNamespace(survey_areas=[AREA], corners=[], map_widget=d, _hv_coordinator=None)
     win.survey_area_polygons = types.MethodType(mw.MainWindow.survey_area_polygons, win)
-    dlg = GcpPlanDialog(map_widget=d, polygons=win.survey_area_polygons, blocks=mw.gcp_blocks_provider(win))
+    dlg = _cross20(GcpPlanDialog(map_widget=d, polygons=win.survey_area_polygons, blocks=mw.gcp_blocks_provider(win)))
     assert dlg.generate() is True and dlg.plan.counts["GCP"] == 5
     lid, data = _call(d.map_3d._sent[-1], "setSurveyPoints")
     assert lid == MAP_LAYER and len(data["rows"]) == 25

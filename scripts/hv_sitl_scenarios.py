@@ -1,7 +1,7 @@
 """HARVEST SITL 航次的「情境」定義。
 
-一個情境 = 機隊 + 作業區 + 規劃路徑 + 高度。`scripts/hv_sitl_flight.py` 以
-環境變數 ``HV_SCENARIO`` 選一個來跑，預設 ``lidar_rgb_1a3b``（HV4SITL1/2 那一組）。
+一個情境 = 機隊 + 作業區 + 規劃路徑 + 高度。由 ``python scripts/hv_sitl_run.py <指令> <情境鍵>``
+選一個來跑（``list`` 列出全部）；舊說明的環境變數 ``HV_SCENARIO`` 已沒有程式在讀。
 
 兩條規劃路徑刻意都保留：
 
@@ -18,6 +18,8 @@
 """
 from __future__ import annotations
 
+import copy
+import dataclasses
 import math
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -289,6 +291,21 @@ _add(Scenario(
     target_gsd=0.05,
     spawn_spread_m=10.0,
     note="實際機隊 1 Pioneer + 2 HERO；與 HV4SITL14 同幾何同空域，只少一台 ⇒ 乾淨 A/B"))
+
+
+# ── 同一組，規劃風 3 m/s：建圖首飛的規劃情境 ─────────────────────────
+#   使用者 2026-10-15 定首飛建圖風速 ≤ 3 m/s，GUI 的建圖風速閘門（3 m/s）會擋下用 5 m/s 規劃的計畫；
+#   S1 那三趟（S1_HDMAP_20261014／_W3／_W5b）都是用上面那組的 5 m/s 規劃 ⇒ 不是首飛會上傳的那份。
+#   ⚠ 用 deepcopy＋replace 從上面那組複製（不共用 areas／dict 物件）：**只有 key、trial、wind、note 不同**（測試逐欄鎖住），幾何／機隊／空域
+#     任何改動都要兩組一起改，否則就不是同一份計畫的風速對照。
+#   ⚠ trial 另取名，不碰論文證據 HV4SITL15（16 已有產物、17 留給 C1）；重跑仍建議設 HV_TRIAL。
+#   ⚠ 鍵名用 pw3（plan wind）不用 w3：既有 S1_HDMAP_20261015_W3 那一趟的 3 m/s 是**模擬風**（規劃風 5）。
+#   ⚠ hv_sitl_run 的 HV_PLAN_WIND_SPD 也能改規劃風，但不改 key／trial ⇒ 不設 HV_TRIAL 會寫進 HV4SITL15。
+#   C_compare（runs/artifacts/HDMAP_CROSS_GCP_2026-10-15）的 s1_w3 就是這一組：條帶 29 → 26、makespan 3180 s、
+#   照片 2319 張、建圖閘門可上傳。
+_add(dataclasses.replace(
+    copy.deepcopy(SCENARIOS["gui_legal_120_1a2b"]), key="gui_legal_120_1a2b_pw3", trial="S1_HDMAP_PW3", wind=(3.0, 270.0),
+    note="建圖首飛規劃情境：與 gui_legal_120_1a2b 逐欄相同，只把規劃風改成 3 m/s（來自 270°）"))
 
 
 # ── 1 Pioneer + 3 HERO：禁航區 × 法規上限（兩件事第一次一起飛）────────

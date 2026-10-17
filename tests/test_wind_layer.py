@@ -122,6 +122,11 @@ def test_glue_defines_the_six_page_functions_with_the_limit_and_the_right_adapte
             assert f"function {fn}(" in js, f"{kind} 膠水缺 {fn}"
         assert marker in js and "limitMps: 2.5" in js and "AeroWind.create(" in js
     assert "viewer.container" in wl.glue_js("cesium") and "window.currentMap._container" in wl.glue_js("leaflet")
+    # 圖例讓開各頁右上角的控制項；Cesium 用橢球遮擋判背面、Leaflet 縮放動畫期間藏圖層
+    assert "legendMargin: [10, 60]" in wl.glue_js("leaflet") and "legendMargin: [140, 8]" in wl.glue_js("cesium")
+    assert "EllipsoidalOccluder" in wl.glue_js("cesium") and "SceneMode.SCENE3D" in wl.glue_js("cesium")
+    assert "zoomstart" in wl.glue_js("leaflet") and "zoomend" in wl.glue_js("leaflet")
+    assert "_windAfterCreate(_windLayer)" in wl.glue_js("leaflet")
     with pytest.raises(ValueError):
         wl.glue_js("openlayers")
     with pytest.raises(ValueError):

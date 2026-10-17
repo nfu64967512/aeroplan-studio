@@ -1776,9 +1776,9 @@ class CesiumMapWidget(MapWidgetBase):
 
     # ── 飛控任務航線（讀回的那一份）────────────────────────────────
     def display_fc_mission(self, path3d, loiters=None,
-                           color: str = '#00E5FF', label: str = 'FC Mission',
-                           home=None):
-        """畫從飛控讀回來的任務航線 + 盤旋圈。
+                           color: str = None, label: str = None,
+                           home=None, *, sysid=None, kind=None):
+        """畫一份任務（讀回的、或從檔案匯入的）航線 + Home + 盤旋圈，**每個 (sysid, kind) 一層**。
 
         Parameters
         ----------
@@ -1787,32 +1787,63 @@ class CesiumMapWidget(MapWidgetBase):
             產生。
         loiters : list[dict] | None
             `mission.mission_view.mission_loiters` 的輸出。
+        color / label : None ⇒ 依 sysid 取 `mission_view.sysid_color` / `fc_mission_label`。
+        home : `mission_view.mission_home` 的輸出（獨立 H 標記），可省。
+        sysid, kind : 決定 main.html `_missionLayers[...]` 的圖層鍵，規則與 2D **同一份**
+            （`mission_view.fc_layer_key`）：
+            * 都是 None ⇒ 舊語意：`clearMissionOverlay()` 清掉**全部**層後畫成單一疊圖
+              （layerId 傳 null，只進總表）。
+            * 只給 sysid ⇒ 'uav<n>'；都給 ⇒ 'uav<n>-<kind>'（如 'uav3-import' 匯入預覽，
+              不會跟同一架的讀回互相蓋掉）；只給 kind ⇒ '<kind>'（如 'loaded' 單檔載入）。
+              這三種都只換自己那一層（`clearMissionLayer`），其他層不動 ⇒ 多機可並存。
 
         ⚠️ 這條路徑**不碰** `_tacticalEntities`，也不觸發任何圍籬重建。
-           對應的清除是 `clear_fc_mission()`，不是 `clearTacticalOverlay()`。
+           對應的清除是 `clear_fc_mission(sysid, kind)`，不是 `clearTacticalOverlay()`。
         """
         import json as _json
-        self._js('clearMissionOverlay()')
+        from mission import mission_view as _mv
+        color = str(color) if color else _mv.sysid_color(sysid)
+        label = _mv.fc_mission_label(sysid, label)
+        key = None if (sysid is None and kind is None) else _mv.fc_layer_key(sysid, kind)
+        kj = _json.dumps(key)          # 'null' 或 '"uav3"' / '"uav3-import"' / '"loaded"'
+        if key is None:
+            self._js('clearMissionOverlay()')
+        else:
+            self._js(f'clearMissionLayer({kj})')
         pts = [[float(p[0]), float(p[1]), float(p[2] if len(p) > 2 else 0.0)]
                for p in (path3d or [])]
         if pts:
             self._js(f'addMissionRoute({_json.dumps(pts)},'
-                     f'{_json.dumps(color)},{_json.dumps(label)})')
+                     f'{_json.dumps(color)},{_json.dumps(label)},{kj})')
         if home:
-            self._js('addMissionHome(%r,%r,%r)' % (
+            self._js('addMissionHome(%r,%r,%r,%s,%s)' % (
                 float(home['lat']), float(home['lon']),
-                float(home.get('alt', 0.0))))
+                float(home.get('alt', 0.0)), kj,
+                _json.dumps(f'H{int(sysid)}' if sysid is not None else 'H')))
         for lo in (loiters or []):
             self._js(
-                'addMissionLoiter(%r,%r,%r,%r,%s)' % (
+                'addMissionLoiter(%r,%r,%r,%r,%s,%s)' % (
                     float(lo['lat']), float(lo['lon']),
                     float(lo['radius_m']), float(lo.get('alt', 0.0)),
-                    _json.dumps(color))
+                    _json.dumps(color), kj)
             )
 
-    def clear_fc_mission(self):
-        """清除飛控任務航線疊加。"""
-        self._js('clearMissionOverlay()')
+    def clear_fc_mission(self, sysid=None, kind=None):
+        """清除任務航線疊加（規則與 2D 同一份：`mission_view.fc_layer_selector`）：
+
+        * 都是 None ⇒ `clearMissionOverlay()` 清**全部**層。
+        * 只給 sysid ⇒ `clearMissionLayerFamily('uav<n>')`：'uav<n>' 與 'uav<n>-*' 整架。
+        * 都給／只給 kind ⇒ `clearMissionLayer(key)` 恰好那一層。
+        """
+        import json as _json
+        from mission import mission_view as _mv
+        exact, prefix = _mv.fc_layer_selector(sysid, kind)
+        if exact is None:
+            self._js('clearMissionOverlay()')
+        elif prefix is not None:
+            self._js(f'clearMissionLayerFamily({_json.dumps(exact)})')
+        else:
+            self._js(f'clearMissionLayer({_json.dumps(exact)})')
 
     def draw_coverage_gaps(self, missed_points: list):
         """標出偵察覆蓋率驗算找出的漏掃格心。

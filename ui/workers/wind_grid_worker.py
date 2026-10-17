@@ -46,3 +46,37 @@ class WindGridWorker(QThread):
             logger.error(f"[氣象網格] 失敗：{msg}")
             if not self._abandoned:
                 self.failed.emit(msg)
+
+
+class CwaStationWorker(QThread):
+    """中央氣象署自動氣象站觀測（core.wind_field.fetch_cwa_station）。
+    信號：``finished_ok(StationWind)``、``failed(錯誤字串)``。⚠ 授權碼只收進來用，不放進信號、不記 log。"""
+
+    finished_ok = pyqtSignal(object)
+    failed = pyqtSignal(str)
+
+    def __init__(self, key: str, *, station: str = "", near=None, parent=None) -> None:
+        super().__init__(parent)
+        self._key = str(key)
+        self._station = str(station or "").strip()
+        self._near = (float(near[0]), float(near[1])) if near is not None else None
+        self._abandoned = False
+
+    def stop(self) -> None:
+        self._abandoned = True
+
+    def run(self) -> None:                                   # noqa: D401 - QThread 入口
+        try:
+            from core import wind_field as wf
+            obs = wf.fetch_cwa_station(self._key, station=self._station, near=self._near)
+            if self._abandoned:
+                return
+            self.finished_ok.emit(obs)
+        except Exception as e:                               # noqa: BLE001
+            kind = type(e).__name__
+            msg = str(e) if kind in ("WindFetchError", "ValueError") else f"{kind}: {e}"
+            from core.wind_field import redact_cwa_url
+            msg = redact_cwa_url(msg)
+            logger.error(f"[CWA 測站] 失敗：{msg}")
+            if not self._abandoned:
+                self.failed.emit(msg)

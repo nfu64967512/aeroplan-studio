@@ -1247,6 +1247,8 @@ html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden;
 </script>
 """
         js_code += self._wind_js_block()
+        # 任務疊圖（讀回／匯入預覽）：JS 圖層不隨 folium 重建，整頁重繪後要自己畫回來
+        js_code += self._fc_mission_js_block()
 
         # 注入到 </html> 前（在 folium 的 Leaflet script 之後）
         if '</html>' in html:
@@ -2169,6 +2171,11 @@ html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden;
     if(leg) leg.parentNode.removeChild(leg);
     // 清除 folium 產生的路徑/航點 polyline, circleMarker, marker（保留底圖）
     map.eachLayer(function(layer){
+        // ⚠ 任務疊圖（讀回／匯入預覽）是**觀測**，不是規劃：規劃前的清場不可以掃掉它。
+        //    以前這裡會把它的 polyline/marker/circle 一併移除，但 Python 端的
+        //    _fc_missions 與 window._fcMissionLayers 都還留著 ⇒ 預覽「消失」，下一次整頁
+        //    重繪又「回來」。_fc_mission_js 建圖層時打了 options.fcMission=true，這裡跳過。
+        if(layer.options && layer.options.fcMission) return;
         if(layer instanceof L.Polyline || layer instanceof L.CircleMarker){
             // 保留邊界多邊形（藍色 fill）
             if(layer instanceof L.Polygon && layer.options && layer.options.fillColor === '#2196F3') return;
@@ -2186,28 +2193,235 @@ html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden;
 """)
         logger.info("已透過 JS 清除所有顯示圖層（無頁面重載）")
 
-    def clear_fc_mission(self):
-        """清除「從飛控讀回來的 AUTO 航線」疊圖（JS 移除圖層，不重載頁面）。
+    # ─────────────────────────────────────
+    # 飛控任務航線／匯入航點檔預覽（JS 圖層，每個 (sysid, kind) 一層）
+    #   window._fcMissionLayers = { 'fc': [...], 'uav3': [...], 'uav3-import': [...], 'loaded': [...] }
+    #   鍵的規則只有一份：mission/mission_view.py::fc_layer_key（3D 也從那裡拿，兩張圖不分岔）。
+    #   ⚠ 不碰 corners／paths／圍籬，也不觸發 _render_map()；狀態記在
+    #     self._fc_missions，整頁重繪時由 _fc_mission_js_block() 原樣畫回來。
+    #   ⚠ 每個 Leaflet 圖層都帶 options.fcMission=true：clear_all_display_layers_js()
+    #     （規劃前的清場）靠這個旗標跳過它們，畫面才會跟狀態一致。
+    # ─────────────────────────────────────
+    _FC_DEFAULT_KEY = 'fc'
 
-        對應 3D 的 `CesiumMapWidget.clear_fc_mission()`（發 `clearMissionOverlay()`），
-        也是 `DualMapWidget.clear_fc_mission()` 逐張圖找的那個名字。
+    @staticmethod
+    def _fc_layer_key(sysid, kind=None) -> str:
+        """(sysid, kind) → 圖層鍵（`mission_view.fc_layer_key`）：(None, None) 是「讀回飛控那一份」
+        的舊語意 'fc'；(n, None) 'uav<n>'；(n, kind) 'uav<n>-<kind>'；(None, kind) '<kind>'。"""
+        from mission import mission_view as _mv
+        return _mv.fc_layer_key(sysid, kind)
 
-        ⚠ 2D 目前**畫不出**這一層：`DualMapWidget.display_fc_mission()` 用
-        `hasattr(self.map_2d, 'display_fc_mission')` 守著，而 `MapWidget` 沒有
-        那個方法，所以讀回的航線只上得了 3D。這裡先照 2D 既有的
-        `window._swarmLayers` 慣例把清除側接好（`window._fcMissionLayers`），
-        等繪製側補上就是成對的；在那之前它是個安全的 no-op。
+    def display_fc_mission(self, path2d, loiters=None, color=None, home=None, *,
+                           sysid=None, kind=None, label=None, fit=False) -> dict:
+        """把一份任務（讀回的、或從檔案匯入的）疊到 2D 圖上，**每個 (sysid, kind) 一層**。
+
+        Parameters
+        ----------
+        path2d : list[tuple[float, float]]
+            `[(lat, lon), ...]`，由 `mission.mission_view.mission_to_path_2d` 產生。
+            ⚠ **只收二元組**：任何一點不是兩個數就整份拒絕（ValueError）——
+            三元組在 folium 那條路會讓整張 2D 圖靜靜消失（見 mission_view 的
+            模組 docstring），這裡雖然走 JS 不走 folium，仍然不准混用。
+        loiters : `mission_view.mission_loiters` 的輸出（盤旋圈），可省。
+        color : 色碼；None ⇒ 依 sysid 取 `mission_view.sysid_color`。
+        home : `mission_view.mission_home` 的輸出（獨立 H 標記，不接進折線），可省。
+        sysid, kind : 決定圖層鍵（規則在 `mission_view.fc_layer_key`，3D 同一套）：
+            * 都是 None ⇒ 舊語意：**清掉所有層**後畫成單一的 'fc' 層（「讀回飛控」
+              的舊呼叫法；既有呼叫端不用改）。
+            * 只給 sysid ⇒ 'uav<n>'：UAV-n 的讀回；同一架再畫＝換掉那一層，其他層不動。
+            * 都給 ⇒ 'uav<n>-<kind>'：如 kind='import' 是 UAV-n 的匯入預覽，**不會**
+              跟同一架的讀回 'uav<n>' 互相蓋掉。
+            * 只給 kind ⇒ '<kind>'：如 kind='loaded' 是單檔載入；只換自己這一層，
+              **不**清別人（以前單檔載入走 (None, None) 會把每一層都洗掉）。
+        label : tooltip 文字；None ⇒ `UAV-n 任務` / `FC Mission`。送進 JS 前會
+            HTML-escape（Leaflet 的 bindTooltip 是 innerHTML；檔名帶標籤不可以被執行）。
+        fit : True 就把視圖拉到這份任務的範圍（不整頁重繪）。
+
+        參數順序與 `DualMapWidget.display_fc_mission` 轉給 2D 的呼叫對齊：
+        `(path2d, loiters, color, home=home, sysid=…, kind=…)`。
+
+        ⚠ 刻意不呼叫任何 `_auto_build_fence` / `display_path*`：那幾條會偷換
+        「上傳電子圍籬」的來源；預覽是觀測，不可以有副作用。
+
+        Returns
+        -------
+        dict  實際畫上去的東西：layer / points / loiters / home / color / label。
         """
-        self.custom_page.runJavaScript("""
+        import json as _json
+        from mission import mission_view as _mv
+
+        pts = []
+        for i, p in enumerate(path2d or []):
+            try:
+                n = len(p)
+            except TypeError:
+                n = -1
+            if n != 2:
+                raise ValueError(
+                    f'path2d 第 {i} 點不是 (lat, lon) 二元組：{p!r}。'
+                    '2D 只收二元組（mission_to_path_2d）；帶高度的請走 3D。')
+            la, lo = float(p[0]), float(p[1])
+            if not (math.isfinite(la) and math.isfinite(lo)):
+                raise ValueError(f'path2d 第 {i} 點不是有限數：{p!r}')
+            pts.append([la, lo])
+
+        rings = []
+        for lo in (loiters or []):
+            r = float(lo.get('radius_m', 0.0))
+            rings.append([float(lo['lat']), float(lo['lon']), abs(r)])
+        home_pt = None
+        if home:
+            home_pt = [float(home['lat']), float(home['lon'])]
+
+        color = str(color) if color else _mv.sysid_color(sysid)
+        label = _mv.fc_mission_label(sysid, label)
+        key = self._fc_layer_key(sysid, kind)        # 空字串的 kind 在這裡就炸，不留狀態
+        replace_all = sysid is None and kind is None  # 只有舊語意 (None, None) 才清光別層
+        rec = {'path': pts, 'loiters': rings, 'home': home_pt, 'color': color,
+               'label': label, 'sysid': None if sysid is None else int(sysid),
+               'kind': None if kind is None else str(kind).strip()}
+
+        store = self.__dict__.setdefault('_fc_missions', {})
+        if replace_all:
+            store.clear()           # 舊語意：疊加層只有一份
+        store[key] = rec
+
+        js = self._fc_mission_js(key, rec, replace_all=replace_all, fit=bool(fit))
+        page = getattr(self, 'custom_page', None)
+        if page is not None:
+            page.runJavaScript(js)
+        logger.info(f'[FC Mission/2D] 圖層 {key}：{len(pts)} 點、盤旋圈 {len(rings)}'
+                    f'{"、Home" if home_pt else ""}（{label}）')
+        return {'layer': key, 'points': len(pts), 'loiters': len(rings),
+                'home': home_pt is not None, 'color': color, 'label': label}
+
+    @staticmethod
+    def _fc_mission_js(key: str, rec: dict, *, replace_all: bool, fit: bool) -> str:
+        """產生「畫一層任務」的 Leaflet JS（display 與整頁重繪後的 replay 共用同一份）。
+
+        所有值都經 json.dumps，沒有字串拼接進 JS 的空間。label 先 `html.escape`：
+        Leaflet 的 bindTooltip 走 innerHTML，檔名裡的 `<b>`/`<img onerror>` 會在滑過時
+        被渲染／執行；`#k`／起點／終點／Home／盤旋 的尾綴都是接在這個已轉義的 label 後面。
+        每個圖層都帶 `fcMission:true`，給 clear_all_display_layers_js() 的掃描跳過用。
+        """
+        import html as _html
+        import json as _json
+        pts, color = rec['path'], rec['color']
+        label = _html.escape(str(rec['label']), quote=True)
+        sysid = rec.get('sysid')
+        badge = f'U{sysid}' if sysid is not None else ''
+        mk_style = (f'background:{color};color:#fff;border-radius:4px;padding:1px 4px;'
+                    'font:bold 11px monospace;border:1px solid #fff;'
+                    'box-shadow:0 1px 4px rgba(0,0,0,.5);white-space:nowrap;')
+        home_style = ('background:#7CFC00;color:#000;border-radius:50%;width:20px;height:20px;'
+                      'display:flex;align-items:center;justify-content:center;font:bold 12px monospace;'
+                      'border:2px solid #000;')
+        return f"""
+(function(){{
+    var map = window.currentMap;
+    if(!map){{console.error('❌ 地圖未就緒，無法顯示任務航線');return;}}
+    window._fcMissionLayers = window._fcMissionLayers || {{}};
+    var store = window._fcMissionLayers;
+    var key = {_json.dumps(key)};
+    function drop(k){{ (store[k]||[]).forEach(function(l){{try{{map.removeLayer(l);}}catch(e){{}}}}); delete store[k]; }}
+    if({_json.dumps(bool(replace_all))}){{ Object.keys(store).forEach(drop); }} else {{ drop(key); }}
+    var layers = [];
+    var pts = {_json.dumps(pts)};
+    var color = {_json.dumps(color)};
+    var label = {_json.dumps(label)};
+    if(pts.length >= 2){{
+        var pl = L.polyline(pts, {{color:color, weight:4, opacity:0.95, fcMission:true}});
+        pl.bindTooltip(label); pl.addTo(map); layers.push(pl);
+    }}
+    pts.forEach(function(p, i){{
+        var cm = L.circleMarker(p, {{radius:3.5, color:'#000', weight:1, fillColor:color, fillOpacity:1, fcMission:true}});
+        cm.bindTooltip(label + ' #' + (i + 1)); cm.addTo(map); layers.push(cm);
+    }});
+    if(pts.length >= 1){{
+        var s_ico = L.divIcon({{html:{_json.dumps(f'<div style="{mk_style}">{badge}▶</div>')}, iconSize:null, iconAnchor:[0, 10], className:''}});
+        var s_mk = L.marker(pts[0], {{icon:s_ico, fcMission:true}}); s_mk.bindTooltip(label + ' 起點'); s_mk.addTo(map); layers.push(s_mk);
+    }}
+    if(pts.length >= 2){{
+        var e_ico = L.divIcon({{html:{_json.dumps(f'<div style="{mk_style}">{badge}■</div>')}, iconSize:null, iconAnchor:[0, 10], className:''}});
+        var e_mk = L.marker(pts[pts.length - 1], {{icon:e_ico, fcMission:true}}); e_mk.bindTooltip(label + ' 終點'); e_mk.addTo(map); layers.push(e_mk);
+    }}
+    var home = {_json.dumps(rec.get('home'))};
+    if(home){{
+        var h_ico = L.divIcon({{html:{_json.dumps(f'<div style="{home_style}">H</div>')}, iconSize:[20, 20], iconAnchor:[10, 10], className:''}});
+        var h_mk = L.marker(home, {{icon:h_ico, fcMission:true}}); h_mk.bindTooltip(label + ' Home（seq 0）'); h_mk.addTo(map); layers.push(h_mk);
+    }}
+    {_json.dumps(rec.get('loiters') or [])}.forEach(function(c){{
+        if(!(c[2] > 0)) return;
+        var ci = L.circle([c[0], c[1]], {{radius:c[2], color:color, weight:2, fillColor:color, fillOpacity:0.08, fcMission:true}});
+        ci.bindTooltip(label + ' 盤旋 r=' + c[2] + ' m'); ci.addTo(map); layers.push(ci);
+    }});
+    store[key] = layers;
+    if({_json.dumps(bool(fit))} && (pts.length || home)){{
+        var b = L.latLngBounds(pts.length ? pts : [home]);
+        if(home) b.extend(home);
+        map.fitBounds(b, {{padding:[40, 40]}});
+    }}
+}})();
+"""
+
+    def _fc_mission_js_block(self) -> str:
+        """整頁重繪（_render_map）後把 Python 端記住的任務圖層原樣畫回去；沒有就空字串。"""
+        store = self.__dict__.get('_fc_missions') or {}
+        if not store:
+            return ''
+        parts = [self._fc_mission_js(k, rec, replace_all=False, fit=False)
+                 for k, rec in store.items()]
+        return '\n<script>\n' + '\n'.join(parts) + '\n</script>\n'
+
+    def clear_fc_mission(self, sysid=None, kind=None) -> bool:
+        """清除任務疊圖（JS 移除圖層，不重載頁面）。回傳原本有沒有東西。
+
+        * 都是 None ⇒ 清**全部**層（舊語意）。
+        * 只給 sysid ⇒ 整架：'uav<n>' 與 'uav<n>-*'（讀回＋該架所有 kind 的預覽）。
+        * 都給 ⇒ 恰好 'uav<n>-<kind>' 那一層；只給 kind ⇒ 恰好 '<kind>' 那一層。
+        規則與 3D 的 `CesiumMapWidget.clear_fc_mission(sysid, kind)` 同一份
+        （`mission_view.fc_layer_selector`），也是 `DualMapWidget.clear_fc_mission()`
+        轉過來的那個名字。
+        """
+        import json as _json
+        from mission import mission_view as _mv
+        store = self.__dict__.setdefault('_fc_missions', {})
+        exact, prefix = _mv.fc_layer_selector(sysid, kind)
+        if exact is None:
+            existed = bool(store)
+            store.clear()
+            js = """
 (function(){
-    if(window._fcMissionLayers){
-        window._fcMissionLayers.forEach(function(l){
-            try{window.currentMap.removeLayer(l);}catch(e){}
-        });
-        window._fcMissionLayers=[];
-    }
+    var store = window._fcMissionLayers;
+    if(!store) return;
+    Object.keys(store).forEach(function(k){
+        (store[k]||[]).forEach(function(l){try{window.currentMap.removeLayer(l);}catch(e){}});
+    });
+    window._fcMissionLayers = {};
 })();
-""")
+"""
+        else:
+            gone = [k for k in list(store) if _mv.fc_layer_matches(k, sysid, kind)]
+            for k in gone:
+                store.pop(k, None)
+            existed = bool(gone)
+            # JS 端用同一條規則（exact ＋ 可有可無的 prefix）挑層，不靠 Python 端的清單：
+            # 兩邊狀態若曾失同步，畫面上多出來的那層也一起清。
+            js = f"""
+(function(){{
+    var store = window._fcMissionLayers;
+    if(!store) return;
+    var key = {_json.dumps(exact)};
+    var prefix = {_json.dumps(prefix)};
+    function drop(k){{ (store[k]||[]).forEach(function(l){{try{{window.currentMap.removeLayer(l);}}catch(e){{}}}}); }}
+    drop(key); delete store[key];
+    if(prefix){{ Object.keys(store).forEach(function(k){{ if(k.indexOf(prefix) === 0){{ drop(k); delete store[k]; }} }}); }}
+}})();
+"""
+        page = getattr(self, 'custom_page', None)
+        if page is not None:
+            page.runJavaScript(js)
+        return existed
 
     def clear_all(self):
         """清掉 2D 圖上所有**規劃疊圖** —— 「清除全部」在 2D 這一側的實作。

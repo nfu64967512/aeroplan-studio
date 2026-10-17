@@ -4,6 +4,7 @@
 提供無縫切換功能，對外介面與原 MapWidget 完全相容。
 """
 
+import math
 from typing import List, Tuple
 
 from PyQt6.QtWidgets import (
@@ -542,8 +543,9 @@ class DualMapWidget(MapWidgetBase):
 
     # ── 飛控任務航線（讀回的那一份）──────────────────────────────
     def display_fc_mission(self, path2d, path3d, loiters=None,
-                           color: str = '#00E5FF', home=None):
-        """把飛控讀回來的任務同時疊到 2D 與 3D。
+                           color: str = None, home=None, *,
+                           sysid=None, kind=None, label=None, fit=False) -> dict:
+        """把一份任務（讀回的、或從檔案匯入的）同時疊到 2D 與 3D，**每個 (sysid, kind) 一層**。
 
         ⚠️⚠️ **刻意不呼叫 `_auto_build_fence`** —— 上面每個 display_* 都會呼叫
         它，那是「強制飛安政策」，對**規劃出來的**航線是對的。但讀回的任務是
@@ -554,16 +556,61 @@ class DualMapWidget(MapWidgetBase):
         2D 收二元組、3D 收三元組 —— 兩個**不同**的參數，不是同一份轉型。
         混用會讓 folium 丟 ValueError 並讓整張 2D 圖靜靜消失
         （見 `mission/mission_view.py` 的模組 docstring）。
-        """
-        if hasattr(self.map_2d, 'display_fc_mission'):
-            self.map_2d.display_fc_mission(path2d, loiters, color, home=home)
-        if hasattr(self.map_3d, 'display_fc_mission'):
-            self.map_3d.display_fc_mission(path3d, loiters, color, home=home)
 
-    def clear_fc_mission(self):
-        for m in (self.map_2d, self.map_3d):
-            if hasattr(m, 'clear_fc_mission'):
-                m.clear_fc_mission()
+        sysid, kind : 圖層鍵，兩張圖**同一套**（`mission_view.fc_layer_key`）：2D 畫進
+            `window._fcMissionLayers[key]`、3D 畫進 `_missionLayers[key]`。
+            * 都是 None ⇒ 舊語意：兩張圖都先清掉全部層、畫成單一疊圖 'fc'。
+            * 只給 sysid ⇒ 'uav<n>'（讀回）；都給 ⇒ 'uav<n>-<kind>'（kind='import'
+              是匯入預覽，不會跟同一架的讀回互相蓋掉）；只給 kind ⇒ '<kind>'
+              （kind='loaded' 是單檔載入，只換自己這層、**不**清別人）。
+            同一把鍵再畫只換那一層，其他層不動（多機並存）。
+        color / label : None ⇒ 依 sysid 取 `mission_view.sysid_color` /
+            `fc_mission_label`，兩張圖同色同名。
+        fit : True ⇒ 2D fitBounds 到這份任務；3D 相機飛到航線中心（距離依範圍）。
+
+        ⚠️ 兩張圖**直接呼叫**，不再用 hasattr 守：以前 2D 沒有
+        `display_fc_mission`，hasattr 把「方法不存在」翻譯成「什麼都不做」，
+        載入後 2D 看不到也不報錯（2026-10-17 補上 2D 之前就是這樣）。
+
+        Returns
+        -------
+        dict  `{'2d': 2D 回傳的 dict, 'layer': 圖層鍵, 'color': ..., 'label': ...}`
+        """
+        from mission import mission_view as _mv
+        color = str(color) if color else _mv.sysid_color(sysid)
+        label = _mv.fc_mission_label(sysid, label)
+        r2 = self.map_2d.display_fc_mission(path2d, loiters, color, home=home,
+                                            sysid=sysid, kind=kind, label=label, fit=fit)
+        self.map_3d.display_fc_mission(path3d, loiters, color, label=label,
+                                       home=home, sysid=sysid, kind=kind)
+        if fit:
+            self._fly_3d_to_mission(path3d, home)
+        return {'2d': r2, 'layer': (r2 or {}).get('layer'), 'color': color, 'label': label}
+
+    def _fly_3d_to_mission(self, path3d, home=None):
+        """3D 相機飛到航線（含 home）的中心；距離依範圍放大，至少 600 m。沒有點就不動。"""
+        pts = [(float(p[0]), float(p[1])) for p in (path3d or []) if len(p) >= 2]
+        if home:
+            pts.append((float(home['lat']), float(home['lon'])))
+        if not pts:
+            return
+        lat = sum(p[0] for p in pts) / len(pts)
+        lon = sum(p[1] for p in pts) / len(pts)
+        span_lat = max(p[0] for p in pts) - min(p[0] for p in pts)
+        span_lon = (max(p[1] for p in pts) - min(p[1] for p in pts)) * math.cos(math.radians(lat))
+        span_m = max(span_lat, span_lon) * 111_320.0
+        self.map_3d.fly_to_position(lat, lon, 0.0, max(600.0, span_m * 1.6))
+
+    def clear_fc_mission(self, sysid=None, kind=None) -> dict:
+        """清除任務疊圖，兩張圖都清（規則同一份：`mission_view.fc_layer_selector`）：
+        都是 None ⇒ 全部層；只給 sysid ⇒ 整架（'uav<n>' 與 'uav<n>-*'）；
+        都給／只給 kind ⇒ 恰好那一層。
+
+        回傳 `{'2d': 2D 原本有沒有東西(bool), '3d': None}`（3D 是 fire-and-forget 的 JS）。
+        """
+        r2 = self.map_2d.clear_fc_mission(sysid, kind=kind)
+        self.map_3d.clear_fc_mission(sysid, kind=kind)
+        return {'2d': r2, '3d': None}
 
     # ── Geofence 自動建構 ─────────────────────────────────────────
     def _auto_build_fence(self, paths_list, altitude=None, buffer_m: float = 30.0,
@@ -1181,9 +1228,23 @@ class DualMapWidget(MapWidgetBase):
             except Exception:
                 pass
 
-    def fly_to_position(self, lat, lon, alt=0.0, range_m=600.0):
+    def fly_to_position(self, lat, lon, alt=0.0, range_m=600.0) -> bool:
+        """把目前顯示的那張圖移到 (lat, lon)；回傳有沒有真的動。
+
+        3D：Cesium flyToPos。2D：頁面載好就用 Leaflet setView（不整頁重繪，角點／路徑的 fitBounds 不會把它蓋掉），
+        頁面還沒好就寫 _view_state 讓下次重繪以它為中心。⚠ 以前 2D 什麼都不做又靜默回 None（場地預設套用後畫面不動）。
+        """
         if self._mode == _MODE_3D:
             self.map_3d.fly_to_position(lat, lon, alt, range_m)
+            return True
+        zoom = 16 if float(range_m) <= 2500.0 else (14 if float(range_m) <= 10000.0 else 12)
+        m2 = self.map_2d
+        page = getattr(m2, 'custom_page', None)
+        if page is not None:
+            page.runJavaScript(
+                f"if (window.currentMap) {{ window.currentMap.setView([{float(lat)}, {float(lon)}], {zoom}); }}")
+        m2._view_state = {'lat': float(lat), 'lon': float(lon), 'zoom': zoom}
+        return True
 
     # ─────────────────────────────────────────────────────────────────
     # 戰術模組代理（只作用於 3D Cesium 地圖）

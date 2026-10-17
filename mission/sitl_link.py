@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import copy
 import functools
+import hashlib
 import math
 import os
 import struct
@@ -354,6 +355,25 @@ _MISSION_PARAMS_NOT_ECHOED = {19: (3,)}
 
 
 # ──────────────────────────────────────────────────────────────────────
+# DataFlash 日誌（.bin）經 MAVLink 下載：LOG_REQUEST_LIST / LOG_REQUEST_DATA 的常數
+# （狀態機本體與 ArduPilot 端的事實見 SITLLink._log_transfer_tick 的 docstring）
+# ──────────────────────────────────────────────────────────────────────
+_LOG_CHUNK = 90                    # LOG_DATA.data 固定 90 B（MAVLink 定義；count<90 = 飛控認為送完）
+_LOG_LIST_TIMEOUT_S = 8.0          # 8 s 沒收到新的 LOG_ENTRY ⇒ 列表逾時
+_LOG_LIST_RETRIES = 1              # 列表逾時時對缺的 id 區間再要一次，之後才 fail
+_LOG_IDLE_REFILL_S = 1.0           # LOG_DATA 閒置 ≥ 1 s ⇒ 對缺段補抓
+_LOG_REFILL_BATCH = 20             # 每輪補抓最多 20 段（每段一則 LOG_REQUEST_DATA，依序一段接一段送）
+_LOG_MAX_REFILL_ROUNDS = 400       # 補抓超過 400 輪 ⇒ 放棄
+_LOG_STALL_TIMEOUT_S = 60.0        # 60 s 完全沒有新區塊 ⇒ 放棄
+_LOG_PROGRESS_INTERVAL_S = 0.5     # 進度信號節流：每 ≥ 0.5 s …
+_LOG_PROGRESS_BYTES = 1_000_000    # … 或每 1 MB 才 emit 一次
+_LOG_LIST_ALL_END = 0xFFFF         # LOG_REQUEST_LIST.end：全部
+_LOG_DATA_ALL = 0xFFFFFFFF         # LOG_REQUEST_DATA.count：到檔尾
+_LOG_RENAME_RETRIES = 5            # .part → 目的檔 os.rename 失敗（Windows 防毒／索引器短暫鎖檔）最多試 5 次
+_LOG_RENAME_RETRY_S = 0.2          # … 每次間隔 0.2 s（4 次等待 = 0.8 s，≤ 1 s；此時每塊都已落地，不急）
+
+
+# ──────────────────────────────────────────────────────────────────────
 # SITLLink — MAVLink 接收背景執行緒
 # ──────────────────────────────────────────────────────────────────────
 class SITLLink(QThread):
@@ -403,6 +423,26 @@ class SITLLink(QThread):
     #   ⚠ 這是估計不是量測：定翼飛行中（有空速計、轉過彎）才可信；多旋翼／剛起飛時數值可能是 0 或亂飄。
     #   ⚠ 非有限值（NaN/inf）整則丟掉不送，不會靜默變 0。
     wind = pyqtSignal(int, dict)
+    # ── DataFlash 日誌（.bin）列表／下載：都在接收執行緒 emit，第一個參數都是本鏈路的 sysid_label ──
+    #   ⚠ 不是 pymavlink 的 target_system：fan-in（一個 socket 載好幾架）時 pymavlink 把它鎖在**第一個**
+    #     心跳的那架，而 GUI 的每機狀態用 sysid_label 當 key —— 日誌交易一律綁 UI 標示的那架
+    #     （請求送給它、只收它的 LOG_ENTRY / LOG_DATA、armed 預檢看它的心跳、信號也報它）。
+    # log_list：entries = [{'id','size','time_utc'}, …] 依 id 排序；飛控沒日誌 ⇒ 空清單（合法答案）。
+    #   ⚠ id 是「從最舊一份起算的序號」不是檔名：開機 Prep_MinSpace 刪舊檔會整體前移 ⇒ 命名請用 time_utc。
+    log_list = pyqtSignal(int, list)
+    # 列表失敗（逾時／飛控已解鎖／連線結束…）走自己的信號，**不用空清單代表失敗**（理由同 mission_download_failed）。
+    log_list_failed = pyqtSignal(int, str)
+    # 進度 {'id','size','received','bytes_per_s','eta_s'(None = 還算不出來),'path','refills'}：
+    #   節流 —— 每 ≥ 0.5 s 或每 1 MB 一次；另外開始時一次（received=0）、完成前一次（received == size）。
+    log_download_progress = pyqtSignal(int, dict)
+    # 完成 {'id','size','path','sha256','seconds','refills'}：只有**每個 90 B 區塊都收到**才會發；
+    #   此時檔案已從 .part 改名成 path、大小 == size、sha256 是整個檔的雜湊。
+    log_download_done = pyqtSignal(int, dict)
+    # 失敗，原因給人看（armed、逾時、取消、連線結束、寫檔失敗、id 無效／飛控不回…）；.part 已刪 ——
+    #   除非每個區塊都已收到、只是收尾（關檔／sha256／改名）失敗：那份 .part **保留**、路徑寫在原因裡。
+    #   每次 download_log() **恰好一次** done 或 failed（立即失敗的在呼叫端執行緒 emit；鏈路已結束
+    #   ⇒ 也是立即 failed('連線已結束')，不登記、不排佇列）。
+    log_download_failed = pyqtSignal(int, str)
 
     def __init__(self, conn_str: str = 'udpin:0.0.0.0:14550',
                  sysid_label: int = 1, vehicle_hint: str = '',
@@ -461,6 +501,10 @@ class SITLLink(QThread):
         self._tlog_bytes = 0
         self._tlog_error: Optional[str] = None
         self._tlog_last_flush = 0.0
+        # ── DataFlash 日誌下載（非阻塞狀態機；見 request_log_list / download_log / _log_transfer_tick）──
+        self._log_lock = threading.Lock()              # 保護下面兩個（GUI 執行緒讀狀態、stop() 收尾）
+        self._log_list_state: Optional[dict] = None    # 進行中的列表請求
+        self._log_dl: Optional[dict] = None            # 進行中的下載（同一條鏈路同時只能一個）
 
     # ── 公開控制 ──────────────────────────────────────────────────────
     def stop(self):
@@ -470,6 +514,12 @@ class SITLLink(QThread):
                 self._mav.close()
             except Exception:
                 pass
+        # 進行中的日誌列表／下載不可以靜默消失：這裡（GUI 執行緒）不碰 _mav，不送 LOG_REQUEST_END ——
+        # 飛控 3 s 收不到 GCS 心跳自己會停。run() 的 finally 也會做同一件事，先到的那個算（恰好一次）。
+        # 還排在 _cmd_queue 裡沒派送的也要各失敗一次：接收執行緒可能已經不在了，佇列再也沒人排空。
+        self._fail_log_list('連線結束')
+        self._fail_log_download('連線結束')
+        self._fail_queued_log_cmds('連線結束')
 
     # ── 內部：送出 GCS heartbeat ──────────────────────────────────────
     def _send_gcs_heartbeat(self) -> None:
@@ -765,6 +815,140 @@ class SITLLink(QThread):
             out['gaps'] = list(st['gaps'])
         return out
 
+    # ── DataFlash 日誌（.bin）：列表與下載（GUI 執行緒呼叫，只 put 佇列或改狀態）──
+    def request_log_list(self):
+        """向飛控要 DataFlash 日誌清單（LOG_REQUEST_LIST 0..0xFFFF）；結果走 log_list / log_list_failed。
+
+        只 put 佇列，不碰 _mav（理由見 download_mission）。尚未連線、或鏈路已結束（stop() 過／run()
+        已退出：_mav 關了但還不是 None，佇列再也沒人排空）就**立即** log_list_failed ——
+        不可以讓請求躺在佇列裡沒人回。「看旗標＋put」在 _log_lock 裡做，與 stop()／run() finally 的
+        排空（_fail_queued_log_cmds）互斥 ⇒ 要嘛這裡立即失敗、要嘛排空時失敗，不會兩者皆無。
+        飛控端的規則與狀態機見 `_log_transfer_tick`。
+        """
+        if self._mav is None:
+            self.log_list_failed.emit(self.sysid_label, '尚未連線到飛控（沒有可用的 MAVLink 連線）')
+            return
+        with self._log_lock:
+            closed = self._link_closed or self._stop
+            if not closed:
+                self._cmd_queue.put(('log_list', None))
+        if closed:
+            self.log_list_failed.emit(self.sysid_label, '連線已結束')
+
+    def download_log(self, log_id: int, dest_path: str, size: int):
+        """下載一份 DataFlash 日誌到 `dest_path`（絕對路徑；父目錄不存在就建）。
+
+        `size` 要用 log_list 給的那個：只收這個大小以內的資料（LOG_DISARMED=0 時上鎖後板子仍往
+        最新日誌追加，下載中檔案會長）。目的檔已存在就改名 `_2`、`_3`…，**永不覆蓋**。
+        結果走 log_download_progress / log_download_done / log_download_failed，每次呼叫
+        **恰好一次** done 或 failed。收到的區塊直接 seek 寫進 `<path>.part`（不把整個檔留在記憶體），
+        全部收齊才改名成目的檔並算 sha256。
+
+        **立即**（在呼叫端執行緒）就 failed 的情況：尚未連線、鏈路已結束（stop() 過／run() 已退出：
+        _mav 關了但還不是 None，佇列再也沒人排空 ⇒ 不登記、不排佇列，直接 '連線已結束'）、引數不合法、
+        飛控已解鎖（armed：ArduPilot 一律拒絕並回 STATUSTEXT "Disarm for log download"，所以根本不送請求）、
+        已有下載進行中（同一條鏈路同時只能一個；飛控本身同時也只服務一條鏈路）。
+        目標機一律是 sysid_label（fan-in 時不是 pymavlink 鎖到的 target_system；見 _log_sysid）。
+        其餘都在接收執行緒裡非同步進行，**不阻塞遙測**（幾十 MB × 90 B 的交易若同步做會凍住
+        遙測數分鐘）。
+        """
+        sysid = self._log_sysid()
+        try:
+            log_id = int(log_id)
+            size = int(size)
+        except (TypeError, ValueError):
+            self.log_download_failed.emit(sysid, f'引數不合法：log_id={log_id!r} size={size!r}')
+            return
+        if log_id < 0:
+            self.log_download_failed.emit(sysid, f'日誌 id {log_id} 不合法')
+            return
+        if size <= 0:
+            self.log_download_failed.emit(
+                sysid, f'日誌 id {log_id} 的大小 {size} B 不合法（要用 log_list 給的 size）')
+            return
+        try:
+            dest = os.path.abspath(os.fspath(dest_path)) if dest_path else ''
+        except TypeError:
+            dest = ''
+        if not dest:
+            self.log_download_failed.emit(sysid, f'目的路徑不合法：{dest_path!r}')
+            return
+        if self._mav is None:
+            self.log_download_failed.emit(sysid, '尚未連線到飛控（沒有可用的 MAVLink 連線）')
+            return
+        if self._link_closed or self._stop:
+            self.log_download_failed.emit(sysid, '連線已結束')
+            return
+        if self._vehicle_armed(sysid):
+            self.log_download_failed.emit(
+                sysid, f'飛控已解鎖（armed），ArduPilot 拒絕日誌下載（"Disarm for log download"）—— 請先上鎖')
+            return
+        now = time.monotonic()
+        nblocks = (size + _LOG_CHUNK - 1) // _LOG_CHUNK
+        st = {
+            'id': log_id, 'size': size, 'sysid': sysid, 'compid': None,
+            'dest': dest, 'path': None, 'part': None, 'fh': None,
+            'have': bytearray(nblocks), 'nblocks': nblocks, 'got_blocks': 0, 'received': 0,
+            'started': now, 'last_rx': now, 'last_progress_rx': now,
+            'last_progress_emit': now, 'last_progress_bytes': 0,
+            'refills': 0, 'refill_cur': None, 'refill_queue': [],
+            'ignored_other_id': 0, 'ignored_other_src': 0, 'extra_blocks': 0,
+            'dup_blocks': 0, 'partial_blocks': 0,
+            'phase': 'queued', 'cancel': False,
+        }
+        with self._log_lock:
+            # 再看一次旗標：「登記＋put」與 stop()／run() finally 的收尾（_fail_log_download +
+            # _fail_queued_log_cmds，同一把鎖）互斥 ⇒ 不會有登記了卻沒人收的下載。
+            closed = self._link_closed or self._stop
+            cur = self._log_dl
+            if not closed and cur is None:
+                self._log_dl = st
+                self._cmd_queue.put(('log_download', st))
+        # 不在鎖裡 emit：slot 若回頭呼叫 log_download_status() 會自己鎖死
+        if closed:
+            self.log_download_failed.emit(sysid, '連線已結束')
+        elif cur is not None:
+            self.log_download_failed.emit(
+                sysid, f'已有下載進行中（id {cur["id"]}），同一條鏈路同時只能一個')
+
+    def cancel_log_download(self):
+        """中止進行中的下載：failed('取消…')、刪 .part、送 LOG_REQUEST_END（由接收執行緒做）。沒有進行中的就不做事。
+
+        鏈路已結束（stop() 過／run() 已退出）就不排佇列（沒人會排空），還掛著的直接在這裡收掉
+        （不碰 _mav、不送 LOG_REQUEST_END）；正常情況 stop()／run() finally 早已把它以「連線結束」收掉。
+        """
+        with self._log_lock:
+            st = self._log_dl
+            if st is not None:
+                st['cancel'] = True        # 主迴圈的 tick 也看這個旗標（佇列與 tick 誰先到都行）
+            closed = self._link_closed or self._stop
+            if not closed:
+                self._cmd_queue.put(('log_cancel', None))
+        if closed:
+            self._fail_log_download('取消（使用者中止）')
+
+    def log_download_status(self) -> Optional[dict]:
+        """進行中下載的狀態**複本**（欄位同 log_download_progress，另加 'phase'、'sysid'、'seconds'）；沒有就 None。"""
+        with self._log_lock:
+            st = self._log_dl
+            if st is None:
+                return None
+            return self._log_progress_payload(st, time.monotonic())
+
+    def _log_sysid(self) -> int:
+        """日誌交易的目標 sysid：**一律**是 UI 標示的 sysid_label，不是連線物件的 target_system。
+
+        pymavlink 把 target_system 鎖在這個 socket 上**第一個**心跳的那架；fan-in（一個 socket 載好幾架，
+        本類用 _frames／_vehicle_srcs 明確支援）時 2 號鏈路可能鎖到 1 號機 ⇒ 請求送錯機、信號報
+        log_list(1, …)，而 GUI 用 sysid_label 當 key ⇒ UAV-2 的狀態永遠停在「列表中」。
+        """
+        return self.sysid_label
+
+    def _vehicle_armed(self, sysid: int) -> bool:
+        """最近一包心跳說這架是否已解鎖（沒收過心跳 = 不知道 = 當作未解鎖，讓飛控自己拒絕）。"""
+        f = self._frames.get(int(sysid))
+        return bool(f is not None and f.armed)
+
     # ── tlog（opt-in）────────────────────────────────────────────────
     def start_tlog(self, path) -> str:
         """開始把**收到的** MAVLink 原始封包記成 tlog；預設不記、不寫任何檔案。
@@ -909,6 +1093,11 @@ class SITLLink(QThread):
                 self._param_cv.notify_all()
             if self._tlog_file is not None:
                 self.stop_tlog()
+            # 進行中的日誌列表／下載：連線沒了就是失敗，不可以讓 HUD 停在「下載中…」；
+            # 還排在佇列裡沒派送的也各失敗一次（主迴圈已經不會再排空佇列了）。
+            self._fail_log_list('連線結束')
+            self._fail_log_download('連線結束')
+            self._fail_queued_log_cmds('連線結束')
 
     def _run_link(self):
         try:
@@ -1070,6 +1259,9 @@ class SITLLink(QThread):
             except Exception as e:
                 self.error.emit(f'接收錯誤: {e}')
                 break
+            # 日誌列表／下載狀態機的時鐘：每圈都要跑（含 recv_match 逾時回 None 的那些圈），
+            # 列表逾時、缺段補抓、無進展放棄都靠它；自己吞例外，不會把連線帶掉。
+            self._log_transfer_tick()
             if msg is None:
                 continue
 
@@ -1350,6 +1542,19 @@ class SITLLink(QThread):
                 if src not in (0, 255) and (src in self._vehicle_srcs or src == self.sysid_label) \
                         and self._is_autopilot_component(src, self._src_component(msg)):
                     self.mission_item_started.emit(src, int(m.group(1)), m.group(2))
+            # 日誌下載被飛控拒絕的兩句話（AP_Logger::handle_log_message / handle_log_request_*）：
+            # 與其等 60 s 無進展，不如當下就把進行中的列表／下載以這個理由收掉。只認自駕儀元件說的。
+            # ⚠ 只在**還什麼都沒收到**時才算是拒絕我們：飛控對「任何一條鏈路」的請求都把這句回到
+            #   發問者的通道 —— 共用 MAVProxy fan-out 埠上 Mission Planner 要清單被拒，我們也會收到；
+            #   列表 8 s 重送時飛控若還在送清單，也會這樣回我們自己。資料已在流就忽略，真的停了由
+            #   60 s 無進展計時器收。這條路只收掉沒收過資料的 ⇒ 不送 LOG_REQUEST_END（飛控若正在
+            #   服務別條鏈路，handle_log_request_end 不認發信者，END 會把人家的傳輸砍掉）。
+            elif text.strip() in ('Disarm for log download', 'Log download in progress'):
+                src = int(msg.get_srcSystem())
+                if src not in (0, 255) and self._is_autopilot_component(src, self._src_component(msg)):
+                    reason = f'飛控拒絕（STATUSTEXT "{text.strip()}"）'
+                    self._fail_log_list(reason, src=src, only_before_data=True)
+                    self._fail_log_download(reason, src=src, only_before_data=True)
             return
 
         # ── 遙測類：依來源 system 分流到各自的 TelemetryFrame ──
@@ -1379,6 +1584,15 @@ class SITLLink(QThread):
             return
         elif not self._is_autopilot_component(src, self._src_component(msg)):
             return   # 同 sysid 非自駕儀元件送的遙測，一樣不寫進機卡
+
+        # 日誌列表／下載：一定要在上面「只收自駕儀元件」的守衛之後 —— 同 sysid 的相機偽造一則
+        # LOG_DATA 就能把垃圾寫進日誌檔而 sha256 還是「正確」的（那是我們自己算的）。
+        if mtype == 'LOG_ENTRY':
+            self._on_log_entry(src, msg)
+            return
+        if mtype == 'LOG_DATA':
+            self._on_log_data(src, msg)
+            return
 
         if mtype == 'CAMERA_FEEDBACK':
             self._on_camera_feedback(src, msg)
@@ -1608,6 +1822,571 @@ class SITLLink(QThread):
         self.camera_feedback.emit(src, payload)
 
     # ─────────────────────────────────────────────────────────────────
+    # DataFlash 日誌下載：非阻塞狀態機（全部在接收執行緒；GUI 執行緒只讀複本）
+    # ─────────────────────────────────────────────────────────────────
+    def _log_transfer_tick(self) -> None:
+        """主迴圈每圈（recv_match 之後、不論有沒有收到訊息）呼叫一次的日誌傳輸時鐘。
+
+        ═══ ArduPilot 端的行為（AP_Logger_MAVLinkLogTransfer.cpp，已查證）═══
+          * **已解鎖一律拒絕**：handle_log_message 先看 armed，是就回 STATUSTEXT
+            "Disarm for log download" 然後整則丟掉 ⇒ 鏈路層先看最近心跳的 armed，armed 就立即
+            fail、不送請求；若飛控仍回那句話（我們的心跳舊了），STATUSTEXT 分支當下收掉 ——
+            但只在**還沒收到任何 LOG_ENTRY / LOG_DATA** 時（見 _handle_message 的 STATUSTEXT 分支）。
+          * **GCS 心跳超過 3 s 沒收到就停送** LOG_ENTRY / LOG_DATA ⇒ 非阻塞設計下主迴圈的
+            1 Hz 心跳照送就夠；同步交易（任務上傳／讀回）自己有 pump。
+          * 同一飛控**同時只服務一條鏈路**（別條鏈路來要會回 "Log download in progress" 到**發問者
+            的通道** —— 共用 fan-out 埠上我們也看得到，資料在流就忽略；LOG_REQUEST_END 不認發信者，
+            誰送都會把現行傳輸砍掉）；
+            LOG_REQUEST_DATA 的 **id 無效會取消傳輸、不回任何東西**；每次 update_send 只送
+            num_sends 則 LOG_DATA（數傳 1 則／次、SITL 40、USB 250）。
+          * ⚠ 每一則 LOG_REQUEST_DATA 都會**覆寫**飛控的 _log_data_offset / _remaining：
+            一口氣送 20 則補抓，飛控在同一個 update_receive 裡全部處理完，只有最後一則生效
+            （scratchpad 版靠每則 sleep 20 ms 碰運氣）⇒ 這裡**一次只讓一段在飛**：閒置 ≥ 1 s
+            算一輪，取缺段清單前 20 段，送第 1 段；該段收齊就立刻送下一段（_on_log_data），
+            整批送完或又閒置 1 s 就再算一輪。輪數超過 400 或 60 s 完全沒有新區塊 ⇒ fail。
+          * LOG_DATA.data 解碼後**永遠是 90 格 list**，要切 [:count]；count 可能是 0；
+            count < 90 表示飛控認為這份送完了。
+          * LOG_DISARMED=0 時上鎖後板子仍往最新日誌追加 ⇒ 下載中檔案會長：只收 LOG_ENTRY.size
+            以內的資料，ofs ≥ size 的塊丟掉（計入 extra_blocks）。
+          * LOG_ENTRY.id 是從最舊一份起算的序號，開機 Prep_MinSpace 刪舊檔會整體前移 ⇒
+            (id, size, time_utc) 一起記，命名用 time_utc；飛控沒日誌時回單一 LOG_ENTRY
+            id=0、num_logs=0（合法的空清單）。
+          * Windows serial：pymavlink 的 recv_match(timeout ≥ 1) 每 ~0.5 s 吐一批 ⇒ 進度與速率
+            以**位元組**計，不拿主機時間做精細時序；主迴圈的 timeout 0.5 不改。
+          * 不用 MAVFTP（CubeBlack 每次 MAVFTP 永久漏 1.7 KB）；**絕不送 LOG_ERASE**。
+
+        ═══ 狀態機 ═══
+          列表：_start_log_list 送 LOG_REQUEST_LIST(0, 0xFFFF) → _on_log_entry 收 LOG_ENTRY
+          （num_logs=0 ⇒ 空清單）→ 收齊 emit log_list；8 s 沒新 LOG_ENTRY ⇒ 對缺的 id 區間
+          再要一次，再 8 s ⇒ log_list_failed。
+          下載：download_log 預留狀態（phase='queued'）→ _start_log_download 開 .part、送
+          LOG_REQUEST_DATA(id, 0, 0xFFFFFFFF)（phase='active'）→ _on_log_data 逐塊 seek 寫檔、
+          記缺塊表 → 每塊都到 ⇒ phase='finishing' → _complete_log_download：LOG_REQUEST_END、核對大小、
+          sha256、.part → 目的檔（永不覆蓋；os.rename 失敗隔 0.2 s 再試、最多 5 次）、emit done。
+          任何失敗 ⇒ _fail_log_download：刪 .part、emit failed（恰好一次，靠「先把狀態從 _log_dl
+          摘下來的人才能 emit」保證）—— 但 phase 已是 'finishing'（每塊都在 .part 裡）就**不刪**，
+          保留並把路徑寫進原因。接收執行緒上放棄一份已收到資料的下載（無進展逾時、補抓輪數上限、
+          狀態機例外、寫檔失敗、取消）都送 LOG_REQUEST_END，否則飛控會一直串流到 GCS 心跳斷。
+          鏈路結束（stop()／run() finally）：進行中的與還排在佇列裡沒派送的都各失敗一次（'連線結束'）；
+          之後再來的請求在呼叫端立即失敗（'連線已結束'），不登記、不排佇列。
+          同步交易（任務上傳／讀回）期間 recv_match(type=…) 會把 LOG_DATA 濾掉 ⇒ 交易結束後
+          閒置補抓自然接手，不必特別處理。
+        """
+        try:
+            self._log_tick_list()
+            self._log_tick_download()
+        except Exception as e:
+            logger.error(f'[SITL] 日誌傳輸狀態機例外: {e}', exc_info=True)
+            reason = f'狀態機例外：{type(e).__name__}: {e}'
+            self._fail_log_list(reason)
+            self._fail_log_download(reason, send_end=True)
+
+    # ── 列表 ──
+    def _log_target(self) -> Tuple[int, int]:
+        """(目標 sysid, 該 sysid 的自駕儀 compid)：與 _send_param_read_requests 同一套規則，不用廣播 compid 0。"""
+        tgt_sys = self._log_sysid()
+        tgt_comp = self._autopilot_compid.get(tgt_sys, _mavlink_enums().MAV_COMP_ID_AUTOPILOT1)
+        return tgt_sys, int(tgt_comp)
+
+    def _start_log_list(self) -> None:
+        """'log_list' 的落點（接收執行緒、持 _mav_lock）：送 LOG_REQUEST_LIST(0, 0xFFFF) 並開始計時。"""
+        tgt_sys, tgt_comp = self._log_target()
+        if self._vehicle_armed(tgt_sys):
+            self._emit_log_list_failed(
+                tgt_sys, '飛控已解鎖（armed），ArduPilot 拒絕日誌列表（"Disarm for log download"）—— 請先上鎖')
+            return
+        with self._log_lock:
+            dl = self._log_dl
+        if dl is not None:
+            self._emit_log_list_failed(
+                tgt_sys, f'下載進行中（id {dl["id"]}），飛控此時不接受列表請求（"Log download in progress"）')
+            return
+        now = time.monotonic()
+        with self._log_lock:
+            self._log_list_state = {'sysid': tgt_sys, 'compid': tgt_comp, 'entries': {},
+                                    'total': None, 'started': now, 'last_rx': now, 'retries': 0}
+        try:
+            self._mav.mav.log_request_list_send(tgt_sys, tgt_comp, 0, _LOG_LIST_ALL_END)
+        except Exception as e:
+            self._fail_log_list(f'送出 LOG_REQUEST_LIST 失敗：{type(e).__name__}: {e}')
+            return
+        logger.info(f'[SITL] 已向 sysid={tgt_sys} comp={tgt_comp} 要日誌清單')
+
+    def _on_log_entry(self, src: int, msg) -> None:
+        """LOG_ENTRY（已過「只收自駕儀元件」守衛）：記 (id, size, time_utc)，收齊就 emit log_list。"""
+        with self._log_lock:
+            ls = self._log_list_state
+            if ls is None or src != ls['sysid']:
+                return
+            try:
+                total = int(msg.num_logs)
+                lid = int(msg.id)
+            except (AttributeError, TypeError, ValueError):
+                return
+            ls['last_rx'] = time.monotonic()
+            ls['total'] = total
+            if total > 0:
+                ls['entries'][lid] = {'id': lid, 'size': int(msg.size), 'time_utc': int(msg.time_utc)}
+            done = total == 0 or len(ls['entries']) >= total
+            if done:
+                self._log_list_state = None
+        if done:
+            entries = sorted(ls['entries'].values(), key=lambda e: e['id'])
+            logger.info(f'[SITL] sysid={ls["sysid"]} 日誌清單 {len(entries)} 份'
+                        f'（重送 {ls["retries"]} 次，{time.monotonic() - ls["started"]:.1f} s）')
+            self.log_list.emit(ls['sysid'], entries)
+
+    def _log_tick_list(self) -> None:
+        now = time.monotonic()
+        with self._log_lock:
+            ls = self._log_list_state
+            if ls is None or now - ls['last_rx'] < _LOG_LIST_TIMEOUT_S:
+                return
+            total, have, retries = ls['total'], ls['entries'], ls['retries']
+            retry = retries < _LOG_LIST_RETRIES and self._mav is not None
+            if retry:
+                ls['retries'] = retries + 1
+                ls['last_rx'] = now
+                if total:
+                    missing = [i for i in range(1, total + 1) if i not in have]
+                    start, end = (min(missing), max(missing)) if missing else (0, _LOG_LIST_ALL_END)
+                else:
+                    start, end = 0, _LOG_LIST_ALL_END
+        if retry:
+            try:
+                self._mav.mav.log_request_list_send(ls['sysid'], ls['compid'], start, end)
+            except Exception as e:
+                self._fail_log_list(f'重送 LOG_REQUEST_LIST 失敗：{type(e).__name__}: {e}')
+            else:
+                logger.info(f'[SITL] 日誌清單 {_LOG_LIST_TIMEOUT_S:g} s 沒收齊（{len(have)}'
+                            f'{"/" + str(total) if total is not None else ""}），再要 id {start}..{end}')
+            return
+        shown = f'已收 {len(have)}' + (f'/{total}' if total is not None else '')
+        self._fail_log_list(f'列表逾時：{_LOG_LIST_TIMEOUT_S:g} s 沒收到新的 LOG_ENTRY（{shown}，重送 {retries} 次）')
+
+    def _emit_log_list_failed(self, sysid: int, reason: str) -> None:
+        logger.warning(f'[SITL] 日誌清單失敗 (sysid={sysid}): {reason}')
+        self.status_text.emit(3, f'⚠️ 日誌清單失敗：{reason}')
+        self.log_list_failed.emit(int(sysid), str(reason))
+
+    def _fail_log_list(self, reason: str, src: Optional[int] = None, *,
+                       only_before_data: bool = False) -> bool:
+        """把進行中的列表請求以 `reason` 收掉（恰好一次）。`src` 給了就只收那架的。回傳有沒有收掉東西。
+
+        `only_before_data`：已收到任何一則 LOG_ENTRY 就不收（STATUSTEXT 拒絕句用 —— 清單在流就不是在拒絕我們）。
+        """
+        with self._log_lock:
+            ls = self._log_list_state
+            if ls is None or (src is not None and ls['sysid'] != src):
+                return False
+            if only_before_data and ls['total'] is not None:
+                return False
+            self._log_list_state = None
+        self._emit_log_list_failed(ls['sysid'], reason)
+        return True
+
+    # ── 下載 ──
+    @staticmethod
+    def _unique_log_path(dest: str) -> str:
+        """目的檔（或它的 .part）已存在就改名 `_2`、`_3`…；**永不覆蓋**（id 會前移，同一個 id 下一趟是另一份檔）。"""
+        root, ext = os.path.splitext(dest)
+        cand, k = dest, 2
+        while os.path.exists(cand) or os.path.exists(cand + '.part'):
+            cand = f'{root}_{k}{ext}'
+            k += 1
+        return cand
+
+    @staticmethod
+    def _sha256_file(path: str) -> str:
+        """串流算整個檔的 sha256（1 MiB 一塊，不把檔案整個讀進記憶體）。"""
+        h = hashlib.sha256()
+        with open(path, 'rb') as fh:
+            while True:
+                chunk = fh.read(1 << 20)
+                if not chunk:
+                    break
+                h.update(chunk)
+        return h.hexdigest()
+
+    @staticmethod
+    def _rename_with_retry(src: str, dst: str) -> Optional[BaseException]:
+        """os.rename(src, dst)，失敗就隔 _LOG_RENAME_RETRY_S 再試、最多 _LOG_RENAME_RETRIES 次（≤ 0.8 s）。
+
+        Windows 上剛關閉的檔案常被防毒／索引器短暫鎖住 ⇒ 第一次 rename 丟 PermissionError 不代表真的不行。
+        刻意是 os.rename 不是 os.replace：目的檔若存在要失敗，不能蓋。成功回 None，否則回最後一次的例外。
+        """
+        err: Optional[BaseException] = None
+        for attempt in range(_LOG_RENAME_RETRIES):
+            try:
+                os.rename(src, dst)
+                return None
+            except Exception as e:
+                err = e
+                if attempt + 1 < _LOG_RENAME_RETRIES:
+                    time.sleep(_LOG_RENAME_RETRY_S)
+        return err
+
+    @staticmethod
+    def _log_missing_ranges(st: dict) -> list:
+        """缺塊表 → [(ofs, count), …]：連續缺的塊併成一段，尾段 count 取到 size 為止。"""
+        have, size, n = st['have'], st['size'], st['nblocks']
+        out, i = [], 0
+        while i < n:
+            if have[i]:
+                i += 1
+                continue
+            j = i
+            while j < n and not have[j]:
+                j += 1
+            out.append((i * _LOG_CHUNK, min(size, j * _LOG_CHUNK) - i * _LOG_CHUNK))
+            i = j
+        return out
+
+    @staticmethod
+    def _log_progress_payload(st: dict, now: float) -> dict:
+        """進度／狀態 dict（呼叫端持 _log_lock 或 st 已摘下）。速率 = 收到的位元組 / 經過秒數（粗略）。"""
+        elapsed = max(now - st['started'], 1e-3)
+        received = st['received']
+        rate = received / elapsed
+        remain = st['size'] - received
+        eta = (remain / rate) if (rate > 0 and received > 0) else None
+        return {'id': st['id'], 'size': st['size'], 'received': received,
+                'bytes_per_s': rate, 'eta_s': eta, 'path': st['path'],
+                'refills': st['refills'], 'phase': st['phase'], 'sysid': st['sysid'],
+                'seconds': now - st['started'], 'blocks': st['got_blocks'], 'nblocks': st['nblocks'],
+                'extra_blocks': st['extra_blocks'], 'dup_blocks': st['dup_blocks'],
+                'ignored_other_id': st['ignored_other_id'], 'ignored_other_src': st['ignored_other_src']}
+
+    def _start_log_download(self, st: dict) -> None:
+        """'log_download' 的落點（接收執行緒、持 _mav_lock）：開 .part、送 LOG_REQUEST_DATA(id, 0, 到檔尾)。"""
+        with self._log_lock:
+            if self._log_dl is not st:
+                return                      # 已被 stop() 收掉：那邊已經 emit 過 failed
+        if st.get('cancel'):
+            self._fail_log_download('取消（使用者中止）')
+            return
+        tgt_sys, tgt_comp = self._log_target()
+        if self._vehicle_armed(tgt_sys):
+            self._fail_log_download(
+                f'飛控已解鎖（armed），ArduPilot 拒絕日誌下載（"Disarm for log download"）—— 請先上鎖')
+            return
+        try:
+            path = self._unique_log_path(st['dest'])
+            part = path + '.part'
+            parent = os.path.dirname(path)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            fh = open(part, 'wb')
+        except Exception as e:
+            self._fail_log_download(f'無法建立暫存檔 {st["dest"]}.part：{type(e).__name__}: {e}')
+            return
+        now = time.monotonic()
+        with self._log_lock:
+            if self._log_dl is not st:      # stop() 搶在開檔與登記之間
+                stale = True
+            else:
+                stale = False
+                st.update(sysid=tgt_sys, compid=tgt_comp, path=path, part=part, fh=fh,
+                          started=now, last_rx=now, last_progress_rx=now,
+                          last_progress_emit=now, last_progress_bytes=0, phase='active')
+                payload = self._log_progress_payload(st, now)
+        if stale:
+            try:
+                fh.close()
+                os.remove(part)
+            except Exception:
+                pass
+            return
+        try:
+            self._mav.mav.log_request_data_send(tgt_sys, tgt_comp, st['id'], 0, _LOG_DATA_ALL)
+        except Exception as e:
+            self._fail_log_download(f'送出 LOG_REQUEST_DATA 失敗：{type(e).__name__}: {e}')
+            return
+        logger.info(f'[SITL] 開始下載日誌 id {st["id"]}（{st["size"]:,} B，{st["nblocks"]} 塊）'
+                    f' sysid={tgt_sys} comp={tgt_comp} → {path}')
+        self.log_download_progress.emit(tgt_sys, payload)
+
+    def _on_log_data(self, src: int, msg) -> None:
+        """LOG_DATA（已過「只收自駕儀元件」守衛）：正確的塊 seek 寫進 .part、記缺塊表；收齊就收尾。
+
+        丟掉（各自計數，status 看得到）：不是進行中的 id、別架 sysid（fan-in 時同條鏈路可能有
+        別架的流量）、ofs ≥ size（下載中檔案長大的部分）、重複塊、count=0。
+        ofs 不對齊 90 的塊照寫位元組但不算「收到」（飛控只會從我們要的 ofs 起送，所以不該出現）。
+        """
+        now = time.monotonic()
+        write_err = complete = False
+        payload = next_req = None
+        with self._log_lock:
+            st = self._log_dl
+            if st is None or st['phase'] != 'active':
+                return
+            if src != st['sysid']:
+                st['ignored_other_src'] += 1
+                return
+            try:
+                lid, ofs, count = int(msg.id), int(msg.ofs), int(msg.count)
+            except (AttributeError, TypeError, ValueError):
+                return
+            if lid != st['id']:
+                st['ignored_other_id'] += 1
+                return
+            st['last_rx'] = now
+            size = st['size']
+            if count <= 0:
+                return
+            if ofs >= size:
+                st['extra_blocks'] += 1
+                return
+            bi = ofs // _LOG_CHUNK
+            n = min(count, size - ofs, _LOG_CHUNK)
+            block_len = min(_LOG_CHUNK, size - bi * _LOG_CHUNK)
+            aligned = (ofs % _LOG_CHUNK == 0)
+            if aligned and st['have'][bi]:
+                st['dup_blocks'] += 1
+                return
+            try:
+                data = bytes(msg.data[:n])
+                fh = st['fh']
+                fh.seek(ofs)
+                fh.write(data)
+            except Exception as e:
+                write_err = f'寫檔失敗（{st["part"]}）：{type(e).__name__}: {e}'
+            else:
+                if aligned and n >= block_len:
+                    st['have'][bi] = 1
+                    st['got_blocks'] += 1
+                    st['received'] += block_len
+                    st['last_progress_rx'] = now
+                    if st['got_blocks'] >= st['nblocks']:
+                        complete = True
+                        st['phase'] = 'finishing'
+                    else:
+                        if now - st['last_progress_emit'] >= _LOG_PROGRESS_INTERVAL_S \
+                                or st['received'] - st['last_progress_bytes'] >= _LOG_PROGRESS_BYTES:
+                            st['last_progress_emit'] = now
+                            st['last_progress_bytes'] = st['received']
+                            payload = self._log_progress_payload(st, now)
+                        next_req = self._log_next_refill_locked(st, bi)
+                else:
+                    st['partial_blocks'] += 1
+        if write_err:
+            self._fail_log_download(write_err, send_end=True)
+            return
+        if complete:
+            self._complete_log_download(st)
+            return
+        if payload is not None:
+            self.log_download_progress.emit(st['sysid'], payload)
+        if next_req is not None:
+            self._send_log_refill(st, next_req)
+
+    @staticmethod
+    def _log_next_refill_locked(st: dict, bi: int) -> Optional[tuple]:
+        """在飛的補抓段若因為第 bi 塊到了而收齊 ⇒ 從佇列挑下一段還有缺的，回傳要送的 (ofs, count)。"""
+        cur = st['refill_cur']
+        if cur is None:
+            return None
+        c_ofs, c_cnt = cur
+        b0, b1 = c_ofs // _LOG_CHUNK, (c_ofs + c_cnt - 1) // _LOG_CHUNK
+        if not (b0 <= bi <= b1) or not all(st['have'][b0:b1 + 1]):
+            return None
+        st['refill_cur'] = None
+        while st['refill_queue']:
+            o, c = st['refill_queue'].pop(0)
+            q0, q1 = o // _LOG_CHUNK, (o + c - 1) // _LOG_CHUNK
+            if not all(st['have'][q0:q1 + 1]):
+                st['refill_cur'] = (o, c)
+                return (o, c)
+        return None
+
+    def _send_log_refill(self, st: dict, req: tuple) -> None:
+        ofs, cnt = req
+        try:
+            self._mav.mav.log_request_data_send(st['sysid'], st['compid'], st['id'], int(ofs), int(cnt))
+        except Exception as e:
+            self._fail_log_download(f'送出補抓請求失敗：{type(e).__name__}: {e}')
+
+    def _log_tick_download(self) -> None:
+        now = time.monotonic()
+        fail_reason = req = None
+        with self._log_lock:
+            st = self._log_dl
+            if st is None or st['phase'] != 'active':
+                return
+            if st.get('cancel'):
+                fail_reason, cancel = '取消（使用者中止）', True
+            else:
+                cancel = False
+                if now - st['last_progress_rx'] >= _LOG_STALL_TIMEOUT_S:
+                    if st['received'] == 0:
+                        fail_reason = (f'{_LOG_STALL_TIMEOUT_S:g} s 內沒收到任何 LOG_DATA —— 飛控不回'
+                                       f'（id {st["id"]} 無效？飛控已解鎖？別條鏈路正在下載？）')
+                    else:
+                        fail_reason = (f'{_LOG_STALL_TIMEOUT_S:g} s 完全沒有進展'
+                                       f'（已收 {st["received"]:,}/{st["size"]:,} B，補抓 {st["refills"]} 輪）')
+                elif now - st['last_rx'] >= _LOG_IDLE_REFILL_S:
+                    missing = self._log_missing_ranges(st)
+                    if missing and st['refills'] >= _LOG_MAX_REFILL_ROUNDS:
+                        fail_reason = (f'補抓超過 {_LOG_MAX_REFILL_ROUNDS} 輪仍缺 {len(missing)} 段'
+                                       f'（已收 {st["received"]:,}/{st["size"]:,} B）')
+                    elif missing:
+                        st['refills'] += 1
+                        st['last_rx'] = now
+                        batch = missing[:_LOG_REFILL_BATCH]
+                        st['refill_cur'], st['refill_queue'] = batch[0], batch[1:]
+                        req = batch[0]
+        if fail_reason is not None:
+            self._fail_log_download(fail_reason, send_end=True)
+            return
+        if req is not None:
+            logger.info(f'[SITL] 日誌 id {st["id"]} 閒置 ≥ {_LOG_IDLE_REFILL_S:g} s，第 {st["refills"]} 輪補抓：'
+                        f'{len(st["refill_queue"]) + 1} 段，先要 ofs {req[0]} count {req[1]}')
+            self._send_log_refill(st, req)
+
+    def _send_log_request_end(self, st: dict) -> None:
+        if self._mav is None:
+            return
+        try:
+            self._mav.mav.log_request_end_send(st['sysid'], st['compid'])
+        except Exception as e:
+            logger.warning(f'[SITL] 送 LOG_REQUEST_END 失敗（飛控自己也會收尾）：{e}')
+
+    def _complete_log_download(self, st: dict) -> None:
+        """每個區塊都到了：LOG_REQUEST_END → 核對大小 → sha256 → .part 改名 → emit 進度(=size) 與 done。
+
+        先把狀態從 _log_dl 摘下來（之後 stop() 看到的是「沒有進行中的下載」）⇒ 這條路上的失敗
+        都用 st=st 明示地 emit failed，成功就 emit done；兩者恰好一次。
+        """
+        with self._log_lock:
+            if self._log_dl is not st:
+                return
+            self._log_dl = None
+        self._send_log_request_end(st)
+        fh = st['fh']
+        try:
+            fh.flush()
+            fh.seek(0, os.SEEK_END)
+            actual = fh.tell()
+            fh.close()
+        except Exception as e:
+            self._fail_log_download(f'關閉暫存檔失敗：{type(e).__name__}: {e}', st=st)
+            return
+        st['fh'] = None
+        if actual != st['size']:
+            self._fail_log_download(f'暫存檔大小 {actual:,} B ≠ 預期 {st["size"]:,} B', st=st)
+            return
+        try:
+            digest = self._sha256_file(st['part'])
+        except Exception as e:
+            self._fail_log_download(f'讀回暫存檔計算 sha256 失敗：{type(e).__name__}: {e}', st=st)
+            return
+        path = st['path']
+        if os.path.exists(path):                # 下載期間被別人建立：再換名，仍然不覆蓋
+            path = self._unique_log_path(path)
+            st['path'] = path
+        err = self._rename_with_retry(st['part'], path)   # 不是 os.replace：目的檔若存在要失敗，不能蓋
+        if err is not None:
+            # phase 仍是 'finishing' ⇒ _fail_log_download 會保留 .part（每塊都在裡面、大小已核對）
+            self._fail_log_download(
+                f'.part 改名成目的檔失敗（試了 {_LOG_RENAME_RETRIES} 次）：{type(err).__name__}: {err}', st=st)
+            return
+        st['part'] = None
+        now = time.monotonic()
+        st['phase'] = 'done'
+        payload = self._log_progress_payload(st, now)
+        result = {'id': st['id'], 'size': st['size'], 'path': path, 'sha256': digest,
+                  'seconds': now - st['started'], 'refills': st['refills']}
+        logger.info(f'[SITL] 日誌 id {st["id"]} 下載完成：{path}（{st["size"]:,} B，{result["seconds"]:.1f} s，'
+                    f'補抓 {st["refills"]} 輪，多餘 {st["extra_blocks"]} 重複 {st["dup_blocks"]}，sha256 {digest[:16]}）')
+        self.status_text.emit(6, f'日誌 id {st["id"]} 下載完成（{st["size"]:,} B）：{path}')
+        self.log_download_progress.emit(st['sysid'], payload)
+        self.log_download_done.emit(st['sysid'], result)
+
+    def _fail_log_download(self, reason: str, *, send_end: bool = False,
+                           src: Optional[int] = None, st: Optional[dict] = None,
+                           only_before_data: bool = False) -> bool:
+        """把下載以 `reason` 收掉：關檔、刪 .part、（接收執行緒才）送 LOG_REQUEST_END、emit failed 一次。
+
+        `st` 沒給就把 _log_dl 摘下來（沒有就什麼都不做、回 False）；給了表示呼叫端已經摘下來了。
+        `src` 給了就只收那架的。`send_end` 只能在接收執行緒為 True（GUI 執行緒不碰 _mav）。
+        `only_before_data`：已收到任何一個區塊就不收（STATUSTEXT 拒絕句用 —— 資料在流就不是在拒絕我們）。
+        ⚠ phase 已是 'finishing'（每個區塊都在 .part 裡、只是收尾失敗）就**不刪 .part**：保留、
+          路徑附在原因後面 —— 幾十 MB 下載完才因為改名／sha256／關檔失敗整份刪掉，是最糟的結果。
+        """
+        if st is None:
+            with self._log_lock:
+                cur = self._log_dl
+                if cur is None or (src is not None and cur['sysid'] != src):
+                    return False
+                if only_before_data and cur['got_blocks'] > 0:
+                    return False
+                self._log_dl = None
+                st = cur
+        keep_part = st.get('phase') == 'finishing'
+        st['phase'] = 'failed'
+        fh = st.get('fh')
+        if fh is not None:
+            try:
+                fh.close()
+            except Exception:
+                pass
+            st['fh'] = None
+        part = st.get('part')
+        if part and keep_part:
+            reason = f'{reason}；每個區塊都已收到，暫存檔保留在 {part}（請自行改名）'
+        elif part:
+            try:
+                if os.path.exists(part):
+                    os.remove(part)
+            except Exception as e:
+                logger.warning(f'[SITL] 刪不掉暫存檔 {part}：{e}')
+        if send_end and st.get('compid') is not None:
+            self._send_log_request_end(st)
+        logger.warning(f'[SITL] 日誌 id {st["id"]} 下載失敗 (sysid={st["sysid"]}): {reason}'
+                       f'（已收 {st["received"]:,}/{st["size"]:,} B）')
+        self.status_text.emit(3, f'⚠️ 日誌 id {st["id"]} 下載失敗：{reason}')
+        self.log_download_failed.emit(int(st['sysid']), str(reason))
+        return True
+
+    def _cancel_log_download(self) -> None:
+        """'log_cancel' 的落點（接收執行緒、持 _mav_lock）。"""
+        with self._log_lock:
+            st = self._log_dl
+        if st is None:
+            logger.info('[SITL] 取消日誌下載：沒有進行中的下載')
+            return
+        self._fail_log_download('取消（使用者中止）', send_end=True)
+
+    def _fail_queued_log_cmds(self, reason: str) -> None:
+        """鏈路結束時把 _cmd_queue 裡**還沒派送**的日誌指令撈出來各失敗一次；其他指令原樣放回。
+
+        stop()（GUI 執行緒）與 run() 的 finally（接收執行緒）都會叫：接收執行緒一旦不在，佇列再也沒人
+        排空，躺在裡面的 'log_list' / 'log_download' 就永遠沒有終結信號。撈佇列在 _log_lock 裡做，
+        與 request_log_list / download_log 的「看旗標＋put」互斥（它們看到旗標就立即失敗、不會 put）。
+        'log_download' 的 st 若已被 _fail_log_download 摘掉（phase 不是 'queued'）就跳過 —— 恰好一次。
+        """
+        with self._log_lock:
+            items, keep = [], []
+            while True:
+                try:
+                    item = self._cmd_queue.get_nowait()
+                except queue.Empty:
+                    break
+                (items if item[0] in ('log_list', 'log_download', 'log_cancel') else keep).append(item)
+            for item in keep:
+                self._cmd_queue.put(item)
+            downloads = []
+            for cmd, arg in items:
+                if cmd == 'log_download' and self._log_dl is arg:
+                    self._log_dl = None
+                    downloads.append(arg)
+        for cmd, arg in items:
+            if cmd == 'log_list':
+                self._emit_log_list_failed(self.sysid_label, reason)
+        for st in downloads:
+            self._fail_log_download(reason, st=st)
+
+    # ─────────────────────────────────────────────────────────────────
     # 命令發送（在接收執行緒中執行，與接收共用 self._mav）
     # ─────────────────────────────────────────────────────────────────
     @staticmethod
@@ -1619,6 +2398,8 @@ class SITLLink(QThread):
             return f'{len(arg[0])} 項 verify={arg[1]}'
         if cmd == 'read_params':
             return f'{len(arg[1])} 個參數'
+        if cmd == 'log_download':
+            return f'id={arg.get("id")} size={arg.get("size")} → {arg.get("dest")}'
         return arg
 
     def _dispatch_command(self, cmd: str, arg):
@@ -1626,6 +2407,10 @@ class SITLLink(QThread):
             if cmd == 'upload_mission_items':
                 # ⚠️ 不可以靜默 return：呼叫端在等 mission_uploaded，零次 = 永遠等。
                 self._report_mission_upload(False, '尚未連線到飛控（沒有可用的 MAVLink 連線）')
+            elif cmd == 'log_list':
+                self.log_list_failed.emit(self.sysid_label, '尚未連線到飛控（沒有可用的 MAVLink 連線）')
+            elif cmd == 'log_download':
+                self._fail_log_download('尚未連線到飛控（沒有可用的 MAVLink 連線）')
             return
         try:
             with self._mav_lock:
@@ -1676,6 +2461,12 @@ class SITLLink(QThread):
                     self._send_fence_zones(arg)
                 elif cmd == 'clear_fence':
                     self._send_clear_fence()
+                elif cmd == 'log_list':
+                    self._start_log_list()
+                elif cmd == 'log_download':
+                    self._start_log_download(arg)
+                elif cmd == 'log_cancel':
+                    self._cancel_log_download()
                 logger.info(f'[SITL] 已發送命令: {cmd} {self._cmd_arg_summary(cmd, arg)}')
         except Exception as e:
             logger.error(f'[SITL] 命令 {cmd} 失敗: {e}', exc_info=True)

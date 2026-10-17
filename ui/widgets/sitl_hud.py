@@ -19,6 +19,7 @@ from PyQt6.QtGui import QPainter, QColor, QPen, QPolygonF, QFontMetrics
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton,
     QLineEdit, QFrame, QComboBox, QScrollArea, QSizePolicy, QSpinBox,
+    QProgressBar, QCheckBox,
 )
 
 # MIL-STD-1472H 戰術色彩 / 字型常數（單一事實來源 — QPainter / 動態樣式仍需）
@@ -643,6 +644,9 @@ class UavInfoCard(QFrame):
     selected = pyqtSignal(int)
     # 要求單獨斷線此機；參數為 sysid
     disconnect_requested = pyqtSignal(int)
+    # 下載這台飛完的 DataFlash 日誌（.bin）／取消下載；參數為 sysid
+    log_download_requested = pyqtSignal(int)
+    log_cancel_requested = pyqtSignal(int)
 
     def __init__(self, sysid: int, parent=None):
         super().__init__(parent)
@@ -678,6 +682,21 @@ class UavInfoCard(QFrame):
         )
         tb.addWidget(self.lbl_title)
         tb.addStretch()
+
+        # 下載此機飛行日誌（.bin）鈕（icon-only；飛完上鎖後才有用，解鎖中按下會被 MainWindow 擋並說明）
+        self.btn_logdl = QPushButton()
+        self.btn_logdl.setIcon(get_icon('download', color=TC.NEUTRAL, size=12))
+        self.btn_logdl.setIconSize(QSize(12, 12))
+        self.btn_logdl.setFixedSize(22, 18)
+        self.btn_logdl.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_logdl.setToolTip(f'下載 UAV{sysid} 飛控裡最新一份飛行日誌（.bin）到 runs/flight_logs/。\n'
+                                  '飛控只在上鎖（落地）後才給；數傳 57600 很慢（數十 MB 要數十分鐘），USB／SITL 快。')
+        self.btn_logdl.setStyleSheet(
+            'QPushButton{background:transparent;border:none;border-radius:0;}'
+            f'QPushButton:hover{{background:{TC.BG_ELEVATED};}}'
+        )
+        self.btn_logdl.clicked.connect(lambda: self.log_download_requested.emit(self.sysid))
+        tb.addWidget(self.btn_logdl)
 
         # 單獨斷線鈕（icon-only，HOSTILE 語意：移除此連線）
         self.btn_disconnect = QPushButton()
@@ -723,6 +742,38 @@ class UavInfoCard(QFrame):
         pb.addStretch()
         v.addWidget(pos_bar)
 
+        # 日誌下載列（平常藏起來；下載中顯示進度＋取消，完成／失敗顯示一行結果）
+        self.log_bar = QFrame()
+        self.log_bar.setStyleSheet(
+            f'QFrame{{background:{TC.BG_SUNKEN};border:none;'
+            f'border-top:1px solid {TC.BORDER_SUBTLE};border-radius:0;}}'
+            f'QLabel{{background:transparent;}}'
+        )
+        self.log_bar.setFixedHeight(18)
+        lb = QHBoxLayout(self.log_bar)
+        lb.setContentsMargins(6, 0, 4, 0)
+        lb.setSpacing(4)
+        self.log_progress = QProgressBar()
+        self.log_progress.setRange(0, 1000)
+        self.log_progress.setValue(0)
+        self.log_progress.setTextVisible(False)
+        self.log_progress.setFixedHeight(8)
+        lb.addWidget(self.log_progress, 1)
+        self.lbl_log = QLabel('')
+        self.lbl_log.setStyleSheet(f'color:{TC.FG_SECONDARY};font-size:9px;font-family:{TF.css_mono()};')
+        lb.addWidget(self.lbl_log, 2)
+        self.btn_log_cancel = QPushButton('✕')
+        self.btn_log_cancel.setFixedSize(16, 14)
+        self.btn_log_cancel.setToolTip('取消這台的日誌下載')
+        self.btn_log_cancel.setStyleSheet(
+            f'QPushButton{{background:transparent;border:none;color:{TC.HOSTILE};font-size:9px;}}'
+            f'QPushButton:hover{{background:{TC.BG_ELEVATED};}}')
+        self.btn_log_cancel.clicked.connect(lambda: self.log_cancel_requested.emit(self.sysid))
+        lb.addWidget(self.btn_log_cancel)
+        self.log_bar.hide()
+        v.addWidget(self.log_bar)
+        self._log_state = 'idle'            # 'idle' | 'running' | 'done' | 'failed'
+
         # 為了向後相容：保留別名（其他模組若直接讀 attitude / lbl_mode 等不會崩）
         self.attitude = self.hud
         self.lbl_mode    = QLabel()   # 啞元 — 實際資料在 self.hud
@@ -737,6 +788,48 @@ class UavInfoCard(QFrame):
         self.hud.update_from_frame(frame)
         # 只剩座標列在 HUD 之外更新
         self.lbl_pos.setText(f'📍 {frame.lat:.5f},{frame.lon:.5f}')
+
+    # ── 日誌下載列 ───────────────────────────────────────────────
+    @staticmethod
+    def _fmt_mb(n: int) -> str:
+        return f'{int(n) / 1048576:.1f} MB'
+
+    def on_log_progress(self, info: dict) -> None:
+        """SITLLink.log_download_progress 的 payload：{'id','size','received','bytes_per_s','eta_s','path'}。"""
+        size = int(info.get('size', 0) or 0)
+        got = int(info.get('received', 0) or 0)
+        bps = float(info.get('bytes_per_s', 0.0) or 0.0)
+        eta = info.get('eta_s')
+        self._log_state = 'running'
+        self.log_progress.setValue(int(1000 * got / size) if size > 0 else 0)
+        eta_txt = f'，剩 {int(eta) // 60}:{int(eta) % 60:02d}' if isinstance(eta, (int, float)) and eta >= 0 else ''
+        self.lbl_log.setText(f'⬇ #{info.get("id", "?")} {self._fmt_mb(got)}/{self._fmt_mb(size)} '
+                             f'{bps / 1024:.0f} KiB/s{eta_txt}')
+        self.lbl_log.setStyleSheet(f'color:{TC.NEUTRAL};font-size:9px;font-family:{TF.css_mono()};')
+        self.btn_log_cancel.show()
+        self.log_progress.show()
+        self.log_bar.show()
+
+    def on_log_done(self, info: dict) -> None:
+        self._log_state = 'done'
+        self.log_progress.setValue(1000)
+        name = str(info.get('path', '')).replace('\\', '/').rsplit('/', 1)[-1]
+        self.lbl_log.setText(f'✔ {name}（{self._fmt_mb(int(info.get("size", 0) or 0))}）')
+        self.lbl_log.setStyleSheet(f'color:{TC.FRIENDLY};font-size:9px;font-family:{TF.css_mono()};')
+        self.lbl_log.setToolTip(str(info.get('path', '')))
+        self.btn_log_cancel.hide()
+        self.log_bar.show()
+
+    def on_log_failed(self, reason: str) -> None:
+        self._log_state = 'failed'
+        self.lbl_log.setText(f'✖ {reason}')
+        self.lbl_log.setToolTip(str(reason))
+        self.lbl_log.setStyleSheet(f'color:{TC.HOSTILE};font-size:9px;font-family:{TF.css_mono()};')
+        self.btn_log_cancel.hide()
+        self.log_bar.show()
+
+    def log_state(self) -> str:
+        return self._log_state
 
     # ── 選取（指令對象）視覺狀態 ─────────────────────────────────
     def _apply_card_style(self) -> None:
@@ -794,6 +887,13 @@ class SITLHud(QWidget):
     cmd_load_wp    = pyqtSignal()            # 從檔案載入航點檔（純本機讀檔，不需要連線）
     cmd_write_wp   = pyqtSignal()            # 把已載入的航點檔寫入飛控（安全關鍵，見 on_sitl_write_wp）
     cmd_save_wp    = pyqtSignal()            # 把「剛讀回」的任務存成航點檔
+    # 多檔匯入：一次選多個 .waypoints／.plan，每檔明確指派給一架（對話框），再逐機寫入
+    cmd_import_wps = pyqtSignal()            # 開匯入對話框（純本機讀檔＋預覽，不需要連線）
+    cmd_write_imported = pyqtSignal()        # 把「每架匯入的那一份」各自寫入對應 sysid（每架各跳一次確認）
+    # 飛完後下載 DataFlash 日誌（.bin）：逐機（卡片鈕，帶 sysid）／全部連線／取消
+    cmd_log_download = pyqtSignal(int)
+    cmd_log_download_all = pyqtSignal()
+    cmd_log_cancel = pyqtSignal(int)
     cmd_upload_fence = pyqtSignal()          # 上傳電子圍籬
     cmd_auto_start = pyqtSignal()            # 一鍵 AUTO+ARM+MISSION_START
     cmd_param_set  = pyqtSignal(str, float, str)   # name, value, ptype
@@ -1238,6 +1338,17 @@ class SITLHud(QWidget):
         self.btn_load_wp.clicked.connect(self.cmd_load_wp.emit)
         cmd_outer.addWidget(self.btn_load_wp)
 
+        self.btn_import_wps = self._cmd_btn('📂 多檔匯入 → 每架一份 (Import WPs)', TC.FG_EMPHASIS)
+        self.btn_import_wps.setToolTip(
+            '一次選多個 .waypoints / .plan（Mission Planner 存的 QGC WPL 110 也行），\n'
+            '在對話框裡把每個檔**明確指派給一架**（sysid；檔名有 UAV-3 / sys3 之類會先幫你填），\n'
+            '確定後每架各自預覽到 2D / 3D 地圖（不同顏色）。\n'
+            '純讀檔 + 畫圖，不需要連線、不會自動寫入飛控；要寫入按下面的「✍️ 寫入每架匯入的任務」。\n'
+            '有錯誤的檔、沒指派的檔、兩個檔指到同一架 ⇒ 對話框不准按確定。'
+        )
+        self.btn_import_wps.clicked.connect(self.cmd_import_wps.emit)
+        cmd_outer.addWidget(self.btn_import_wps)
+
         self.btn_write_wp = self._cmd_btn('✍️ 寫入飛控 (Write WPs)', TC.HOSTILE)
         self.btn_write_wp.setToolTip(
             '把「已載入的航點檔」寫入飛控。\n'
@@ -1259,6 +1370,18 @@ class SITLHud(QWidget):
         self.btn_write_wp.clicked.connect(self.cmd_write_wp.emit)
         cmd_outer.addWidget(self.btn_write_wp)
 
+        self.btn_write_imported = self._cmd_btn('✍️ 寫入每架匯入的任務 (Write Imported)', TC.HOSTILE)
+        self.btn_write_imported.setToolTip(
+            '把「多檔匯入」指派好的每一份，各自寫入**對應 sysid** 的那一架：\n'
+            'UAV-1 拿 UAV-1 的檔、UAV-2 拿 UAV-2 的檔，不看 HUD 的「指令對象」。\n'
+            '⚠️ 每一架都會各跳一次確認對話框（跟「✍️ 寫入飛控」同一套守衛），按取消就跳過那架；\n'
+            '指派了但沒連線的 sysid 會列出來、不會寫到別台。\n'
+            '沒有匯入任何檔、沒有連線、或有寫入還在等回報時本鈕停用。'
+        )
+        self.btn_write_imported.setEnabled(False)
+        self.btn_write_imported.clicked.connect(self.cmd_write_imported.emit)
+        cmd_outer.addWidget(self.btn_write_imported)
+
         self.btn_save_wp = self._cmd_btn('💾 存成航點檔 (Save WP File)', TC.FG_EMPHASIS)
         self.btn_save_wp.setToolTip(
             '把「剛剛從飛控讀回」的那份任務（📥 從飛控讀回任務航線的結果）存成 .waypoints 檔。\n'
@@ -1267,6 +1390,21 @@ class SITLHud(QWidget):
         )
         self.btn_save_wp.clicked.connect(self.cmd_save_wp.emit)
         cmd_outer.addWidget(self.btn_save_wp)
+
+        # ── 飛完後下載每台的飛行日誌（.bin）──────────────────────
+        self.btn_log_download_all = self._cmd_btn('⬇ 下載飛完的日誌 (.bin，全部連線)', TC.FG_EMPHASIS)
+        self.btn_log_download_all.setToolTip(
+            '對每一條連線索取飛控的日誌清單、挑最新一份下載到 runs/flight_logs/<日期>/UAV-<sysid>_log<id>_<時間>.bin。\n'
+            '逐機下載用卡片標題列的 ⬇ 鈕。飛控只在上鎖（落地）後才給日誌；數傳 57600 約 8 KiB/s（數十 MB 要數十分鐘），\n'
+            'USB 直連與 SITL 很快。不會刪飛控上的日誌、不用 MAVFTP。'
+        )
+        self.btn_log_download_all.clicked.connect(self.cmd_log_download_all.emit)
+        cmd_outer.addWidget(self.btn_log_download_all)
+        self.chk_auto_logdl = QCheckBox('落地（上鎖）後自動下載該機最新 .bin')
+        self.chk_auto_logdl.setChecked(False)
+        self.chk_auto_logdl.setToolTip('勾了：每台解鎖→上鎖幾秒後自動開始下載最新日誌。數傳慢的實機建議不勾，手動按。')
+        self.chk_auto_logdl.setStyleSheet(f'color:{TC.FG_SECONDARY};font-size:10px;')
+        cmd_outer.addWidget(self.chk_auto_logdl)
 
         self.btn_upload_fence = self._cmd_btn('🛡️ 上傳電子圍籬', TC.WARNING)
         self.btn_upload_fence.setToolTip(
@@ -1609,6 +1747,31 @@ class SITLHud(QWidget):
         self.lbl_status.setStyleSheet(f'color:{color};font-size:10px;padding:3px;')
         self.lbl_status.setText(f'[FC] {text}')
 
+    # ── 飛行日誌（.bin）下載：進度進卡片、訊息進 log 區 ──────────────
+    def on_log_message(self, sysid: int, text: str, severity: int = 6) -> None:
+        color = TC.HOSTILE if severity <= 3 else TC.WARNING if severity <= 5 else TC.NEUTRAL
+        self.lbl_status.setStyleSheet(f'color:{color};font-size:10px;padding:3px;')
+        self.lbl_status.setText(f'[LOG] {text}')
+
+    def on_log_progress(self, sysid: int, info: dict) -> None:
+        card = self._uav_cards.get(int(sysid))
+        if card is not None:
+            card.on_log_progress(info)
+
+    def on_log_done(self, sysid: int, info: dict) -> None:
+        card = self._uav_cards.get(int(sysid))
+        if card is not None:
+            card.on_log_done(info)
+
+    def on_log_failed(self, sysid: int, reason: str) -> None:
+        card = self._uav_cards.get(int(sysid))
+        if card is not None:
+            card.on_log_failed(reason)
+
+    def auto_log_download_enabled(self) -> bool:
+        chk = getattr(self, 'chk_auto_logdl', None)
+        return bool(chk is not None and chk.isChecked())
+
     # ── 參數寫入 ─────────────────────────────────────────
     def _on_param_set_clicked(self):
         name = self.param_name_edit.text().strip().upper()
@@ -1741,6 +1904,8 @@ class SITLHud(QWidget):
             card = UavInfoCard(sysid, self)
             card.selected.connect(self._on_card_selected)
             card.disconnect_requested.connect(self.uav_disconnect_requested.emit)
+            card.log_download_requested.connect(self.cmd_log_download.emit)
+            card.log_cancel_requested.connect(self.cmd_log_cancel.emit)
             # ── 依 sysid 數字大小插入（與連線順序無關）→ 卡片永遠按編號排列 ──
             # 插入索引 = 既有卡片中 sysid 比它小的數量（stretch 永遠在最後）。
             insert_idx = sum(1 for sid in self._uav_cards if sid < sysid)

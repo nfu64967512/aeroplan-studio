@@ -120,6 +120,11 @@ class MapSettings:
     # Cesium ion access token（3D 地圖用）。⚠ 這是祕密：只放在 config/settings.json
     # （已被 .gitignore），不要寫進原始碼。環境變數 CESIUM_ION_TOKEN 優先於這個值。
     cesium_ion_token: str = ''
+
+    # 地圖起始中心改用「場地預設」：填 config.spawn_presets.SPAWN_PRESETS 的 key
+    # （CHIAYI_AUIRC / HUWEI / TAOYUAN）就會在載入設定時把 default_lat/lon 換成該場地；
+    # 空字串＝用上面的 default_lat/lon；不認得的 key 不會靜默，會印出警告並維持原值。
+    default_site: str = ''
     
     def __post_init__(self):
         """初始化地圖伺服器列表"""
@@ -300,6 +305,33 @@ class EmbeddedSwarmSettings:
 
 
 @dataclass
+class WeatherSettings:
+    """氣象資料來源（風場顯示／寫入規劃風）。"""
+    # 中央氣象署開放資料平臺 API 授權碼（自動氣象站觀測 O-A0001-001）。⚠ 這是祕密：只放在
+    # config/settings.json（已被 .gitignore），不要寫進原始碼；環境變數 CWA_API_KEY 優先於這個值。
+    cwa_api_key: str = ''
+    # 預設測站（代碼如 466920 或名稱）；空白＝離作業區最近的測站
+    cwa_station: str = ''
+
+
+def _load_weather(raw) -> tuple:
+    """weather 區塊單獨處理：未知鍵只警告並忽略、已知鍵照收 —— 不讓一個打錯的鍵名（cwa_apikey）把整段（含授權碼）
+    靜默歸零，再讓面板誤報「沒有授權碼」。回傳 (WeatherSettings, 警告文字)；只記鍵名，絕不記值。"""
+    from dataclasses import fields as _fields
+    if not isinstance(raw, dict):
+        warn = f"settings.json 的 weather 區塊不是物件（{type(raw).__name__}），整段忽略"
+        print(warn)
+        return WeatherSettings(), warn
+    known = {f.name for f in _fields(WeatherSettings)}
+    unknown = sorted(set(raw) - known)
+    ws = WeatherSettings(**{k: v for k, v in raw.items() if k in known})
+    warn = f"settings.json 的 weather 區塊有未知鍵 {unknown}（已忽略；已知鍵 {sorted(known)}）" if unknown else ''
+    if warn:
+        print(warn)
+    return ws, warn
+
+
+@dataclass
 class HILSettings:
     """HIL（Hardware-in-the-Loop）連線面板的持久化設定。
     用途：記住使用者上次填的每顆飛控連線埠 / 鮑率 / SYSID，
@@ -335,6 +367,10 @@ class GlobalSettings:
         self.sitl_launch = SITLLaunchSettings()
         self.embedded_swarm = EmbeddedSwarmSettings()
         self.hil = HILSettings()
+        self.weather = WeatherSettings()
+        self.weather_load_warning = ''      # weather 區塊讀取時的警告（未知鍵等），給 utils.cwa_opendata 回報
+        self.map_default_site_warning = ''  # map.default_site 不認得時的警告
+        self._map_default_latlon_raw = None # 檔案裡使用者自己填的 default_lat/lon（被 default_site 取代時保留，save 寫回原值）
 
         # 配置文件路徑
         self.config_file = config_file or os.path.join(
@@ -363,6 +399,7 @@ class GlobalSettings:
                     self.paths = PathSettings(**_rebase_saved_paths(config_data['paths']))
                 if 'map' in config_data:
                     self.map = MapSettings(**config_data['map'])
+                    self._apply_default_site()
                 if 'export' in config_data:
                     self.export = ExportSettings(**config_data['export'])
                 if 'performance' in config_data:
@@ -381,6 +418,8 @@ class GlobalSettings:
                     )
                 if 'hil' in config_data:
                     self.hil = HILSettings(**config_data['hil'])
+                if 'weather' in config_data:
+                    self.weather, self.weather_load_warning = _load_weather(config_data['weather'])
 
                 return True
         except Exception as e:
@@ -388,6 +427,37 @@ class GlobalSettings:
         
         return False
     
+    def _apply_default_site(self) -> None:
+        """map.default_site（場地預設 key）⇒ 生效的 map.default_lat/lon 換成該場地；不認得的 key 印警告、維持原值。
+
+        檔案裡使用者自己填的 default_lat/lon 留在 _map_default_latlon_raw，save() 寫回的是原值
+        （否則按一次 SITL 對話框的「儲存為預設」就把原值靜默換掉，之後清空 default_site 也回不去）。
+        """
+        self.map_default_site_warning = ''
+        self._map_default_latlon_raw = None
+        key = str(getattr(self.map, 'default_site', '') or '').strip()
+        if not key:
+            return
+        from config.spawn_presets import SPAWN_PRESETS, get_preset_by_key
+        p = get_preset_by_key(key)
+        if p is None:
+            self.map_default_site_warning = (f"settings.json map.default_site={key!r} 不是已知場地預設"
+                                             f"（可用：{[q.key for q in SPAWN_PRESETS]}），地圖中心維持 default_lat/lon")
+            print(self.map_default_site_warning)
+            return
+        self._map_default_latlon_raw = (self.map.default_lat, self.map.default_lon)
+        self.map.default_lat, self.map.default_lon = float(p.lat), float(p.lon)
+        print(f"settings.json map.default_site={p.key}：地圖中心用 {p.lat:.6f}, {p.lon:.6f}"
+              f"（檔案的 default_lat/lon {self._map_default_latlon_raw} 保留不改）")
+
+    def _map_for_save(self) -> dict:
+        """asdict(self.map)，但 default_lat/lon 寫回使用者原值（default_site 生效時）。"""
+        d = asdict(self.map)
+        raw = getattr(self, '_map_default_latlon_raw', None)
+        if raw is not None:
+            d['default_lat'], d['default_lon'] = raw
+        return d
+
     def save(self) -> bool:
         """
         儲存配置到文件
@@ -398,7 +468,7 @@ class GlobalSettings:
         try:
             config_data = {
                 'paths': asdict(self.paths),
-                'map': asdict(self.map),
+                'map': self._map_for_save(),
                 'export': asdict(self.export),
                 'performance': asdict(self.performance),
                 'safety': asdict(self.safety),
@@ -406,6 +476,7 @@ class GlobalSettings:
                 'sitl_launch': asdict(self.sitl_launch),
                 'embedded_swarm': asdict(self.embedded_swarm),
                 'hil': asdict(self.hil),
+                'weather': asdict(self.weather),
             }
 
             os.makedirs(os.path.dirname(self.config_file), exist_ok=True)
@@ -434,7 +505,7 @@ class GlobalSettings:
         """獲取配置字典"""
         return {
             'paths': asdict(self.paths),
-            'map': asdict(self.map),
+            'map': self._map_for_save(),
             'export': asdict(self.export),
             'performance': asdict(self.performance),
             'safety': asdict(self.safety),

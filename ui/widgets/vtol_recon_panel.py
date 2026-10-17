@@ -155,13 +155,15 @@ class VTOLReconPanel(QWidget):
     clear_areas_requested = pyqtSignal()      # 清除所有已完成的區
     pick_launch_site_requested = pyqtSignal()   # 從地圖點選起降場（= MainWindow.home_point）
     clear_launch_site_requested = pyqtSignal()  # 清除起降場
+    launch_site_preset_requested = pyqtSignal(str)   # 預設場地（config.spawn_presets 的 key）套用為起降場
     plan_requested = pyqtSignal(dict)         # 執行 DCCPP（vehicle_type 已釘為 vtol）
     find_flat_requested = pyqtSignal(dict)    # 找平坦位置（參數；作業區由 MainWindow 補）
     flat_apply_requested = pyqtSignal(float, float, float)   # 平移作業區到（緯度, 經度），縮放倍率
     flat_undo_requested = pyqtSignal()        # 復原上次平移
     wind_display_changed = pyqtSignal(dict)   # 風場顯示勾選／規劃風值變了：{'plan','live','speed_mps','dir_from_deg'}
     wind_grid_requested = pyqtSignal(dict)    # 抓氣象網格：{'height': '10m'|'120m'}（作業區由 MainWindow 補）
-    wind_grid_clear_requested = pyqtSignal()  # 清除氣象網格
+    wind_grid_clear_requested = pyqtSignal()  # 清除氣象網格與測站觀測
+    wind_cwa_requested = pyqtSignal(dict)     # 抓 CWA 測站觀測：{'station': 代碼或名稱（空白＝最近）}
     verify_coverage_requested = pyqtSignal(dict)   # 覆蓋率驗算
     show_missed_requested = pyqtSignal()      # 在地圖標出漏掃格（紅點）
     show_heatmap_requested = pyqtSignal()     # 用 SAR 熱力圖呈現覆蓋分布
@@ -286,8 +288,31 @@ class VTOLReconPanel(QWidget):
         row3.addWidget(self.btn_clear_launch_site)
         row3.addStretch(1)
         lay.addLayout(row3)
+        # ── 預設場地（使用者 2026-10-17：嘉義亞創中心跑道北端、虎尾、桃園機場）────
+        #   單一事實來源 config.spawn_presets.SPAWN_PRESETS（SITL 出生點、settings map.default_site 同一份）。
+        #   按「套用」= 設成起降場 + 地圖飛過去 + SITL 出生點預設同步成同一場地（MainWindow 處理）。
+        from config.spawn_presets import SPAWN_PRESETS
+        row4 = QHBoxLayout()
+        row4.addWidget(QLabel("預設場地："))
+        self.site_preset_combo = QComboBox()
+        for p in SPAWN_PRESETS:
+            self.site_preset_combo.addItem(f"{p.label}（{p.lat:.5f}, {p.lon:.5f}）", userData=p.key)
+            self.site_preset_combo.setItemData(self.site_preset_combo.count() - 1,
+                                               f"{p.note}\n座標來源：{p.source or '未註明'}", Qt.ItemDataRole.ToolTipRole)
+        self.site_preset_combo.setToolTip("常用場地清單（與 SITL 出生點同一份）。按「套用為起降場」把它設成起降場並把目前的地圖移過去。")
+        row4.addWidget(self.site_preset_combo, 1)
+        self.btn_apply_site_preset = IconButton("pin", "套用為起降場", tone="primary", compact=True)
+        self.btn_apply_site_preset.setToolTip(
+            "把選到的場地設成起降場（各機起降坪排在這裡），目前顯示的地圖（2D 或 3D）移到該處；\n"
+            "SITL 出生點預設同步成同一場地（之後用地圖點選／清除起降場會改回「自動」）。")
+        self.btn_apply_site_preset.clicked.connect(self._emit_site_preset)
+        row4.addWidget(self.btn_apply_site_preset)
+        lay.addLayout(row4)
         self.clear_launch_site()
         return g
+
+    def _emit_site_preset(self) -> None:
+        self.launch_site_preset_requested.emit(str(self.site_preset_combo.currentData() or ""))
 
     # ── 起降場顯示（狀態在 MainWindow.home_point）────────────────
     def set_launch_site(self, lat: float, lon: float) -> None:
@@ -968,8 +993,9 @@ class VTOLReconPanel(QWidget):
             "向 Open-Meteo 抓作業區一帶 6×6 格點的模式預報風（不是實測；解析度約 1–11 km，地形與陣風不反映）。\n"
             "要網路；會送出作業區附近的格點經緯度。沒圈作業區時不能抓。")
         self.btn_wind_grid.setEnabled(False)
-        self.btn_wind_grid_clear = IconButton("clear", "清除網格", tone="ghost", compact=True)
+        self.btn_wind_grid_clear = IconButton("clear", "清除網格／測站", tone="ghost", compact=True)
         self.btn_wind_grid_clear.setEnabled(False)
+        self.btn_wind_grid_clear.setToolTip("把氣象網格與 CWA 測站觀測從地圖拿掉（規劃風欄位不會改回去）。")
         _wrow = QHBoxLayout()
         _wrow.setContentsMargins(0, 0, 0, 0)
         _wrow.addWidget(self.wind_show_plan_check)
@@ -986,12 +1012,46 @@ class VTOLReconPanel(QWidget):
         _gwrap = QWidget()
         _gwrap.setLayout(_grow)
         form.addRow("氣象網格:", _gwrap)
+        # CWA 自動氣象站（真的量測）：代碼／名稱，空白＝離作業區最近；授權碼只在 settings.json／環境變數
+        self.wind_cwa_station_edit = QLineEdit()
+        self.wind_cwa_station_edit.setPlaceholderText("測站代碼或名稱；空白＝離作業區最近的測站")
+        self.wind_cwa_station_edit.setToolTip(
+            "中央氣象署自動氣象站代碼（如 466920、C0A520）或測站名稱（全等優先、再包含）；空白時取離作業區中心最近、"
+            "有風值的站。\n授權碼放 config/settings.json 的 weather.cwa_api_key 或環境變數 CWA_API_KEY（不要寫進程式）。")
+        try:
+            from utils.cwa_opendata import configured_cwa_station
+            self.wind_cwa_station_edit.setText(configured_cwa_station())
+        except Exception:
+            pass
+        self.btn_wind_cwa = IconButton("radar", "抓 CWA 測站觀測", tone="primary", compact=True)
+        self.btn_wind_cwa.setToolTip(
+            "向中央氣象署開放資料抓該站最新一筆觀測（10 分鐘平均風、陣風、氣壓；地面測站風，標準觀測高度 10 m、"
+            "CWA 未公布各站實際離地高度，不是作業高度）。\n"
+            "要網路與授權碼；畫成測站位置的一支箭頭，並依下面的勾選寫入規劃風。")
+        _crow = QHBoxLayout()
+        _crow.setContentsMargins(0, 0, 0, 0)
+        _crow.addWidget(self.wind_cwa_station_edit, 1)
+        _crow.addWidget(self.btn_wind_cwa)
+        _cwrap = QWidget()
+        _cwrap.setLayout(_crow)
+        form.addRow("CWA 測站:", _cwrap)
+        self.wind_apply_plan_check = QCheckBox("抓到就寫入規劃風（平均風速／風向欄位）")
+        self.wind_apply_plan_check.setChecked(True)
+        self.wind_apply_plan_check.setToolTip(
+            "抓到 CWA 測站觀測或氣象網格後，把風速／來向寫進上面的「平均風速」「風向」欄位（規劃器用的就是那兩格）。\n"
+            "網格寫入的是全部格點的向量平均；測站寫入的是 10 m 高的 10 分鐘平均風。寫入後狀態列會寫明來源，"
+            "你隨時可以再手動改。")
+        form.addRow("", self.wind_apply_plan_check)
         self.wind_status_label = QLabel("")
         self.wind_status_label.setWordWrap(True)
         self.wind_status_label.setProperty("role", "caption")
         form.addRow("", self.wind_status_label)
         self._wind_grid_busy = False
         self._wind_grid_loaded = False
+        self._wind_cwa_busy = False
+        self.btn_wind_cwa.clicked.connect(
+            lambda: self.wind_cwa_requested.emit({"station": self.wind_cwa_station_edit.text().strip()}))
+        self.wind_cwa_station_edit.textChanged.connect(lambda _t: self._sync_wind_buttons())
         self.wind_show_plan_check.toggled.connect(self._emit_wind_display)
         self.wind_show_live_check.toggled.connect(self._emit_wind_display)
         self.hv_wind_speed_spin.valueChanged.connect(self._emit_wind_display)
@@ -2010,30 +2070,71 @@ class VTOLReconPanel(QWidget):
                 "live": bool(self.wind_show_live_check.isChecked()),
                 "speed_mps": float(self.hv_wind_speed_spin.value()),
                 "dir_from_deg": float(self.hv_wind_dir_spin.value()),
-                "grid_height": str(self.wind_grid_height_combo.currentData())}
+                "grid_height": str(self.wind_grid_height_combo.currentData()),
+                "apply_plan": bool(self.wind_apply_plan_check.isChecked()),
+                "cwa_station": self.wind_cwa_station_edit.text().strip()}
 
     def _emit_wind_display(self, *_a) -> None:
         self.wind_display_changed.emit(self.get_wind_display())
 
-    def set_wind_grid_busy(self, busy: bool, text: str = "") -> None:
+    def wind_apply_to_plan_enabled(self) -> bool:
+        return bool(self.wind_apply_plan_check.isChecked())
+
+    def apply_wind_to_plan(self, speed_mps: float, dir_from_deg: float, source: str) -> dict:
+        """把抓到的風寫進規劃器用的「平均風速」「風向」欄位（有效值就是這兩格；狀態列寫明來源）。
+
+        超出欄位範圍會被**夾住並回報**（clamped=True），不會靜默吃掉；非有限值直接丟錯。
+        """
+        s, d = float(speed_mps), float(dir_from_deg)
+        if not (math.isfinite(s) and math.isfinite(d)):
+            raise ValueError(f"要寫入規劃風的值不合法：{speed_mps!r}, {dir_from_deg!r}")
+        d = d % 360.0
+        s_eff = min(max(s, self.hv_wind_speed_spin.minimum()), self.hv_wind_speed_spin.maximum())
+        d_round = float(round(d)) % 360.0                     # 359.6 → 360 → 0°（欄位只到 359）
+        d_eff = min(max(d_round, self.hv_wind_dir_spin.minimum()), self.hv_wind_dir_spin.maximum())
+        clamped = abs(s_eff - s) > 1e-9 or abs(d_eff - d_round) > 1e-9
+        self.hv_wind_speed_spin.setValue(s_eff)
+        self.hv_wind_dir_spin.setValue(d_eff)
+        s_eff, d_eff = float(self.hv_wind_speed_spin.value()), float(self.hv_wind_dir_spin.value())
+        text = f"規劃風已寫入：{s_eff:.1f} m/s 來自 {d_eff:.0f}°（來源：{source}）"
+        if clamped:
+            text += f"；⚠ 原值 {s:.1f} m/s／{d:.0f}° 超出欄位範圍，已夾到欄位上下限"
+        self.wind_status_label.setText(text)
+        return {"speed_mps": s_eff, "dir_from_deg": d_eff, "clamped": clamped, "text": text}
+
+    # 下面三個只管旗標與按鈕；text 給了才改狀態文字（MainWindow 自己用 set_wind_status 組合多行狀態）
+    def set_wind_grid_busy(self, busy: bool, text=None) -> None:
         """抓取中：鎖住按鈕；結束（成功／失敗）再放開。"""
         self._wind_grid_busy = bool(busy)
         self._sync_wind_buttons()
-        self.wind_status_label.setText(text)
+        if text is not None:
+            self.wind_status_label.setText(text)
 
-    def set_wind_grid_loaded(self, loaded: bool, text: str = "") -> None:
-        """有沒有網格在圖上（決定「清除網格」能不能按）。"""
+    def set_wind_cwa_busy(self, busy: bool, text=None) -> None:
+        self._wind_cwa_busy = bool(busy)
+        self._sync_wind_buttons()
+        if text is not None:
+            self.wind_status_label.setText(text)
+
+    def set_wind_grid_loaded(self, loaded: bool, text=None) -> None:
+        """有沒有網格／測站在圖上（決定「清除網格／測站」能不能按）。"""
         self._wind_grid_loaded = bool(loaded)
         self._sync_wind_buttons()
-        self.wind_status_label.setText(text)
+        if text is not None:
+            self.wind_status_label.setText(text)
 
     def set_wind_status(self, text: str) -> None:
         self.wind_status_label.setText(text)
 
     def _sync_wind_buttons(self) -> None:
         _has_area = (self._corner_count >= 3 or getattr(self, "_committed_areas", 0) >= 1)
-        self.btn_wind_grid.setEnabled(bool(_has_area and not self._wind_grid_busy))
-        self.btn_wind_grid_clear.setEnabled(bool(self._wind_grid_loaded and not self._wind_grid_busy))
+        busy = self._wind_grid_busy or getattr(self, "_wind_cwa_busy", False)
+        self.btn_wind_grid.setEnabled(bool(_has_area and not busy))
+        self.btn_wind_grid_clear.setEnabled(bool(self._wind_grid_loaded and not busy))
+        # CWA：有填測站就不需要作業區；沒填才要作業區（找最近）
+        _cwa = getattr(self, "btn_wind_cwa", None)
+        if _cwa is not None:
+            _cwa.setEnabled(bool(not busy and (_has_area or self.wind_cwa_station_edit.text().strip())))
 
     # ── 找平坦位置 ──────────────────────────────────────────
     def get_flat_request(self) -> dict:

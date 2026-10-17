@@ -189,7 +189,7 @@ def test_3d_adapter_projects_the_area_centre_near_the_screen_centre_and_hides_th
                 key: a.viewKey(), w: viewer.canvas.clientWidth, h: viewer.canvas.clientHeight }}; }}""")
     assert r["c"] is not None and abs(r["c"]["x"] - r["w"] / 2) < 40 and abs(r["c"]["y"] - r["h"] / 2) < 40, r
     assert r["far"] is None, "地球背面的點要回 null"
-    assert "|" in r["key"] and "x" in r["key"].split("|")[-1]
+    assert "|" in r["key"] and f"{r['w']}x{r['h']}" in r["key"], "viewKey 要含畫布尺寸（改尺寸要重投影）"
 
 
 def test_3d_field_draws_particles_over_the_area_and_the_view_key_follows_the_camera(page3d):

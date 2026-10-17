@@ -29,7 +29,86 @@ __all__ = [
     'NAV_CMD_MIN', 'NAV_CMD_MAX', 'LOITER_COMMANDS',
     'is_navigational', 'mission_to_path_2d', 'mission_to_path_3d',
     'mission_home', 'mission_loiters', 'mission_summary',
+    'FC_MISSION_DEFAULT_COLOR', 'SYSID_PALETTE', 'sysid_color', 'fc_mission_label',
+    'FC_DEFAULT_LAYER', 'fc_layer_key', 'fc_layer_selector', 'fc_layer_matches',
 ]
+
+# ── 多機任務疊圖的配色（2D / 3D / 對話框共用，所以放在純 Python 這一層）──
+# 沒有 sysid（「讀回飛控那一份」的舊語意）維持原本的青色；有 sysid 就依 sysid
+# 取色，和 2D 群飛圖層 `MapWidget._DRONE_COLORS` 同一套（Drone 1 紅、2 藍、3 綠…），
+# 使用者在兩種圖上看到同一架是同一個顏色。
+FC_MISSION_DEFAULT_COLOR = '#00E5FF'
+SYSID_PALETTE = (
+    '#E53935',  # 1 紅
+    '#1E88E5',  # 2 藍
+    '#43A047',  # 3 綠
+    '#FB8C00',  # 4 橙
+    '#8E24AA',  # 5 紫
+    '#00ACC1',  # 6 青
+    '#FDD835',  # 7 黃
+    '#6D4C41',  # 8 棕
+)
+
+
+def sysid_color(sysid) -> str:
+    """sysid → 色碼；None ⇒ 預設青色。同一個 sysid 永遠同一色（1 起算、循環）。"""
+    if sysid is None:
+        return FC_MISSION_DEFAULT_COLOR
+    return SYSID_PALETTE[(int(sysid) - 1) % len(SYSID_PALETTE)]
+
+
+def fc_mission_label(sysid, label=None) -> str:
+    """圖層／tooltip 的文字：給了 label 就用它，否則 `UAV-<sysid> 任務`，沒有 sysid 是 `FC Mission`。"""
+    if label:
+        return str(label)
+    return f'UAV-{int(sysid)} 任務' if sysid is not None else 'FC Mission'
+
+
+# ── 任務疊圖的圖層鍵（2D `window._fcMissionLayers` 與 3D `_missionLayers` **同一套**）──
+# 鍵只在這裡算，兩張圖都從這裡拿，所以不可能各自發明而分岔。
+#   (None, None) → 'fc'               舊語意：讀回飛控那一份；畫之前把**所有**層清掉
+#   (n,    None) → 'uav<n>'           某一架的讀回
+#   (n,    kind) → 'uav<n>-<kind>'    某一架的某一類（'uav3-import' = 匯入預覽）
+#   (None, kind) → '<kind>'           不屬於任何一架的一類（'loaded' = 單檔載入）；**不**清別層
+# 以前讀回與匯入預覽都落在 'uav<n>' 互相蓋掉、單檔載入落在 (None, None) 把每一層都洗掉。
+FC_DEFAULT_LAYER = 'fc'
+
+
+def _norm_kind(kind):
+    if kind is None:
+        return None
+    k = str(kind).strip()
+    if not k:
+        raise ValueError('kind 不可以是空字串（要嘛 None、要嘛像 "import"/"loaded" 這樣的類別名）')
+    return k
+
+
+def fc_layer_key(sysid=None, kind=None) -> str:
+    """(sysid, kind) → 圖層鍵；規則見上面的表。空字串的 kind 是 ValueError。"""
+    kind = _norm_kind(kind)
+    if sysid is None:
+        return FC_DEFAULT_LAYER if kind is None else kind
+    return f'uav{int(sysid)}' if kind is None else f'uav{int(sysid)}-{kind}'
+
+
+def fc_layer_selector(sysid=None, kind=None) -> Tuple:
+    """clear 用的 `(exact, prefix)`：
+      (None, None) → (None, None)            全部
+      (n,    None) → ('uav<n>', 'uav<n>-')   整架：讀回那層＋該架所有 kind
+      其他         → (key, None)              恰好那一層
+    """
+    if sysid is None and kind is None:
+        return None, None
+    key = fc_layer_key(sysid, kind)
+    return key, (f'{key}-' if kind is None else None)
+
+
+def fc_layer_matches(key: str, sysid=None, kind=None) -> bool:
+    """`key` 是不是 `clear_fc_mission(sysid, kind)` 該清掉的層（與 `fc_layer_selector` 同一條規則）。"""
+    exact, prefix = fc_layer_selector(sysid, kind)
+    if exact is None:
+        return True
+    return key == exact or (prefix is not None and str(key).startswith(prefix))
 
 # MAVLink 規範：MAV_CMD_NAV_* 佔 16..95（MAV_CMD_NAV_LAST = 95）。
 # 只有這個區間的指令帶真實的 x/y/z；DO_*(176+) 與 CONDITION_*(112+) 的

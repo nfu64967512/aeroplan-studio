@@ -127,7 +127,7 @@ def js_call(fn: str, *args: Any) -> str:
 #  頁面膠水：兩個頁面各自提供 adapter（投影＋視角鍵），其餘交給引擎
 # ─────────────────────────────────────────────────────────────────────
 _GLUE_COMMON = r"""
-var _windLayer = null, _windField = null, _windArrows = [], _windOpts = {limitMps: __LIMIT__};
+var _windLayer = null, _windField = null, _windArrows = [], _windOpts = {limitMps: __LIMIT__, legendMargin: __LEGEND__};
 function _windEnsure() {
   if (_windLayer) return _windLayer;
   if (!window.AeroWind || typeof window.AeroWind.create !== 'function') {
@@ -136,6 +136,7 @@ function _windEnsure() {
   }
   _windLayer = window.AeroWind.create(_windHost(), _windAdapter());
   _windLayer.setOptions(_windOpts);
+  if (typeof _windAfterCreate === 'function') { try { _windAfterCreate(_windLayer); } catch (e) { console.error('[Wind] 頁面掛勾失敗', e); } }
   return _windLayer;
 }
 function setWindField(field) {
@@ -172,7 +173,7 @@ function _windAdapter() {
   var map = window.currentMap;
   return {
     project: function (lat, lon, h) {
-      var p = map.latLngToContainerPoint([lat, lon]);
+      var p = map.latLngToContainerPoint([lat, lon]);          // 畫面外照樣回座標（引擎要靠它找可見區）
       return (isFinite(p.x) && isFinite(p.y)) ? { x: p.x, y: p.y } : null;
     },
     viewKey: function () {
@@ -181,32 +182,43 @@ function _windAdapter() {
     }
   };
 }
+function _windAfterCreate(L_) {
+  // Leaflet 縮放動畫（約 250 ms）用 CSS 縮放圖磚窗格、引擎的 canvas 不會跟著縮 ⇒ 粒子錯位；動畫期間先藏起來
+  var map = window.currentMap;
+  map.on('zoomstart', function () { L_.setOptions({visible: false}); });
+  map.on('zoomend', function () { L_.setOptions({visible: true}); });
+}
 """
 
 _GLUE_CESIUM = r"""
 function _windHost() { return viewer.container; }
 function _windAdapter() {
-  var scratch = new Cesium.Cartesian2();
+  var scene = viewer.scene, camera = scene.camera, ell = scene.globe.ellipsoid, ST = Cesium.SceneTransforms;
+  var toWin = ST.wgs84ToWindowCoordinates || ST.worldToWindowCoordinates;   // 1.115 是前者，新版改名
+  var occ = new Cesium.EllipsoidalOccluder(ell, Cesium.Cartesian3.ZERO);
+  var cart = new Cesium.Cartesian3(), win = new Cesium.Cartesian2();
   return {
     project: function (lat, lon, h) {
-      var c = Cesium.Cartesian3.fromDegrees(lon, lat, h || 0);
-      var p = Cesium.SceneTransforms.wgs84ToWindowCoordinates(viewer.scene, c, scratch);
-      if (!p || !isFinite(p.x) || !isFinite(p.y)) return null;
-      // 被地球擋住（背面）的點不畫：相機到點的向量與地表法線同向 ⇒ 在背面
-      var cam = viewer.camera.positionWC;
-      var n = Cesium.Cartesian3.normalize(c, new Cesium.Cartesian3());
-      var toCam = Cesium.Cartesian3.subtract(cam, c, new Cesium.Cartesian3());
-      if (Cesium.Cartesian3.dot(n, toCam) < 0) return null;
-      return { x: p.x, y: p.y };
+      var p = Cesium.Cartesian3.fromDegrees(lon, lat, h || 0, ell, cart);
+      if (scene.mode === Cesium.SceneMode.SCENE3D) {
+        occ.cameraPosition = camera.positionWC;
+        if (!occ.isPointVisible(p)) return null;             // 地球背面
+      }
+      var w = toWin.call(ST, scene, p, win);                 // 相機後方 ⇒ undefined
+      return (w && isFinite(w.x) && isFinite(w.y)) ? { x: w.x, y: w.y } : null;   // 畫面外照樣回座標
     },
     viewKey: function () {
-      var cam = viewer.camera, p = cam.positionWC, cv = viewer.canvas;
-      return p.x.toFixed(1) + ',' + p.y.toFixed(1) + ',' + p.z.toFixed(1) + '|' + cam.heading.toFixed(4) + ','
-           + cam.pitch.toFixed(4) + ',' + cam.roll.toFixed(4) + '|' + cv.clientWidth + 'x' + cv.clientHeight;
+      var c = camera.positionWC, d = camera.directionWC, u = camera.upWC, cv = scene.canvas;
+      return [c.x.toFixed(2), c.y.toFixed(2), c.z.toFixed(2), d.x.toFixed(6), d.y.toFixed(6), d.z.toFixed(6),
+              u.x.toFixed(6), u.y.toFixed(6), u.z.toFixed(6), cv.clientWidth + 'x' + cv.clientHeight, scene.mode].join('|');
     }
   };
 }
+function _windAfterCreate(L_) {}
 """
+
+#: 圖例位置（[離角落水平 px, 垂直 px]）：2D 右上有 Leaflet 圖層控制、3D 右上有 #toolbar，各自讓開
+LEGEND_MARGIN = {'leaflet': [10, 60], 'cesium': [140, 8]}
 
 
 def glue_js(kind: str, *, limit_mps: float = WIND_LIMIT_MPS_DEFAULT) -> str:
@@ -220,7 +232,7 @@ def glue_js(kind: str, *, limit_mps: float = WIND_LIMIT_MPS_DEFAULT) -> str:
     lim = float(limit_mps)
     if not (math.isfinite(lim) and lim > 0):
         raise ValueError(f'風速上限不合法：{limit_mps!r}')
-    return adapter + _GLUE_COMMON.replace('__LIMIT__', repr(lim))
+    return adapter + _GLUE_COMMON.replace('__LIMIT__', repr(lim)).replace('__LEGEND__', json.dumps(LEGEND_MARGIN[kind]))
 
 
 def restore_js(field: dict | None, rows: list | None, options: dict | None) -> str:

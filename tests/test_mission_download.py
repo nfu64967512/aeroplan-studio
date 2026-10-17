@@ -386,10 +386,17 @@ class TestEveryLinkSignalMainWindowConnectsExists:
             '症狀會是「送得出去但畫面永遠不動」，而且完全靜默。' % missing)
 
     @pytest.mark.parametrize('sig', ['mission_downloaded',
-                                     'mission_download_failed'])
+                                     'mission_download_failed',
+                                     # 2026-10-17 日誌下載五個信號：少接任何一個就是「下載會完成但畫面永遠不動」
+                                     'log_list', 'log_list_failed',
+                                     'log_download_progress', 'log_download_done',
+                                     'log_download_failed'])
     def test_download_signals_are_connected(self, sig):
-        assert f'link.{sig}.connect(' in self.SRC, (
-            f'{sig} 沒有接 ⇒ 下載會完成，但沒有人在聽（ParamService 形狀）')
+        # 只數**非註解**行，而且恰好一次（接兩次 ⇒ 每筆回報處理兩遍）
+        n = len(re.findall(rf'^\s*link\.{sig}\.connect\(', self.SRC, re.M))
+        assert n == 1, (
+            f'{sig} 接了 {n} 次（要恰好 1 次）⇒ 0 次是「下載會完成，但沒有人在聽」'
+            '（ParamService 形狀），2 次是每筆回報處理兩遍')
 
     def test_signals_carry_a_payload(self):
         """零參數的 signal 會逼呼叫端反查狀態，而反查的來源就是競爭。"""

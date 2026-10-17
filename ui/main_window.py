@@ -735,6 +735,46 @@ def mapping_tlog_path(callsign: str, when=None):
     return _PROJECT_ROOT / 'runs' / 'survey' / t.strftime('%Y%m%d') / f'{callsign}_{t.strftime("%H%M%S")}.tlog'
 
 
+def flight_log_path(callsign: str, log_id: int, time_utc: int = 0, when=None):
+    """飛控 DataFlash 日誌（.bin）落地路徑：runs/flight_logs/<YYYYMMDD>/<callsign>_log<id>_<HHMMSS>.bin。
+
+    日期時間優先用飛控給的 ``LOG_ENTRY.time_utc``（該份日誌的開始時間，UTC 秒；轉成本地時間），
+    飛控沒有 GPS 時間（0）就用現在。⚠ ``log_id`` 是「從最舊起算的序號」，開機刪舊檔會前移，
+    所以檔名同時帶時間；SITLLink 那邊存檔遇到同名會自動加 _2/_3，永不覆蓋。
+    """
+    import datetime as _dt
+    if int(time_utc or 0) > 0:
+        t = _dt.datetime.fromtimestamp(int(time_utc))
+    else:
+        t = when or _dt.datetime.now()
+    return (_PROJECT_ROOT / 'runs' / 'flight_logs' / t.strftime('%Y%m%d')
+            / f'{callsign}_log{int(log_id)}_{t.strftime("%H%M%S")}.bin')
+
+
+def _forget_log_state(win, sysid=None) -> None:
+    """清掉主視窗的日誌下載等待狀態與解鎖紀錄：sysid=None 全清，否則只清那一架。
+
+    模組層函式而不是方法：三個呼叫點（逐機斷線、全域斷線、HIL 斷開全部）在測試裡都是用
+    假 self 跑的，假 self 沒有這個方法；直接讀 `__dict__` 則讓沒有這兩欄的假 self 也能過。
+    """
+    for key in ('_log_dl', '_armed_state'):
+        d = win.__dict__.get(key)
+        if not d:
+            continue
+        if sysid is None:
+            d.clear()
+        else:
+            d.pop(int(sysid), None)
+
+
+def pick_latest_log(entries) -> dict | None:
+    """``log_list`` 的項目裡挑「最新一份」：id 最大（飛控的序號依時間遞增）；空清單回 None。"""
+    rows = [e for e in (entries or []) if isinstance(e, dict) and 'id' in e]
+    if not rows:
+        return None
+    return max(rows, key=lambda e: (int(e.get('id', 0)), int(e.get('time_utc', 0) or 0)))
+
+
 def assign_links_to_uavs(links, uav_ids):
     """鏈路 → UAV 對應（與既有上傳同一規則）：sysid 等於某 UAV id 就用它，否則給尚未用過的最小 id。
 
@@ -1840,6 +1880,13 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         self.sitl_hud.cmd_load_wp.connect(self.on_sitl_load_wp_file)
         self.sitl_hud.cmd_write_wp.connect(self.on_sitl_write_wp)
         self.sitl_hud.cmd_save_wp.connect(self.on_sitl_save_wp_file)
+        # 多檔匯入（每檔指派一架）→ 逐機寫入；寫入仍走 on_sitl_write_wp 同一套守衛
+        self.sitl_hud.cmd_import_wps.connect(self.on_import_waypoints)
+        self.sitl_hud.cmd_write_imported.connect(self.on_sitl_write_imported)
+        # 飛完後下載每台的 .bin（逐機 / 全部 / 取消）
+        self.sitl_hud.cmd_log_download.connect(self._start_log_download)
+        self.sitl_hud.cmd_log_download_all.connect(self._start_log_download_all)
+        self.sitl_hud.cmd_log_cancel.connect(self._cancel_log_download)
         self.sitl_hud.cmd_upload_fence.connect(self.on_sitl_upload_fence)
         self.sitl_hud.cmd_auto_start.connect(lambda: self._sitl_broadcast('auto_start'))
         self.sitl_hud.cmd_guided_takeoff.connect(
@@ -1907,6 +1954,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         # 起降場 = home_point（與固定翼「起飛點」同一份狀態）；VTOL 偵察規劃前必選
         self.vtol_recon_panel.pick_launch_site_requested.connect(self.on_pick_home_point)
         self.vtol_recon_panel.clear_launch_site_requested.connect(self.on_clear_home_point)
+        self.vtol_recon_panel.launch_site_preset_requested.connect(self._on_launch_site_preset)
         self.vtol_recon_panel.delete_last_corner_requested.connect(
             self.on_delete_last_corner)
         # 自動建構的電子圍籬狀態也餵給 VTOL 面板 —— 否則地圖上明明畫著圍籬，
@@ -1925,6 +1973,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         self.vtol_recon_panel.wind_display_changed.connect(self._on_wind_display_changed)
         self.vtol_recon_panel.wind_grid_requested.connect(self._on_wind_grid_requested)
         self.vtol_recon_panel.wind_grid_clear_requested.connect(self._on_wind_grid_clear)
+        self.vtol_recon_panel.wind_cwa_requested.connect(self._on_wind_cwa_requested)
         self.vtol_recon_panel.verify_coverage_requested.connect(
             self._on_vtol_recon_verify)
         self.vtol_recon_panel.show_missed_requested.connect(
@@ -1979,6 +2028,9 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         self._write_pending_sysids: set = set()
         # 上次「載入/存成航點檔」對話框停留的目錄；純 UI 便利，不是任何正確性契約。
         self._last_wp_dir: str = ''
+        # 「多檔匯入」的結果：{sysid: ImportedMission}。跟 _loaded_mission 分開放——
+        # 那份是「HUD 指令對象是誰就寫誰」，這裡每份都綁死一個 sysid（見 on_sitl_write_imported）。
+        self._imported_missions: dict = {}
         self._hil_links: list = []    # HIL 實體飛控鏈路（_sitl_links 的子集）
         self._sitl_launcher = None
         
@@ -2144,7 +2196,12 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         action = file_menu.addAction("匯出航點")
         action.setShortcut(QKeySequence("Ctrl+E"))
         action.triggered.connect(self.on_export_waypoints)
-        
+
+        action = file_menu.addAction("匯入航點檔（多檔 → 每架一份）…")
+        action.setShortcut(QKeySequence("Ctrl+I"))
+        action.setStatusTip("選多個 .waypoints / .plan，每檔指派給一架 UAV 預覽；寫入飛控要另外按 HUD 的「寫入每架匯入的任務」")
+        action.triggered.connect(self.on_import_waypoints)
+
         file_menu.addSeparator()
         
         action = file_menu.addAction("退出")
@@ -2364,8 +2421,18 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         self.parameter_panel.set_home_point_display(lat, lon)
         self._sync_launch_site_display()
         self.map_widget.set_home_point_overlay(lat, lon)
+        self._reset_sitl_home_preset()
         self.statusBar().showMessage(f"起飛點已設定: ({lat:.6f}, {lon:.6f})", 5000)
         logger.info(f"起飛點設定: ({lat:.6f}, {lon:.6f})")
+
+    def _reset_sitl_home_preset(self) -> None:
+        """起降場被（地圖點選／清除）改動 ⇒ SITL 出生點預設改回「自動」（無任務時生在 home_point），
+        否則之前套用的場地預設會讓 SITL 生在舊場地、起降場卻在新位置。"""
+        try:
+            from config.settings import get_settings
+            get_settings().sitl_launch.home_preset = ''
+        except Exception as e:                               # noqa: BLE001
+            logger.warning(f'[起降場] 清除 SITL 出生點預設失敗：{e}')
 
     def on_clear_home_point(self):
         """清除起飛點"""
@@ -2375,8 +2442,42 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         self._sync_launch_site_display()
         if hasattr(self.map_widget, 'clear_home_point_overlay'):
             self.map_widget.clear_home_point_overlay()
+        self._reset_sitl_home_preset()
         self.statusBar().showMessage("起飛點已清除", 3000)
         logger.info("起飛點已清除")
+
+    SITE_PRESET_VIEW_RANGE_M = 1500.0   # 套用預設場地後地圖飛過去的視距
+
+    def _on_launch_site_preset(self, key: str) -> None:
+        """面板「預設場地 → 套用為起降場」：設 home_point、地圖飛過去，SITL 出生點預設也同步成同一場地。
+
+        場地清單只有一份（config.spawn_presets.SPAWN_PRESETS）；不認得的 key 不做任何事、大聲說。
+        """
+        from config.spawn_presets import get_preset_by_key
+        p = get_preset_by_key(key)
+        if p is None:
+            self.statusBar().showMessage(f'沒有這個場地預設：{key!r}（起降場未變）', 8000)
+            logger.warning(f'[場地預設] 找不到 key={key!r}，起降場未變')
+            return
+        self.on_home_point_set(p.lat, p.lon)
+        moved = False
+        fly = getattr(self.map_widget, 'fly_to_position', None)
+        if fly is not None:
+            try:
+                moved = bool(fly(p.lat, p.lon, 0.0, self.SITE_PRESET_VIEW_RANGE_M))
+            except Exception as e:                           # noqa: BLE001 - 地圖飛不過去不該讓起降場設定失敗
+                logger.warning(f'[場地預設] 地圖飛到 {p.label} 失敗：{e}')
+        # SITL 啟動對話框的「出生地點」預設跟著同一場地（on_home_point_set 剛把它清成「自動」，這裡再設成本場地；
+        # 之後用地圖點選／清除起降場會再清回「自動」，SITL 就生在 home_point）。對話框「儲存為預設」勾著時會存進 settings.json。
+        try:
+            from config.settings import get_settings
+            get_settings().sitl_launch.home_preset = p.key
+        except Exception as e:                               # noqa: BLE001
+            logger.warning(f'[場地預設] 同步 SITL 出生點預設失敗：{e}')
+        self.statusBar().showMessage(f'起降場已設為「{p.label}」：{p.lat:.6f}, {p.lon:.6f}；{p.note}'
+                                     + ('' if moved else '（地圖未移動）'), 10000)
+        logger.info(f'[場地預設] {p.key} → 起降場 ({p.lat:.6f}, {p.lon:.6f}) 海拔 {p.alt_m:.0f} m 航向 {p.heading:.1f}°；'
+                    f'來源：{p.source or "未註明"}')
 
     # ═════════════════════════════════════════════════════════════
     #  蜂群打擊面板（VTOL 全任務生命週期）— 浮動對話框整合
@@ -2565,12 +2666,24 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
     WIND_LIVE_STALE_S = 10.0             # 超過這麼久沒收到 WIND 的機不再畫箭頭
     WIND_PLAN_SYSID = 0                  # 規劃風箭頭用的代號（真機 sysid 從 1 起）
     WIND_GRID_MARGIN_M = 500.0           # 網格／均勻場範圍 = 作業區外擴這麼多
+    WIND_CWA_SYSID = -1                  # CWA 測站觀測箭頭用的代號（真機 sysid 從 1 起、規劃風 0）
 
     def _wind_state(self) -> dict:
         st = self.__dict__.get('_wind')
         if st is None:
-            st = self.__dict__['_wind'] = {'live': {}, 'grid': None, 'grid_text': '', 'last_push': 0.0}
+            st = self.__dict__['_wind'] = {'live': {}, 'grid': None, 'grid_text': '', 'cwa': None, 'cwa_text': '',
+                                           'plan_text': '', 'plan_applied': None, 'plan_source': '',
+                                           'plan_writing': False, 'note_text': '', 'last_push': 0.0}
         return st
+
+    def _wind_note(self, text: str) -> None:
+        """抓取中／失敗／拒絕這類一次性的提示：放在狀態列第一行，不會被下一次即時風推送蓋掉。"""
+        self._wind_state()['note_text'] = str(text or '')
+        self._refresh_wind_status()
+
+    def _wind_loaded(self) -> bool:
+        st = self._wind_state()
+        return st.get('grid') is not None or st.get('cwa') is not None
 
     def _wind_display(self) -> dict:
         panel = getattr(self, 'vtol_recon_panel', None)
@@ -2621,6 +2734,9 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                              'lon': 0.5 * (bbox[1] + bbox[3]), 'alt_rel': 0.0,
                              'dir_from_deg': disp['dir_from_deg'], 'speed_mps': disp['speed_mps'],
                              'label': '規劃風（面板假設）'})
+        obs = st.get('cwa')
+        if obs is not None and obs.has_wind():
+            rows.append(obs.to_arrow(self.WIND_CWA_SYSID))
         return rows
 
     def _push_wind_arrows(self, now: float | None = None) -> None:
@@ -2636,7 +2752,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             else:
                 self.map_widget.clear_wind_arrows()
         live = [f"UAV-{r['sysid']} {r['speed_mps']:.1f} m/s 來自 {r['dir_from_deg']:.0f}°"
-                for r in rows if r['sysid'] != self.WIND_PLAN_SYSID]
+                for r in rows if r['sysid'] > 0]
         st['live_text'] = ('即時風（EKF 估計）：' + '；'.join(live)) if live else ''
         self._refresh_wind_status()
 
@@ -2646,7 +2762,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         if set_status is None:
             return
         st = self._wind_state()
-        set_status('\n'.join(t for t in (st.get('grid_text'), st.get('live_text')) if t))
+        set_status('\n'.join(t for t in (st.get('note_text'), st.get('grid_text'), st.get('cwa_text'),
+                                         st.get('plan_text'), st.get('live_text')) if t))
 
     def _refresh_wind_field(self) -> None:
         """流動層：有網格就畫網格；否則勾了規劃風就畫均勻場；否則清掉。"""
@@ -2676,7 +2793,24 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             fn(limitMps=self._wind_limit_mps())
 
     def _on_wind_display_changed(self, _d: dict | None = None) -> None:
-        """面板勾選或規劃風值變了：選項、流動層、箭頭全部重推。"""
+        """面板勾選或規劃風值變了：選項、流動層、箭頭全部重推。
+
+        規劃風曾由外部來源寫入、之後使用者手改欄位 ⇒ 狀態列不能再宣稱「已寫入 X 來自 CWA」（有效值契約：
+        回報的必須是生效值）；改寫成「已手動改為…（原寫入值已被覆蓋）」。寫入當下 setValue 的同步回呼用 plan_writing 擋掉。
+        """
+        st = self._wind_state()
+        applied = st.get('plan_applied')
+        if applied is not None and not st.get('plan_writing'):
+            disp = self._wind_display()
+            try:
+                s, d = float(disp.get('speed_mps', 0.0)), float(disp.get('dir_from_deg', 0.0))
+            except (TypeError, ValueError):
+                s, d = float('nan'), float('nan')
+            if not (abs(s - applied[0]) <= 1e-9 and abs(d - applied[1]) <= 1e-9):
+                st['plan_text'] = (f"規劃風已手動改為 {s:.1f} m/s 來自 {d:.0f}°（原由 {st.get('plan_source') or '外部來源'} 寫入的 "
+                                   f"{applied[0]:.1f} m/s／{applied[1]:.0f}° 已被覆蓋）")
+                st['plan_applied'] = None
+                logger.info(f"[風場] {st['plan_text']}")
         self._apply_wind_options()
         self._refresh_wind_field()
         self._push_wind_arrows()
@@ -2687,7 +2821,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         panel = self.vtol_recon_panel
         bbox = self._wind_area_bbox()
         if bbox is None:
-            panel.set_wind_grid_busy(False, f"請先圈好作業區（網格範圍 = 作業區外擴 {self.WIND_GRID_MARGIN_M:.0f} m）")
+            panel.set_wind_grid_busy(False)
+            self._wind_note(f"請先圈好作業區（網格範圍 = 作業區外擴 {self.WIND_GRID_MARGIN_M:.0f} m）")
             return
         old = getattr(self, '_wind_worker', None)
         if old is not None and old.isRunning():
@@ -2699,7 +2834,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             except RuntimeError:
                 pass
         height = str((req or {}).get('height') or '10m')
-        panel.set_wind_grid_busy(True, f"抓取 Open-Meteo {height} 風場中…（要網路，約 1–3 秒）")
+        panel.set_wind_grid_busy(True)
+        self._wind_note(f"抓取 Open-Meteo {height} 風場中…（要網路，約 1–3 秒）")
         # parent=None：視窗關閉時由 closeEvent 等它跑完（在還在跑的 QThread 上跑解構子是 qFatal）
         self._wind_worker = WindGridWorker(bbox, height=height, parent=None)
         self._wind_worker.finished_ok.connect(self._on_wind_grid_done)
@@ -2711,26 +2847,155 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         st = self._wind_state()
         st['grid'] = field
         st['grid_text'] = field.label + (('；' + '；'.join(field.notes)) if field.notes else '')
+        st['note_text'] = ''
         logger.info(f"[氣象網格] 完成：{field.label}；最大 {field.max_speed():.1f} m/s")
         self.vtol_recon_panel.set_wind_grid_busy(False)
-        self.vtol_recon_panel.set_wind_grid_loaded(True, st['grid_text'])
+        self.vtol_recon_panel.set_wind_grid_loaded(True)
         self._refresh_wind_status()
         self._apply_wind_options()
         self._refresh_wind_field()
+        # 使用者 2026-10-16：讀到的風也要寫進規劃器 ⇒ 網格的向量平均寫進「平均風速／風向」（面板勾選控制）
+        if self._wind_display().get('apply_plan'):
+            from core.wind_field import field_mean_wind
+            m = field_mean_wind(field)
+            if m is None:
+                self.statusBar().showMessage('氣象網格沒有有效格點，規劃風未寫入', 8000)
+            else:
+                self._apply_wind_to_plan(m[0], m[1], f"Open-Meteo {field.height_m:.0f} m 網格 {m[2]} 格向量平均，"
+                                                      f"{field.time_utc or '時間未知'} UTC（模式預報，非實測）")
 
     def _on_wind_grid_failed(self, msg: str) -> None:
-        st = self._wind_state()
         self.vtol_recon_panel.set_wind_grid_busy(False)
-        self.vtol_recon_panel.set_wind_grid_loaded(st['grid'] is not None, f"⚠ {msg}")
+        self.vtol_recon_panel.set_wind_grid_loaded(self._wind_loaded())
+        self._wind_note(f'⚠ 氣象網格：{msg}')
         self.statusBar().showMessage(f'氣象網格抓取失敗：{msg}', 10000)
 
     def _on_wind_grid_clear(self) -> None:
+        """清掉氣象網格與 CWA 測站觀測（規劃風欄位不改回去：那是使用者看得到、可以自己改的值；狀態列留著來源，
+        之後手改欄位會自動改寫成「已手動改為」）。"""
         st = self._wind_state()
         st['grid'] = None
         st['grid_text'] = ''
-        self.vtol_recon_panel.set_wind_grid_loaded(False, '')
+        st['cwa'] = None
+        st['cwa_text'] = ''
+        st['note_text'] = ''
+        self.vtol_recon_panel.set_wind_grid_loaded(False)
         self._refresh_wind_status()
         self._refresh_wind_field()
+        self._push_wind_arrows()
+
+    # ── CWA 自動氣象站觀測（真的量測）→ 測站箭頭 ＋ 寫入規劃風 ──────────────────
+    def _wind_near_point(self):
+        """找最近測站的基準點：作業區中心，否則起降場；都沒有回 None。"""
+        bbox = self._wind_area_bbox()
+        if bbox is not None:
+            return (0.5 * (bbox[0] + bbox[2]), 0.5 * (bbox[1] + bbox[3]))
+        hp = getattr(self, 'home_point', None)
+        try:
+            if hp is not None and len(hp) >= 2:
+                la, lo = float(hp[0]), float(hp[1])
+                if math.isfinite(la) and math.isfinite(lo):
+                    return (la, lo)
+        except (TypeError, ValueError):
+            pass
+        return None
+
+    def _apply_wind_to_plan(self, speed_mps: float, dir_from_deg: float, source: str):
+        """抓到的風 → 面板「平均風速／風向」（規劃器讀的就是那兩格）；狀態列與 log 寫明來源。"""
+        panel = self.vtol_recon_panel
+        st = self._wind_state()
+        st['plan_writing'] = True            # setValue 會同步觸發 wind_display_changed：那不是使用者手改
+        try:
+            eff = panel.apply_wind_to_plan(speed_mps, dir_from_deg, source)
+        except (ValueError, TypeError) as e:
+            logger.error(f'[風場] 規劃風未寫入：{e}')
+            self.statusBar().showMessage(f'規劃風未寫入：{e}', 10000)
+            return None
+        finally:
+            st['plan_writing'] = False
+        st['plan_text'] = eff['text']
+        st['plan_applied'] = (float(eff['speed_mps']), float(eff['dir_from_deg']))   # 生效值，之後手改用它比對
+        st['plan_source'] = source
+        logger.info(f"[風場] {eff['text']}")
+        self.statusBar().showMessage(eff['text'], 10000)
+        self._refresh_wind_status()
+        return eff
+
+    def _on_wind_cwa_requested(self, req: dict) -> None:
+        """按下「抓 CWA 測站觀測」：授權碼只從 settings.json／環境變數拿，不進 log；背景執行緒抓。"""
+        from core.wind_field import short_text
+        from ui.workers.wind_grid_worker import CwaStationWorker
+        from utils.cwa_opendata import configured_cwa_api_key, looks_like_cwa_api_key
+        panel = self.vtol_recon_panel
+        station = str((req or {}).get('station') or '').strip()
+        # 授權碼貼錯到「測站」欄：不回顯、不進 log（redact 只認 Authorization=，擋不到這條）
+        if looks_like_cwa_api_key(station):
+            try:
+                panel.wind_cwa_station_edit.clear()
+            except Exception:
+                pass
+            panel.set_wind_cwa_busy(False)
+            self._wind_note("「CWA 測站」欄填的是授權碼，不是測站（欄位已清空）；授權碼請放 config/settings.json 的 "
+                            "weather.cwa_api_key 或環境變數 CWA_API_KEY")
+            logger.warning(f"[CWA 測站] 測站欄疑似授權碼（長度 {len(station)}），已拒絕")
+            return
+        try:
+            key, src = configured_cwa_api_key()
+        except Exception as e:                               # noqa: BLE001 - slot 裡不能帶例外回 Qt（會 qFatal）
+            logger.error(f"[CWA 測站] 讀取授權碼失敗：{type(e).__name__}")
+            panel.set_wind_cwa_busy(False)
+            self._wind_note(f"讀取 CWA 授權碼失敗：{type(e).__name__}")
+            return
+        if not key:
+            why = f"CWA 授權碼讀取失敗（{src[len('invalid:'):]}）" if src.startswith('invalid:') else "沒有 CWA API 授權碼"
+            panel.set_wind_cwa_busy(False)
+            self._wind_note(f"{why}：放 config/settings.json 的 weather.cwa_api_key 或環境變數 CWA_API_KEY")
+            return
+        near = self._wind_near_point()
+        if not station and near is None:
+            panel.set_wind_cwa_busy(False)
+            self._wind_note("請填測站代碼／名稱，或先圈好作業區（才能找最近測站）")
+            return
+        old = getattr(self, '_cwa_worker', None)
+        if old is not None and old.isRunning():
+            self.statusBar().showMessage('CWA 測站觀測還在抓，請稍候', 4000)
+            return
+        if old is not None:
+            try:
+                old.deleteLater()
+            except RuntimeError:
+                pass
+        panel.set_wind_cwa_busy(True)
+        self._wind_note(f"抓 CWA 測站觀測中…（{short_text(station) or '離作業區最近的測站'}；要網路）")
+        # parent=None：視窗關閉時由 closeEvent 等它跑完（在還在跑的 QThread 上跑解構子是 qFatal）
+        self._cwa_worker = CwaStationWorker(key, station=station, near=near, parent=None)
+        self._cwa_worker.finished_ok.connect(self._on_wind_cwa_done)
+        self._cwa_worker.failed.connect(self._on_wind_cwa_failed)
+        self._cwa_worker.start()
+        logger.info(f"[CWA 測站] 開始：{short_text(station) or '最近測站'}；授權碼來源 {src}（長度 {len(key)}）")
+
+    def _on_wind_cwa_done(self, obs) -> None:
+        st = self._wind_state()
+        st['cwa'] = obs
+        st['cwa_text'] = obs.summary()
+        st['note_text'] = ''
+        logger.info(f"[CWA 測站] {st['cwa_text']}")
+        panel = self.vtol_recon_panel
+        panel.set_wind_cwa_busy(False)
+        panel.set_wind_grid_loaded(True)
+        self._refresh_wind_status()
+        self._apply_wind_options()
+        self._push_wind_arrows()
+        if self._wind_display().get('apply_plan'):
+            self._apply_wind_to_plan(obs.speed_mps, obs.dir_from_deg,
+                                     f"CWA 測站 {obs.title()} 觀測 {obs.obs_time or '時間未知'}，10 分鐘平均地面測站風"
+                                     f"（非作業高度）")
+
+    def _on_wind_cwa_failed(self, msg: str) -> None:
+        self.vtol_recon_panel.set_wind_cwa_busy(False)
+        self.vtol_recon_panel.set_wind_grid_loaded(self._wind_loaded())
+        self._wind_note(f'⚠ CWA 測站：{msg}')
+        self.statusBar().showMessage(f'CWA 測站觀測抓取失敗：{msg}', 10000)
 
     def _on_vtol_recon_apply_flat(self, lat: float, lon: float, scale: float) -> None:
         """把所有作業區（含正在畫的角點與起降場）平移到 (lat, lon)，並縮放 ``scale`` 倍。可復原。"""
@@ -5387,6 +5652,13 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         # 真正把兩張圖都清乾淨（含圍籬、VTOL 軌跡、飛控航線等非路徑疊圖）
         if hasattr(self.map_widget, 'clear_all'):
             self.map_widget.clear_all()
+        # 多檔匯入的預覽也被上面清掉了 ⇒ 狀態要跟著走，否則「寫入每架匯入的任務」鈕還亮著、
+        # 寫的是畫面上已經看不到的東西（審查 2026-10-17）。單檔 _loaded_mission 照舊不動。
+        if self.__dict__.get('_imported_missions'):
+            n = len(self._imported_missions)
+            self._imported_missions = {}
+            self._update_write_wp_enabled()
+            logger.info(f'[WP] 清除全部：丟掉 {n} 份多檔匯入的指派')
         # `clear_all` 會把地圖上的 NFZ 一起抹掉。這裡不同步清掉**模型**的話，
         # `self.nfz_zones` 會留著一份畫面上看不見、但仍會參與繞行修正、
         # 也仍會被下一次 display_nfz_zones() 原地畫回來的禁航區 —— 典型的
@@ -7910,6 +8182,13 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         link.mission_item_started.connect(self._on_mapping_item_started)
         # 飛控 EKF 風估計（WIND）→ 地圖上跟著飛機走的風箭頭（面板「飛機即時風」勾著才畫）
         link.wind.connect(self._on_wind)
+        # 飛控 DataFlash 日誌（.bin）下載：清單 → 挑最新 → 下載；進度／完成／失敗各走自己的信號。
+        # 同樣只在建立 link 時接一次（理由同上面 mission_downloaded 的註解）。
+        link.log_list.connect(self._on_log_list)
+        link.log_list_failed.connect(self._on_log_list_failed)
+        link.log_download_progress.connect(self._on_log_download_progress)
+        link.log_download_done.connect(self._on_log_download_done)
+        link.log_download_failed.connect(self._on_log_download_failed)
         link.start()
         self._sitl_links.append(link)
         if self._sitl_link is None:
@@ -8019,6 +8298,10 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         # 而使用者重新連線後那個 sysid 早就不對了。
         self._write_pending_sysids.clear()
         self._update_write_wp_enabled()
+        # 日誌下載等待狀態／解鎖紀錄：這條路先把 disconnected 信號切掉了，
+        # _on_sitl_link_disconnected 不會跑 ⇒ 要在這裡清，否則重連後該機永遠被拒「還在進行（list）」、
+        # 舊的 armed 紀錄會對換上來的另一台機誤判「落地」而自動下載（審查 2026-10-17）。
+        _forget_log_state(self, None)
 
     # ─────────────────────────────────────────────────────────────────
     # HIL：實體飛控多機連線（SITL 分頁 HIL 內頁）
@@ -8074,6 +8357,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 self._sitl_links.remove(link)
             except ValueError:
                 pass
+            # 同 on_sitl_disconnect：disconnected 已切斷，逐機清理不會跑 ⇒ 這裡清日誌狀態
+            _forget_log_state(self, int(getattr(link, 'sysid_label', 1)))
             # ⚠️ finding（major，ui_safety）：這裡先切斷了 disconnected 信號
             # （上面那段），所以 _on_sitl_link_disconnected 不會為這些 link 執行
             # ——它原本負責的「該機若正等待 mission_uploaded 回報，回報永遠不會
@@ -8147,9 +8432,16 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 self.map_widget.clear_uav(sysid)
             except Exception:
                 pass
-        # 該機的即時風箭頭也拿掉（不然會留一支不會動的箭頭）
-        if self._wind_state()['live'].pop(sysid, None) is not None:
-            self._push_wind_arrows()
+        # 該機的即時風箭頭也拿掉（不然會留一支不會動的箭頭）；日誌下載等待狀態與解鎖紀錄一併清
+        #   （進行中的下載 link 自己會發 log_download_failed('連線結束')）。
+        #   ⚠ 直接讀 __dict__：tests/test_mission_write.py 的假 self 沒有 _wind_state 等輔助方法，
+        #     用方法呼叫會讓「斷線清理」整段在測試裡炸掉（2026-10-17 抓到）。
+        _wind = self.__dict__.get('_wind')
+        if _wind and (_wind.get('live') or {}).pop(sysid, None) is not None:
+            push = getattr(self, '_push_wind_arrows', None)
+            if push is not None:
+                push()
+        _forget_log_state(self, sysid)
         # 維護主鏈路指標（向後相容）
         if self._sitl_link is link:
             self._sitl_link = self._sitl_links[0] if self._sitl_links else None
@@ -8175,6 +8467,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         # 主機 (sysid_label==1) 才更新 HUD，避免多機資訊互相覆蓋
         # 所有 sysid 都送進 HUD（多機卡片）
         self.sitl_hud.on_telemetry(frame)
+        # 落地（解鎖→上鎖）⇒ 提示可下載這台的 .bin；勾了自動就排程下載
+        self._note_armed_transition(frame)
         # 建圖條帶監測：模式／解鎖 → 中斷、沒倒帶就接續、落地收尾（只有建圖上傳過的機）
         if getattr(self, '_map_photo_stats', None):
             self._strip_monitor_on_frame(frame)
@@ -9053,14 +9347,16 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             QMessageBox.information(self, 'SITL', '尚未連線任何 SITL')
             return
         links = self._target_links()
-        # ⚠️ 多機同時下載會讓後畫的蓋掉先畫的（疊加層只有一份），而且
-        #    看起來像「只讀到一架」。指定指令對象才是這個功能的正常用法。
+        # ⚠️ 地圖自 2026-10-17 起每架一層（讀回 UAV-2 不會蓋掉 UAV-1），但「💾 存成航點檔」
+        #    只保留**最後一份**讀回結果（self._fc_mission）；多架一起讀回會讓「存的是哪一架」
+        #    變成靠回報順序決定 ⇒ 仍然要求逐台讀回。
         if len(links) > 1:
             QMessageBox.information(
                 self, 'SITL',
                 f'目前指令對象是「全部」（{len(links)} 架）。\n'
-                '任務航線疊加層只有一份，多架同時讀回會互相覆蓋。\n\n'
-                '請先在 HUD 上點選單一 UAV 卡片，再讀回任務。')
+                '地圖上每架各畫一層，但「存成航點檔」只保留最後一份讀回結果，\n'
+                '多架一起讀回會讓存的是哪一架變成靠回報順序決定。\n\n'
+                '請先在 HUD 上點選單一 UAV 卡片，逐台讀回。')
             return
         for link in links:
             try:
@@ -9079,9 +9375,12 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             home = _mv.mission_home(items)
             summary = _mv.mission_summary(items)
 
+            # 每架一層（sysid=…）：讀回 UAV-2 只換 UAV-2 那層，UAV-1 的讀回／匯入預覽留著。
+            # ⚠ 不帶 sysid 的舊呼叫法會先清掉**全部**層（2026-10-17 2D/3D 改多層後的語意）。
             if hasattr(self.map_widget, 'display_fc_mission'):
                 self.map_widget.display_fc_mission(path2d, path3d, loiters,
-                                                   home=home)
+                                                   home=home, sysid=int(sysid),
+                                                   label=f'UAV-{int(sysid)} 讀回')
             self._fc_mission = {'sysid': int(sysid), 'items': list(items)}
 
             # ⚠️ 「n 項但 0 點可繪製」是一個真實且會發生的狀態（整份都是 DO_*，
@@ -9098,6 +9397,206 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         except Exception as e:
             logger.error(f'[SITL] 繪製讀回任務失敗: {e}', exc_info=True)
             self.statusBar().showMessage(f'讀回任務但繪製失敗：{e}', 8000)
+
+    # ══════════════════════════════════════════════════════════════
+    #  飛控 DataFlash 日誌（.bin）下載：每台飛完後把那一趟的日誌抓下來
+    #
+    #  鏈路層（SITLLink.request_log_list / download_log / cancel_log_download）是非阻塞狀態機，
+    #  這裡只做：找 link → 擋「還在解鎖」→ 要清單 → 挑最新一份 → 給路徑 → 開始；
+    #  進度丟給 HUD 卡片；完成／失敗寫狀態列與 HUD，並記住每台的檔案路徑（航測處理可直接帶入）。
+    #  ⚠ 飛控已解鎖時一律拒絕（ArduPilot 自己也拒絕：'Disarm for log download'）。
+    #  ⚠ 數傳（57600）很慢（實測約 8 KiB/s、數十 MB 要數十分鐘到數小時），所以預設不自動下載，
+    #    落地只提示；HUD 勾「落地後自動下載」才會在上鎖 LOG_DOWNLOAD_AUTO_DELAY_S 秒後自動開始。
+    # ══════════════════════════════════════════════════════════════
+    LOG_DOWNLOAD_AUTO_DELAY_S = 8.0      # 落地上鎖後等這麼久再抓（讓飛控把日誌關檔、寫完尾巴）
+
+    def _log_dl_state(self) -> dict:
+        """sysid → {'stage': 'list'|'download', 'id', 'size', 'path', 'started'}"""
+        st = self.__dict__.get('_log_dl')
+        if st is None:
+            st = self.__dict__['_log_dl'] = {}
+        return st
+
+    def _flight_logs(self) -> dict:
+        """sysid → 最近一次下載完成的 .bin 路徑（字串）"""
+        st = self.__dict__.get('_flight_log_paths')
+        if st is None:
+            st = self.__dict__['_flight_log_paths'] = {}
+        return st
+
+    def _armed_seen(self) -> dict:
+        st = self.__dict__.get('_armed_state')
+        if st is None:
+            st = self.__dict__['_armed_state'] = {}
+        return st
+
+    def _link_for_sysid(self, sysid: int):
+        for l in list(getattr(self, '_sitl_links', None) or []):
+            if int(getattr(l, 'sysid_label', -1)) == int(sysid):
+                return l
+        return None
+
+    def _hud_log_msg(self, sysid: int, text: str, severity: int = 6) -> None:
+        hud = getattr(self, 'sitl_hud', None)
+        fn = getattr(hud, 'on_log_message', None)
+        if fn is not None:
+            fn(int(sysid), text, severity)
+
+    def _start_log_download(self, sysid: int) -> bool:
+        """HUD 卡片「⬇ .bin」或落地自動：對這一台要清單，之後 _on_log_list 挑最新一份開始下載。"""
+        sysid = int(sysid)
+        link = self._link_for_sysid(sysid)
+        if link is None:
+            msg = f'UAV-{sysid} 沒有連線，無法下載日誌'
+            self.statusBar().showMessage(msg, 6000)
+            self._hud_log_msg(sysid, msg, 4)
+            return False
+        code, why = link_flight_state(link)
+        if code in ('armed', 'unknown'):
+            msg = f'日誌下載拒絕：{why}（飛控只在上鎖後才給日誌）'
+            self.statusBar().showMessage(msg, 8000)
+            self._hud_log_msg(sysid, msg, 4)
+            logger.warning(f'[日誌] {msg}')
+            return False
+        st = self._log_dl_state()
+        if sysid in st:
+            msg = f'UAV-{sysid} 的日誌下載還在進行（{st[sysid].get("stage")}）'
+            self.statusBar().showMessage(msg, 6000)
+            self._hud_log_msg(sysid, msg, 5)
+            return False
+        st[sysid] = {'stage': 'list', 'started': time.monotonic()}
+        link.request_log_list()
+        # ⚠ 鏈路「立即失敗」（尚未連線）是在呼叫端執行緒、return 之前就 emit log_list_failed
+        #   ⇒ 狀態此時已被 _on_log_list_failed 清掉；不可以再蓋一句「索取中…」在失敗訊息上。
+        if sysid not in st:
+            return False
+        self._hud_log_msg(sysid, f'向 UAV-{sysid} 索取日誌清單…')
+        logger.info(f'[日誌] UAV-{sysid} 索取日誌清單')
+        return True
+
+    def _start_log_download_all(self) -> None:
+        """HUD「下載全部」：對每一條連線各自走 _start_log_download（各自回報）。"""
+        links = list(getattr(self, '_sitl_links', None) or [])
+        if not links:
+            self.statusBar().showMessage('沒有連線中的飛機，無法下載日誌', 6000)
+            return
+        n = sum(1 for l in links if self._start_log_download(int(getattr(l, 'sysid_label', 1))))
+        self.statusBar().showMessage(f'已對 {n}/{len(links)} 台發出日誌下載', 6000)
+
+    def _cancel_log_download(self, sysid: int) -> None:
+        link = self._link_for_sysid(int(sysid))
+        if link is not None:
+            link.cancel_log_download()
+        self._hud_log_msg(int(sysid), f'UAV-{sysid} 日誌下載取消中…', 5)
+
+    def _on_log_list(self, sysid: int, entries: list) -> None:
+        """清單回來：挑最新一份、算路徑、開始下載。沒在等清單的（例如別處要的）只記 log。"""
+        sysid = int(sysid)
+        st = self._log_dl_state().get(sysid)
+        if not st or st.get('stage') != 'list':
+            logger.info(f'[日誌] UAV-{sysid} 清單 {len(entries)} 份（非本流程索取，略過）')
+            return
+        latest = pick_latest_log(entries)
+        if latest is None:
+            self._log_dl_state().pop(sysid, None)
+            msg = f'UAV-{sysid} 飛控沒有任何日誌（清單為空）'
+            self.statusBar().showMessage(msg, 8000)
+            self._hud_log_msg(sysid, msg, 4)
+            return
+        link = self._link_for_sysid(sysid)
+        if link is None:
+            self._log_dl_state().pop(sysid, None)
+            return
+        path = flight_log_path(f'UAV-{sysid}', int(latest['id']), int(latest.get('time_utc', 0) or 0))
+        size = int(latest.get('size', 0) or 0)
+        st.update({'stage': 'download', 'id': int(latest['id']), 'size': size, 'path': str(path),
+                   'n_logs': len(entries)})
+        link.download_log(int(latest['id']), str(path), size)
+        # 立即失敗（armed／size 0／已有下載／沒連線）在 return 前就 emit failed ⇒ 狀態已清，別再報「下載中」
+        if sysid not in self._log_dl_state():
+            return
+        msg = (f'UAV-{sysid} 下載日誌 #{latest["id"]}（{size / 1048576:.1f} MB，清單共 {len(entries)} 份）'
+               f' → {path.name}')
+        self.statusBar().showMessage(msg, 10000)
+        self._hud_log_msg(sysid, msg)
+        logger.info(f'[日誌] {msg}；完整路徑 {path}')
+
+    def _on_log_list_failed(self, sysid: int, reason: str) -> None:
+        sysid = int(sysid)
+        self._log_dl_state().pop(sysid, None)
+        msg = f'UAV-{sysid} 日誌清單失敗：{reason}'
+        self.statusBar().showMessage(msg, 10000)
+        self._hud_log_msg(sysid, msg, 3)
+        logger.error(f'[日誌] {msg}')
+
+    def _on_log_download_progress(self, sysid: int, info: dict) -> None:
+        hud = getattr(self, 'sitl_hud', None)
+        fn = getattr(hud, 'on_log_progress', None)
+        if fn is not None:
+            fn(int(sysid), dict(info))
+
+    def _on_log_download_done(self, sysid: int, info: dict) -> None:
+        sysid = int(sysid)
+        self._log_dl_state().pop(sysid, None)
+        path = str(info.get('path', ''))
+        self._flight_logs()[sysid] = path
+        size = int(info.get('size', 0) or 0)
+        secs = float(info.get('seconds', 0.0) or 0.0)
+        rate = (size / secs / 1024.0) if secs > 0 else 0.0
+        import os as _os
+        msg = (f'UAV-{sysid} 日誌下載完成：{_os.path.basename(path)}（{size / 1048576:.1f} MB，'
+               f'{secs:.0f} s，{rate:.0f} KiB/s，sha256 {str(info.get("sha256", ""))[:12]}）')
+        self.statusBar().showMessage(msg, 15000)
+        self._hud_log_msg(sysid, msg)
+        hud = getattr(self, 'sitl_hud', None)
+        fn = getattr(hud, 'on_log_done', None)
+        if fn is not None:
+            fn(sysid, dict(info))
+        logger.info(f'[日誌] {msg}；完整路徑 {path}')
+
+    def _on_log_download_failed(self, sysid: int, reason: str) -> None:
+        sysid = int(sysid)
+        self._log_dl_state().pop(sysid, None)
+        msg = f'UAV-{sysid} 日誌下載失敗：{reason}'
+        self.statusBar().showMessage(msg, 15000)
+        self._hud_log_msg(sysid, msg, 3)
+        hud = getattr(self, 'sitl_hud', None)
+        fn = getattr(hud, 'on_log_failed', None)
+        if fn is not None:
+            fn(sysid, str(reason))
+        logger.error(f'[日誌] {msg}')
+
+    def _note_armed_transition(self, frame) -> None:
+        """每幀遙測：解鎖→上鎖＝落地 ⇒ HUD 提示可下載；勾了自動就延遲後自動開始。"""
+        try:
+            sysid = int(getattr(frame, 'sysid', -1))
+            armed = bool(getattr(frame, 'armed', False))
+        except (TypeError, ValueError):
+            return
+        seen = self._armed_seen()
+        prev = seen.get(sysid)
+        seen[sysid] = armed
+        if prev is True and armed is False:
+            msg = f'UAV-{sysid} 已上鎖（落地）：可下載這一趟的飛行日誌（.bin）'
+            self.statusBar().showMessage(msg, 15000)
+            self._hud_log_msg(sysid, msg, 5)
+            logger.info(f'[日誌] {msg}')
+            hud = getattr(self, 'sitl_hud', None)
+            auto = getattr(hud, 'auto_log_download_enabled', None)
+            if auto is not None and auto():
+                delay_ms = int(self.LOG_DOWNLOAD_AUTO_DELAY_S * 1000)
+                self._hud_log_msg(sysid, f'{self.LOG_DOWNLOAD_AUTO_DELAY_S:.0f} 秒後自動下載 UAV-{sysid} 的最新日誌…')
+
+                def _fire(s=sysid):
+                    # 到點**再查一次**勾選：這 8 秒內使用者取消勾選就是不要下載（數傳上是數十分鐘的傳輸）
+                    hud2 = getattr(self, 'sitl_hud', None)
+                    auto2 = getattr(hud2, 'auto_log_download_enabled', None)
+                    if auto2 is None or not auto2():
+                        self._hud_log_msg(s, f'UAV-{s} 自動下載已取消（勾選已關閉）', 5)
+                        logger.info(f'[日誌] UAV-{s} 自動下載取消：勾選在延遲期間被關閉')
+                        return
+                    self._start_log_download(s)
+                QTimer.singleShot(delay_ms, _fire)
 
     def _on_mission_download_failed(self, sysid: int, reason: str):
         """讀回失敗 —— **不可以**靜默，也不可以畫成空航線。
@@ -9120,6 +9619,12 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         enabled = bool(self._sitl_links) and not self._write_pending_sysids
         try:
             self.sitl_hud.btn_write_wp.setEnabled(enabled)
+        except Exception:
+            pass
+        # 「寫入每架匯入的任務」多一個條件：真的有匯入過東西（__dict__：假 self 可能沒這欄）
+        try:
+            self.sitl_hud.btn_write_imported.setEnabled(
+                enabled and bool(self.__dict__.get('_imported_missions')))
         except Exception:
             pass
 
@@ -9164,9 +9669,11 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             path3d = _mv.mission_to_path_3d(lm.items)
             loiters = _mv.mission_loiters(lm.items)
             home = _mv.mission_home(lm.items)
+            # kind='loaded'：自己一層，不清掉其他架的讀回／匯入預覽（不帶 kind 的 sysid=None 是「先清全部層」）
             if hasattr(self.map_widget, 'display_fc_mission'):
                 self.map_widget.display_fc_mission(path2d, path3d, loiters,
-                                                    home=home)
+                                                    home=home, kind='loaded',
+                                                    label=f'載入：{os.path.basename(path)}')
         except Exception as e:
             logger.error(f'[WP] 預覽載入的航點檔失敗: {e}', exc_info=True)
         self.statusBar().showMessage(
@@ -9175,7 +9682,153 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                     f'{len(lm.warnings)} 個警告')
         QMessageBox.information(self, '航點檔已載入', lm.summary_text())
 
-    def on_sitl_write_wp(self, target_links=None):
+    # ── 多檔匯入：每個 .waypoints／.plan 明確指派給一架 → 逐機預覽 → 逐機寫入 ──
+    #   規則只有 mission/import_missions.py 一份（載入≠指派、sysid 不用猜、問題清單擋確定）；
+    #   這裡只做：開對話框 → 收結果 → 畫圖 → 逐機走 on_sitl_write_wp 同一套守衛。
+    def _run_import_dialog(self):
+        """開「多檔匯入」對話框；回 list[ImportedMission]（使用者取消 ⇒ None）。
+
+        獨立成一小段：測試可以整段換掉，不必真的開 QDialog。
+        """
+        from ui.dialogs.import_waypoints_dialog import FILE_FILTER, ImportWaypointsDialog
+        # 先選檔（可多選）再開指派表；一個都沒選就當取消。對話框裡還能再「加入檔案…」。
+        paths, _flt = QFileDialog.getOpenFileNames(
+            self, '匯入航點檔（可多選，每檔指派一架）', self._last_wp_dir, FILE_FILTER)
+        if not paths:
+            return None
+        known = sorted({int(getattr(l, 'sysid_label', 1)) for l in self._sitl_links})
+        dlg = ImportWaypointsDialog(self, paths=list(paths), links_sysids=known,
+                                    last_dir=self._last_wp_dir)
+        if not dlg.exec():
+            return None
+        # ⚠ dlg.result() 被對話框改成回 list[ImportedMission]（取消＝空清單），不是 QDialog 的代碼
+        return dlg.result() or None
+
+    def on_import_waypoints(self):
+        """📂 多檔匯入 → 每架一份（HUD 鈕與「檔案」選單共用）。
+
+        純讀檔 + 畫圖，**不需要連線、不會寫飛控**；寫入另外按「✍️ 寫入每架匯入的任務」。
+        """
+        missions = self._run_import_dialog()
+        if not missions:
+            return
+        self._apply_imported_missions(missions)
+
+    def _apply_imported_missions(self, missions) -> dict:
+        """收下對話框確認過的指派結果：再驗一次 → 換掉上一批 → 逐機預覽 → 更新鈕。
+
+        回 `{sysid: ImportedMission}`；被擋下就回 {} 且**什麼都不改**（上一批保留）。
+
+        ⚠ 對話框已經擋過的事這裡再驗一次（`assignment_problems`）：這是「真的會被
+          寫進飛控的那份」最後一道，不信任 UI 層。
+        """
+        import os
+        from mission.import_missions import assignment_problems
+        missions = list(missions or [])
+        probs = assignment_problems(missions)
+        if probs:
+            logger.error(f'[WP] 多檔匯入被擋下：{probs}')
+            QMessageBox.critical(
+                self, '匯入航點檔',
+                '指派結果有問題，**沒有匯入任何檔**（上一批匯入保留）：\n\n' + '\n'.join(probs))
+            return {}
+        # 上一批匯入的層只清「匯入的那一種」（kind='import'）——同一架的「📥 讀回」層（鍵 uav<n>）
+        # 與單檔載入層（'loaded'）都不動。
+        old = self.__dict__.get('_imported_missions') or {}
+        for sysid in list(old):
+            try:
+                self.map_widget.clear_fc_mission(sysid=int(sysid), kind='import')
+            except Exception as e:
+                logger.warning(f'[WP] 清除 UAV-{sysid} 舊匯入層失敗：{e}')
+        by_sysid = {int(m.sysid): m for m in missions}
+        self._imported_missions = by_sysid
+        try:
+            self._last_wp_dir = os.path.dirname(missions[0].path)
+        except Exception:
+            pass
+        drawn = self._preview_imported_missions(by_sysid)
+        self._update_write_wp_enabled()
+
+        connected = {int(getattr(l, 'sysid_label', 1)) for l in self._sitl_links}
+        missing = sorted(s for s in by_sysid if s not in connected)
+        # m.label：load_many 在同名檔時會加上父目錄（siteA/mission.waypoints），不要再用 basename
+        parts = [f'匯入 {len(by_sysid)} 份：' + '、'.join(
+            f'UAV-{s}←{m.label or os.path.basename(m.path)}' for s, m in sorted(by_sysid.items()))]
+        if drawn != len(by_sysid):
+            parts.append(f'⚠ 只畫出 {drawn}/{len(by_sysid)} 份（看 log）')
+        if missing:
+            parts.append('尚未連線：' + '、'.join(f'UAV-{s}' for s in missing))
+        self.statusBar().showMessage('；'.join(parts), 12000)
+        logger.info('[WP] ' + '；'.join(parts))
+        return by_sysid
+
+    def _preview_imported_missions(self, by_sysid) -> int:
+        """每架一層疊到 2D/3D（顏色依 sysid）；只對第一架 fit 視圖。回畫成功的份數。
+
+        ⚠ 走 `display_fc_mission(sysid=…)`，不可以用 display_path*（會重建圍籬，見
+          on_sitl_load_wp_file 的註解）。一架畫失敗不影響其他架，但要留 log。
+        """
+        import os
+        from mission import mission_view as _mv
+        n = 0
+        for i, (sysid, m) in enumerate(sorted(by_sysid.items())):
+            try:
+                items = list(m.items)
+                self.map_widget.display_fc_mission(
+                    _mv.mission_to_path_2d(items), _mv.mission_to_path_3d(items),
+                    _mv.mission_loiters(items), home=_mv.mission_home(items),
+                    sysid=int(sysid), kind='import',     # 鍵 uav<n>-import：與讀回層（uav<n>）並存
+                    label=f'UAV-{int(sysid)}：{m.label or os.path.basename(m.path)}',
+                    fit=(i == 0))
+                n += 1
+            except Exception as e:
+                logger.error(f'[WP] 預覽 UAV-{sysid} 的匯入任務失敗：{e}', exc_info=True)
+        return n
+
+    def on_sitl_write_imported(self):
+        """✍️ 寫入每架匯入的任務：每個 sysid 拿**自己那份**，各自走 `on_sitl_write_wp`。
+
+        對象不看 HUD「指令對象」——UAV-1 就寫 UAV-1 的 link（sysid_label 相等）。
+        每架各跳一次確認對話框；取消只跳過那架。指派了但沒連線的 sysid 最後列出，
+        **絕不**寫到別台。
+        """
+        by_sysid = self.__dict__.get('_imported_missions') or {}
+        if not by_sysid:
+            QMessageBox.information(
+                self, '寫入每架匯入的任務',
+                '尚未匯入任何航點檔。\n請先按「📂 多檔匯入 → 每架一份」選檔並指派 sysid。')
+            return
+        missing = []
+        ambiguous = []
+        for sysid in sorted(by_sysid):
+            links = [l for l in self._sitl_links
+                     if int(getattr(l, 'sysid_label', 1)) == int(sysid)]
+            if not links:
+                missing.append(int(sysid))
+                continue
+            if len(links) > 1:
+                # 兩條連線掛同一個 sysid（HIL 兩列都填 2、或 SITL＋HIL）：on_sitl_write_wp 會以
+                # 「多於一台」拒絕並叫人去點卡片——但這條路本來就不看卡片，點了也沒用 ⇒ 這裡把真正原因講出來
+                conns = '、'.join(str(getattr(l, 'conn_str', '?')) for l in links)
+                ambiguous.append((int(sysid), conns))
+                logger.error(f'[WP] UAV-{sysid} 有 {len(links)} 條連線（{conns}），跳過寫入')
+                continue
+            # 同一套守衛：有錯誤拒絕、恰好一台、併發、確認對話框、快照
+            self.on_sitl_write_wp(target_links=links, mission=by_sysid[sysid].loaded)
+        notes = []
+        if missing:
+            notes.append('以下 sysid 有指派檔案但目前沒有連線，**沒有寫入**（也不會寫到別台）：\n'
+                         + '、'.join(f'UAV-{s}' for s in missing))
+        if ambiguous:
+            notes.append('以下 sysid 同時有多條連線，分不出要寫哪一條，**沒有寫入**；請先斷開其中一條再試：\n'
+                         + '\n'.join(f'UAV-{s}：{c}' for s, c in ambiguous))
+        if notes:
+            QMessageBox.information(
+                self, '寫入每架匯入的任務',
+                '\n\n'.join(notes)
+                + '\n\n處理好之後再按一次即可；已寫入的那幾架不會重寫（會再各跳一次確認）。')
+
+    def on_sitl_write_wp(self, target_links=None, mission=None):
         """Write WPs（安全關鍵）—— 把已載入的航點檔寫入**恰好一台**飛控。
 
         target_links: 通常留 None，此時對象由 HUD 的「指令對象」
@@ -9183,6 +9836,10 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         面板 callsign 對應的單一 link（見 `_on_detail_panel_write_wp`），
         但**不會**因此少走任何一道下面的守衛——換的只是「對象怎麼決定」，
         不是「要不要檢查」。
+        mission: 通常留 None ⇒ 寫 `self._loaded_mission`（📂 載入航點檔那份）；
+        「多檔匯入」逐機寫入（`on_sitl_write_imported`）會帶入該 sysid 指派到的
+        那份 `LoadedMission`——同樣只換「資料來源」，守衛、確認對話框、快照、
+        併發檢查一道都不少。
 
         ⚠️ 刻意不重用 `on_sitl_upload_mission`：那條走的是「當前規劃路徑」
         （地圖 paths / DCCPP 結果），資料來源、語意、失敗處理都不同，
@@ -9190,7 +9847,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
         """
         import os
         # (1) 檔案面：沒載入、或載入了但有錯誤 —— 一律拒絕，不猜、不部分寫。
-        lm = self._loaded_mission
+        lm = mission if mission is not None else self._loaded_mission
         if lm is None:
             QMessageBox.information(
                 self, 'Write WPs',
@@ -9253,7 +9910,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
             f'目標：UAV-{sysid}（sysid={sysid}）',
             f'連線：{conn_str}' + ('　⚠️ 這看起來是「真實飛控」（序列埠）'
                                   if is_real_board else '　（SITL / 網路連線）'),
-            f'檔案：{os.path.basename(lm.path) if lm.path else "?"}',
+            # 完整路徑：兩個資料夾裡同名的 mission.waypoints 只看檔名分不出要寫哪一份（審查 2026-10-17）
+            f'檔案：{lm.path if lm.path else "?"}',
             f'項目數：{len(items)}',
         ]
         if first_wp is not None:
@@ -11222,14 +11880,15 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 _fw.wait(30000)
         except Exception:
             pass
-        # 氣象網格的背景執行緒：同上（urllib 沒有取消點，逾時 20 s）
-        try:
-            _ww = getattr(self, '_wind_worker', None)
-            if _ww is not None and _ww.isRunning():
-                _ww.stop()
-                _ww.wait(30000)
-        except Exception:
-            pass
+        # 氣象網格／CWA 測站的背景執行緒：同上（urllib 沒有取消點，逾時 20 s）
+        for _name in ('_wind_worker', '_cwa_worker'):
+            try:
+                _ww = getattr(self, _name, None)
+                if _ww is not None and _ww.isRunning():
+                    _ww.stop()
+                    _ww.wait(30000)
+            except Exception:
+                pass
         # 依時程放行還有飛機在倒數 ⇒ 關視窗就不會再放行了，取消並寫 log（不留一個看不到的計時器）
         try:
             _rel = getattr(self, '_release', None)

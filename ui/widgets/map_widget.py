@@ -2287,7 +2287,8 @@ html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden;
         store[key] = rec
 
         js = self._fc_mission_js(key, rec, replace_all=replace_all, fit=bool(fit))
-        page = getattr(self, 'custom_page', None)
+        # ⚠ 裸實例（MapWidget.__new__、測試與無頭截圖用）上 getattr 會丟 RuntimeError ⇒ 用 __dict__
+        page = self.__dict__.get('custom_page')
         if page is not None:
             page.runJavaScript(js)
         logger.info(f'[FC Mission/2D] 圖層 {key}：{len(pts)} 點、盤旋圈 {len(rings)}'
@@ -2418,7 +2419,7 @@ html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden;
     if(prefix){{ Object.keys(store).forEach(function(k){{ if(k.indexOf(prefix) === 0){{ drop(k); delete store[k]; }} }}); }}
 }})();
 """
-        page = getattr(self, 'custom_page', None)
+        page = self.__dict__.get('custom_page')     # 裸實例上 getattr 會丟 RuntimeError
         if page is not None:
             page.runJavaScript(js)
         return existed

@@ -142,4 +142,5 @@ class TestPerSourceDemux:
         # 不應因 PARAM/STATUSTEXT 而生出 frame
         assert link._frames == {}
         assert servo == [(5, 'FUNCTION', 33.0)]
-        assert ('hello' in t for _, t in statuses)
+        # 以前寫成 assert (generator) —— 產生器物件永遠為真，等於沒測（2026-10-22 修）
+        assert any('hello' in t for _, t in statuses), statuses

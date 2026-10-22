@@ -15,10 +15,13 @@ AeroPlan Studio 專案檔保存/讀取 (.aeroplan)
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+_logger = logging.getLogger(__name__)
 
 
 # 檔案格式版本 — 日後可據此做向後相容遷移
@@ -140,8 +143,14 @@ def apply_project_to_main_window(project: AeroPlanProject, win) -> None:
         for lat, lon in project.corners:
             win.map_widget.add_corner(lat, lon)
 
-    # 打擊目標
-    if project.strike_targets:
+    # 打擊目標／STOT 基地：攻擊那一系的 UI 先拿掉（2026-10-17，config/features.STRIKE_ENABLED 預設關）。
+    # 關著時檔案裡的目標**不還原**（不然 3D 圖上會冒出沒有任何入口能清掉的紅色目標），只記一行。
+    from config import features as _features
+    if not _features.strike_enabled() and (project.strike_targets or project.strike_launch_base is not None):
+        _logger.info(f'[專案] 檔案裡有 {len(project.strike_targets)} 個打擊目標'
+                  f'{"＋STOT 基地" if project.strike_launch_base is not None else ""}，'
+                  '但蜂群攻擊 UI 已停用（AEROPLAN_STRIKE_UI=1 才還原），略過')
+    if project.strike_targets and _features.strike_enabled():
         win._strike_targets = list(project.strike_targets)
         cesium = getattr(win, '_get_cesium_widget', lambda: None)()
         if cesium:
@@ -156,7 +165,7 @@ def apply_project_to_main_window(project: AeroPlanProject, win) -> None:
             )
 
     # STOT 基地
-    if project.strike_launch_base is not None:
+    if project.strike_launch_base is not None and _features.strike_enabled():
         win._strike_launch_base = project.strike_launch_base
         if hasattr(win, 'parameter_panel'):
             win.parameter_panel.update_strike_base_label(

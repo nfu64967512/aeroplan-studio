@@ -95,6 +95,8 @@ class _RailCell(QFrame):
         self._refresh_style()
 
     def set_severity(self, sev: str) -> None:
+        if sev == self._severity:
+            return                      # 樣式沒變就不重套 QSS（每幀都 repolish 是看不見的浪費，2026-10-17）
         self._severity = sev
         self._refresh_style()
 

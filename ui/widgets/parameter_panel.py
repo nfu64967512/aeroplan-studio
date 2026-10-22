@@ -209,11 +209,20 @@ class ParameterPanel(QWidget):
         self._tabs.addTab(tactical_scroll, "戰術模組")
 
         # ── Tab 5: 蜂群打擊 ──────────────────────────────────────────
+        # 2026-10-17 使用者定調：攻擊這一系先從 UI 拿掉。分頁內容照建（signal／widget 屬性名都在），
+        # 但只有 config/features.STRIKE_ENABLED 時才 addTab；否則藏起來、不佔分頁。
+        from config import features as _features
         strike_group = self._create_strike_command_panel()
         strike_scroll = self._make_resizable_tab(
             [strike_group, self._create_fence_export_group()]
         )
-        self._tabs.addTab(strike_scroll, "蜂群打擊")
+        self._strike_scroll = strike_scroll
+        if _features.strike_enabled():
+            self._strike_tab_index = self._tabs.addTab(strike_scroll, "蜂群打擊")
+        else:
+            self._strike_tab_index = -1
+            strike_scroll.setParent(self)
+            strike_scroll.hide()
 
         # 分頁切換 → 通知 main_window 調整地圖點擊路由
         self._tabs.currentChanged.connect(self._on_tab_changed)

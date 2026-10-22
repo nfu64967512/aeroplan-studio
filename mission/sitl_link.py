@@ -23,7 +23,9 @@ import threading
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtCore import QThread, pyqtSignal, Qt
+
+from mission.boot_clock import BootClockSync
 
 from utils.logger import get_logger
 
@@ -74,6 +76,16 @@ class TelemetryFrame:
     # SERVO_OUTPUT_RAW：16 通道 PWM（μs），未收到時為 0
     servo_pwm: List[int] = field(default_factory=lambda: [0] * 16)
     last_update: float = field(default_factory=time.time)
+    # 接收執行緒收到「造成這幀位置／姿態」的那則 GLOBAL_POSITION_INT／ATTITUDE 的牆鐘時間（epoch 秒；0 = 還沒收過）。
+    # 3D 地圖拿它當插值樣本的時間戳：GUI 合幀（30 Hz）會把同一則位置重送好幾次、兩批也可能貼著到，
+    # 用「JS 收到的時刻」當時間戳會讓機體走走停停甚至倒退（2026-10-17 審查）。
+    pos_t: float = 0.0
+    att_t: float = 0.0
+    # 那則 ATTITUDE 的飛控開機時間（ms；-1 = 沒收過）與它換到牆鐘的取樣時刻（epoch 秒；0 = 沒有）。
+    # 3D 姿態樣本用 att_ts：收到時刻 att_t 比飛控取樣晚 0～32 ms 不等（SITL 成批送），懸停振盪時就是幾度的誤差
+    # （2026-10-22 實測；換算見 mission/boot_clock.py）。att_t 維持「收到時刻」的意思不變。
+    att_boot_ms: int = -1
+    att_ts: float = 0.0
 
     def is_valid_gps(self) -> bool:
         return self.gps_fix >= 3 and abs(self.lat) > 1e-6
@@ -367,6 +379,23 @@ _LOG_MAX_REFILL_ROUNDS = 400       # 補抓超過 400 輪 ⇒ 放棄
 _LOG_STALL_TIMEOUT_S = 60.0        # 60 s 完全沒有新區塊 ⇒ 放棄
 _LOG_PROGRESS_INTERVAL_S = 0.5     # 進度信號節流：每 ≥ 0.5 s …
 _LOG_PROGRESS_BYTES = 1_000_000    # … 或每 1 MB 才 emit 一次
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, '') or default)
+    except ValueError:
+        return default
+
+
+#: 網路鏈路（SITL／UDP／TCP）對位置／姿態／VFR_HUD 三條串流要求的頻率（Hz）。
+#: ArduPilot 的 REQUEST_DATA_STREAM 上限約 50；20 已足夠讓 3D 機體在插值下平順。序列埠數傳不套用。
+STREAM_HZ: float = _env_float('AEROPLAN_STREAM_HZ', 20.0)
+#: 網路鏈路的 ATTITUDE 另外用 SET_MESSAGE_INTERVAL 要到這個頻率（Hz；≤ STREAM_HZ 或 0 ⇒ 不另外要）。
+#: 2026-10-22：3D 模型要忠實反映飛控姿態；通用 VTOL 懸停時有 ~17 Hz、±3° 的俯仰振盪，20 Hz 取樣畫不出來。
+#: 只拉 ATTITUDE 一則（EXTRA1 整條拉到 50 Hz 會連 AHRS2／SIMSTATE 等一起拉）。序列埠數傳不套用。
+ATTITUDE_HZ: float = _env_float('AEROPLAN_ATTITUDE_HZ', 50.0)
+_MAVLINK_MSG_ID_ATTITUDE = 30
+_MAV_CMD_SET_MESSAGE_INTERVAL = 511
+
 _LOG_LIST_ALL_END = 0xFFFF         # LOG_REQUEST_LIST.end：全部
 _LOG_DATA_ALL = 0xFFFFFFFF         # LOG_REQUEST_DATA.count：到檔尾
 _LOG_RENAME_RETRIES = 5            # .part → 目的檔 os.rename 失敗（Windows 防毒／索引器短暫鎖檔）最多試 5 次
@@ -389,6 +418,14 @@ class SITLLink(QThread):
     status_text    = pyqtSignal(int, str)         # severity, text
     error          = pyqtSignal(str)
     servo_param    = pyqtSignal(int, str, float)  # ch (1-16), key (FUNCTION/MIN/TRIM/MAX/REVERSED), value
+    # 2026-10-22 SITL 頁「群控／單機」：上面兩條再帶 sysid 的版本（舊的兩條照舊發、照舊不帶 sysid）。
+    #   status_text_sysid(sysid, severity, text, kind)：kind = 'fc'（飛控 STATUSTEXT）／'param'（PARAM_VALUE 回報）／
+    #     'gcs'（本鏈路自己產生的訊息，例如命令失敗、任務上傳結果）／'ext'（STATUSTEXT 但來源不是已確認飛機的
+    #     自駕儀元件：MAVROS、伴隨電腦、相機、別的地面站 255、來源不明 0）。sysid = 訊息**真正的來源** system
+    #     （fan-in 時不一定等於 sysid_label）；0 = 無法歸屬（'ext' 保留 255）。'gcs' 一律報 sysid_label。
+    #   servo_param_sysid(sysid, ch, key, value)：只收**自駕儀元件**回的 SERVOn_*（相機元件不算）。
+    status_text_sysid = pyqtSignal(int, int, str, str)
+    servo_param_sysid = pyqtSignal(int, int, str, float)
     # 任務下載結果（sysid, [item dict, ...]）— 見 _recv_mission 的 docstring
     mission_downloaded    = pyqtSignal(int, list)
     # ⚠️ 失敗**必須**走自己的信號，不可以用「成功但空清單」代表失敗。
@@ -505,6 +542,66 @@ class SITLLink(QThread):
         self._log_lock = threading.Lock()              # 保護下面兩個（GUI 執行緒讀狀態、stop() 收尾）
         self._log_list_state: Optional[dict] = None    # 進行中的列表請求
         self._log_dl: Optional[dict] = None            # 進行中的下載（同一條鏈路同時只能一個）
+        # ── status_text → status_text_sysid 轉接（2026-10-22）──
+        # 40 多個 status_text.emit 散在各處（接收執行緒、GUI 執行緒都有），不逐一改：用 DirectConnection
+        # 接一個轉接 slot —— 它在**發信的那條執行緒裡同步執行**，所以 _emit_status_from 先把「這則的來源 sysid／
+        # 種類」放進 thread-local、再 emit，轉接 slot 讀得到的就是這一則的來源；沒放（其他所有 emit 點）就是
+        # 本鏈路自己產生的 'gcs'，報 sysid_label。thread-local ⇒ 兩條執行緒同時 emit 也不會互相標錯。
+        self._status_origin = threading.local()
+        self.status_text.connect(self._relay_status_sysid, Qt.ConnectionType.DirectConnection)
+
+    # ── 帶 sysid 的狀態訊息（見 status_text_sysid）──────────────────────
+    def _relay_status_sysid(self, severity, text):
+        o = getattr(self.__dict__.get('_status_origin'), 'v', None)
+        sid, kind = o if o is not None else (self.sysid_label, 'gcs')
+        self.status_text_sysid.emit(int(sid), int(severity), str(text), kind)
+
+    def _emit_status_from(self, src, kind: str, severity: int, text: str) -> None:
+        """以「來源 system ＝ src、種類 ＝ kind」發一則 status_text（舊信號照發；轉接 slot 據此帶 sysid）。"""
+        loc = self.__dict__.get('_status_origin')
+        if loc is None:                      # SITLLink.__new__ 的測試替身：沒有轉接，照舊發
+            self.status_text.emit(int(severity), text)
+            return
+        if kind == 'ext':                    # 非飛機來源：保留原始 system（255＝別的地面站），HUD 標 [EXT n]
+            sid = int(src) if src is not None and 0 < int(src) <= 255 else 0
+        else:
+            sid = int(src) if src not in (None, 0, 255) else 0
+        loc.v = (sid, kind)
+        try:
+            self.status_text.emit(int(severity), text)
+        finally:
+            loc.v = None
+
+    @staticmethod
+    def _msg_src(msg) -> Optional[int]:
+        """訊息的來源 system；拿不到（測試替身沒有 get_srcSystem）回 None。"""
+        get = getattr(msg, 'get_srcSystem', None)
+        if not callable(get):
+            return None
+        try:
+            return int(get())
+        except Exception:
+            return None
+
+    # ── 串流頻率 ──────────────────────────────────────────────────────
+    def is_serial_link(self) -> bool:
+        """COM／ttyUSB／ttyACM／serial: 這類數傳鏈路（頻寬受限，串流不拉高）。"""
+        c = str(self.conn_str or '').strip().lower()
+        return (c.startswith('com') and len(c) > 3 and c[3].isdigit()) or '/dev/tty' in c or c.startswith('serial')
+
+    def telemetry_stream_hz(self) -> float:
+        """位置／姿態／VFR 串流要求的頻率：網路鏈路用 STREAM_HZ（env AEROPLAN_STREAM_HZ，預設 20）；序列埠回 0（不拉高）。
+        `AEROPLAN_STREAM_HZ_SERIAL` 可對序列埠另設（預設 0）。"""
+        if self.is_serial_link():
+            return max(0.0, _env_float('AEROPLAN_STREAM_HZ_SERIAL', 0.0))
+        return max(0.0, STREAM_HZ)
+
+    def attitude_stream_hz(self) -> float:
+        """ATTITUDE 另外要的頻率（SET_MESSAGE_INTERVAL）：網路鏈路用 ATTITUDE_HZ（env AEROPLAN_ATTITUDE_HZ，預設 50）；
+        序列埠回 0（維持串流原速率；`AEROPLAN_ATTITUDE_HZ_SERIAL` 可另設）。"""
+        if self.is_serial_link():
+            return max(0.0, _env_float('AEROPLAN_ATTITUDE_HZ_SERIAL', 0.0))
+        return max(0.0, ATTITUDE_HZ)
 
     # ── 公開控制 ──────────────────────────────────────────────────────
     def stop(self):
@@ -1216,6 +1313,24 @@ class SITLLink(QThread):
                 8,  # MAV_DATA_STREAM_RC_CHANNELS
                 10, 1
             )
+            # 2026-10-17 使用者定調「畫面要流暢、SITL 的 Hz 要高」：位置／姿態／VFR 這三條再以
+            # STREAM_HZ（預設 20，環境變數 AEROPLAN_STREAM_HZ）要一次。只對網路鏈路（SITL／UDP／TCP）；
+            # 序列埠數傳（57600 ≈ 5.7 kB/s）塞不下，維持上面的 4 Hz。GUI 端另有合幀，高頻不會拖垮主執行緒。
+            hz = self.telemetry_stream_hz()
+            if hz > 0:
+                for stream_id in (6, 10, 11):      # POSITION, EXTRA1(ATTITUDE), EXTRA2(VFR_HUD)
+                    self._mav.mav.request_data_stream_send(
+                        self._mav.target_system, self._mav.target_component,
+                        stream_id, int(hz), 1)
+                logger.info(f'[SITL] {self.conn_str}: 位置／姿態／VFR 串流 {int(hz)} Hz')
+            # ATTITUDE 再單獨拉高（3D 姿態忠實度）。⚠ 一定要在上面的 REQUEST_DATA_STREAM 之後：ArduPilot 收到
+            # EXTRA1 的串流要求會把 ATTITUDE 的間隔改回串流頻率。
+            att_hz = self.attitude_stream_hz()
+            if att_hz > max(hz, 0.0):
+                self._mav.mav.command_long_send(
+                    self._mav.target_system, self._mav.target_component, _MAV_CMD_SET_MESSAGE_INTERVAL, 0,
+                    _MAVLINK_MSG_ID_ATTITUDE, 1e6 / att_hz, 0, 0, 0, 0, 0)
+                logger.info(f'[SITL] {self.conn_str}: ATTITUDE {att_hz:g} Hz')
         except Exception:
             pass
 
@@ -1501,6 +1616,21 @@ class SITLLink(QThread):
             logger.info(f'[SITL] {self.conn_str} 偵測到來源 system {src}{extra}')
         return f
 
+    def _att_sample_time(self, src: int, msg, t_recv: float) -> tuple:
+        """ATTITUDE 的 (time_boot_ms, 飛控取樣時刻換到牆鐘的 epoch 秒)：每個來源 system 一個 BootClockSync（下包絡、
+        重開機分段，見 mission/boot_clock.py）。訊息沒有可用的 time_boot_ms ⇒ (-1, 收到時刻)。"""
+        try:
+            boot_ms = int(msg.time_boot_ms)
+        except (AttributeError, TypeError, ValueError):
+            return -1, float(t_recv)
+        if boot_ms < 0:
+            return -1, float(t_recv)
+        clocks = self.__dict__.setdefault('_boot_clocks', {})     # __dict__：SITLLink.__new__ 的測試替身也能跑
+        clk = clocks.get(src)
+        if clk is None:
+            clk = clocks[src] = BootClockSync()
+        return boot_ms, clk.map(boot_ms, t_recv)
+
     # ── 訊息分派 ──────────────────────────────────────────────────────
     def _handle_message(self, msg):
         mtype = msg.get_type()
@@ -1516,13 +1646,18 @@ class SITLLink(QThread):
                 # 例如 SERVO5_FUNCTION → ch=5, key=FUNCTION
                 import re as _re
                 m = _re.match(r'^SERVO(\d+)_(FUNCTION|MIN|TRIM|MAX|REVERSED)$', pname)
+                src = self._msg_src(msg)
                 if m:
                     ch = int(m.group(1))
                     key = m.group(2)
                     if 1 <= ch <= 16:
                         self.servo_param.emit(ch, key, pval)
+                        # 帶 sysid 的版本只收自駕儀元件（同 sysid 的相機回 SERVOn_* 不能蓋掉飛控的）
+                        if src not in (None, 0, 255) \
+                                and self._is_autopilot_component(src, self._src_component(msg)):
+                            self.servo_param_sysid.emit(int(src), ch, key, pval)
                 else:
-                    self.status_text.emit(6, f'PARAM {pname} = {pval:g}')
+                    self._emit_status_from(src, 'param', 6, f'PARAM {pname} = {pval:g}')
             except Exception:
                 pass
             try:
@@ -1534,7 +1669,19 @@ class SITLLink(QThread):
         if mtype == 'STATUSTEXT':
             text = msg.text if isinstance(msg.text, str) else msg.text.decode('utf-8', 'ignore')
             text = text.strip('\x00')
-            self.status_text.emit(int(msg.severity), text)
+            # 舊信號不過濾來源（舊行為）；帶 sysid 的版本報**真正的來源** system，而且只有「已確認是飛機（或本鏈路
+            # 標示的機號）的自駕儀元件」說的才算 'fc' —— MAVROS／伴隨電腦（例如 191/240）、同機的相機元件、別的
+            # 地面站（255）、來源不明（0）一律 'ext'：HUD 只在群控合併時間線列（標 [EXT n]），不進任何一台的單機訊息
+            # （2026-10-22 審查：以前標成「UAV191 [FC]」，來源 0／255 還會出現在每一台的單機畫面裡）。
+            _src = self._msg_src(msg)
+            try:
+                _is_fc = (_src not in (None, 0, 255)
+                          and (_src in self.__dict__.get('_vehicle_srcs', ())
+                               or _src == self.__dict__.get('sysid_label'))
+                          and self._is_autopilot_component(_src, self._src_component(msg)))
+            except Exception:                # SITLLink.__new__ 的測試替身缺欄位：當成不確定來源
+                _is_fc = False
+            self._emit_status_from(_src, 'fc' if _is_fc else 'ext', int(msg.severity), text)
             # 任務進度（條帶監測）：只認已確認是飛機的自駕儀元件（相機／伴隨電腦或別的 sysid 不能偽造）
             m = _MISSION_TEXT_RE.match(text)
             if m:
@@ -1637,6 +1784,7 @@ class SITLLink(QThread):
             f.ground_speed = (vx*vx + vy*vy) ** 0.5
             f.climb = -msg.vz / 100.0
             f.vel_n, f.vel_e, f.vel_d = vx, vy, msg.vz / 100.0
+            f.pos_t = time.time()           # 3D 插值樣本的時間戳（收到這則位置的當下）
             emit = True
 
         elif mtype == 'ATTITUDE':
@@ -1644,6 +1792,8 @@ class SITLLink(QThread):
             f.roll  = math.degrees(msg.roll)
             f.pitch = math.degrees(msg.pitch)
             f.yaw   = math.degrees(msg.yaw)
+            f.att_t = time.time()           # 同上，姿態樣本
+            f.att_boot_ms, f.att_ts = self._att_sample_time(src, msg, f.att_t)
             emit = True
 
         elif mtype == 'VFR_HUD':
@@ -1675,7 +1825,12 @@ class SITLLink(QThread):
 
         if emit:
             f.last_update = time.time()
-            self.telemetry.emit(f)
+            # 送**快照**而不是這個活物件：跨執行緒 queued 信號只傳參考，GUI 合幀之後才讀（最晚 1/30 s），
+            # 那時接收執行緒可能剛改了 lat 還沒改 lon（撕裂）⇒ 3D 插值多出一個歪點、看起來抖。
+            # servo_pwm 是 list，淺拷貝會共用 ⇒ 另外複製。get_latest_telemetry() 仍回活物件，不受影響。
+            snap = copy.copy(f)
+            snap.servo_pwm = list(f.servo_pwm)
+            self.telemetry.emit(snap)
 
     # ── PARAM_VALUE → param_value 信號 + read_params 等待者 ─────────────
     def _on_param_value(self, msg) -> None:

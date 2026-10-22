@@ -90,7 +90,9 @@ def fake_result(tmp_path, *, passed=True, gsd=2.7, images=True):
     csv_p = deliverable.write_photos_csv(out / "photos.csv", [row])
     geo = out / "odm" / "geo.txt"
     geo.parent.mkdir(exist_ok=True)
-    geo.write_text("EPSG:4326\n", encoding="utf-8")
+    # 每張上傳影像都要有 geo.txt 行（2026-10-20 起 odm_job 會核對：缺行的影像 ODX 會靜默改用 EXIF GPS）
+    geo.write_text("EPSG:4326\nHERO1_S1_000001.jpg 121.200000000 25.100000000 150.000 95.000 0.000 0.000 0.030 0.050\n",
+                   encoding="utf-8")
     img = out / "odm" / "images" / "HERO1_S1_000001.jpg"
     img.parent.mkdir(exist_ok=True)
     img.write_bytes(b"jpg")
@@ -384,9 +386,18 @@ def test_ppk_frame_name_and_base_inputs_required(qt_app, no_rtklib, tmp_path):
     assert "PPK：HERO1 沒有填 .pos（或改選 RTKLIB 解算）" in errors
     dlg._set_cell(0, 4, str(tmp_path / "rover.pos"))
     dlg.ed_base_frame.setText("e-GNSS[2025]")
+    # 2026-10-21（M2b／M4）：.pos 模式也必須填基站座標（流水線會核對 .pos 表頭的 % ref pos）
+    _, errors = dlg.collect_inputs()
+    assert sorted(e.split("必填")[0] for e in errors) == ["PPK：基站橢球高", "PPK：基站經度", "PPK：基站緯度", "PPK：天線高"]
+    for ed, v in ((dlg.ed_base_lat, "25.0995"), (dlg.ed_base_lon, "121.1995"), (dlg.ed_base_h, "52.3"),
+                  (dlg.ed_base_ant, "1.234")):
+        ed.setText(v)
     inp, errors = dlg.collect_inputs()
     assert errors == [] and isinstance(inp["kwargs"]["ppk"], PpkSettings)
     assert inp["kwargs"]["ppk"].frame == "e-GNSS[2025]" and inp["kwargs"]["ppk"].run_rtklib is False
+    assert inp["kwargs"]["ppk"].base == rtklib.BaseStation(25.0995, 121.1995, 52.3, "e-GNSS[2025]", antenna_height_m=1.234)
+    for ed in (dlg.ed_base_lat, dlg.ed_base_lon, dlg.ed_base_h, dlg.ed_base_ant):
+        ed.setText("")
     # RTKLIB 模式：基站座標、天線高、觀測檔都必填；沒裝 RTKLIB 也擋下
     dlg.rb_ppk_rtklib.setChecked(True)
     _, errors = dlg.collect_inputs()
@@ -493,7 +504,9 @@ def test_dialog_runs_the_real_pipeline_with_committed_areas_and_gps_lag(qt_app, 
     assert (tmp_path / "gui" / "photos.csv").read_bytes() == (tmp_path / "direct" / "photos.csv").read_bytes()
     assert res.effective["gps_lag_s"] == 0.08 and res.qa["exposure"]["n_polygons"] == 2
     assert res.qa["exposure"]["frac_ge"] == direct.qa["exposure"]["frac_ge"]
-    assert res.effective["input_sources"] == {"gps_lag_s": "操作員輸入", "polygons": f"{MAIN_SRC}，2 塊"}
+    # 2026-10-20：以測區算視數時也記下計畫來源（即時狀態 vs 飛行計畫快照）
+    assert res.effective["input_sources"] == {"gps_lag_s": "操作員輸入", "polygons": f"{MAIN_SRC}，2 塊",
+                                              "plan_source": "即時狀態（目前規劃器與主視窗，不是飛行計畫快照）"}
     assert abs(float(np.median([truth_err(s, r)[2] for r in res.rows]))) < 2e-3      # 0 ms 時是 −0.080 s
     assert "GPS 接收延遲補償 80 ms（操作員輸入）" in dlg.lbl_summary.text().splitlines()
 

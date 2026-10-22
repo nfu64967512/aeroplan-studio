@@ -604,7 +604,7 @@ def test_trigger_distance_ignores_micro_agl_jitter_but_follows_real_height_chang
                 if it.command == 206 and it.param1 > 0]
 
     sensor = ap._sensor_for(up, ctx, sids[0], None)
-    d_op = ap.trigger_distance_m(sensor, 120.0)
+    d_op = ap.commanded_trigger_distance_m(sensor, 120.0)      # 給了 camera_cfg ⇒ 再扣 50 Hz 量化保護（2026-10-21）
     # R2 的 5 ulp（−6e-5 m）與有 DEM 時的地球曲率／內插（F1 實測帶起點 AGL 高出 4–42 mm）
     jit = bump({sids[0]: -6e-5, sids[1]: +0.042, sids[2]: -0.4})
     got = p1s(jit, CC)
@@ -614,11 +614,11 @@ def test_trigger_distance_ignores_micro_agl_jitter_but_follows_real_height_chang
     # 真的高度差（2 m，超過容差）照舊依該點 AGL
     agl0 = next(w.agl_m for w in up.waypoints if w.phase is Phase.OPERATE and w.strip_id == sids[0])
     real = p1s(bump({sids[0]: 2.0}), CC)
-    assert real[0] == pytest.approx(ap.trigger_distance_m(sensor, agl0 + 2.0), rel=1e-12)
+    assert real[0] == pytest.approx(ap.commanded_trigger_distance_m(sensor, agl0 + 2.0), rel=1e-12)
     assert real[0] != pytest.approx(d_op, rel=1e-3)
     # 預設路徑（不給 camera_cfg）逐值不變：仍用該點 AGL
     plain = p1s(jit, None)
-    assert plain[0] != d_op
+    assert plain[0] != ap.trigger_distance_m(sensor, 120.0)            # 沒吸附（也沒有量化保護）
 
 
 # ═══════════════════════════ (f) 錯開起飛 ═══════════════════════════

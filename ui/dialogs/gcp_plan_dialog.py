@@ -62,6 +62,9 @@ class GcpPlanDialog(QDialog):
         self.setMinimumWidth(980)
         self.map_widget = map_widget
         self.polygons_source = polygons
+        # 作業區的來源說明（記進 plan.effective['areas_source']）：None ＝ 主視窗的作業區（預設）；航測處理對話框
+        # 改用飛行計畫快照時會設成快照的說明（survey.plan_snapshot.polygons_label），不能還寫「主視窗」
+        self.polygons_label = None
         self.blocks_source = blocks
         self.plan = None
         self.comparison = None
@@ -284,17 +287,23 @@ class GcpPlanDialog(QDialog):
     # 來源
     # ─────────────────────────────────────────────────────────────────
     def areas(self) -> Tuple[Optional[list], str, Optional[str]]:
-        """(ring 的串列, 來源說明, 錯誤)。給了 polygons 就只用它（不退回地圖角點）。"""
+        """(ring 的串列, 來源說明, 錯誤)。給了 polygons 就只用它（不退回地圖角點）；來源說明用 ``polygons_label``
+        （例如飛行計畫快照），沒設才是「主視窗的作業區」。"""
         if self.polygons_source is not None:
+            label = getattr(self, "polygons_label", None)
             try:
                 src = self.polygons_source
                 raw = src() if callable(src) else src
             except Exception as e:                       # noqa: BLE001 - 主視窗狀態異常要說清楚
+                if label:
+                    return None, label, f"讀作業區失敗（{label}）：{type(e).__name__}: {e}"
                 return None, AREAS_MAIN_SRC, f"讀主視窗作業區失敗：{type(e).__name__}: {e}"
             rings = [list(r) for r in (raw or [])]
             if not rings:
+                if label:
+                    return None, label, f"沒有任何作業區（{label}）"
                 return None, AREAS_MAIN_SRC, "主視窗沒有任何作業區：請先圈好作業區"
-            return rings, f"{AREAS_MAIN_SRC}，{len(rings)} 塊", None
+            return rings, (label or f"{AREAS_MAIN_SRC}，{len(rings)} 塊"), None
         corners = list(getattr(self.map_widget, "corners", None) or []) if self.map_widget is not None else []
         if len(corners) < 3:
             return None, AREAS_MAP_SRC, "沒有作業區（地圖上的角點不到 3 個）"

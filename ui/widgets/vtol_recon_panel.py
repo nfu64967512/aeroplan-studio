@@ -20,7 +20,7 @@ from typing import Optional
 
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QPixmap
 import math
 
@@ -105,6 +105,30 @@ def _platform_pixmap(filename: str, height: int):
     return pm.scaledToHeight(height, Qt.TransformationMode.SmoothTransformation)
 
 
+def wind_profile_heights() -> tuple:
+    """分層風的高度（使用者 2026-10-19 定調：先只做 10／80／120 m）。單一來源是 core.wind_field.PROFILE_HEIGHTS_M：
+    這裡不留第二份（之前的「讀不到就退回同一組值」是 core 還沒落地時的替身，會在常數改了時靜默不同步）。"""
+    from core.wind_field import PROFILE_HEIGHTS_M
+    return tuple(float(h) for h in PROFILE_HEIGHTS_M)
+
+
+def _wind_profile_model_name() -> str:
+    """分層風用的模式名（tooltip 用）；單一來源同上。"""
+    from core.wind_field import PROFILE_MODEL_DEFAULT
+    return str(PROFILE_MODEL_DEFAULT)
+
+
+def nearest_profile_height(h_m, heights) -> Optional[float]:
+    """最接近 ``h_m`` 的那一層（**不內插**）；等距取較低層；h_m 不是有限數或沒有層回 None。"""
+    try:
+        h = float(h_m)
+    except (TypeError, ValueError):
+        return None
+    hs = [float(x) for x in heights if isinstance(x, (int, float)) and math.isfinite(float(x))]
+    if not hs or not math.isfinite(h):
+        return None
+    return min(hs, key=lambda x: (abs(x - h), x))
+
 
 def _tune_form(form: QFormLayout, is_group_layout: bool = False) -> QFormLayout:
     """把一個 QFormLayout 調成本頁統一的密度。
@@ -161,9 +185,13 @@ class VTOLReconPanel(QWidget):
     flat_apply_requested = pyqtSignal(float, float, float)   # 平移作業區到（緯度, 經度），縮放倍率
     flat_undo_requested = pyqtSignal()        # 復原上次平移
     wind_display_changed = pyqtSignal(dict)   # 風場顯示勾選／規劃風值變了：{'plan','live','speed_mps','dir_from_deg'}
-    wind_grid_requested = pyqtSignal(dict)    # 抓氣象網格：{'height': '10m'|'120m'}（作業區由 MainWindow 補）
+    wind_grid_requested = pyqtSignal(dict)    # 抓氣象網格：{'height': '10m'|'120m'|'profile'}（作業區由 MainWindow 補）
+    wind_profile_view_changed = pyqtSignal(dict)   # 分層風「2D 顯示高度」變了：{'height_2d_m': 10.0|80.0|120.0, 'user': 手動選的?}
+    planned_altitude_changed = pyqtSignal(float)   # 生效的偵察航高（含 GSD 反算）變了（防抖 250 ms；分層風依它重挑層）
     wind_grid_clear_requested = pyqtSignal()  # 清除氣象網格與測站觀測
     wind_cwa_requested = pyqtSignal(dict)     # 抓 CWA 測站觀測：{'station': 代碼或名稱（空白＝最近）}
+    hdmap_preview_requested = pyqtSignal()    # 「預覽高精地圖成果…」（只在預覽算好時可按）
+    hdmap_preview_layer_toggled = pyqtSignal(bool)   # 「地圖顯示預計成果」勾選
     verify_coverage_requested = pyqtSignal(dict)   # 覆蓋率驗算
     show_missed_requested = pyqtSignal()      # 在地圖標出漏掃格（紅點）
     show_heatmap_requested = pyqtSignal()     # 用 SAR 熱力圖呈現覆蓋分布
@@ -194,6 +222,10 @@ class VTOLReconPanel(QWidget):
         self._build_ui()
         self._refresh_footprint()
         self._sync_enabled()
+        try:                                             # 起始航高：之後只有「真的變了」才發 planned_altitude_changed
+            self._last_planned_alt = float(self.effective_altitude_m())
+        except Exception:                                # noqa: BLE001 - GSD 反算可能丟錯
+            self._last_planned_alt = None
 
     # ══════════════════════════════════════════════════════════
     #  UI
@@ -957,10 +989,14 @@ class VTOLReconPanel(QWidget):
         self.hv_wind_speed_spin.setSingleStep(0.5)
         self.hv_wind_speed_spin.setValue(0.0)
         self.hv_wind_speed_spin.setSuffix(" m/s")
+        # 0＝無風規劃（預設）：寫在欄位裡，不是只放提示（評估_2026-10-20 §5.1：沒輸入風就是無風規劃、自己看不出來）
+        self.hv_wind_speed_spin.setSpecialValueText("0 m/s＝無風規劃")
         self.hv_wind_speed_spin.setToolTip(
-            "平均風速。會修正地速、耗時與**轉彎半徑**：\n"
-            "實測 8 m/s 時 A 的 200 m → 244.7 m、B 的 120 m → 151.5 m。\n"
-            "風速太大會撞到起降場地的陣風限制而直接 NO_GO。")
+            "規劃器假設的平均風速（HARVEST 才用；DCCPP 不考慮風）。**0 m/s＝無風規劃**（預設）。\n"
+            "會修正地速、耗時與**轉彎半徑**：實測 8 m/s 時 A 的 200 m → 244.7 m、B 的 120 m → 151.5 m。\n"
+            "風速太大會撞到起降場地的陣風限制而直接 NO_GO。\n"
+            "⚠ 0 m/s 時下面的風向仍會影響沒有禁航區時的進場方向。\n"
+            "GUI 開 SITL 時對話框可「帶入規劃風」（SIM_WIND_SPD／SIM_WIND_DIR），不勾＝SITL 無風。")
         form.addRow("平均風速:", self.hv_wind_speed_spin)
 
         self.hv_wind_dir_spin = QDoubleSpinBox()
@@ -969,7 +1005,9 @@ class VTOLReconPanel(QWidget):
         self.hv_wind_dir_spin.setSingleStep(5.0)
         self.hv_wind_dir_spin.setValue(0.0)
         self.hv_wind_dir_spin.setSuffix(" °")
-        self.hv_wind_dir_spin.setToolTip("風**從哪個方位吹來**（氣象慣例，0=北）。影響逆風進場方向。")
+        self.hv_wind_dir_spin.setToolTip(
+            "風**從哪個方位吹來**（氣象慣例，0=北；與 SITL 的 SIM_WIND_DIR 同一個「來向」約定）。\n"
+            "影響逆風進場方向——平均風速 0 m/s 時也一樣。")
         form.addRow("風向（風從何方來）:", self.hv_wind_dir_spin)
 
         # ── 風場顯示（地圖圖層；使用者 2026-10-16：規劃風＋飛機即時風＋外部氣象網格，2D/3D 都畫）──
@@ -987,10 +1025,18 @@ class VTOLReconPanel(QWidget):
         self.wind_grid_height_combo = QComboBox()
         self.wind_grid_height_combo.addItem("10 m（目前）", "10m")
         self.wind_grid_height_combo.addItem("120 m（這小時）", "120m")
-        self.wind_grid_height_combo.setToolTip("氣象網格的高度：10 m 是目前值（15 分鐘級）；120 m 是這個小時的逐時預報。")
+        # 使用者 2026-10-19：3D 要看不同高度的風，先只做 10／80／120 m 三層（同一模式、同一個逐時時間步）
+        self.wind_grid_height_combo.addItem("分層 10／80／120 m（這小時）", "profile")
+        _pmodel = _wind_profile_model_name()
+        self.wind_grid_height_combo.setToolTip(
+            "氣象網格的高度：10 m 是目前值（15 分鐘級）；120 m 是這個小時的逐時預報。\n"
+            f"分層：Open-Meteo {_pmodel} 模式**同一個逐時時間步**的 10／80／120 m 三層（模式預報，非實測）；"
+            "3D 每層畫在自己的高度＋作業區中心一根風剖面柱，2D 只畫「2D 顯示高度」那一層。\n"
+            "只有這三層：層與層之間不內插，也不外推到更高或更低。")
         self.btn_wind_grid = IconButton("radar", "抓氣象網格", tone="primary", compact=True)
         self.btn_wind_grid.setToolTip(
-            "向 Open-Meteo 抓作業區一帶 6×6 格點的模式預報風（不是實測；解析度約 1–11 km，地形與陣風不反映）。\n"
+            "向 Open-Meteo 抓作業區一帶 6×6 格點的模式預報風（不是實測；解析度依模式，分層用的 icon_global 是 0.125° "
+            "格點約 13 km，作業區一帶常只對應 1–4 個模式格點；地形與陣風不反映）。\n"
             "要網路；會送出作業區附近的格點經緯度。沒圈作業區時不能抓。")
         self.btn_wind_grid.setEnabled(False)
         self.btn_wind_grid_clear = IconButton("clear", "清除網格／測站", tone="ghost", compact=True)
@@ -1012,6 +1058,27 @@ class VTOLReconPanel(QWidget):
         _gwrap = QWidget()
         _gwrap.setLayout(_grow)
         form.addRow("氣象網格:", _gwrap)
+        # 分層風的 2D 顯示高度：2D 是俯視，三層疊在一起分不出來 ⇒ 2D 只畫一層；3D 三層都畫在各自高度
+        self.wind_profile_h2d_combo = QComboBox()
+        for _h in wind_profile_heights():
+            self.wind_profile_h2d_combo.addItem(f"{_h:g} m", float(_h))
+        self.wind_profile_h2d_combo.setToolTip(
+            "2D 地圖（俯視）只畫分層風的這一層；3D 三層都畫在各自的高度，這一層畫實線、其餘層淡化。\n"
+            "預設＝最接近「偵察航高」的那一層（等距時取較低層；那層沒資料就取最接近的可用層），"
+            "航高改了會跟著換；手動選過就照你選的。")
+        _hrow = QHBoxLayout()
+        _hrow.setContentsMargins(0, 0, 0, 0)
+        _hrow.addWidget(self.wind_profile_h2d_combo)
+        _hrow.addStretch(1)
+        self.wind_profile_h2d_row = QWidget()
+        self.wind_profile_h2d_row.setLayout(_hrow)
+        form.addRow("2D 顯示高度:", self.wind_profile_h2d_row)
+        self._wind_form = form
+        self._wind_profile_loaded = False
+        self._wind_profile_h2d_user = False      # 使用者手動選過 ⇒ 不再自動跟著航高
+        self._wind_profile_h2d_auto = False      # 程式在設預設值（不算使用者選）
+        self._set_wind_profile_h2d_default()
+        self._sync_wind_profile_row()
         # CWA 自動氣象站（真的量測）：代碼／名稱，空白＝離作業區最近；授權碼只在 settings.json／環境變數
         self.wind_cwa_station_edit = QLineEdit()
         self.wind_cwa_station_edit.setPlaceholderText("測站代碼或名稱；空白＝離作業區最近的測站")
@@ -1039,7 +1106,9 @@ class VTOLReconPanel(QWidget):
         self.wind_apply_plan_check.setChecked(True)
         self.wind_apply_plan_check.setToolTip(
             "抓到 CWA 測站觀測或氣象網格後，把風速／來向寫進上面的「平均風速」「風向」欄位（規劃器用的就是那兩格）。\n"
-            "網格寫入的是全部格點的向量平均；測站寫入的是 10 m 高的 10 分鐘平均風。寫入後狀態列會寫明來源，"
+            "網格寫入的是全部格點的向量平均；分層風寫入的是作業區中心、最接近偵察航高的**那一層**（規劃器只吃一個風，"
+            "不內插；航高高於最高層或低於最低層時寫入端點那一層並標 ⚠，不外推；之後改航高會依新高度重挑那一層）；"
+            "測站寫入的是 10 m 高的 10 分鐘平均風。寫入後狀態列會寫明來源，"
             "你隨時可以再手動改。")
         form.addRow("", self.wind_apply_plan_check)
         self.wind_status_label = QLabel("")
@@ -1056,9 +1125,10 @@ class VTOLReconPanel(QWidget):
         self.wind_show_live_check.toggled.connect(self._emit_wind_display)
         self.hv_wind_speed_spin.valueChanged.connect(self._emit_wind_display)
         self.hv_wind_dir_spin.valueChanged.connect(self._emit_wind_display)
-        self.btn_wind_grid.clicked.connect(
-            lambda: self.wind_grid_requested.emit({"height": str(self.wind_grid_height_combo.currentData())}))
+        self.btn_wind_grid.clicked.connect(self._emit_wind_grid_request)
         self.btn_wind_grid_clear.clicked.connect(self.wind_grid_clear_requested.emit)
+        self.wind_grid_height_combo.currentIndexChanged.connect(self._on_wind_grid_height_changed)
+        self.wind_profile_h2d_combo.currentIndexChanged.connect(self._on_wind_profile_h2d_changed)
 
         self.hv_note_label = QLabel(
             "作業高度、條帶間距、最小間距與高度錯開量沿用上方欄位。\n"
@@ -1187,7 +1257,8 @@ class VTOLReconPanel(QWidget):
         self.hv_map_fwd_spin.setRange(0.0, 0.95)
         self.hv_map_fwd_spin.setDecimals(2)
         self.hv_map_fwd_spin.setSingleStep(0.05)
-        self.hv_map_fwd_spin.setToolTip("沿航向的照片重疊；觸發距離 = 足跡縱長 ×(1 − 前向重疊)。"
+        self.hv_map_fwd_spin.setToolTip("沿航向的照片重疊；觸發距離 = 足跡縱長 ×(1 − 前向重疊) ×(1 − 拍照率/50)："
+                                        "飛控每 20 ms 才比一次距離，最後那個因子扣掉量化多走的距離，實際重疊不低於設定。"
                                         "側向重疊是上方「感測器足跡」的「重疊率」。")
         form.addRow("前向重疊:", self.hv_map_fwd_spin)
 
@@ -1324,6 +1395,25 @@ class VTOLReconPanel(QWidget):
         self.hv_map_status_label = QLabel("")
         self.hv_map_status_label.setWordWrap(True)
         lay.addWidget(self.hv_map_status_label)
+        # 預計成果（規劃預測）：建圖規劃完成後 MainWindow 在背景算；算好（'ready'）才可以按
+        _pv = QHBoxLayout()
+        self.btn_hdmap_preview = IconButton("map_2d", "預覽高精地圖成果…", tone="primary", compact=True)
+        self.btn_hdmap_preview.clicked.connect(self.hdmap_preview_requested.emit)
+        _pv.addWidget(self.btn_hdmap_preview)
+        self.chk_hdmap_preview_layer = QCheckBox("地圖顯示預計成果")
+        self.chk_hdmap_preview_layer.setChecked(True)
+        self.chk_hdmap_preview_layer.setToolTip(
+            "在 2D／3D 地圖疊上預計成果分級（每格預計被幾張照片拍到）、可成圖範圍與內部破洞。\n"
+            "這是規劃預測，不是正射影像，也不是飛完的成果。")
+        self.chk_hdmap_preview_layer.toggled.connect(self.hdmap_preview_layer_toggled.emit)
+        _pv.addWidget(self.chk_hdmap_preview_layer)
+        _pv.addStretch(1)
+        lay.addLayout(_pv)
+        self.hdmap_preview_status_label = QLabel("")
+        self.hdmap_preview_status_label.setWordWrap(True)
+        lay.addWidget(self.hdmap_preview_status_label)
+        self._hdmap_preview_state = "none"
+        self.set_hdmap_preview_state("none")
         self.hv_map_live_label = QLabel("")
         self.hv_map_live_label.setWordWrap(True)
         lay.addWidget(self.hv_map_live_label)
@@ -1505,6 +1595,45 @@ class VTOLReconPanel(QWidget):
     def set_mapping_live_status(self, text: str) -> None:
         """上傳後由 MainWindow 回填：每架「已拍 N / 預估 M」（CAMERA_FEEDBACK）。"""
         self.hv_map_live_label.setText(text)
+
+    # ── 預計成果（規劃預測）──────────────────────────────────────
+    #: 狀態 → (預設狀態字, 鈕的說明, 字色)
+    _HDMAP_PREVIEW_STATES = {
+        "none": ("", "建圖模式規劃完成後會自動計算預計成果；目前沒有可預覽的結果。", ""),
+        "computing": ("預計成果計算中…（規劃預測）", "預計成果還在背景計算，算好就可以按。", "color:#1565c0;"),
+        "ready": ("預計成果已算好（規劃預測，非實際成果）",
+                  "開啟預計成果：分級圖、可成圖範圍、內部破洞、張數與資料量範圍、文獻精度（附條件）。\n"
+                  "這是規劃預測，不是飛完的成果。", "color:#2e7d32;"),
+        "failed": ("預計成果無法產生", "預計成果沒有算出來（原因見下方說明）。", "color:#c62828;"),
+    }
+
+    def set_hdmap_preview_state(self, state: str) -> None:
+        """'none'｜'computing'｜'ready'｜'failed'。鈕只在 'ready' 時可按；狀態字換成該狀態的預設字
+        （要更精確的說明再呼叫 ``set_hdmap_preview_status``）。"""
+        if state not in self._HDMAP_PREVIEW_STATES:
+            raise ValueError(f"預計成果狀態只能是 {sorted(self._HDMAP_PREVIEW_STATES)}，收到 {state!r}")
+        self._hdmap_preview_state = state
+        text, tip, style = self._HDMAP_PREVIEW_STATES[state]
+        self.btn_hdmap_preview.setEnabled(state == "ready")
+        self.btn_hdmap_preview.setToolTip(tip)
+        self.hdmap_preview_status_label.setText(text)
+        self.hdmap_preview_status_label.setStyleSheet(style)
+        self.hdmap_preview_status_label.setToolTip("")
+
+    def hdmap_preview_state(self) -> str:
+        return self._hdmap_preview_state
+
+    def set_hdmap_preview_status(self, text: str) -> None:
+        """MainWindow 回填：計算中／完成摘要／失敗原因（狀態字與鈕的提示都顯示這段）。"""
+        text = str(text or "")
+        self.hdmap_preview_status_label.setText(text)
+        self.hdmap_preview_status_label.setToolTip(text)
+        base = self._HDMAP_PREVIEW_STATES.get(self._hdmap_preview_state, ("", "", ""))[1]
+        self.btn_hdmap_preview.setToolTip(base + (("\n\n" + text) if text else ""))
+
+    def hdmap_preview_layer_enabled(self) -> bool:
+        """「地圖顯示預計成果」有沒有勾。"""
+        return bool(self.chk_hdmap_preview_layer.isChecked())
 
     def apply_camera_values(self, values: dict, *, enable_mapping: bool) -> dict:
         """「相機配置」對話框套用：焦距／像素／解析度／前向與側向重疊填進來（下拉改成「自訂」）。
@@ -1898,6 +2027,42 @@ class VTOLReconPanel(QWidget):
             self.footprint_label.setText(f"相機幾何無解：{e}")
             self.footprint_label.setStyleSheet("color:#ff6b6b;")
         self._sync_enabled()
+        self._schedule_planned_altitude()
+
+    # ── 規劃高度變了（分層風的 2D 預設層、寫入規劃風選的那一層都依它）──────────
+    #   航高／目標 GSD／模式／相機參數任一變動都會走 _refresh_footprint ⇒ 防抖 250 ms 後比對生效航高，真的變了才發信號
+    #   （打字「150」不會發 1、15、150 三次）。
+    PLANNED_ALT_DEBOUNCE_MS = 250
+
+    def _schedule_planned_altitude(self) -> None:
+        t = self.__dict__.get("_planned_alt_timer")
+        if t is None:
+            try:
+                t = QTimer(self)
+            except RuntimeError:                         # 建構中途（QWidget 還沒好）：之後的變動再排
+                return
+            t.setSingleShot(True)
+            t.setInterval(self.PLANNED_ALT_DEBOUNCE_MS)
+            t.timeout.connect(self._emit_planned_altitude)
+            self._planned_alt_timer = t
+        t.start()
+
+    def _emit_planned_altitude(self) -> None:
+        """防抖到期：生效航高真的變了 ⇒（還沒手動選「2D 顯示高度」時）2D 預設層跟著換，再發 planned_altitude_changed。"""
+        try:
+            alt = float(self.effective_altitude_m())
+        except Exception:                                # noqa: BLE001 - GSD 反算可能丟錯：不發（MainWindow 讀不到高度也不猜）
+            return
+        if not math.isfinite(alt):
+            return
+        last = self.__dict__.get("_last_planned_alt")
+        if last is not None and abs(alt - last) < 1e-6:
+            return
+        self._last_planned_alt = alt
+        if not self.__dict__.get("_wind_profile_h2d_user", True) and (
+                str(self.wind_grid_height_combo.currentData()) == "profile" or self.__dict__.get("_wind_profile_loaded")):
+            self._set_wind_profile_h2d_default()
+        self.planned_altitude_changed.emit(alt)
 
     # ══════════════════════════════════════════════════════════
     #  對外狀態更新（由 MainWindow 呼叫）
@@ -1948,6 +2113,8 @@ class VTOLReconPanel(QWidget):
         # 新的規劃出來 ⇒ 舊的驗算結果作廢
         self._has_missed = False
         self._has_coverage = False
+        # 預計成果也是上一份計畫的 ⇒ 回到 'none'（建圖計畫由 MainWindow 接著設成 'computing'）
+        self.set_hdmap_preview_state("none")
         self._sync_enabled()
 
     def set_coverage_result(self, report, warn: bool = False) -> None:
@@ -2071,11 +2238,67 @@ class VTOLReconPanel(QWidget):
                 "speed_mps": float(self.hv_wind_speed_spin.value()),
                 "dir_from_deg": float(self.hv_wind_dir_spin.value()),
                 "grid_height": str(self.wind_grid_height_combo.currentData()),
+                "profile_height_2d_m": self.wind_profile_height_2d_m(),
+                # False ＝「2D 顯示高度」還是自動預設（依航高）：MainWindow 直接拿規劃高度對**可用**層挑一次，
+                #   不拿這個下拉（固定 10／80／120）的值再挑第二次（缺層時兩次挑選會挑到離航高較遠的層）
+                "profile_height_2d_user": bool(self._wind_profile_h2d_user),
                 "apply_plan": bool(self.wind_apply_plan_check.isChecked()),
                 "cwa_station": self.wind_cwa_station_edit.text().strip()}
 
     def _emit_wind_display(self, *_a) -> None:
         self.wind_display_changed.emit(self.get_wind_display())
+
+    # ── 分層風（10／80／120 m）──────────────────────────────
+    def wind_profile_height_2d_m(self) -> float:
+        """2D 要畫的那一層（m）。"""
+        return float(self.wind_profile_h2d_combo.currentData())
+
+    def _emit_wind_grid_request(self, *_a) -> None:
+        h = str(self.wind_grid_height_combo.currentData())
+        if h == "profile" and not self._wind_profile_h2d_user:
+            self._set_wind_profile_h2d_default()          # 航高可能改過：還沒手動選就再對一次
+        self.wind_grid_requested.emit({"height": h})
+
+    def _set_wind_profile_h2d_default(self) -> None:
+        """2D 顯示高度預設＝最接近目前偵察航高的那一層（等距取較低層）；航高讀不到就不動。"""
+        try:
+            alt = float(self.effective_altitude_m())
+        except Exception:                                    # noqa: BLE001 - GSD 反算可能丟錯：保留目前選擇
+            return
+        heights = [float(self.wind_profile_h2d_combo.itemData(i)) for i in range(self.wind_profile_h2d_combo.count())]
+        h = nearest_profile_height(alt, heights)
+        if h is None:
+            return
+        idx = heights.index(h)
+        if idx != self.wind_profile_h2d_combo.currentIndex():
+            self._wind_profile_h2d_auto = True
+            try:
+                self.wind_profile_h2d_combo.setCurrentIndex(idx)
+            finally:
+                self._wind_profile_h2d_auto = False
+
+    def _on_wind_grid_height_changed(self, *_a) -> None:
+        if str(self.wind_grid_height_combo.currentData()) == "profile" and not self._wind_profile_h2d_user:
+            self._set_wind_profile_h2d_default()
+        self._sync_wind_profile_row()
+
+    def _on_wind_profile_h2d_changed(self, *_a) -> None:
+        if not self._wind_profile_h2d_auto:
+            self._wind_profile_h2d_user = True
+        self.wind_profile_view_changed.emit({"height_2d_m": self.wind_profile_height_2d_m(),
+                                             "user": bool(self._wind_profile_h2d_user)})
+
+    def set_wind_profile_loaded(self, loaded: bool) -> None:
+        """地圖上有沒有分層風（有的話就算下拉選回 10 m／120 m，「2D 顯示高度」也留著讓你換層）。"""
+        self._wind_profile_loaded = bool(loaded)
+        self._sync_wind_profile_row()
+
+    def _sync_wind_profile_row(self) -> None:
+        show = (str(self.wind_grid_height_combo.currentData()) == "profile") or bool(self._wind_profile_loaded)
+        try:
+            self._wind_form.setRowVisible(self.wind_profile_h2d_row, show)
+        except (AttributeError, RuntimeError):             # 舊 Qt 沒有 setRowVisible：至少把欄位藏起來
+            self.wind_profile_h2d_row.setVisible(show)
 
     def wind_apply_to_plan_enabled(self) -> bool:
         return bool(self.wind_apply_plan_check.isChecked())

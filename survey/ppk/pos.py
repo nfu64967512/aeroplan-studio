@@ -17,6 +17,16 @@
 
 刻意拒絕（直接丟錯，不猜）：時間不是 GPST（UTC/JST）、高度是 geodetic、度分秒格式、
 ENU 基線格式、沒有表頭（out-outhead=off ⇒ 無從確認欄位與高度型別）。
+
+表頭中繼資料（:class:`PosMeta`，只讀出來、這裡不擋；數值鎖在 survey/pipeline.py）依 src/postpos.c outheader：
+- ``% program   : …``、``% inp file  : …``（每個輸入檔一行）。
+- ``% obs start : <曆法時間> <標籤> (week%04d %8.1fs)``、``% obs end   : …``：括號內的週／週內秒是
+  移動站第一／最後一個觀測 epoch 以 time2gpst 算的，在換成 UTC／JST **之前** ⇒ 永遠是 GPST；
+  週內秒印 ``%8.1f`` ⇒ 解析度 0.1 s。
+- ``% ref pos   : …``：相對定位（DGPS～FIXED、非 moving-base）才印，數值是設定的基站位置 rb
+  （**標石**，天線高另計），llh 印 ``%13.9f %14.9f %10.4f``、xyz 印 ``%14.4f`` ×3。
+- ``% antenna1  : …``／``% antenna2  : …``：out-outopt=on 才印。
+Emlid Studio 1.5 的 .pos 有 program／inp file／obs start／end，沒有處理選項行（2026-10-21 實檔核對）。
 """
 
 from __future__ import annotations
@@ -40,6 +50,8 @@ __all__ = [
     "Q_PPP",
     "GPS_WEEK_S",
     "PosFormatError",
+    "PosMeta",
+    "PosObsTime",
     "PosTrajectory",
     "gpst_calendar_to_seconds",
     "parse_pos",
@@ -56,10 +68,53 @@ _XYZ_REQ = ("x-ecef(m)", "y-ecef(m)", "z-ecef(m)", "Q", "ns",
 _LLH_VEL = ("vn(m/s)", "ve(m/s)", "vu(m/s)")
 _XYZ_VEL = ("vx(m/s)", "vy(m/s)", "vz(m/s)")
 _HEIGHT_RE = re.compile(r"lat/lon/height=([^/,\s]+)/([^,\s)]+)")
+# 只認這幾個鍵（其他 ``% xxx : yyy`` 例如處理選項行不在這裡解讀）；值取第一個冒號之後
+_META_RE = re.compile(r"^%\s*(program|inp file|obs start|obs end|ref pos|antenna1|antenna2)\s*:(.*)$")
+_OBS_T_RE = re.compile(r"\(\s*week\s*(\d+)\s+(\d+(?:\.\d*)?)\s*s\s*\)")
 
 
 class PosFormatError(ValueError):
     """.pos 檔的格式或設定不是本模組能正確解讀的。"""
+
+
+@dataclass(frozen=True)
+class PosObsTime:
+    """``% obs start／end`` 括號內的 GPST 週／週內秒（解析度 0.1 s）。``text`` 是冒號後原文，只記錄。"""
+    week: int
+    tow_s: float
+    text: str
+
+    @property
+    def gpst_s(self) -> float:
+        return self.week * GPS_WEEK_S + self.tow_s
+
+
+@dataclass(frozen=True)
+class PosMeta:
+    """.pos 表頭的中繼資料。缺的就是 None；認得的行解不出來時記在 ``problems``（這裡不丟錯）。"""
+    program: str | None = None
+    inp_files: tuple[str, ...] = ()
+    obs_start: PosObsTime | None = None
+    obs_end: PosObsTime | None = None
+    ref_pos_kind: str | None = None                          # "llh" | "xyz"（跟著 .pos 的解格式）
+    ref_pos: tuple[float, float, float] | None = None        # 照檔案寫的數值
+    ref_pos_llh: tuple[float, float, float] | None = None    # (緯度°, 經度°, 橢球高 m)；xyz 以 WGS84 橢球換算
+    ref_pos_text: str | None = None                          # 原文；有這行但 ref_pos 是 None ⇒ 解不出來
+    antenna1: str | None = None
+    antenna2: str | None = None
+    problems: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict:
+        def ot(o: PosObsTime | None):
+            return None if o is None else {"week": o.week, "tow_s": o.tow_s, "gpst_s": o.gpst_s, "text": o.text}
+        return {
+            "program": self.program, "inp_files": list(self.inp_files),
+            "obs_start": ot(self.obs_start), "obs_end": ot(self.obs_end),
+            "ref_pos": None if self.ref_pos_text is None else {
+                "kind": self.ref_pos_kind, "values": None if self.ref_pos is None else list(self.ref_pos),
+                "llh": None if self.ref_pos_llh is None else list(self.ref_pos_llh), "text": self.ref_pos_text},
+            "antenna1": self.antenna1, "antenna2": self.antenna2, "problems": list(self.problems),
+        }
 
 
 @dataclass
@@ -86,6 +141,7 @@ class PosTrajectory:
     header: list[str] = field(default_factory=list)
     skipped_lines: list[int] = field(default_factory=list)  # 被略過的行號（只允許最後一行截斷）
     source: str | None = None
+    meta: PosMeta = field(default_factory=PosMeta)          # 表頭中繼資料（program、obs start／end、ref pos…）
 
     def __len__(self) -> int:
         return int(self.t_gpst_s.size)
@@ -118,8 +174,61 @@ def _sq_signed(v: np.ndarray) -> np.ndarray:
     return np.sign(v) * v * v
 
 
+def _parse_obs_time(key: str, val: str, problems: list[str]) -> PosObsTime | None:
+    m = _OBS_T_RE.search(val)
+    if m is None:
+        problems.append(f"% {key} 沒有括號內的 GPST 週／週內秒：{val!r}")
+        return None
+    return PosObsTime(int(m.group(1)), float(m.group(2)), val)
+
+
+def _parse_meta(pairs: list[tuple[str, str]], fmt: str) -> PosMeta:
+    """表頭的 (鍵, 值) → PosMeta。``fmt`` 是 .pos 的解格式（ref pos 跟著它印 llh 或 xyz）。"""
+    problems: list[str] = []
+    seen: dict[str, list[str]] = {}
+    for k, v in pairs:
+        seen.setdefault(k, []).append(v)
+    for k, vs in seen.items():
+        if k != "inp file" and len(vs) > 1:
+            problems.append(f"% {k} 出現 {len(vs)} 次（只取第一行）")
+
+    def first(k: str) -> str | None:
+        return seen[k][0] if k in seen else None
+
+    obs_start = _parse_obs_time("obs start", first("obs start"), problems) if "obs start" in seen else None
+    obs_end = _parse_obs_time("obs end", first("obs end"), problems) if "obs end" in seen else None
+    ref_text = first("ref pos")
+    ref = ref_llh = None
+    if ref_text is not None:
+        toks = ref_text.replace(",", " ").split()
+        try:
+            vals = tuple(float(x) for x in toks)
+        except ValueError:
+            vals = ()
+        if len(vals) != 3 or not all(np.isfinite(vals)):
+            problems.append(f"% ref pos 不是三個數值（度分秒或其他格式？）：{ref_text!r}")
+        elif fmt == "llh":
+            if -90.0 <= vals[0] <= 90.0 and -180.0 <= vals[1] <= 180.0:
+                ref = ref_llh = vals
+            else:
+                problems.append(f"% ref pos 的緯經度超出範圍：{ref_text!r}")
+        else:
+            r = float(np.linalg.norm(vals))
+            if 6.2e6 <= r <= 6.5e6:   # 地表附近的 ECEF 半徑；寫成緯經度的 llh 會在這裡被擋
+                la, lo, hh = ecef_to_llh(np.asarray(vals, float))
+                ref, ref_llh = vals, (float(la), float(lo), float(hh))
+            else:
+                problems.append(f"% ref pos 不像 ECEF（|r| = {r:.1f} m）：{ref_text!r}")
+    return PosMeta(
+        program=first("program"), inp_files=tuple(seen.get("inp file", ())),
+        obs_start=obs_start, obs_end=obs_end,
+        ref_pos_kind=None if ref_text is None else fmt, ref_pos=ref, ref_pos_llh=ref_llh, ref_pos_text=ref_text,
+        antenna1=first("antenna1"), antenna2=first("antenna2"), problems=tuple(problems))
+
+
 def parse_pos(text: str, source: str | None = None) -> PosTrajectory:
     header: list[str] = []
+    meta_pairs: list[tuple[str, str]] = []
     col_line: list[str] | None = None
     time_label = None
     height_kind = None
@@ -131,6 +240,9 @@ def parse_pos(text: str, source: str | None = None) -> PosTrajectory:
             continue
         if line.startswith("%"):
             header.append(raw)
+            mm = _META_RE.match(line)
+            if mm:
+                meta_pairs.append((mm.group(1), mm.group(2).strip()))
             toks = line[1:].split()
             if toks and toks[0] in ("GPST", "UTC", "JST"):
                 col_line = toks
@@ -253,6 +365,7 @@ def parse_pos(text: str, source: str | None = None) -> PosTrajectory:
         ratio=col("ratio") if "ratio" in idx else None,
         vel_ned_mps=vel_ned, solution_format=fmt, time_format=tf or "tow",
         datum_label=datum or "WGS84", header=header, skipped_lines=skipped, source=source,
+        meta=_parse_meta(meta_pairs, fmt),
     )
 
 

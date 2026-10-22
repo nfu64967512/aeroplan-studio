@@ -264,6 +264,9 @@ def test_gcp_file_needs_its_vertical_datum_and_is_validated_before_upload(qt_app
     dlg.ed_gcp_txt.setText(str(g))
     assert dlg.odm_block_reason() == "選了 GCP 檔，但還沒選它的 geo_z 高程基準" and not dlg.btn_odm.isEnabled()
     dlg.cmb_gcp_vertical.setCurrentIndex(dlg.cmb_gcp_vertical.findData("orthometric"))
+    # 2026-10-20 Step 0：有 GCP 時照片 GPS 進不進平差（--force-gps）沒有預設，必須明確選
+    assert dlg.odm_block_reason().startswith("選了 GCP 檔，但還沒決定照片 GPS") and not dlg.btn_odm.isEnabled()
+    dlg.cmb_force_gps.setCurrentIndex(dlg.cmb_force_gps.findData(False))
     assert dlg.odm_block_reason() is None
     jobs = []
     dlg.odm_run_fn = lambda job, **k: (jobs.append(job), {"ortho_tiles": None})[1]
@@ -273,8 +276,10 @@ def test_gcp_file_needs_its_vertical_datum_and_is_validated_before_upload(qt_app
     from tests.test_survey_dialog import wait_worker
     wait_worker(dlg, "_odm_worker")
     assert jobs[0]["gcp_txt"] == str(g) and jobs[0]["gcp"]["n_gcps"] == 1 and jobs[0]["gcp"]["n_lines"] == 5
+    assert jobs[0]["force_gps"]["decision"] == "gcp_only" and jobs[0]["force_gps"]["source"] == "operator"
     sub = dlg.result.effective["odm_submission"]
     assert sub["gcp_txt"] == str(g) and sub["gcp"]["gcp_vertical"] == "ellipsoidal"
+    assert sub["force_gps"]["decision"] == "gcp_only"
     assert any("GCP 只有 1 個" in w for w in sub["gcp"]["warnings"]) and "GCP：1 個、5 行" in dlg.lbl_gcp.text()
     # 影像檔名不在上傳清單 ⇒ 不送
     dlg.ed_gcp_txt.setText(str(_gcp_file(tmp_path, image="OTHER.jpg")))
@@ -287,6 +292,7 @@ def test_checkpoint_ids_in_the_gcp_file_block_the_upload(qt_app, tmp_path):
     dlg.spn_res.setValue(2.0)
     dlg.ed_gcp_txt.setText(str(_gcp_file(tmp_path, name="CHK03", n=5)))
     dlg.cmb_gcp_vertical.setCurrentIndex(dlg.cmb_gcp_vertical.findData("ellipsoidal"))
+    dlg.cmb_force_gps.setCurrentIndex(dlg.cmb_force_gps.findData(True))
     sv = tmp_path / "survey.csv"
     sv.write_text("id,type,lat,lon,h,frame,vertical_datum,sigma_h_m,sigma_v_m\n"
                   "CHK03,CHK,25.1,121.2,48,EPSG:4326,ellipsoidal,0.01,0.01\n", encoding="utf-8")

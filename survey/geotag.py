@@ -18,17 +18,40 @@
   會寫 ``nan nan nan``，ODM 視為未提供但仍讀精度欄）。
 * 影像以檔名比對（``GeoFile.entries[filename]``）⇒ 名稱必須等於上傳／匯出的檔名，
   見 :func:`export_filename`（EXIF 匯出也用同一個名字）。
+
+精度欄的單位與意義（2026-10-20 審查，依 R1 §6.2／§8.2：ODX v3.8.4 modules/photo.py、OpenSfM stats）：
+ODX 把第 8 欄存成 ``gps_xy_stddev``，OpenSfM 拿它**同時**當 x 與 y 各自的 σ（單軸）。我們列裡的 ``sigma_h_m``
+是**二維** HRMS（PPK：hypot(sdn, sde)；飛控：GPA.HAcc；見 survey/checkpoints.py 開頭）⇒ 直接寫進去會讓每一軸的
+σ 大 √2、先驗權重低估 2 倍。所以第 8 欄寫 ``sigma_h_m / √2``（假設東、北等向），第 9 欄照寫 ``sigma_v_m``（本來就是
+單軸）。這個換算記在 :data:`ACCURACY_SEMANTICS`，處理時寫進 qa.json 的 effective.geo_txt_accuracy、送 ODM 時進任務紀錄。
 """
 
 from __future__ import annotations
 
 import logging
+import math
 from pathlib import Path, PurePosixPath
 from typing import Optional
 
 _log = logging.getLogger(__name__)
 
 _HEIGHT_KEY = {"ellipsoidal": "h_ell_m", "orthometric": "h_orth_m"}
+
+#: geo.txt 精度欄寫的是什麼（有效值契約：換算要記錄）
+ACCURACY_SEMANTICS = {
+    "horizontal": "sigma_1d_from_hrms", "vertical": "sigma_v_1d", "recorded": True,
+    "horizontal_factor": 1.0 / math.sqrt(2.0),
+    "note": "第 8 欄＝單軸 σ＝sigma_h_m（二維 HRMS）/ √2（假設東北等向；ODX 當成 x、y 各自的 σ，R1 §6.2）；"
+            "第 9 欄＝sigma_v_m（垂直單軸 σ）",
+}
+
+
+def _sigma_text(v, what: str, name: str) -> str:
+    """精度欄的文字：必須是有限的正數（0／負數／NaN 會讓 ODX 拿到零或 NaN 的 σ）；太小就多印幾位，不印成 0.000。"""
+    x = float(v)
+    if not math.isfinite(x) or x <= 0.0:
+        raise ValueError(f"{name} 的{what}精度 {v!r} 不是有限的正數：拒絕寫 geo.txt（ODX 會拿到零或 NaN 的 σ）")
+    return f"{x:.3f}" if x >= 0.0005 else f"{x:.3e}"
 
 
 def export_filename(row) -> str:
@@ -86,7 +109,8 @@ def write_geo_txt(path, rows, *, height: str, projection: Optional[str] = None,
         elif include_accuracy:
             parts += ["nan", "nan", "nan"]
         if include_accuracy:
-            parts += [f"{r['sigma_h_m']:.3f}", f"{r['sigma_v_m']:.3f}"]
+            parts += [_sigma_text(float(r["sigma_h_m"]) * ACCURACY_SEMANTICS["horizontal_factor"], "水平", name),
+                      _sigma_text(r["sigma_v_m"], "垂直", name)]
         lines.append(" ".join(parts))
     if bad:
         raise ValueError(f"{len(bad)} 張照片缺欄位，拒絕寫 geo.txt：{bad[:5]}")

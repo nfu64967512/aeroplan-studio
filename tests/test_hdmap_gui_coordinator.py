@@ -310,9 +310,12 @@ def test_mapping_plan_interval_reaches_export_and_readback_gate(mapped, tmp_path
 
 
 def test_mapping_trigger_distance_uses_the_forward_overlap(mapped):
-    """206 開的 p1 = 足跡縱長 ×(1 − 0.80)，用面板相機獨立重算（不是 0.70、不是範例相機）。"""
+    """206 開的 p1 = 足跡縱長 ×(1 − 0.80) ×(1 − f_s/50)，用面板相機獨立重算（不是 0.70、不是範例相機）。
+    後面那個因子是 50 Hz 量化保護（vendored 2026-10-21）：f_s ＝ 規劃拍照率（面板 1.7 Hz → CAM1_INTRVAL_MIN 0.60 s）。"""
     hv = mapped.hv_coordinator
-    want = FOOT_L * (1.0 - 0.80)                                 # 18.848 m @ 120 m
+    f_s = mapped.hv_mapping_setup["trigger_rate_planned_hz"]
+    assert f_s == pytest.approx(1.0 / 0.6)
+    want = FOOT_L * (1.0 - 0.80) * (1.0 - f_s / 50.0)            # 18.848 × 0.9667 = 18.22 m @ 120 m
     ds = []
     for did in hv.id_map:
         items = hv.mission_items(did, camera_cfg=hv.camera_cfg)

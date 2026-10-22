@@ -42,12 +42,13 @@ def test_geo_txt_columns_match_odm_parser(tmp_path):
     assert geotag.write_geo_txt(p, _rows(), height="ellipsoidal") == 2
     assert b"\r" not in p.read_bytes()                          # Windows 上也是 LF（輸出可重現）
     text = p.read_text(encoding="utf-8")
-    assert text.splitlines()[1] == "hero2_S_000001.jpg 121.987654321 25.123456789 168.543 95.250 2.000 -1.500 0.500 0.800"
+    # 水平精度欄：ODX 當 x、y 各自的 σ（R1 §6.2）⇒ 二維 HRMS 0.5 m 寫成單軸 0.5/√2 = 0.354；垂直照寫
+    assert text.splitlines()[1] == "hero2_S_000001.jpg 121.987654321 25.123456789 168.543 95.250 2.000 -1.500 0.354 0.800"
     header, ent = odm_parse_geo(text)
     assert header == "EPSG:4326"
     e = ent["hero2_S_000002.JPG"]                               # 副檔名大小寫保留
     assert (e["lon"], e["lat"], e["z"]) == (121.987754321, 25.123556789, 168.6)
-    assert e["ypr"] == [359.9, 1.0, 0.0] and e["acc"] == [0.4, 0.7]
+    assert e["ypr"] == [359.9, 1.0, 0.0] and e["acc"] == [round(0.4 / math.sqrt(2), 3), 0.7]
     geotag.write_geo_txt(p, _rows(), height="orthometric")
     assert odm_parse_geo(p.read_text(encoding="utf-8"))[1]["hero2_S_000001.jpg"]["z"] == 150.003
 
@@ -56,7 +57,7 @@ def test_angles_can_be_withheld_but_accuracy_kept(tmp_path):
     p = tmp_path / "geo.txt"
     geotag.write_geo_txt(p, _rows(), height="ellipsoidal", include_angles=False)
     _, ent = odm_parse_geo(p.read_text(encoding="utf-8"))
-    assert ent["hero2_S_000001.jpg"]["ypr"] is None and ent["hero2_S_000001.jpg"]["acc"] == [0.5, 0.8]
+    assert ent["hero2_S_000001.jpg"]["ypr"] is None and ent["hero2_S_000001.jpg"]["acc"] == [0.354, 0.8]
     geotag.write_geo_txt(p, _rows(), height="ellipsoidal", include_accuracy=False)
     assert len(p.read_text(encoding="utf-8").splitlines()[1].split()) == 7
     geotag.write_geo_txt(p, _rows(), height="ellipsoidal", include_accuracy=False, include_angles=False)
@@ -109,3 +110,27 @@ def test_non_wgs84_frame_needs_explicit_projection(tmp_path, caplog):
 def test_export_filename():
     assert geotag.export_filename({"image_id": "a_b_000001", "file": "images/000001.jpg"}) == "a_b_000001.jpg"
     assert geotag.export_filename({"image_id": "x", "file": None}) == "x.jpg"
+
+
+def test_horizontal_accuracy_column_is_per_axis_and_bad_sigmas_are_refused(tmp_path):
+    """審查 2026-10-20：ODX 把第 8 欄當 x、y 各自的 σ（gps_xy_stddev），我們的 sigma_h_m 是二維 HRMS ⇒ 寫 HRMS/√2；
+    換算記在 ACCURACY_SEMANTICS。σ 是 0／負數／NaN ⇒ 拒絕（ODX 會拿到零或 NaN 的 σ）；很小的 σ 不印成 0.000。"""
+    p = tmp_path / "geo.txt"
+    rows = _rows()
+    rows[0]["sigma_h_m"] = math.hypot(0.02, 0.02)              # PPK：sdn = sde = 2 cm ⇒ 單軸 σ 0.020
+    geotag.write_geo_txt(p, rows, height="ellipsoidal")
+    acc = odm_parse_geo(p.read_text(encoding="utf-8"))[1]["hero2_S_000001.jpg"]["acc"]
+    assert acc == [0.02, 0.8]
+    sem = geotag.ACCURACY_SEMANTICS
+    assert sem["horizontal"] == "sigma_1d_from_hrms" and sem["recorded"] is True
+    assert sem["horizontal_factor"] == pytest.approx(1 / math.sqrt(2))
+    for bad in (0.0, -0.1, float("nan"), float("inf")):
+        rows = _rows()
+        rows[1]["sigma_v_m"] = bad
+        with pytest.raises(ValueError, match="不是有限的正數"):
+            geotag.write_geo_txt(p, rows, height="ellipsoidal")
+    rows = _rows()
+    rows[0]["sigma_h_m"] = 0.0006                               # 單軸 0.000424：印成 0.000 就變成零 σ
+    geotag.write_geo_txt(p, rows, height="ellipsoidal")
+    acc = odm_parse_geo(p.read_text(encoding="utf-8"))[1]["hero2_S_000001.jpg"]["acc"]
+    assert acc[0] == pytest.approx(0.0006 / math.sqrt(2), rel=1e-3) and acc[0] > 0

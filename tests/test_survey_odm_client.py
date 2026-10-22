@@ -6,6 +6,7 @@ import pytest
 
 from survey import odm_client
 from survey.odm_client import NodeOdmClient, OdmError, build_options
+from tests.fake_nodeodx import parse_multipart
 
 
 class FakeResp:
@@ -32,9 +33,12 @@ class FakeSession:
 
     def _next(self, method, url, **kw):
         self.calls.append((method, url, kw))
-        if "files" in kw:   # 記下檔案內容（ExitStack 會在回傳後關檔）
-            kw["file_names"] = [(field, name) for field, (name, fh) in kw["files"]]
-            kw["file_bytes"] = [fh.read() for _, (_, fh) in kw["files"]]
+        body = kw.get("data")
+        if hasattr(body, "content_type"):   # 串流 multipart 主體（survey.odm_client.MultipartStream）：讀完記下內容
+            fields, files = parse_multipart(body, kw["headers"]["Content-Type"])
+            kw["fields"] = fields
+            kw["file_names"] = [(field, name) for field, name, _ in files]
+            kw["file_bytes"] = [data for _, _, data in files]
         return self.responses.pop(0)
 
     def post(self, url, **kw):
@@ -75,6 +79,8 @@ def test_rolling_shutter_readout_consistency():
 
 
 def test_new_task_uploads_images_geo_and_options(tmp_path):
+    """2026-10-20 改成 NodeODX 的分段上傳：init（multipart 欄位＋set-uuid）→ 附檔一批 → 影像分批 → commit。
+    舊版是一個 POST /task/new 把所有影像讀進記憶體（2,500 張要 49–103 GB），本測試原本斷言的就是那個形狀。"""
     imgs = []
     for k in range(2):
         p = tmp_path / f"a_{k}.jpg"
@@ -82,16 +88,38 @@ def test_new_task_uploads_images_geo_and_options(tmp_path):
         imgs.append(p)
     geo = tmp_path / "geo.txt"
     geo.write_bytes(b"EPSG:4326\n")
-    s = FakeSession([FakeResp(payload={"uuid": "abc-123"})])
+    uid ="0f8fad5b-d9cb-469f-a165-70867728950e"
+    s = FakeSession([FakeResp(payload={"uuid": uid}), FakeResp(payload={"success": True}),
+                     FakeResp(payload={"success": True}), FakeResp(payload={"uuid": uid})])
     c = NodeOdmClient("http://127.0.0.1:3000/", token="tok", session=s, timeout_s=5)
     opts = build_options(orthophoto_resolution_cm=3.1)
-    assert c.new_task(imgs, options=opts, geo_txt=geo, name="F1") == "abc-123"
-    method, url, kw = s.calls[0]
-    assert (method, url) == ("POST", "http://127.0.0.1:3000/task/new")
-    assert kw["params"] == {"token": "tok"} and kw["timeout"] == 5
-    assert json.loads(kw["data"]["options"]) == opts and kw["data"]["name"] == "F1"
-    assert kw["file_names"] == [("images", "a_0.jpg"), ("images", "a_1.jpg"), ("images", "geo.txt")]
-    assert kw["file_bytes"] == [b"jpeg0", b"jpeg1", b"EPSG:4326\n"]
+    assert c.new_task(imgs, options=opts, geo_txt=geo, name="F1", task_uuid=uid) == uid
+    urls = [(m, u) for m, u, _ in s.calls]
+    assert urls == [("POST", "http://127.0.0.1:3000/task/new/init"),
+                    ("POST", f"http://127.0.0.1:3000/task/new/upload/{uid}"),
+                    ("POST", f"http://127.0.0.1:3000/task/new/upload/{uid}"),
+                    ("POST", f"http://127.0.0.1:3000/task/new/commit/{uid}")]
+    init = s.calls[0][2]
+    assert init["params"] == {"token": "tok"} and init["timeout"] == (odm_client.CONNECT_TIMEOUT_S, 5.0)
+    assert init["headers"]["set-uuid"] == uid and init["headers"]["Content-Type"].startswith("multipart/form-data")
+    assert json.loads(init["fields"]["options"]) == opts and init["fields"]["name"] == "F1"
+    assert init["file_names"] == []                                             # init 不能帶檔案（Unexpected field）
+    assert s.calls[1][2]["file_names"] == [("images", "geo.txt")]                # 附檔自己一批
+    assert s.calls[1][2]["file_bytes"] == [b"EPSG:4326\n"]
+    assert s.calls[2][2]["file_names"] == [("images", "a_0.jpg"), ("images", "a_1.jpg")]
+    assert s.calls[2][2]["file_bytes"] == [b"jpeg0", b"jpeg1"]
+    assert all(c[2]["params"] == {"token": "tok"} for c in s.calls)
+
+
+def test_gcp_is_uploaded_as_gcp_list_txt_whatever_its_local_name(tmp_path):
+    img = tmp_path / "a.jpg"
+    img.write_bytes(b"x")
+    g = tmp_path / "my_points.txt"
+    g.write_text("EPSG:4326\n", encoding="utf-8")
+    imgs, aux = odm_client.classify_uploads([img], geo_txt=tmp_path / "geo.txt", gcp_txt=g)
+    assert imgs == [(img, "a.jpg")] and aux == [(tmp_path / "geo.txt", "geo.txt"), (g, "gcp_list.txt")]
+    with pytest.raises(ValueError, match="ASCII"):
+        odm_client.classify_uploads([tmp_path / "照片.jpg"])
 
 
 def test_new_task_rejects_misnamed_files(tmp_path):
@@ -113,9 +141,10 @@ def test_new_task_rejects_misnamed_files(tmp_path):
 def test_errors_reported_even_with_http_200(tmp_path):
     img = tmp_path / "a.jpg"
     img.write_bytes(b"x")
-    c = NodeOdmClient(session=FakeSession([FakeResp(payload={"error": "Need at least 1 file."})]))
-    with pytest.raises(OdmError, match="Need at least 1 file"):
+    c = NodeOdmClient(session=FakeSession([FakeResp(payload={"error": "Need at least 1 file.", "noRetry": True})]))
+    with pytest.raises(OdmError, match="Need at least 1 file") as ei:
         c.new_task([img], options=[])
+    assert ei.value.no_retry is True
     c = NodeOdmClient(session=FakeSession([FakeResp(status=500, payload=None)]))
     with pytest.raises(OdmError, match="不是 JSON"):
         c.task_info("u")

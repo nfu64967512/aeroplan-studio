@@ -274,6 +274,8 @@ def test_coordinator_default_forbids_neighbour_airspace_end_to_end(crossed_defau
 def test_coordinator_mission_items_have_206_per_cross_strip(crossed):
     hv = crossed.hv_coordinator
     cc = crossed.hv_mapping_setup["camera_cfg"]
+    f_s = crossed.hv_mapping_setup["trigger_rate_planned_hz"]       # 206 的 d 再乘 (1 − f_s/50)：50 Hz 量化保護
+    assert f_s == pytest.approx(2.0) and cc.trigger_overshoot_guard is True
     p = hv.last_plan
     for did, uid in hv.id_map.items():
         up = p.plans.get(uid)
@@ -289,7 +291,7 @@ def test_coordinator_mission_items_have_206_per_cross_strip(crossed):
                 prev = o
         assert len(on) == len(up.strips)
         for (sid, _d), d in zip(up.strips, on):
-            want = (100.0 if is_cross_strip(sid) else 120.0) * H_PX * PIX_UM * 1e-3 / F_MM * 0.2
+            want = (100.0 if is_cross_strip(sid) else 120.0) * H_PX * PIX_UM * 1e-3 / F_MM * 0.2 * (1 - f_s / 50)
             assert d == pytest.approx(want, rel=5e-3), (uid, sid, d, want)
 
 

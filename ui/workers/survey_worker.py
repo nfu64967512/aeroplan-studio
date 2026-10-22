@@ -4,14 +4,16 @@
 ``run()`` 內不碰任何 widget。
 
 * :class:`SurveyProcessWorker`：跑 ``survey.pipeline.process_campaign``（讀日誌、配對、PPK、交付物、QA）。
-* :class:`OdmSubmitWorker`：跑 ``survey.pipeline.run_odm_job``（上傳、等待、下載、解壓、找正射瓦片）。
+* :class:`OdmSubmitWorker`：跑 ``survey.pipeline.run_odm_job``（查節點、分批上傳、提交、等待、下載、解壓、品質報告），
+  或同簽章的 ``resume_odm_job``（接回）、``cancel_odm_job``（取消遠端任務）、對話框的「測試連線」。
 
-取消：設旗標，流水線在步驟之間（每架次、每架的影像匯出、ODM 等待的每 0.5 s）檢查；正在跑的單一步驟
-（例如讀一份大日誌、RTKLIB 解算）要等它結束才會停。取消後輸出目錄可能只寫了一部分。
-本模組不開任何子行程；只有使用者明確開啟 RTKLIB 時，流水線才經由 survey.ppk.rtklib 呼叫它。
+取消：設旗標，流水線在步驟之間（每架次、每架的影像匯出、ODM 上傳的每個讀取區塊、等待的每 0.5 s、下載的每個區塊）
+檢查；正在跑的單一步驟（例如讀一份大日誌、RTKLIB 解算、一個卡住的 API 呼叫）要等它結束才會停。取消後輸出目錄可能
+只寫了一部分。本模組不開任何子行程；只有使用者明確開啟 RTKLIB 時，流水線才經由 survey.ppk.rtklib 呼叫它。
 """
 from __future__ import annotations
 
+import inspect
 import threading
 from typing import Any, Callable, Dict, Optional, Sequence
 
@@ -26,6 +28,15 @@ def _message(e: Exception) -> str:
     """流水線自己的錯誤訊息是給人看的；其他例外加上型別。"""
     from survey.pipeline import PipelineError
     return str(e) if isinstance(e, PipelineError) else f"{type(e).__name__}: {e}"
+
+
+def _accepts_kw(fn, name: str) -> bool:
+    """``fn`` 收不收 ``name=`` 這個關鍵字參數（有 **kwargs 也算）。看不到簽章 ⇒ 不送（舊的假函式簽章是固定的）。"""
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+    return name in params or any(p.kind is p.VAR_KEYWORD for p in params.values())
 
 
 class SurveyProcessWorker(QThread):
@@ -76,12 +87,16 @@ class SurveyProcessWorker(QThread):
 
 
 class OdmSubmitWorker(QThread):
-    """信號：``progress(訊息, 0–1；-1 = 不明)``、``finished_ok(dict)``、``failed(錯誤)``、``canceled()``。
+    """信號：``progress(訊息, 0–1；-1 = 不明)``、``state(dict)``、``finished_ok(dict)``、``failed(錯誤)``、``canceled()``。
 
-    取消只停止本機的等待與下載；NodeODM 上的任務會繼續跑。
+    ``run_fn(job, *, client, progress, should_cancel, poll_s)``（預設 ``run_odm_job``）；``run_fn`` 收 ``on_state``
+    （或 **kwargs）時才送 ``on_state``，結構化狀態（phase、uuid、上傳檔數／位元組、遠端狀態與進度…）經 ``state`` 信號
+    回到 GUI 執行緒。取消的意思由流水線決定：提交前 ⇒ 停止上傳（遠端未提交的上傳節點 48 h 後自清）；提交後 ⇒ 只停本機的
+    等待與下載，NodeODX 上的任務繼續跑（可接回）。實際的取消訊息放在 ``cancel_message``（``canceled`` 信號沒有參數）。
     """
 
     progress = pyqtSignal(str, float)
+    state = pyqtSignal(dict)
     finished_ok = pyqtSignal(dict)
     failed = pyqtSignal(str)
     canceled = pyqtSignal()
@@ -94,21 +109,33 @@ class OdmSubmitWorker(QThread):
         self._client = client
         self._poll_s = float(poll_s)
         self._cancel = threading.Event()
+        self.cancel_message: Optional[str] = None
 
     def cancel(self) -> None:
         self._cancel.set()
 
+    def is_canceled(self) -> bool:
+        return self._cancel.is_set()
+
     def _emit_progress(self, msg: str, frac: Optional[float] = None) -> None:
         self.progress.emit(str(msg), -1.0 if frac is None else float(frac))
+
+    def _emit_state(self, st: dict) -> None:
+        self.state.emit(dict(st))
 
     def run(self) -> None:                                   # noqa: D401 - QThread 入口
         from survey.pipeline import PipelineCanceled, run_odm_job
         fn = self._run_fn or run_odm_job
+        kw = dict(client=self._client, progress=self._emit_progress, should_cancel=self._cancel.is_set,
+                  poll_s=self._poll_s)
+        if _accepts_kw(fn, "on_state"):
+            kw["on_state"] = self._emit_state
         try:
-            res = fn(self._job, client=self._client, progress=self._emit_progress,
-                     should_cancel=self._cancel.is_set, poll_s=self._poll_s)
-        except PipelineCanceled:
-            logger.info("[ODM] 已取消（NodeODM 上的任務仍在執行）")
+            res = fn(self._job, **kw)
+        except PipelineCanceled as e:
+            # 訊息由流水線說清楚是哪一種取消（提交前 ⇒ 上傳已放棄；提交後 ⇒ 遠端任務仍在跑、可接回）
+            self.cancel_message = str(e) or "已取消"
+            logger.info(f"[ODM] 已停止：{self.cancel_message}")
             self.canceled.emit()
             return
         except Exception as e:                               # noqa: BLE001

@@ -1168,18 +1168,33 @@ def validate_gcp_list(path, *, image_names: Optional[Sequence[str]] = None, imag
     bad = sorted(set(per_gcp) & set(forbidden_names))
     if bad:
         errors.append(f"檢核點 {bad} 出現在 GCP 檔：檢核點不能拿來當控制點，否則精度報告沒有意義")
+    # ODX 的 CHK- 慣例（R1 §6.3）：名稱以 CHK- 開頭的點 ODX 當「檢核點」（不進平差）；全部都是 CHK- 時 ODX 會自己
+    # 開 --force-gps（X stages/dataset.py:306-308）⇒ 與我們記錄的 force-gps 決定不符。ODX 比對不分大小寫，OpenSfM 的
+    # 過濾卻只認大寫 "CHK-"（S opensfm/dataset.py:646-647）⇒ 小寫／混寫的 chk- 兩邊的處理不一致。
+    engine_chk = sorted(n for n in per_gcp if n.lower().startswith("chk-"))
+    odd_case = [n for n in engine_chk if not n.startswith("CHK-")]
+    control = [n for n in per_gcp if not n.lower().startswith("chk-")]
+    if odd_case:
+        errors.append(f"點名 {odd_case[:5]} 以小寫或大小寫混合的 chk- 開頭：ODX 會當檢核點、OpenSfM 卻只認大寫 CHK-，"
+                      "兩邊處理不一致 ⇒ 請改成大寫 CHK-（要當檢核點）或改名（要當控制點）")
+    if engine_chk and not control and lines:
+        errors.append(f"GCP 檔裡的點全部以 CHK- 開頭（{engine_chk[:5]}）：ODX 把它們當檢核點、沒有任何控制點，"
+                      "而且會自己開 --force-gps（X stages/dataset.py:306-308），與這裡記錄的 force-gps 決定不符 ⇒ 不送")
+    elif engine_chk:
+        warns.append(f"{len(engine_chk)} 個點以 CHK- 開頭（{engine_chk[:5]}）：ODX 當檢核點（不進平差，結果在品質報告的"
+                     f"「檢核點誤差」）；控制點只算其他 {len(control)} 個")
     for name, rec in sorted(per_gcp.items()):
         n = len(rec["images"])
         if n < min_images:
             warns.append(f"{name} 只標在 {n} 張影像（ODM 建議 ≥{min_images}）")
-    if len(per_gcp) < min_gcps:
-        warns.append(f"GCP 只有 {len(per_gcp)} 個（ODM 建議至少 {min_gcps} 個）")
+    if len(control) < min_gcps:
+        warns.append(f"GCP 只有 {len(control)} 個（ODM 建議至少 {min_gcps} 個）")
     if not lines:
         errors.append("GCP 檔沒有任何有效的資料行")
     return {"path": str(p), "header": header, "crs": crs.to_string(), "crs_is_geographic": bool(crs.is_geographic),
-            "n_lines": len(lines), "n_gcps": len(per_gcp), "gcp_vertical": gcp_vertical,
+            "n_lines": len(lines), "n_gcps": len(control), "gcp_vertical": gcp_vertical,
             "images_per_gcp": {k: len(v["images"]) for k, v in sorted(per_gcp.items())},
-            "errors": errors, "warnings": warns}
+            "engine_checkpoints": engine_chk, "errors": errors, "warnings": warns}
 
 
 def _vtext(v) -> str:

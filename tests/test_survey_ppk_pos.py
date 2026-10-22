@@ -31,26 +31,60 @@ def _tow(t: float) -> str:
     return f"{wk:4d} {t - wk * 604800:10.3f}"
 
 
-_HEAD = [
-    "% program   : RTKPOST ver.demo5 b34k",
-    "% inp file  : rover.obs",
-    "% inp file  : base.obs",
-    "% obs start : 2026/10/20 02:00:00.0 GPST (week2389 180000.0s)",
-    "% pos mode  : Kinematic",
-    "% solution  : Combined",
-    "%",
-]
+def _obs_line(key: str, t: float, label: str = "GPST") -> str:
+    """postpos.c outheader：``% obs start : <time2str(…,1)> <標籤> (week%04d %8.1fs)``（括號內永遠是 GPST）。"""
+    t1 = round(t, 1)
+    whole = int(np.floor(t1))
+    dec = int(round((t1 - whole) * 10))
+    if dec == 10:
+        whole, dec = whole + 1, 0
+    cal = (_GPS_EPOCH + timedelta(seconds=whole)).strftime("%Y/%m/%d %H:%M:%S") + f".{dec}"
+    wk = int(t // 604800)
+    return f"% {key:<9} : {cal} {label} (week{wk:04d} {t - wk * 604800:8.1f}s)"
+
+
+def head_lines(t, *, program="RTKPOST ver.demo5 b34k", inp=("rover.obs", "base.obs"), obs="auto",
+               outopt=True, antennas=None, ref_pos=None, ref_pos_text=None, fmt="llh"):
+    """RTKLIB outheader 的行序：program、inp file、obs start／end、（outopt）處理選項、ref pos、``%``。
+
+    ``obs="auto"``：第一／最後一筆解的時刻（RTKLIB 印的是移動站第一／最後一個觀測 epoch）；``None`` 不印；
+    (start, end) 指定 GPST 秒（任一個 None 就不印那一行）。``ref_pos`` = (緯度, 經度, 橢球高)，xyz 檔印 ECEF。
+    """
+    lines = [f"% program   : {program}"] + [f"% inp file  : {f}" for f in inp]
+    if obs is not None:
+        s, e = (t[0], t[-1]) if obs == "auto" else obs
+        if s is not None:
+            lines.append(_obs_line("obs start", s))
+        if e is not None:
+            lines.append(_obs_line("obs end", e))
+    if outopt:
+        lines += ["% pos mode  : Kinematic", "% solution  : Combined"]
+        for k, a in enumerate(antennas or ()):
+            lines.append(f"% antenna{k + 1}  : {a}")
+    if ref_pos_text is not None:
+        lines.append(f"% ref pos   :{ref_pos_text}")
+    elif ref_pos is not None:
+        la, lo, hh = ref_pos
+        if fmt == "llh":
+            lines.append(f"% ref pos   :{la:13.9f} {lo:14.9f} {hh:10.4f}")
+        else:
+            x, y, z = _TO_ECEF.transform(lo, la, hh)
+            lines.append(f"% ref pos   :{x:14.4f} {y:14.4f} {z:14.4f}")
+    return lines + ["%"]
 
 
 def pos_text(t, lat, lon, h, *, q=None, ns=None, sd=None, vel_ned=None, timeform="tow",
-             fmt="llh", height="ellipsoidal", label="GPST", datum="WGS84", ecef_sd=None) -> str:
+             fmt="llh", height="ellipsoidal", label="GPST", datum="WGS84", ecef_sd=None, age=0.0,
+             head=None, **head_kw) -> str:
+    """``head`` 給整份表頭行（不含高度說明與欄名行）；否則以 head_kw 呼叫 head_lines。"""
     n = len(t)
     q = np.ones(n, int) if q is None else np.asarray(q)
     ns = np.full(n, 18) if ns is None else np.asarray(ns)
     sd = np.tile([0.006, 0.008, 0.015, 0.002, -0.003, 0.004], (n, 1)) if sd is None else np.asarray(sd)
+    age = np.broadcast_to(np.asarray(age, float), (n,))
     tf = _tow if timeform == "tow" else _hms
     tlab = f"%  {label:<{9 if timeform == 'tow' else 17}}"
-    lines = list(_HEAD)
+    lines = list(head if head is not None else head_lines(t, fmt=fmt, **head_kw))
     if fmt == "llh":
         lines.append(f"% (lat/lon/height={datum}/{height},Q=1:fix,2:float,3:sbas,4:dgps,5:single,"
                      "6:ppp,ns=# of satellites)")
@@ -61,7 +95,7 @@ def pos_text(t, lat, lon, h, *, q=None, ns=None, sd=None, vel_ned=None, timeform
         lines.append(hdr)
         for k in range(n):
             s = (f"{tf(t[k])} {lat[k]:14.9f} {lon[k]:14.9f} {h[k]:10.4f} {q[k]:3d} {ns[k]:3d}"
-                 + "".join(f" {v:8.4f}" for v in sd[k]) + f" {0.0:6.2f} {3.5:6.1f}")
+                 + "".join(f" {v:8.4f}" for v in sd[k]) + f" {age[k]:6.2f} {3.5:6.1f}")
             if vel_ned is not None:
                 vn, ve, vd = vel_ned[k]
                 s += f" {vn:10.5f} {ve:10.5f} {-vd:10.5f}" + " 0.00100" * 6
@@ -76,7 +110,7 @@ def pos_text(t, lat, lon, h, *, q=None, ns=None, sd=None, vel_ned=None, timeform
         x, y, z = _TO_ECEF.transform(lon, lat, h)
         for k in range(n):
             s = (f"{tf(t[k])} {x[k]:14.4f} {y[k]:14.4f} {z[k]:14.4f} {q[k]:3d} {ns[k]:3d}"
-                 + "".join(f" {v:8.4f}" for v in ecef_sd[k]) + f" {0.0:6.2f} {3.5:6.1f}")
+                 + "".join(f" {v:8.4f}" for v in ecef_sd[k]) + f" {age[k]:6.2f} {3.5:6.1f}")
             if vel_ned is not None:
                 s += "".join(f" {v:10.5f}" for v in vel_ned[k]) + " 0.00100" * 6
             lines.append(s)
@@ -241,3 +275,97 @@ def test_comma_separator_and_read_pos(tmp_path):
     p = read_pos(f)
     assert len(p) == 4 and p.source == str(f)
     assert np.allclose(p.lat_deg, lat, atol=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# 表頭中繼資料（M1，2026-10-21 Emlid Studio 評估 §4）：只讀出來、不改既有行為
+# 座標、時間全部合成；不放論壇下載的 Emlid Studio 實檔或其座標。
+BASE_LLH = (25.0995, 121.1995, 52.3)
+
+
+def _es_track(n=12):
+    """ES 1.5 的形狀：1 Hz、接收機時鐘抖動（.999／.000）、hms GPST、沒有速度欄。"""
+    t0 = WEEK * 604800 + 180000.0
+    t = t0 + np.arange(n) - np.where(np.arange(n) % 3 == 1, 0.001, 0.0)
+    return t, 25.1 + 1e-6 * np.arange(n), 121.2 + 1e-5 * np.arange(n), np.full(n, 150.0)
+
+
+def test_meta_es15_header_structure():
+    t, lat, lon, h = _es_track()
+    txt = pos_text(t, lat, lon, h, timeform="hms", program="ES 1.5", outopt=False,
+                   inp=("C:/data/rover_raw_20261020.26O", "C:/data/rover_raw_20261020.26P"))
+    assert "pos mode" not in txt and "vn(m/s)" not in txt and "\r" not in txt
+    p = parse_pos(txt)
+    m = p.meta
+    assert m.program == "ES 1.5"
+    assert m.inp_files == ("C:/data/rover_raw_20261020.26O", "C:/data/rover_raw_20261020.26P")
+    assert (m.obs_start.week, m.obs_start.tow_s) == (WEEK, 180000.0)
+    assert m.obs_start.gpst_s == t[0] and m.obs_start.text.endswith(f"GPST (week{WEEK} 180000.0s)")
+    assert m.obs_end.gpst_s == pytest.approx(round(t[-1], 1), abs=1e-9)
+    assert m.ref_pos_text is None and m.ref_pos is None and m.antenna1 is None and m.antenna2 is None
+    assert m.problems == ()
+    assert p.time_format == "hms" and p.vel_ned_mps is None and np.max(np.abs(p.t_gpst_s - t)) < 1e-6
+    d = m.as_dict()
+    assert d["obs_start"] == {"week": WEEK, "tow_s": 180000.0, "gpst_s": t[0], "text": m.obs_start.text}
+    assert d["ref_pos"] is None and d["program"] == "ES 1.5"
+
+
+def test_meta_ref_pos_llh_and_antennas():
+    t, lat, lon, h = _small_track(4)
+    ants = ["AS-ANT2BCAL     NONE  ( 0.0000  0.0000  0.0000)", "TRM59800.00     SCIS  ( 0.0000  0.0000  1.2340)"]
+    p = parse_pos(pos_text(t, lat, lon, h, ref_pos=BASE_LLH, antennas=ants))
+    m = p.meta
+    assert m.ref_pos_kind == "llh" and m.ref_pos == BASE_LLH and m.ref_pos_llh == BASE_LLH
+    assert (m.antenna1, m.antenna2) == (ants[0], ants[1]) and m.problems == ()
+    # 逗號分隔（out-sep）也讀得到
+    q = parse_pos(pos_text(t, lat, lon, h, ref_pos_text=" 25.099500000, 121.199500000,   52.3000"))
+    assert q.meta.ref_pos_llh == BASE_LLH
+
+
+def test_meta_ref_pos_ecef_is_converted_to_llh():
+    t, lat, lon, h = _small_track(3)
+    sd = np.tile([0.01, 0.01, 0.01, 0.0, 0.0, 0.0], (3, 1))
+    p = parse_pos(pos_text(t, lat, lon, h, fmt="xyz", ecef_sd=sd, ref_pos=BASE_LLH))
+    m = p.meta
+    assert m.ref_pos_kind == "xyz" and len(m.ref_pos) == 3 and abs(m.ref_pos[0]) > 1e6
+    assert m.ref_pos_llh[0] == pytest.approx(BASE_LLH[0], abs=1e-9)
+    assert m.ref_pos_llh[1] == pytest.approx(BASE_LLH[1], abs=1e-9)
+    assert m.ref_pos_llh[2] == pytest.approx(BASE_LLH[2], abs=2e-4)
+
+
+def test_meta_small_tow_is_space_padded():
+    """%8.1f 在週內秒 < 100000 時左補空白：(week2389  12879.0s)。"""
+    t = WEEK * 604800 + 12879.0 + 0.1 * np.arange(3)
+    txt = pos_text(t, np.full(3, 25.1), np.full(3, 121.2), np.full(3, 150.0))
+    assert f"(week{WEEK}  12879.0s)" in txt
+    assert parse_pos(txt).meta.obs_start.gpst_s == t[0]
+
+
+def test_meta_unparseable_lines_are_recorded_not_raised():
+    t, lat, lon, h = _small_track(3)
+    dms = "  25 05 58.20000  121 11 58.20000    52.3000"
+    p = parse_pos(pos_text(t, lat, lon, h, ref_pos_text=dms, obs=None))
+    assert p.meta.ref_pos is None and p.meta.ref_pos_text == dms.strip()
+    assert any("ref pos" in x for x in p.meta.problems)
+    assert p.meta.obs_start is None and p.meta.obs_end is None
+    nob = pos_text(t, lat, lon, h).replace(f"(week{WEEK} 180000.0s)", "")
+    q = parse_pos(nob)
+    assert q.meta.obs_start is None and any("obs start" in x for x in q.meta.problems)
+    # llh 檔卻印 ECEF 數值、緯度超出範圍、兩行 ref pos
+    bad = parse_pos(pos_text(t, lat, lon, h, ref_pos_text=" -3000000.0 5000000.0 2700000.0"))
+    assert bad.meta.ref_pos is None and any("超出範圍" in x for x in bad.meta.problems)
+    two = pos_text(t, lat, lon, h, ref_pos=BASE_LLH).replace("% ref pos", "% ref pos   : 1 2 3\n% ref pos", 1)
+    assert any("出現 2 次" in x for x in parse_pos(two).meta.problems)
+
+
+def test_meta_does_not_change_the_trajectory():
+    """M1 不改既有行為：有沒有中繼資料行，解出來的軌跡逐欄相同。"""
+    t, lat, lon, h = _small_track(6)
+    a = parse_pos(pos_text(t, lat, lon, h, ref_pos=BASE_LLH, antennas=["X", "Y"]))
+    b = parse_pos(pos_text(t, lat, lon, h, head=["%"]))
+    assert b.meta == type(b.meta)()
+    for k in ("t_gpst_s", "lat_deg", "lon_deg", "h_ell_m", "q", "ns", "sdn_m", "sde_m", "sdu_m", "sdne_m", "sdeu_m",
+              "sdun_m", "age_s", "ratio"):
+        assert np.array_equal(getattr(a, k), getattr(b, k)), k
+    assert (a.solution_format, a.time_format, a.datum_label, a.skipped_lines) == \
+        (b.solution_format, b.time_format, b.datum_label, b.skipped_lines)

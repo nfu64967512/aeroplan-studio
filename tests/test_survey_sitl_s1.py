@@ -938,6 +938,7 @@ def test_plan_with_knobs_reaches_planner_and_export(planned_s1):
         assert (s["forward_overlap"], s["side_overlap"], s["shutter_rate_hz"]) == (0.8, 0.7, 2.0), tag
         assert s["camera"]["focal_length_mm"] == 6.0
         assert s["trigger_distance_m"] == pytest.approx(18.848)
+        assert s["trigger_distance_cmd_m"] == pytest.approx(18.848 * (1 - 2.0 / 50))   # 實際下給飛控的 d（量化保護）
     assert ev["planner_readback"]["mapping_mode"]["lead_in_m"] == 50.0 and hv.mapping_mode.lead_in_m == 50.0
     assert "LOG_DISARMED" in ev["logging"]
     scen = json.loads((out / "scenario.json").read_text(encoding="utf-8"))
@@ -953,7 +954,8 @@ def test_plan_with_knobs_reaches_planner_and_export(planned_s1):
         rows = [{"seq": it.seq, "command": it.command, "p1": it.param1} for it in items]
         assert s1.land_start_offenders(rows) == []
         ons = [i for i, it in enumerate(items) if it.command == 206 and it.param1 > 0]
-        assert ons and all(np.float32(items[i].param1) == np.float32(18.848) for i in ons)
+        # 206 的 d ＝ 18.848 × (1 − 2 Hz/50)：50 Hz 量化保護（vendored 2026-10-21；實際間距 ≤ l(1 − o_fwd)）
+        assert ons and all(np.float32(items[i].param1) == np.float32(18.848 * (1 - 2.0 / 50)) for i in ons)
         for i in ons:                                     # 開相機前一個 NAV 是 50 m 引入點
             a, b = items[i - 2], items[i - 1]
             assert (a.command, b.command) == (16, 16)

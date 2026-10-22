@@ -6,7 +6,8 @@
 鎖住的事：
 * 摘要的輸入就是上傳／規劃生效的值：上傳那份 hv.mission_items、規劃風、規劃 DEM、匯出 .param 的空速、camera_cfg 的
   CAM1_INTRVAL_MIN／CAM1_DURATION、格 4 m、視數門檻 5；
-* 真規劃：內部 0 破洞、邊緣帶有視數不足 ⇒ 不擋；挖掉一架的相機 ⇒ 內部破洞 ⇒ 擋；
+* 真規劃：內部 0 破洞；206 的 50 Hz 量化保護（VENDOR #12，預設開）之後邊緣帶也 ≥ 5 視；把保護關掉 ⇒ 邊緣帶有
+  視數不足 ⇒ 不擋；挖掉一架的相機 ⇒ 內部破洞 ⇒ 擋；
 * 摘要是純資料（不留報告／全格網）；
 * 驗證本身壞掉 ⇒ 協調器的建圖閘門擋（沒驗過不能當驗過），轉接層自己的 mapping_gate 不受影響；
 * 測區扣掉禁航區（不扣的話區中央的禁航區會被當成內部破洞）；多層風取最大層。
@@ -14,6 +15,7 @@ GUI 端（hv_upload_gate、面板文字、上傳被擋）在 tests/test_hdmap_fi
 """
 from __future__ import annotations
 
+import dataclasses
 import pickle
 import types
 
@@ -38,12 +40,41 @@ def mapped():
     return plan(mapping_params())
 
 
+@pytest.fixture(scope="module")
+def mapped_noguard():
+    """同一份規劃，但 206 不扣 50 Hz 量化保護（舊匯出行為）⇒ 邊界只有最外側條帶的那一帶有一部分只剩 4 視。"""
+    orig = SC.build_mapping_setup
+
+    def no_guard(p):
+        out = orig(p)
+        out["camera_cfg"] = dataclasses.replace(out["camera_cfg"], trigger_overshoot_guard=False)
+        return out
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(SC, "build_mapping_setup", no_guard)
+        coord = plan(mapping_params())
+    assert coord.hv_mapping_setup["camera_cfg"].trigger_overshoot_guard is False
+    return coord
+
+
 def _items_206(items):
     return [it for it in items if it["command"] == 206]
 
 
-# ═══════════════════════════ 真規劃：只有邊緣 ⇒ 不擋 ═══════════════════════════
-def test_real_plan_only_edge_band_is_short_and_nothing_blocks(mapped):
+# ═══════════════════════════ 真規劃：量化保護之後邊緣帶也 ≥ 5 視 ═══════════════════════════
+def test_real_plan_with_trigger_guard_has_no_edge_shortfall(mapped):
+    """VENDOR #12：206 的 d × (1 − f_s/50) ⇒ 實際間距 ≤ l(1 − o_fwd)，最外側條帶單獨負責的那一帶也有 5 視。"""
+    s = mapped.hv_exposure_summary
+    assert mapped.hv_mapping_setup["camera_cfg"].trigger_overshoot_guard is True
+    assert s["ok"] is True and s["undercovered_interior_area_m2"] == 0.0
+    assert s["undercovered_edge_band_area_m2"] == 0.0 and s["edge_band_short_count"] == 0
+    assert s["edge_band"]["min_views"] >= 5
+    assert SC.mapping_exposure_block_reasons(s) == []
+    assert mapped.hv_mapping_gate == {"uploadable": True, "reasons": []}
+
+
+# ═══════════════════════════ 真規劃（保護關掉）：只有邊緣 ⇒ 不擋 ═══════════════════════════
+def test_real_plan_only_edge_band_is_short_and_nothing_blocks(mapped_noguard):
+    mapped = mapped_noguard
     s = mapped.hv_exposure_summary
     assert s["ok"] is True and s["level"] == "曝光層級（視數）"
     assert s["cell_size_m"] == SC.MAPPING_EXPOSURE_CELL_M == 4.0 and s["min_views"] == SC.MAPPING_EXPOSURE_MIN_VIEWS == 5
@@ -62,8 +93,8 @@ def test_real_plan_only_edge_band_is_short_and_nothing_blocks(mapped):
     assert s["seams"] and 0.0 < s["seam_overlap_min"] < 1.0
 
 
-def test_real_plan_note_states_level_and_assumptions(mapped):
-    s = mapped.hv_exposure_summary
+def test_real_plan_note_states_level_and_assumptions(mapped_noguard):
+    s = mapped_noguard.hv_exposure_summary
     note = SC.mapping_exposure_note(s)
     assert note.startswith("mapping_exposure(曝光層級（視數），格 4 m")
     for frag in ("內部破洞 0 處", "（不擋）", "規劃風 0 m/s 來自 0°", "CAM_MAX_ROLL 15° 未建模", "轉彎切角與轉彎動態未建模"):

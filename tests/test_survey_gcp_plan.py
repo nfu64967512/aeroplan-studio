@@ -592,8 +592,10 @@ from survey.pipeline import PipelineError  # noqa: E402
 from tests.test_survey_pipeline import FakeNodeOdm, fleet, run, sortie  # noqa: E402,F401  (fleet 是 fixture)
 from tests.test_survey_synthlog import DFWriter  # noqa: E402
 
+# 2026-10-20 起任務多了 force-gps／max-concurrency／gps-accuracy 的「送或不送與理由」與 geo.txt 核對摘要
+# （有效值契約：每個影響結果的選項都記來源）；送出的 options 本身沒變（下面另外斷言）。
 JOB_KEYS_WITHOUT_GCP = {"node_url", "images", "geo_txt", "options", "name", "qa_passed", "qa_override", "qa_reasons",
-                        "rolling_shutter", "out_dir"}
+                        "rolling_shutter", "out_dir", "force_gps", "max_concurrency", "gps_accuracy", "geo_txt_check"}
 
 
 def _gcp_lines(images, *, n_gcp=5, ix=30.0, iy=20.0):
@@ -613,22 +615,27 @@ def test_odm_job_without_gcp_is_unchanged_and_with_gcp_carries_the_checked_file(
     from survey.odm_client import NodeOdmClient
     res = fc_result
     job0 = pipeline.odm_job(res, node_url="http://127.0.0.1:3000", orthophoto_resolution_cm=2.5, rolling_shutter=False)
-    assert set(job0) == JOB_KEYS_WITHOUT_GCP                            # 沒給 GCP：任務內容與加入功能前相同
+    assert set(job0) == JOB_KEYS_WITHOUT_GCP                            # 沒給 GCP：送出的參數與加入功能前相同
+    assert job0["options"] == [{"name": "orthophoto-resolution", "value": 2.5}, {"name": "dsm", "value": True},
+                               {"name": "tiles", "value": True}]
+    assert job0["force_gps"]["decision"] == "not_applicable_no_gcp" and job0["force_gps"]["sent"] is False
+    assert job0["gps_accuracy"]["source"] == "geo.txt" and job0["geo_txt_check"]["accuracy"] == "per_image"
     fake0 = FakeNodeOdm()
     pipeline.run_odm_job(job0, client=NodeOdmClient(job0["node_url"], session=fake0), poll_s=1.0, sleep=lambda s: None)
-    assert sorted(fake0.posted[0]["names"]) == sorted([p.name for p in res.images] + ["geo.txt"])
+    assert sorted(fake0.uploaded) == sorted([p.name for p in res.images] + ["geo.txt"])
     names = [p.name for p in res.images]
     g = tmp_path / "gcp_list.txt"
     g.write_text(_gcp_lines(names), encoding="utf-8")
     job = pipeline.odm_job(res, node_url="http://127.0.0.1:3000", orthophoto_resolution_cm=2.5, rolling_shutter=False,
-                           gcp_txt=g, gcp_vertical="ellipsoidal")
+                           gcp_txt=g, gcp_vertical="ellipsoidal", force_gps=True)
     assert set(job) == JOB_KEYS_WITHOUT_GCP | {"gcp_txt", "gcp"}
+    assert job["force_gps"]["decision"] == "force_gps" and {"name": "force-gps", "value": True} in job["options"]
     assert job["gcp_txt"] == str(g) and job["gcp"]["n_gcps"] == 5 and job["gcp"]["n_lines"] == 25
     assert job["gcp"]["header"] == "EPSG:4326" and job["gcp"]["gcp_vertical"] == "ellipsoidal"
     assert set(job["gcp"]["images_per_gcp"].values()) == {5} and job["gcp"]["warnings"] == []
     fake = FakeNodeOdm()
     pipeline.run_odm_job(job, client=NodeOdmClient(job["node_url"], session=fake), poll_s=1.0, sleep=lambda s: None)
-    assert sorted(fake.posted[0]["names"]) == sorted(names + ["geo.txt", "gcp_list.txt"])
+    assert sorted(fake.uploaded) == sorted(names + ["geo.txt", "gcp_list.txt"])
     rec = json.loads((res.out_dir / "odm" / "submission.json").read_text(encoding="utf-8"))
     assert rec["gcp_txt"] == str(g) and rec["gcp"]["n_gcps"] == 5
 
@@ -650,6 +657,11 @@ def test_odm_job_refuses_bad_gcp_files(fc_result, tmp_path):
         pipeline.odm_job(res, gcp_txt=g, gcp_vertical="ellipsoidal", checkpoint_ids=["GCP02"], **kw)
     with pytest.raises(PipelineError, match="卻沒有 gcp_list.txt"):
         pipeline.odm_job(res, gcp_vertical="ellipsoidal", **kw)
+    # 檔案本身沒問題，但沒決定照片 GPS 要不要進平差（--force-gps 三態的 None）⇒ 不組任務
+    with pytest.raises(PipelineError, match="force-gps"):
+        pipeline.odm_job(res, gcp_txt=g, gcp_vertical="ellipsoidal", **kw)
+    assert pipeline.odm_job(res, gcp_txt=g, gcp_vertical="ellipsoidal", force_gps=False, **kw)["force_gps"][
+        "decision"] == "gcp_only"
     g.write_text(_gcp_lines(["NOPE.jpg"] * 5), encoding="utf-8")
     with pytest.raises(PipelineError, match="NOPE.jpg 不在本次要上傳的影像裡"):
         pipeline.odm_job(res, gcp_txt=g, gcp_vertical="ellipsoidal", **kw)

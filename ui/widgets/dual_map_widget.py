@@ -998,6 +998,39 @@ class DualMapWidget(MapWidgetBase):
         eff2d = self.map_2d.set_wind_options(**opts)
         return {'3d': eff3d, '2d': eff2d}
 
+    # 分層風場（10／80／120 m）：3D 每層畫在自己的高度＋剖面柱；2D 只畫一層＋剖面表。各自回傳實際生效的值。
+    def set_wind_profile(self, payload: dict) -> dict:
+        eff3d = self.map_3d.set_wind_profile(payload)
+        eff2d = self.map_2d.set_wind_profile(payload)
+        return {'2d': eff2d, '3d': eff3d}
+
+    def clear_wind_profile(self) -> bool:
+        a = self.map_3d.clear_wind_profile()
+        b = self.map_2d.clear_wind_profile()
+        return bool(a or b)
+
+    def set_wind_profile_view(self, *, height_2d_m: float | None = None,
+                              layers_3d: list | None = None) -> None:
+        self.map_3d.set_wind_profile_view(height_2d_m=height_2d_m, layers_3d=layers_3d)
+        self.map_2d.set_wind_profile_view(height_2d_m=height_2d_m, layers_3d=layers_3d)
+
+    # ── 預計成果（高精地圖規劃預測）：2D + 3D 都要畫（理由同上，不能靠 __getattr__ —— 它只代理到 2D）──
+    def set_hdmap_preview(self, layer_id: str, payload: dict) -> dict:
+        """預計成果畫到 2D 與 3D；回傳 ``{'2d': {...'ok'...}, '3d': {...'ok'...}}``（各自的結果，不合併）。"""
+        eff3d = self.map_3d.set_hdmap_preview(layer_id, payload)
+        eff2d = self.map_2d.set_hdmap_preview(layer_id, payload)
+        return {'2d': eff2d, '3d': eff3d}
+
+    def clear_hdmap_preview(self, layer_id: str | None = None) -> bool:
+        """兩張圖一起移除（``None`` = 全部）；任一張原本有東西就回 True。"""
+        a = self.map_3d.clear_hdmap_preview(layer_id)
+        b = self.map_2d.clear_hdmap_preview(layer_id)
+        return bool(a or b)
+
+    def set_hdmap_preview_visible(self, layer_id: str, visible: bool) -> None:
+        self.map_3d.set_hdmap_preview_visible(layer_id, visible)
+        self.map_2d.set_hdmap_preview_visible(layer_id, visible)
+
     # ── 屬性代理（讓 main_window 直接存取 corners 等）─────────────────
     @property
     def corners(self) -> List[Tuple[float, float]]:
@@ -1078,34 +1111,66 @@ class DualMapWidget(MapWidgetBase):
     # ─────────────────────────────────────────────────────────────────
     # SITL 接口（直接代理到 3D 地圖）
     # ─────────────────────────────────────────────────────────────────
+    # 2D 頁面藏在 3D 後面時，仍每隔這麼多批更新一次（切回 2D 時標記不會停在很久以前）
+    HIDDEN_2D_EVERY_N_BATCHES = 5
+
+    def update_uav_positions(self, batch) -> dict:
+        """一次更新多架 UAV（主視窗合幀後呼叫，約 12 Hz）。batch 是 `[{'sysid','lat','lon','alt','hdg','spd',
+        'mode','armed','vt','pitch','roll'}, …]`。回 `{'3d': 送出架數, '2d': 送出架數}`。
+
+        3D：只在 3D 模式且非「切換安定窗口」時推（理由見舊的 update_uav_position）。
+        2D：2D 可見時每批都推；藏在 3D 後面時每 HIDDEN_2D_EVERY_N_BATCHES 批推一次（隱藏頁持續吃 IPC 是無謂負載，
+            但完全不推的話切回 2D 會看到舊位置）。
+        沒有批次 API 的地圖替身（測試）退回逐架 update_uav_position。
+        """
+        batch = list(batch or [])
+        if not batch:
+            return {'3d': 0, '2d': 0}
+        if not hasattr(self, '_active_sysids'):
+            self._active_sysids = set()
+        for it in batch:
+            try:
+                self._active_sysids.add(int(it['sysid']))
+            except Exception:
+                pass
+        sent3 = sent2 = 0
+        if self._mode == _MODE_3D and not self._map3d_settling:
+            m3 = self.map_3d
+            if hasattr(m3, 'update_uav_positions'):
+                m3.update_uav_positions(batch)
+                sent3 = len(batch)
+            elif hasattr(m3, 'update_uav_position'):
+                for it in batch:
+                    m3.update_uav_position(it['lat'], it['lon'], it.get('alt', 0.0), it.get('hdg', 0.0),
+                                           it.get('spd', 0.0), sysid=it['sysid'], mode=it.get('mode', ''),
+                                           armed=it.get('armed', False), vehicle_type=it.get('vt', ''),
+                                           pitch_deg=it.get('pitch', 0.0), roll_deg=it.get('roll', 0.0))
+                    sent3 += 1
+        n = self.__dict__.get('_uav_batch_count', 0) + 1
+        self._uav_batch_count = n
+        two_d_visible = self._mode != _MODE_3D
+        if two_d_visible or (n % self.HIDDEN_2D_EVERY_N_BATCHES == 0):
+            m2 = self.map_2d
+            if hasattr(m2, 'update_uav_positions'):
+                sent2 = int(m2.update_uav_positions(batch) or 0)
+            elif hasattr(m2, 'update_uav_position'):
+                for it in batch:
+                    m2.update_uav_position(it['lat'], it['lon'], it.get('alt', 0.0), it.get('hdg', 0.0),
+                                           it.get('spd', 0.0), sysid=it['sysid'], mode=it.get('mode', ''),
+                                           armed=it.get('armed', False), vehicle_type=it.get('vt', ''))
+                    sent2 += 1
+        return {'3d': sent3, '2d': sent2}
+
     def update_uav_position(self, lat: float, lon: float, alt: float,
                              heading_deg: float = 0.0, speed_ms: float = 0.0,
                              sysid: int = 1, mode: str = '', armed: bool = False,
                              vehicle_type: str = '',
                              pitch_deg: float = 0.0, roll_deg: float = 0.0):
-        """
-        SITL / MAVLink 即時 UAV 位置更新（多機支援，含姿態同步）。
-        只更新 3D 地圖內部狀態，不強制切換模式（否則使用者切到 2D 會一直被踢回 3D）。
-        """
-        # 記錄出現過的 sysid，供跟隨選單列出
-        if not hasattr(self, '_active_sysids'):
-            self._active_sysids = set()
-        self._active_sysids.add(int(sysid))
-
-        # 只在 3D 模式且非「切換安定窗口」時才推送到 3D：
-        #   (1) 2D 模式下推 3D 是無謂負載（畫面看不到），且讓隱藏頁持續吃 IPC；
-        #   (2) 剛切到 3D 時 WebGL 正重建 GPU context，暫停推送以免主執行緒被
-        #       串流與初始化夾擊而凍結（見 _switch_mode 的安定窗口說明）。
-        # 切回 3D 後約 100ms 內即會收到下一筆遙測，機體位置自然補上，無視覺落差。
-        if self._mode == _MODE_3D and not self._map3d_settling:
-            self.map_3d.update_uav_position(lat, lon, alt, heading_deg, speed_ms,
-                                             sysid=sysid, mode=mode, armed=armed,
-                                             vehicle_type=vehicle_type,
-                                             pitch_deg=pitch_deg, roll_deg=roll_deg)
-        if hasattr(self.map_2d, 'update_uav_position'):
-            self.map_2d.update_uav_position(lat, lon, alt, heading_deg, speed_ms,
-                                             sysid=sysid, mode=mode, armed=armed,
-                                             vehicle_type=vehicle_type)
+        """單架版（舊 API）：包成一筆批次走 update_uav_positions（同一套 3D／2D 可見性規則）。"""
+        self.update_uav_positions([{'sysid': int(sysid), 'lat': float(lat), 'lon': float(lon), 'alt': float(alt or 0.0),
+                                    'hdg': float(heading_deg or 0.0), 'spd': float(speed_ms or 0.0),
+                                    'mode': str(mode or ''), 'armed': bool(armed), 'vt': str(vehicle_type or ''),
+                                    'pitch': float(pitch_deg or 0.0), 'roll': float(roll_deg or 0.0)}])
 
     def set_chase_camera(self, sysid: int):
         """公開 API：程式化啟用/關閉跟隨相機。"""

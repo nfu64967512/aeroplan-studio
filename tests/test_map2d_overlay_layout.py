@@ -41,8 +41,12 @@ SWARM = {
 
 def _page() -> str:
     """與 MapWidget._build_map / _render_map 相同的組法：圖例以 folium.Element 進 body，再注入互動 JS。"""
-    fake = types.SimpleNamespace(_DRONE_COLORS=MapWidget._DRONE_COLORS,
+    fake = types.SimpleNamespace(_DRONE_COLORS=MapWidget._DRONE_COLORS, _UAV_COLORS_2D=MapWidget._UAV_COLORS_2D,
                                  corners=[(25.07, 121.22), (25.06, 121.23), (25.08, 121.24)])
+    # _inject_javascript 之後陸續多了四段注入（風場 10-16、飛控任務層 10-17、UAV 批次更新 10-17、預計成果 10-17）：
+    # 假 self 綁上同一批真方法，組出來的頁面才是正式流程的那一頁
+    for name in ('_wind_js_block', '_hdmap_js_block', '_fc_mission_js_block', '_uav_js_block'):
+        setattr(fake, name, types.MethodType(getattr(MapWidget, name), fake))
     m = folium.Map(location=[25.072, 121.231], zoom_start=15, prefer_canvas=True)
     m.get_root().html.add_child(folium.Element(MapWidget._build_swarm_legend(fake, SWARM)))
     html = m.get_root().render()

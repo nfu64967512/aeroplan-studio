@@ -96,6 +96,7 @@ __WIND_FLOW_SCRIPT__
   <label><input type="checkbox" id="lyr_waypoint" onchange="toggleLayer('waypoint')">🔢 航點標記</label>
   <label><input type="checkbox" id="lyr_imagery" checked onchange="toggleLayer('imagery')">🗺️ 地圖</label>
   <label><input type="checkbox" id="lyr_dem" checked onchange="toggleLayer('dem')">🏔️ DEM</label>
+  <label title="高精地圖規劃預測（非實際成果）"><input type="checkbox" id="lyr_hdmap" checked onchange="toggleLayer('hdmap')">🧩 預計成果</label>
 </div>
 
 <div id="toolbar">
@@ -117,6 +118,14 @@ __WIND_FLOW_SCRIPT__
 //    字串字面量是安全的。
 Cesium.Ion.defaultAccessToken = '__CESIUM_TOKEN__';
 
+// ── 依需求算圖（requestRenderMode）的兩個佔位字 ─────────────────────────
+// Python 端 CesiumMapWidget._load_cesium 以 RENDER_MAX_DT（環境變數 AEROPLAN_CESIUM_RENDER_DT）置換：
+//   __REQUEST_RENDER_MODE__ → true/false、__RENDER_MAX_DT__ → 秒（0.05 = 閒置最多 20 fps；0 = 連續算圖）。
+// 範本**未經置換**時（Playwright 測試直接載入 main.html）這兩個識別字不存在，下面用 typeof 守門補成預設值，
+// 否則 viewer 建構就 ReferenceError、整頁掛掉。置換後這兩行會變成 `typeof true` / `window['0.05']` 之類的無害敘述。
+if (typeof __REQUEST_RENDER_MODE__ === 'undefined') { window['__REQUEST_RENDER_MODE__'] = true; console.warn('[Cesium] __REQUEST_RENDER_MODE__ 未置換，用預設 true'); }
+if (typeof __RENDER_MAX_DT__ === 'undefined') { window['__RENDER_MAX_DT__'] = 0.05; console.warn('[Cesium] __RENDER_MAX_DT__ 未置換，用預設 0.05'); }
+
 // ── 初始化 Viewer ─────────────────────────────────────────────────────
 const viewer = new Cesium.Viewer('cesiumContainer', {
   terrainProvider: new Cesium.EllipsoidTerrainProvider(),  // 無 Token 用平面地形
@@ -125,15 +134,19 @@ const viewer = new Cesium.Viewer('cesiumContainer', {
   homeButton: false,
   sceneModePicker: false,
   geocoder: false,
-  timeline: true,      // SITL: 時間軸（預留）
-  animation: true,     // SITL: 動畫控制（預留）
+  // 時間軸／動畫控制小工具關掉（原本「預留」從沒用上）：兩個 widget 每個 clock tick 都重繪 DOM/SVG。
+  // viewer.clock 仍在（打擊／末端俯衝的 onTick 監聽與 shouldAnimate 照常）；viewer.timeline 從此是 undefined，引用處要判空。
+  timeline: false,
+  animation: false,
   fullscreenButton: false,
   infoBox: true,
   selectionIndicator: false,
   shadows: false,
   skyBox: false,
   skyAtmosphere: new Cesium.SkyAtmosphere(),
-  requestRenderMode: false,
+  // 2026-10-17 量測（tools/swarm_perf_profiler.py，6 架 × 25 Hz）：false 時 Cesium 盡可能 60 fps 空轉，
+  // CPU 150%、FPS ~22。改成只在有東西變了才算圖：遙測批次／改場景的公開函式結尾呼叫 _requestRender()。
+  requestRenderMode: __REQUEST_RENDER_MODE__,
   // GPU 加速：要求 high-performance WebGL context（雙顯卡機器選獨顯）
   contextOptions: {
     webgl: {
@@ -143,6 +156,70 @@ const viewer = new Cesium.Viewer('cesiumContainer', {
     },
   },
 });
+
+// ⚠ 任何 primitive／模型還在建（DataSourceDisplay.update 回 false）時，Viewer 預設會把 clock.canAnimate 設成 false
+//   ⇒ 時鐘停住、所有靠時鐘的東西凍住再一口氣跳（2026-10-17 審查抓到）。這個 app 的時鐘要一直走，關掉這個行為。
+viewer.allowDataSourcesToSuspendAnimation = false;
+
+// ── 依需求算圖：閒置兜底與要求算圖的 helper ───────────────────────────
+// maximumRenderTimeChange 是「模擬時間」差超過這個秒數就自動算一幀。時鐘由 _ensureClockRunning 讓它一直走
+// （SYSTEM_CLOCK_MULTIPLIER ×1），所以閒置模式（requestRenderMode:true）下最多 1/__RENDER_MAX_DT__ fps
+// （0.05 ⇒ 20 fps）。其餘的畫面更新靠 _requestRender() —— 任何會改場景的公開函式結尾都要呼叫一次
+// （entity 增刪改不會讓 Cesium 自己算圖；只有相機移動、圖磚載入、flyTo/zoomTo、trackedEntity 會）。
+viewer.scene.maximumRenderTimeChange = __RENDER_MAX_DT__;
+function _requestRender(){ try{ viewer.scene.requestRender(); }catch(_){} }
+// 自計時的 CallbackProperty 特效（explodeAt／dropStore／_impactMark／末端俯衝震波）在回呼裡自己取 JulianDate.now()，
+// 需要有人持續要求算圖才動得起來：這段時間內每個動畫幀都要求一次，到期自動停；重疊呼叫取最晚的期限。
+let _renderPumpUntil = 0, _renderPumpOn = false;
+function _renderPumpFor(ms) {
+  const until = Date.now() + Math.max(0, ms || 0);
+  if (until > _renderPumpUntil) _renderPumpUntil = until;
+  if (_renderPumpOn) return;
+  _renderPumpOn = true;
+  (function _pump() {
+    _requestRender();
+    if (Date.now() < _renderPumpUntil) requestAnimationFrame(_pump); else _renderPumpOn = false;
+  })();
+}
+
+// ── 時鐘：讓它以實時 ×1 一直走（閒置兜底算圖靠模擬時間差；打擊／末端俯衝的 onTick 也靠它）。
+//   ⚠ 即時 UAV **不靠**這個時鐘：entity 位置／姿態在 _uavDisplayTime（JulianDate.now() − 每架顯示延遲）取值。
+//   用 SYSTEM_CLOCK_MULTIPLIER（不是 SYSTEM_CLOCK）：後者每個 tick 都把 currentTime 蓋成「現在」，
+//   renderTerminalDive／strikeExecuteAnimation 自己設的 currentTime（動畫起點）會被吃掉（2026-10-17 審查抓到）。
+//   打擊／末端俯衝動畫把時鐘改成 CLAMPED 區間自己播：播放期間（還沒到 stopTime）不碰；播完或被
+//   strikeClearAll 停掉之後，下一個遙測批次收回來。**從不**改 currentTime。
+function _ensureClockRunning() {
+  const c = viewer.clock;
+  const animating = (c.clockRange === Cesium.ClockRange.CLAMPED && c.shouldAnimate
+                     && Cesium.JulianDate.lessThan(c.currentTime, c.stopTime));
+  if (animating) return;
+  if (c.clockStep !== Cesium.ClockStep.SYSTEM_CLOCK_MULTIPLIER) c.clockStep = Cesium.ClockStep.SYSTEM_CLOCK_MULTIPLIER;
+  if (c.clockRange !== Cesium.ClockRange.UNBOUNDED) c.clockRange = Cesium.ClockRange.UNBOUNDED;
+  if (c.multiplier !== 1) c.multiplier = 1;
+  if (!c.shouldAnimate) c.shouldAnimate = true;
+}
+_ensureClockRunning();
+
+// ── 自適應算圖：遙測還在進來（最近 _RENDER_IDLE_MS 內有 UAV 更新）⇒ 連續算圖（requestRenderMode:false），
+//   兩筆遙測之間的插值運動才會以顯示更新率動；閒置超過 _RENDER_IDLE_MS ⇒ requestRenderMode:true，只在
+//   _requestRender() 或模擬時間差 > maximumRenderTimeChange（__RENDER_MAX_DT__）時算圖。
+//   __REQUEST_RENDER_MODE__ 為 false（Python RENDER_MAX_DT 0／AEROPLAN_CESIUM_RENDER_DT=0）⇒ 永遠連續、不切換。
+const _RENDER_ADAPTIVE = (__REQUEST_RENDER_MODE__ === true);
+let _RENDER_IDLE_MS = 2000;          // 閒置門檻（ms）；測試可改短
+let _lastUavUpdateMs = 0;            // 0 = 還沒收過遙測 ⇒ 一開始就是閒置
+function _noteUavActivity() {
+  _lastUavUpdateMs = Date.now();
+  if (_RENDER_ADAPTIVE && viewer.scene.requestRenderMode) viewer.scene.requestRenderMode = false;
+}
+function _renderIdleCheck() {
+  if (!_RENDER_ADAPTIVE || viewer.scene.requestRenderMode) return;
+  if (Date.now() - _lastUavUpdateMs > _RENDER_IDLE_MS) {
+    viewer.scene.requestRenderMode = true;
+    viewer.scene.maximumRenderTimeChange = __RENDER_MAX_DT__;
+    _requestRender();
+  }
+}
+setInterval(_renderIdleCheck, 500);
 
 // 印出實際渲染用的 GPU（驗證硬體加速是否生效）
 try {
@@ -242,8 +319,13 @@ function toggleLayer(layer) {
       break;
     case 'imagery':
       for (var i = 0; i < viewer.imageryLayers.length; i++) {
-        viewer.imageryLayers.get(i).show = checked;
+        var _il = viewer.imageryLayers.get(i);
+        if (_il && _il._hdmapPreview) continue;   // 預計成果的點陣圖由自己的勾選框管
+        _il.show = checked;
       }
+      break;
+    case 'hdmap':
+      if (typeof _hdmapApplyAll === 'function') _hdmapApplyAll();
       break;
     case 'dem':
       if (demOverlayEntity) demOverlayEntity.show = checked;
@@ -252,6 +334,7 @@ function toggleLayer(layer) {
       if (demTerrainPrimitive) demTerrainPrimitive.show = checked;
       break;
   }
+  _requestRender();
 }
 
 // ── 工具函數 ─────────────────────────────────────────────────────────
@@ -279,6 +362,7 @@ function clearPaths() {
   wpLabelEntities = [];
   document.getElementById('legend').style.display = 'none';
   legendItems = [];
+  _requestRender();
 }
 
 /**
@@ -396,6 +480,7 @@ function addPath(ptsJson, colorHex, width, label, dashed, forceClamp) {
     legendItems.push({ color: colorHex, label: label });
     _updateLegend();
   }
+  _requestRender();
 }
 
 function _updateLegend() {
@@ -413,6 +498,7 @@ function clearCorners() {
   cornerEntities.forEach(e => { try { viewer.entities.remove(e); } catch(_) {} });
   cornerEntities = [];
   if (polygonEntity) { viewer.entities.remove(polygonEntity); polygonEntity = null; }
+  _requestRender();
 }
 
 function setCorners(cornersJson) {
@@ -458,6 +544,7 @@ function setCorners(cornersJson) {
       },
     });
   }
+  _requestRender();
 }
 
 // ── 戰術視覺化：四散決斷圈 + 預備點盤旋圓 + 俯衝紅線 ───────────────────
@@ -466,6 +553,7 @@ let _tacticalEntities = [];
 function clearTacticalOverlay() {
   _tacticalEntities.forEach(e => { try { viewer.entities.remove(e); } catch(_){} });
   _tacticalEntities = [];
+  _requestRender();
 }
 // 四散決斷圈：以目標為圓心畫琥珀色虛線圓 (TABLE XL caution boundary)
 function setDispersionRing(lat, lon, radius_m) {
@@ -504,6 +592,7 @@ function setDispersionRing(lat, lon, radius_m) {
     },
   });
   _tacticalEntities.push(dashed);
+  _requestRender();
 }
 // 預備點盤旋圓 (NAV_LOITER_TIME 視覺化)
 function addLoiterCircle(lat, lon, radius_m, alt_m, colorHex) {
@@ -521,6 +610,7 @@ function addLoiterCircle(lat, lon, radius_m, alt_m, colorHex) {
     },
   });
   _tacticalEntities.push(e);
+  _requestRender();
 }
 // 俯衝紅線（從 P_dive 切到目標，血紅）
 function addDiveLine(lat0, lon0, alt0, lat_t, lon_t, alt_t) {
@@ -539,6 +629,7 @@ function addDiveLine(lat0, lon0, alt0, lat_t, lon_t, alt_t) {
     },
   });
   _tacticalEntities.push(e);
+  _requestRender();
 }
 
 // ── 飛控任務航線疊加（從飛控讀回的那一份，不是規劃器算出來的那份）────────
@@ -561,12 +652,14 @@ function clearMissionOverlay() {
   _missionEntities.forEach(e => { try { viewer.entities.remove(e); } catch(_){} });
   _missionEntities = [];
   _missionLayers = {};
+  _requestRender();
 }
 function clearMissionLayer(layerId) {
   const arr = _missionLayers[layerId] || [];
   arr.forEach(e => { try { viewer.entities.remove(e); } catch(_){} });
   _missionEntities = _missionEntities.filter(e => arr.indexOf(e) < 0);
   delete _missionLayers[layerId];
+  _requestRender();
 }
 // 整架：layerId 本身（'uav3' = 讀回）＋ 'uav3-<kind>' 全部（'uav3-import' = 匯入預覽…）。
 // 鍵的規則在 mission/mission_view.py::fc_layer_key，2D 的 clear_fc_mission(sysid) 走同一條。
@@ -575,6 +668,7 @@ function clearMissionLayerFamily(layerId) {
   Object.keys(_missionLayers).forEach(k => {
     if (k === layerId || k.indexOf(prefix) === 0) clearMissionLayer(k);
   });
+  _requestRender();
 }
 // ptsJson: [[lat, lon, alt], ...] — 注意是 lat 先，和 Cesium 的順序相反
 function addMissionRoute(ptsJson, colorHex, label, layerId) {
@@ -623,6 +717,7 @@ function addMissionRoute(ptsJson, colorHex, label, layerId) {
       },
     }), layerId));
   });
+  _requestRender();
 }
 // 飛控的 home（mission seq 0）—— 獨立的 H 標記,**不接進航線折線**。
 // MP / QGC 都是這樣畫的:seq 0 是飛控自己的 home,任務本體從 seq 1 開始。
@@ -649,6 +744,7 @@ function addMissionHome(lat, lon, alt_m, layerId, text) {
       heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
     },
   }), layerId));
+  _requestRender();
 }
 // 任務裡的盤旋圈（NAV_LOITER_* 的 param3 = 半徑）→ AUTO 架構的決斷圈
 function addMissionLoiter(lat, lon, radius_m, alt_m, colorHex, layerId) {
@@ -666,6 +762,7 @@ function addMissionLoiter(lat, lon, radius_m, alt_m, colorHex, layerId) {
       height: alt_m || 0,
     },
   }), layerId));
+  _requestRender();
 }
 
 // ── 電子圍籬 (Geofence) — 黃色邊界 = §5.17.25 TABLE XL「caution boundary」─────
@@ -674,6 +771,7 @@ let geofenceEntities = [];
 function clearGeofence() {
   geofenceEntities.forEach(e => { try { viewer.entities.remove(e); } catch(_){} });
   geofenceEntities = [];
+  _requestRender();
 }
 
 // ── TOT 扇形閘門疊圖(蜂群同時抵達的目標前扇形 + slot + 切線)──────────────
@@ -681,6 +779,7 @@ let totGateEntities = [];
 function clearTotGate() {
   totGateEntities.forEach(e => { try { viewer.entities.remove(e); } catch(_){} });
   totGateEntities = [];
+  _requestRender();
 }
 function _dest(lat, lon, brgDeg, distM) {          // 沿方位 brg 前進 dist m
   const EARTH = 111320.0, b = brgDeg * Math.PI / 180.0;
@@ -764,6 +863,7 @@ function setTotGate(jsonStr) {
              backgroundColor: hexColor('#b00000', 0.85),
              pixelOffset: new Cesium.Cartesian2(0, -26) },
   }));
+  _requestRender();
 }
 // ── 命中爆炸動畫(各機命中紅心時放一發)────────────────────────────────
 // 純前端動畫:一顆由小變大再淡出的火球 + 向外擴散的震波環 + 短暫的命中標籤。
@@ -772,6 +872,7 @@ let explosionEntities = [];
 function clearExplosions() {
   explosionEntities.forEach(e => { try { viewer.entities.remove(e); } catch(_){} });
   explosionEntities = [];
+  _requestRender();
 }
 function explodeAt(lat, lon, alt, label) {
   const t0 = Cesium.JulianDate.now();
@@ -848,7 +949,9 @@ function explodeAt(lat, lon, alt, label) {
       const k = explosionEntities.indexOf(e);
       if (k >= 0) explosionEntities.splice(k, 1);
     });
+    _requestRender();
   }, DUR * 1000 + 200);
+  _renderPumpFor(DUR * 1000 + 300);   // 自計時特效：這段時間要持續算圖才看得到火球擴張
 }
 
 // ── 投放彈體：即時下落動畫 + 落地特效 ──────────────────────────────────
@@ -884,6 +987,7 @@ function clearStores() {
   _storeEntities.forEach(e => { try { viewer.entities.remove(e); } catch(_){} });
   _storeEntities = [];
   if (typeof clearImpacts === 'function') clearImpacts();
+  _requestRender();
 }
 
 function dropStore(trajJson, label) {
@@ -987,6 +1091,7 @@ function dropStore(trajJson, label) {
     });
     _impactMark(imp[0], imp[1], imp[2], tr.blast_radius_m || 8.0, label);
   }, tof * 1000);
+  _renderPumpFor(tof * 1000 + 300);   // 自計時下落動畫：這段時間要持續算圖
 }
 
 // 落點標記：一個紅色圓形，簡單標示影響範圍。
@@ -1002,6 +1107,7 @@ let _impactEntities = [];
 function clearImpacts() {
   _impactEntities.forEach(e => { try { viewer.entities.remove(e); } catch(_){} });
   _impactEntities = [];
+  _requestRender();
 }
 
 function _impactMark(lat, lon, alt, radius, label) {
@@ -1045,7 +1151,9 @@ function _impactMark(lat, lon, alt, radius, label) {
     try { viewer.entities.remove(e); } catch(_) {}
     const k = _impactEntities.indexOf(e);
     if (k >= 0) _impactEntities.splice(k, 1);
+    _requestRender();
   }, (HOLD + FADE) * 1000 + 200);
+  _renderPumpFor((HOLD + FADE) * 1000 + 300);   // 自計時淡出：這段時間要持續算圖
 }
 
 function setGeofence(jsonStr) {
@@ -1126,6 +1234,7 @@ function setGeofence(jsonStr) {
   });
   console.log('[3D] Geofence: ' + verts.length + ' 頂點, alt='
               + altMin.toFixed(0) + '~' + altMax.toFixed(0) + 'm');
+  _requestRender();
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -1269,6 +1378,7 @@ function addFenceZone(zoneId, vertices, altMin, altMax, name,
   console.log('[FenceZone] add ' + zoneId + ' (' + catTag + ', n='
               + vertices.length + ', alt=' + aMin.toFixed(0) + '~'
               + aMax.toFixed(0) + 'm, inclusion=' + inclusion + ')');
+  _requestRender();
 }
 
 /**
@@ -1281,6 +1391,7 @@ function removeFenceZone(zoneId) {
     try { viewer.entities.remove(e); } catch (_) {}
   });
   delete fenceZoneEntities[zoneId];
+  _requestRender();
 }
 
 /**
@@ -1293,12 +1404,13 @@ function clearAllFenceZones() {
     });
   });
   fenceZoneEntities = {};
+  _requestRender();
 }
 
 // ── 圓形覆蓋 ─────────────────────────────────────────────────────────
 function setCircleOverlay(lat, lon, radius, colorHex) {
   if (circleEntity) { viewer.entities.remove(circleEntity); circleEntity = null; }
-  if (radius <= 0) return;
+  if (radius <= 0) { _requestRender(); return; }
   circleEntity = viewer.entities.add({
     position: Cesium.Cartesian3.fromDegrees(lon, lat, 0),
     ellipse: {
@@ -1321,6 +1433,7 @@ function setCircleOverlay(lat, lon, radius, colorHex) {
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
     },
   });
+  _requestRender();
 }
 
 // ── 起飛點 ───────────────────────────────────────────────────────────
@@ -1346,12 +1459,14 @@ function setHomePoint(lat, lon) {
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
     },
   });
+  _requestRender();
 }
 
 // ── 禁航區 NFZ ───────────────────────────────────────────────────────
 function clearNFZ() {
   nfzEntities.forEach(e => { try { viewer.entities.remove(e); } catch(_) {} });
   nfzEntities = [];
+  _requestRender();
 }
 
 function addNFZPolygon(vertsJson, name) {
@@ -1369,6 +1484,7 @@ function addNFZPolygon(vertsJson, name) {
     },
   });
   nfzEntities.push(e);
+  _requestRender();
 }
 
 function addNFZCircle(lat, lon, radius, name) {
@@ -1386,6 +1502,7 @@ function addNFZCircle(lat, lon, radius, name) {
     },
   });
   nfzEntities.push(e);
+  _requestRender();
 }
 
 // ── 相機操作 ─────────────────────────────────────────────────────────
@@ -1394,6 +1511,7 @@ function flyToScene() {
   if (all.length) {
     viewer.flyTo(all, { offset: new Cesium.HeadingPitchRange(0, Cesium.Math.toRadians(-55), 0) });
   }
+  _requestRender();
 }
 
 // 立即把相機擺到指定位置（不做補間）。
@@ -1408,6 +1526,7 @@ function setViewPos(lat, lon, alt, range) {
                                       range || 800));
   // 一定要解除鎖定，否則相機會一直綁在那個參考框裡，之後怎麼動都回到這裡
   viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
+  _requestRender();
   return true;
 }
 
@@ -1420,6 +1539,8 @@ function flyToPos(lat, lon, alt, range) {
     duration: 1.5,
     complete: function () { try { viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY); } catch (_) {} },
   });
+  // typeof 守門：tests/test_cesium_flyto.py 只把這一個函式抽到最小頁面跑，那裡沒有 _requestRender
+  if (typeof _requestRender === 'function') _requestRender();
 }
 
 function setMode3D()      { viewer.scene.mode = Cesium.SceneMode.SCENE3D; }
@@ -1432,7 +1553,10 @@ function toggleClamp() {
 }
 
 // ── SITL 即時 UAV 位置更新（多機支援）────────────────────────────────
-// 呼叫方式：updateUAVPosition(lat, lon, alt, hdg, spd, sysid, mode, armed)
+// 呼叫方式：updateUAVPosition(lat, lon, alt, hdg, spd, sysid, mode, armed, vt, pitch, roll)（單架）
+//           updateUAVPositions([{lat, lon, alt, hdg, spd, sysid, mode, armed, vt, pitch, roll, crs}, …])（批次，Python 走這條）
+// 位置／姿態走取樣屬性線性插值、顯示時間落後一個小延遲（見 _uavSampledProps 上方說明），兩筆遙測之間模型連續移動；
+// 模型機鼻 = 飛控 ATTITUDE yaw（hdg）；crs（航跡）只顯示在狀態列，除非明確 setUavNoseFollowsTrack(true)（見 _uavNoseHeading）。
 const _UAV_COLORS = ['#FFD700','#E53935','#43A047','#1E88E5','#8E24AA','#00ACC1','#FB8C00','#3949AB'];
 const _PLANE_MODEL_URI = '__PLANE_MODEL_URI__';
 const _COPTER_MODEL_URI = '__COPTER_MODEL_URI__';
@@ -1470,19 +1594,210 @@ const _COPTER_HEADING_OFFSET = -90;   // 多旋翼 GLB yaw 逆時針 90°
 const _COPTER_PITCH_OFFSET   = 90;   // 多旋翼 GLB pitch +90° 校正
 const _COPTER_ROLL_OFFSET    = 180;   // GLB 機身上下倒置校正 (roll 翻正)
 
-// 各機即時姿態緩存（由 updateUAVPosition 填入），供跟隨相機/FOV 等使用
+// 各機即時狀態（由 _updateUAVOne 填入），供跟隨相機/FOV 等使用。
+//   每架：{lat, lon, alt, heading(機鼻, 度), yaw(飛控 hdg), crs(航跡, 度或 null), pitch, roll, speed,
+//          props: {pos, ori, att}（取樣屬性）, lastPos/lastOri/lastAtt（最後一筆值）,
+//          lastPosMs/lastAttMs + lastPosJD/lastAttJD（最後一筆樣本時間）, nPos/nAtt（加過幾次，含取代）,
+//          dtEma（位置樣本間隔 EMA，秒）, delay（顯示延遲，秒）, delayUpdMs, lastPruneMs,
+//          kind（模型種類 vtol/plane/copter/planeBox/copterBall：ori 樣本裡的 GLB 校正屬於它）}
 const _UAV_STATE = {};
+
+// ── 機鼻方向：**預設 = 飛控 yaw**（hdg = Python 送來的 ATTITUDE yaw）⇒ 模型畫的就是飛控回報的姿態。
+//   ⚠ 2026-10-22 使用者：「模型要忠實反映 SITL 的姿態」。2026-10-17 起預設把固定翼／VTOL 定翼模式的機鼻在
+//     3→6 m/s 之間過渡到航跡（crs = Python 由 vel_n/vel_e 算的地面航向）⇒ 有側風／側滑時模型機鼻 ≠ 飛控 yaw
+//     （偏流角整個不見），滾轉／俯仰也是繞「航跡方向」的機體軸套上去的；機鼻同時帶動平面圖示、追機鏡頭、
+//     FPV、光錐等疊圖（_uavShownPose）。當時抱怨的「機頭沒跟著路徑走、轉彎慢半拍」主因是舊的 VFR_HUD
+//     整數 4 Hz heading，已改 ATTITUDE yaw（main_window._uav_batch_item）⇒ 過渡改成預設關。
+//   setUavNoseFollowsTrack(true) 可以明確打開這個過渡：**顯示輔助，不是姿態**（機鼻改指地面航跡）；
+//     只影響之後加入的樣本。開啟時：速度 3→6 m/s 由 hdg 線性過渡到 crs，走最短角差（350°→10° 經過 0°、不是 180°）；
+//     一律用 hdg 的情況：旗標關、crs 缺／非數字、多旋翼（機頭本來就可以不朝飛行方向）、Q 開頭模式（QuadPlane 旋翼飛）。
+//   ⚠ 更早是 2 m/s 硬切 crs↔hdg ⇒ 跨門檻時機頭瞬間甩過去，而且連多旋翼也套用（2026-10-17 審查抓到）。
+let _UAV_NOSE_FOLLOWS_TRACK = false;
+const _UAV_NOSE_BLEND_LO = 3.0, _UAV_NOSE_BLEND_HI = 6.0;   // m/s：≤LO 全用 hdg、≥HI 全用 crs
+// 公開：明確開／關「機鼻跟航跡」的顯示輔助（預設關 = 機鼻就是飛控 yaw）。回傳開關後的狀態。
+function setUavNoseFollowsTrack(on) {
+  _UAV_NOSE_FOLLOWS_TRACK = !!on;
+  console.log('[3D] 機鼻：' + (_UAV_NOSE_FOLLOWS_TRACK ? '跟航跡（顯示輔助，不是飛控姿態）' : '飛控 yaw（姿態）'));
+  _requestRender();
+  return _UAV_NOSE_FOLLOWS_TRACK;
+}
+function _uavNoseHeading(hdgDeg, crsDeg, spdMs, vehicleType, mode) {
+  const hdg = (typeof hdgDeg === 'number' && isFinite(hdgDeg)) ? hdgDeg : 0;
+  if (!_UAV_NOSE_FOLLOWS_TRACK || typeof crsDeg !== 'number' || !isFinite(crsDeg)) return hdg;
+  const vt = String(vehicleType || '').toUpperCase();
+  if (vt.indexOf('PLANE') < 0 && vt.indexOf('FIXED') < 0 && vt.indexOf('VTOL') < 0) return hdg;
+  if (String(mode || '').toUpperCase().charAt(0) === 'Q') return hdg;
+  const w = Math.max(0, Math.min(1, ((spdMs || 0) - _UAV_NOSE_BLEND_LO) / (_UAV_NOSE_BLEND_HI - _UAV_NOSE_BLEND_LO)));
+  const d = ((crsDeg - hdg) % 360 + 540) % 360 - 180;        // 最短角差，[-180, 180)
+  return ((hdg + w * d) % 360 + 360) % 360;
+}
+
+// ── 模型方向 = 飛機姿態（機鼻 heading、pitch、roll）× GLB 校正（模型自己座標系下的固定旋轉）。
+//   ⚠ 2026-10-22 使用者：「SITL 在做 roll 的時候模型只有偏航沒有滾轉」。舊寫法把校正角度直接加進姿態角：
+//     HPR(機鼻 + hOff, pitch + pOff, roll + rOff)。Cesium 的 HPR 是 qHeading·qPitch·qRoll（先繞 x 滾轉、再繞 y 俯仰、
+//     最後繞 z 偏航），VTOL／多旋翼的 GLB 校正 pOff = 90° ⇒ 加上去的 roll 是繞「已經俯仰 90° 的 x 軸」＝垂直軸轉
+//     ⇒ 滾轉畫出來是偏航（實測：滾轉 40° 從正後方看機翼是平的、看到機身側面）。固定翼偏移全 0 才沒有這個問題。
+//   ⚠ 而且**不能**直接用 Cesium 的 HPR 的 pitch／roll：它的機體軸是「x 前、y 左」，航向 0 時 x 朝**東**
+//     （Cesium 文件：Roll is the first rotation applied about the local east axis）；我們每個 GLB 的目視校正
+//     都是「航向 0 時機鼻朝北」（Barracuda 偏移 0 就是這樣校出來的）⇒ Cesium 的 roll 會讓模型俯仰、pitch 會讓它滾轉
+//     （偏移全 0 的固定翼也一直是錯的，只是不明顯）。
+//   正確：在校正後的機體座標（航向 0 時：機鼻 +y 北、右翼 +x 東、機背 +z）裡照航空慣例轉：
+//     q = ENU(pos)·Rz(−機鼻)·Rx(+pitch 機頭上仰)·Ry(+roll 右翼下沉)·校正，校正 = HPR(hOff, pOff, rOff)。
+//     pitch = roll = 0 時 = ENU·qH(機鼻)·qH(hOff)·qP(pOff)·qR(rOff) = ENU·HPR(機鼻 + hOff, pOff, rOff)，
+//     和舊寫法在水平飛行時**完全相同**，所以既有的目視校正（機鼻對準航向）不變。
+const _uavQP = new Cesium.Quaternion(), _uavQR = new Cesium.Quaternion(), _uavQF = new Cesium.Quaternion();
+function _uavModelOrientation(pos, noseDeg, pitchDeg, rollDeg, hOff, pOff, rOff, result) {
+  const q = Cesium.Transforms.headingPitchRollQuaternion(pos, new Cesium.HeadingPitchRoll(
+    Cesium.Math.toRadians(noseDeg || 0), 0, 0), undefined, undefined, result);       // ENU·Rz(−機鼻)
+  Cesium.Quaternion.fromAxisAngle(Cesium.Cartesian3.UNIT_X, Cesium.Math.toRadians(pitchDeg || 0), _uavQP);
+  Cesium.Quaternion.fromAxisAngle(Cesium.Cartesian3.UNIT_Y, Cesium.Math.toRadians(rollDeg || 0), _uavQR);
+  Cesium.Quaternion.multiply(q, _uavQP, q);
+  Cesium.Quaternion.multiply(q, _uavQR, q);
+  if (!hOff && !pOff && !rOff) return q;
+  Cesium.Quaternion.fromHeadingPitchRoll(new Cesium.HeadingPitchRoll(
+    Cesium.Math.toRadians(hOff || 0), Cesium.Math.toRadians(pOff || 0), Cesium.Math.toRadians(rOff || 0)), _uavQF);
+  return Cesium.Quaternion.multiply(q, _uavQF, q);
+}
+
+// ── 每架的取樣屬性：位置／模型姿態（含 GLB 校正偏移）／原始姿態（給跟隨／FPV 相機），全部**線性**插值
+//   （姿態用 SampledProperty(Quaternion)：Cesium 對 Quaternion 的 packed 插值 = slerp）、兩端 HOLD、**不外推**。
+//   樣本時間 = Python 鏈路執行緒收到那則 MAVLink 的牆鐘時間（批次的 pt／at，epoch ms），不是 JS 執行的時間：
+//     * 同一個 pt 重送（30 Hz 的 GUI 合幀重送 20 Hz 的位置）⇒ 不加樣本；
+//     * 新樣本離上一筆 < _UAV_MIN_SAMPLE_GAP_MS ⇒ 取代上一筆（兩個批次連著執行時不會出現相隔 ~1 ms 的兩點）；
+//     * 時間戳缺／非數字／比現在早 5 s 以上或晚 1 s 以上 ⇒ 用 Date.now()。
+//   顯示時間 = JulianDate.now() − st.delay（每架各自的顯示延遲）：純插值，畫面落在兩筆之間；斷訊時停在最後一筆
+//   （HOLD），不沿多項式飛走也不會回彈。**不靠 viewer.clock**。
+//   ⚠ 以前（2026-10-17 審查抓到）：樣本在 JS 執行當下 now() 加入 ⇒ 重送的同一點變成新樣本（停 33 ms 再跳），
+//     Hermite 外推甚至讓模型往回走；斷訊 > 1 s 外推到期又彈回最後一筆。
+//   樣本只留最近 _UAV_SAMPLE_KEEP_S 秒（每 _UAV_PRUNE_EVERY_MS 修剪一次）。
+const _UAV_SAMPLE_KEEP_S = 30, _UAV_PRUNE_EVERY_MS = 5000;
+const _UAV_MIN_SAMPLE_GAP_MS = 10;                       // 比這更近 ⇒ 新的取代舊的
+const _UAV_TS_PAST_MS = 5000, _UAV_TS_FUTURE_MS = 1000;  // 時間戳可信範圍（相對於現在）
+// 顯示延遲：目標 = clamp(2 × 樣本間隔 EMA + 0.03, 0.08, 1.0) 秒；每次新位置樣本往目標移動，
+//   但每秒最多改 _UAV_DELAY_SLEW 秒 ⇒ 顯示時間以 0.8～1.2 倍實時前進，永遠不會倒退。
+const _UAV_DELAY_INIT = 0.12, _UAV_DELAY_MIN = 0.08, _UAV_DELAY_MAX = 1.0;
+const _UAV_DELAY_SLEW = 0.2, _UAV_DT_EMA_ALPHA = 0.1;
+function _uavSampledProps() {
+  const lin = function (p) {
+    p.setInterpolationOptions({ interpolationDegree: 1, interpolationAlgorithm: Cesium.LinearApproximation });
+    p.forwardExtrapolationType = Cesium.ExtrapolationType.HOLD;
+    p.backwardExtrapolationType = Cesium.ExtrapolationType.HOLD;
+    return p;
+  };
+  return { pos: lin(new Cesium.SampledPositionProperty()),
+           ori: lin(new Cesium.SampledProperty(Cesium.Quaternion)),
+           att: lin(new Cesium.SampledProperty(Cesium.Quaternion)) };
+}
+// 時間戳（epoch ms）→ 可用的樣本時間；不可信就用現在
+function _uavSampleMs(t, nowMs) {
+  return (typeof t === 'number' && isFinite(t) && t >= nowMs - _UAV_TS_PAST_MS && t <= nowMs + _UAV_TS_FUTURE_MS)
+    ? t : nowMs;
+}
+// 同一個時間點把 values[i] 加進 props[i]。ms 不新於 lastMs ⇒ 什麼都不加、回 null；
+// 離上一筆 < _UAV_MIN_SAMPLE_GAP_MS ⇒ 先移除上一筆（lastJD）再加（取代）。回傳新樣本的 JulianDate。
+function _uavPushSample(props, values, ms, lastMs, lastJD) {
+  if (!(ms > lastMs)) return null;
+  const jd = Cesium.JulianDate.fromDate(new Date(ms));
+  if (lastJD && ms - lastMs < _UAV_MIN_SAMPLE_GAP_MS) {
+    for (let i = 0; i < props.length; i++) props[i].removeSample(lastJD);
+  }
+  for (let i = 0; i < props.length; i++) props[i].addSample(jd, values[i]);
+  return jd;
+}
+function _uavDelayTarget(dtEma) {
+  return Math.max(_UAV_DELAY_MIN, Math.min(_UAV_DELAY_MAX, 2 * dtEma + 0.03));
+}
+// 每次加了新位置樣本：gapMs（離上一筆，≥ 最小間隔才算）餵 EMA，顯示延遲往目標移動（受每秒 _UAV_DELAY_SLEW 限制）
+function _uavNoteInterval(st, gapMs, nowMs) {
+  if (gapMs >= _UAV_MIN_SAMPLE_GAP_MS) {
+    const g = gapMs / 1000;
+    st.dtEma = (st.dtEma === null) ? g : st.dtEma + _UAV_DT_EMA_ALPHA * (g - st.dtEma);
+  }
+  if (st.dtEma !== null) {
+    const maxStep = _UAV_DELAY_SLEW * Math.max(0, (nowMs - st.delayUpdMs) / 1000);
+    const want = _uavDelayTarget(st.dtEma) - st.delay;
+    st.delay += Math.max(-maxStep, Math.min(maxStep, want));
+  }
+  st.delayUpdMs = nowMs;
+}
+function _uavPruneSamples(st, nowMs) {
+  const stop = Cesium.JulianDate.fromDate(new Date(nowMs - _UAV_SAMPLE_KEEP_S * 1000));
+  const start = Cesium.JulianDate.addSeconds(stop, -86400.0, new Cesium.JulianDate());
+  const iv = new Cesium.TimeInterval({ start: start, stop: stop, isStartIncluded: true, isStopIncluded: true });
+  ['pos', 'ori', 'att'].forEach(function (k) { st.props[k].removeSamples(iv); });
+}
+// 這一架此刻要顯示的時間（JulianDate.now() − st.delay）；result 給 scratch 物件，避免每幀配置
+const _uavScratchJD = new Cesium.JulianDate();
+function _uavDisplayTime(st, result) {
+  result = result || new Cesium.JulianDate();
+  return Cesium.JulianDate.addSeconds(Cesium.JulianDate.now(result), -st.delay, result);
+}
+function _uavDisplayMs(st) { return Date.now() - st.delay * 1000; }
+// 相機用：和模型同一個顯示時間的插值位置／原始姿態；還沒有樣本才退回最後一筆
+function _uavSmoothPos(st) {
+  const p = st.props ? st.props.pos.getValue(_uavDisplayTime(st, _uavScratchJD)) : undefined;
+  return p || st.lastPos || Cesium.Cartesian3.fromDegrees(st.lon, st.lat, st.alt || 0);
+}
+function _uavSmoothHpr(st) {
+  const q = st.props ? st.props.att.getValue(_uavDisplayTime(st, _uavScratchJD)) : undefined;
+  if (q) return Cesium.HeadingPitchRoll.fromQuaternion(q);
+  return new Cesium.HeadingPitchRoll(Cesium.Math.toRadians(st.heading || 0),
+                                     Cesium.Math.toRadians(st.pitch || 0), Cesium.Math.toRadians(st.roll || 0));
+}
+// 疊圖用（光錐／熱力圖掃描／RCS）：這一架此刻**畫出來**的位置與機鼻 —— 和模型同一個顯示時間。
+//   {pos: Cartesian3（= 模型位置）, lat, lon, alt（橢球高 = 送進來的 alt）, heading（模型機鼻，度 0–360）}
+//   機鼻是模型畫的那個（_uavNoseHeading：預設 = 飛控 ATTITUDE yaw；明確開了 setUavNoseFollowsTrack 才是航跡），
+//   不是 Python 另外傳給疊圖的 VFR_HUD heading。
+function _uavShownPose(st) {
+  const pos = _uavSmoothPos(st);
+  const c = Cesium.Cartographic.fromCartesian(pos);
+  const h = Cesium.Math.toDegrees(_uavSmoothHpr(st).heading);
+  return { pos: pos,
+           lat: c ? Cesium.Math.toDegrees(c.latitude) : st.lat,
+           lon: c ? Cesium.Math.toDegrees(c.longitude) : st.lon,
+           alt: c ? c.height : (st.alt || 0),
+           heading: ((h % 360) + 360) % 360 };
+}
 
 // ── 跟隨相機（Chase Camera / Flight-Sim View）────────────────────────
 let _chaseSysid = 0;           // 0 = 關閉
 let _chasePreRender = null;
 const _chaseConfig = {
-  distance: 80.0,   // 相機位於飛機後方公尺
-  height:   20.0,   // 高於飛機公尺
-  pitchDeg: -10.0,  // 相機俯角
-  smoothing: 0.18,  // 0 = 無延遲，1 = 永不到位；建議 0.1 ~ 0.3
+  distance: 80.0,   // 相機在飛機後方的水平距離（公尺）
+  height:   20.0,   // 高於飛機公尺 —— 只在 pitchDeg 不是數字時用
+  pitchDeg: -10.0,  // 相機俯角：高度 = distance × tan(|pitchDeg|)（以前存了但沒人讀，四個預設全是 14°）
+  smoothing: 0.18,  // 鏡頭偏航阻尼：時間常數 τ = smoothing × 2 秒（0.18 ⇒ 0.36 s）；0 = 剛性鎖機頭
 };
 let _chaseFrameInit = false;   // 首幀才套用初始偏移；後續只更新 transform 以保留使用者滑鼠旋轉
+let _chaseYaw = null;          // 鏡頭目前的偏航（阻尼後）；null = 下一幀直接對齊機頭
+let _chaseLastMs = 0;          // 上一次 preRender 的 performance.now()
+let _chaseLastFrame = null;    // 上一幀交給 lookAtTransform 的 body frame（偵測別人改了相機座標系）
+let _chaseLastOffset = null;   // 上一幀交給 lookAtTransform 的 offset
+const CHASE_YAW_SNAP_RAD = 1e-5;   // 差這麼小就直接對齊（≈0.0006°）：否則指數逼近永遠在改相機，閒置時也停不了算圖
+
+// 追機鏡頭的偏航阻尼（飛行模擬器 chase view 的手感）：一階低通、與幀率無關（α = 1 − e^(−dt/τ)），走最短角。
+// 位置不阻尼（飛機永遠在畫面同一處），只有鏡頭轉向比機頭慢一點：17°/s 的轉彎穩態落後 ≈ 17 × τ ≈ 6°。
+// 也把遙測航向的小抖動濾掉。τ ≤ 0 或首幀 ⇒ 直接回 target（舊行為：剛性鎖機頭）。
+// 差距 < CHASE_YAW_SNAP_RAD ⇒ 直接回 target（停止改相機，依需求算圖才能回到閒置）。
+function _chaseSmoothYaw(prev, target, dtSec, tauSec) {
+  if (prev === null || prev === undefined || !isFinite(prev) || !(tauSec > 0)) return target;
+  if (!isFinite(target)) return prev;
+  const d = Math.atan2(Math.sin(target - prev), Math.cos(target - prev));
+  if (Math.abs(d) < CHASE_YAW_SNAP_RAD) return target;
+  const a = 1 - Math.exp(-Math.max(0, Math.min(dtSec, 0.5)) / tauSec);
+  const y = prev + d * a;
+  return Math.atan2(Math.sin(y), Math.cos(y));
+}
+
+// 首幀（或重新對齊時）的相機偏移（body frame：+Y 機頭、+Z 上）：飛機正後方 distance 公尺，
+// 高度依俯角；沒給俯角就用 height。
+function _chaseInitialOffset() {
+  const c = _chaseConfig;
+  const up = (typeof c.pitchDeg === 'number' && isFinite(c.pitchDeg))
+    ? c.distance * Math.tan(Cesium.Math.toRadians(Math.min(89, Math.abs(c.pitchDeg))))
+    : c.height;
+  return new Cesium.Cartesian3(0, -c.distance, up);
+}
 
 function setChaseCamera(sysid) {
   // 解除 FPV 模式（兩種鏡頭互斥）
@@ -1495,8 +1810,13 @@ function setChaseCamera(sysid) {
   try { viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY); } catch(_) {}
   _chaseSysid = sysid | 0;
   _chaseFrameInit = false;
+  _chaseYaw = null;
+  _chaseLastMs = 0;
+  _chaseLastFrame = null;
+  _chaseLastOffset = null;
   if (_chaseSysid <= 0) {
     console.log('[3D] 跟隨相機：關閉');
+    _requestRender();
     return;
   }
 
@@ -1504,15 +1824,35 @@ function setChaseCamera(sysid) {
     const st = _UAV_STATE[_chaseSysid];
     const entity = uavEntities[_chaseSysid];
     if (!st || !entity) return;
-    const targetPos = Cesium.Cartesian3.fromDegrees(st.lon, st.lat, st.alt);
-    const hdgRad = Cesium.Math.toRadians(st.heading);
+    // 用取樣屬性在這一架顯示時間的插值位置／航向（和模型同一個時間點），相機才不會以遙測率一格一格跳
+    const targetPos = _uavSmoothPos(st);
+    const hdgRad = _uavSmoothHpr(st).heading;
+    const nowMs = performance.now();
+    const dtSec = _chaseLastMs ? (nowMs - _chaseLastMs) / 1000 : 0;
+    _chaseLastMs = nowMs;
+    _chaseYaw = _chaseSmoothYaw(_chaseYaw, hdgRad, dtSec, _chaseConfig.smoothing * 2.0);
 
-    // Body frame：只套用 heading，讓「後方」始終相對機頭正後方。
+    // Body frame：只套用（阻尼後的）heading，讓「後方」始終相對機頭正後方。
     // 忽略飛機 pitch/roll，避免急轉彎時畫面跟著翻轉。
     const bodyFrame = Cesium.Transforms.headingPitchRollToFixedFrame(
       targetPos,
-      new Cesium.HeadingPitchRoll(hdgRad, 0, 0)
+      new Cesium.HeadingPitchRoll(_chaseYaw, 0, 0)
     );
+
+    // 追機時不讓相機飛行（flyToPos／flyToScene／zoomTo…）把鏡頭帶走：飛行每幀改的是「目前座標系」裡的
+    // camera.position，追機又每幀把它當 body frame 偏移照抄 ⇒ 鏡頭沿著飛行路徑慢慢飄走（實測 3 s 飄到 557 m）。
+    // ⇒ 取消飛行、從預設後方視角重新對齊。
+    if (viewer.camera._currentFlight) {
+      try { viewer.camera.cancelFlight(); } catch (_) {}
+      _chaseFrameInit = false;
+    }
+    // 別人把相機座標系換掉了（flyToPos 完成時、setViewPos 都會 lookAtTransform(IDENTITY)）：
+    // 這時 camera.position 是 ECEF 世界座標（≈6.37e6 m），拿它當 body frame 偏移 ⇒ 鏡頭跑到 6,375 km 外
+    // 而且之後每幀照抄、回不來（2026-10-17 審查重現，舊版就有）。⇒ 從預設後方視角重新對齊。
+    if (_chaseFrameInit && _chaseLastFrame
+        && !Cesium.Matrix4.equalsEpsilon(viewer.camera.transform, _chaseLastFrame, 1e-6)) {
+      _chaseFrameInit = false;
+    }
 
     // 關鍵：lookAtTransform(T) 不傳 offset 時，Cesium 只更新 reference frame
     // 而保留相機 world 座標 → 相機不會跟著飛機平移！
@@ -1522,12 +1862,8 @@ function setChaseCamera(sysid) {
     // 「跟隨 + 自由旋轉」並存。
     let offset;
     if (!_chaseFrameInit) {
-      // 首幀：放在後方 -Y + 上方 +Z
-      offset = new Cesium.Cartesian3(
-        0,
-        -_chaseConfig.distance,
-        _chaseConfig.height
-      );
+      // 首幀：放在後方 -Y、高度依俯角（_chaseInitialOffset）
+      offset = _chaseInitialOffset();
       _chaseFrameInit = true;
     } else {
       // 後續：把上一幀末的 camera.position（已含使用者滑鼠調整）轉成
@@ -1535,10 +1871,21 @@ function setChaseCamera(sysid) {
       // 的相對角度與距離」。
       offset = Cesium.Cartesian3.clone(viewer.camera.position);
     }
+    // 座標系與偏移都沒變（飛機停了、鏡頭阻尼也收斂了）⇒ 不再呼叫 lookAtTransform：
+    // 每次呼叫的浮點來回都會讓相機矩陣抖一個 ULP，Cesium 就當成相機動了、閒置也一直算圖。
+    if (_chaseLastFrame && _chaseLastOffset
+        && Cesium.Matrix4.equalsEpsilon(bodyFrame, _chaseLastFrame, 1e-6)
+        && Cesium.Cartesian3.equalsEpsilon(offset, _chaseLastOffset, 0, 1e-6)) {
+      return;
+    }
     viewer.camera.lookAtTransform(bodyFrame, offset);
+    _chaseLastFrame = Cesium.Matrix4.clone(viewer.camera.transform, _chaseLastFrame || new Cesium.Matrix4());
+    _chaseLastOffset = Cesium.Cartesian3.clone(viewer.camera.position, _chaseLastOffset || new Cesium.Cartesian3());
   };
+  // preRender 只在真的算圖時才跑：跟隨是靠每個遙測批次結尾的 _requestRender() 推動的（updateUAVPositions）。
   viewer.scene.preRender.addEventListener(_chasePreRender);
   console.log('[3D] 跟隨相機：鎖定 UAV' + _chaseSysid + '（可滑鼠拖曳旋轉 / 滾輪縮放）');
+  _requestRender();
 }
 
 function setChaseCameraParams(distance, height, pitchDeg, smoothing) {
@@ -1547,11 +1894,17 @@ function setChaseCameraParams(distance, height, pitchDeg, smoothing) {
   if (typeof pitchDeg === 'number') _chaseConfig.pitchDeg = pitchDeg;
   if (typeof smoothing === 'number') _chaseConfig.smoothing = Math.max(0, Math.min(0.95, smoothing));
   _chaseFrameInit = false;  // 下一幀重新套用新距離/高度
+  _requestRender();
 }
 
 // 若使用者滑鼠旋轉偏離太多，可呼叫此函式把鏡頭歸零回預設後方視角
 function resetChaseView() {
   _chaseFrameInit = false;
+  _chaseYaw = null;
+  _chaseLastMs = 0;
+  _chaseLastFrame = null;
+  _chaseLastOffset = null;
+  _requestRender();
 }
 
 // ── FPV 第一人稱視角（機上相機 / 雲台偵查鏡頭）──────────────────────
@@ -1561,10 +1914,49 @@ let _fpvOriginalFov = null;   // 還原 Cesium 預設 FOV 用
 const _fpvConfig = {
   gimbalPitchDeg: 0,    // 0 = 平視前方(FPV), -90 = 正下方 (偵查鏡頭)
   fovDeg:         75,   // 水平視角，典型無人機相機 70~90°，競速 FPV 可到 130°
-  rollFollow:    true,  // 是否跟隨機體 roll（沉浸感 vs 雲台穩定）
+  rollFollow:    true,  // 是否跟隨機體 pitch／roll（沉浸感 vs 雲台穩定；航向一律跟）
   forwardOffset: 2.0,   // 鏡頭在機頭前方公尺，避免看到自己模型
   upOffset:      0.3,   // 鏡頭略高於機身中心
 };
+
+// ── FPV 相機的視線／上方向 = 機體姿態 × 雲台安裝旋轉。
+//   ⚠ 2026-10-22 審查：舊寫法把雲台角直接加進歐拉角：setView(HPR(機鼻, 雲台 + pitch, roll))。Cesium 相機的 HPR
+//     是先繞「視線」滾轉、再俯仰 ⇒ 雲台 0° 時剛好對（視線就是機鼻）；下視 −90° 時機體滾轉 30° 只讓影像旋轉、
+//     視線還是鉛垂（應該偏 30°）；−45° 時航向 137、pitch 15、roll 30 視線差 21°。和模型「滾轉顯示成偏航」
+//     同一類錯（見 _uavModelOrientation）。
+//   正確：ENU 下用 _uavModelOrientation 同一套機體座標（航向 0 時機鼻 +y 北、右翼 +x 東、機背 +z）：
+//     R = Rz(−機鼻)·Rx(+pitch)·Ry(+roll)·Rx(雲台俯角，負＝往下)，視線 = R·(+y)、相機上方向 = R·(+z)
+//     （雲台繞右翼轉 ⇒ 相機的右＝右翼；下視時影像上方＝機鼻）。
+//   回傳 ENU 下的 {dir, up}（單位向量，指向共用的 scratch，下一次呼叫會被覆寫）。
+const _fpvQ = new Cesium.Quaternion(), _fpvQA = new Cesium.Quaternion(), _fpvM = new Cesium.Matrix3();
+const _fpvD = new Cesium.Cartesian3(), _fpvU = new Cesium.Cartesian3();
+function _fpvViewAxesEnu(noseRad, pitchRad, rollRad, gimbalRad) {
+  const C = Cesium, q = C.Quaternion.fromAxisAngle(C.Cartesian3.UNIT_Z, -noseRad, _fpvQ);
+  C.Quaternion.multiply(q, C.Quaternion.fromAxisAngle(C.Cartesian3.UNIT_X, pitchRad, _fpvQA), q);
+  C.Quaternion.multiply(q, C.Quaternion.fromAxisAngle(C.Cartesian3.UNIT_Y, rollRad, _fpvQA), q);
+  C.Quaternion.multiply(q, C.Quaternion.fromAxisAngle(C.Cartesian3.UNIT_X, gimbalRad, _fpvQA), q);
+  const m = C.Matrix3.fromQuaternion(q, _fpvM);
+  return { dir: C.Matrix3.getColumn(m, 1, _fpvD), up: C.Matrix3.getColumn(m, 2, _fpvU) };
+}
+// 飛機 ENU（enuAc）下的視線 d、上方向 u → camera.setView 在 camPos 用的 HPR。
+//   setView 的 HPR：heading 先減 90°，R = Rz(90° − H)·Ry(−P)·Rx(roll)，視線 = R·x、上 = R·z（ENU 是 camPos 的）
+//   ⇒ H、P 由視線直接算；roll 是上方向相對「同一個 H、P、roll 0」的那組軸的角度。視線剛好鉛垂時 atan2(0, 0) = 0：
+//   哪個 H 都行，roll 相對它算出來就對。先換到 camPos 的 ENU：差 2 m 的地平面夾角 ≈ 3e-7 rad，換了才和模型同一個座標系。
+//   ⚠ 不能改用 setView 的 {direction, up} 形式：Cesium 自己換 HPR 時，視線離鉛垂 2.6° 以內（|dir.z| > 1 − 1e-3）
+//     就把 roll 當 0、航向改取上方向 ⇒ 下視時機體滾轉 2° 的視線被畫成往前 2°（測試鎖住）。
+const _fpvEnuCam = new Cesium.Matrix4(), _fpvInvCam = new Cesium.Matrix4(), _fpvW = new Cesium.Cartesian3();
+function _fpvCameraHpr(d, u, enuAc, camPos) {
+  const C = Cesium;
+  const inv = C.Matrix4.inverseTransformation(C.Transforms.eastNorthUpToFixedFrame(camPos, undefined, _fpvEnuCam), _fpvInvCam);
+  const toCam = (v) => C.Matrix4.multiplyByPointAsVector(inv,
+    C.Matrix4.multiplyByPointAsVector(enuAc, v, _fpvW), new C.Cartesian3());
+  const dc = toCam(d), uc = toCam(u);
+  const H = Math.atan2(dc.x, dc.y), P = Math.atan2(dc.z, Math.hypot(dc.x, dc.y));
+  const sH = Math.sin(H), cH = Math.cos(H), sP = Math.sin(P), cP = Math.cos(P);
+  // roll 0 時的左（R·y）=(−cosH, sinH, 0)、上（R·z）=(−sinP·sinH, −sinP·cosH, cosP)；上方向 = −sin(roll)·左 + cos(roll)·上
+  const roll = Math.atan2(uc.x * cH - uc.y * sH, -uc.x * sP * sH - uc.y * sP * cH + uc.z * cP);
+  return { heading: H, pitch: P, roll: roll };
+}
 
 function _disableFpvCamera() {
   if (_fpvPreRender) {
@@ -1592,6 +1984,7 @@ function setFpvCamera(sysid, gimbalPitchDeg, fovDeg, rollFollow) {
   _fpvSysid = sysid | 0;
   if (_fpvSysid <= 0) {
     console.log('[3D] FPV 相機：關閉');
+    _requestRender();
     return;
   }
 
@@ -1610,10 +2003,10 @@ function setFpvCamera(sysid, gimbalPitchDeg, fovDeg, rollFollow) {
     const st = _UAV_STATE[_fpvSysid];
     const entity = uavEntities[_fpvSysid];
     if (!st || !entity) return;
-    const targetPos = Cesium.Cartesian3.fromDegrees(st.lon, st.lat, st.alt);
-    const hdgRad    = Cesium.Math.toRadians(st.heading);
-    const acPitch   = Cesium.Math.toRadians(st.pitch || 0);
-    const acRoll    = Cesium.Math.toRadians(st.roll  || 0);
+    // 同 chase：取樣屬性在這一架顯示時間的插值位置／姿態
+    const targetPos = _uavSmoothPos(st);
+    const _hpr      = _uavSmoothHpr(st);
+    const hdgRad    = _hpr.heading;
 
     // 機頭前方偏移（ENU: +X=East, +Y=North, +Z=Up）
     const fwd = _fpvConfig.forwardOffset;
@@ -1628,24 +2021,21 @@ function setFpvCamera(sysid, gimbalPitchDeg, fovDeg, rollFollow) {
     );
     const camPos = Cesium.Cartesian3.add(targetPos, worldOffset, new Cesium.Cartesian3());
 
-    // 雲台俯角 + 機體姿態（若跟隨 roll）
-    const finalPitch = Cesium.Math.toRadians(_fpvConfig.gimbalPitchDeg)
-                     + (_fpvConfig.rollFollow ? acPitch : 0);
-    const finalRoll  = _fpvConfig.rollFollow ? acRoll : 0;
-
+    // 視線／上方向 = 機體姿態 × 雲台（_fpvViewAxesEnu）；跟隨關閉（雲台穩定）⇒ 機體 pitch、roll 當 0：只跟航向＋雲台俯角
+    const follow = _fpvConfig.rollFollow;
+    const ax = _fpvViewAxesEnu(hdgRad, follow ? _hpr.pitch : 0, follow ? _hpr.roll : 0,
+                               Cesium.Math.toRadians(_fpvConfig.gimbalPitchDeg));
     viewer.camera.setView({
       destination: camPos,
-      orientation: {
-        heading: hdgRad,
-        pitch:   finalPitch,
-        roll:    finalRoll,
-      }
+      orientation: _fpvCameraHpr(ax.dir, ax.up, enuMtx, camPos),
     });
   };
+  // 同 chase：preRender 只在算圖時跑，跟隨由遙測批次結尾的 _requestRender() 推動。
   viewer.scene.preRender.addEventListener(_fpvPreRender);
   console.log('[3D] FPV 相機：UAV' + _fpvSysid +
               ' gimbal=' + _fpvConfig.gimbalPitchDeg +
               '° FOV=' + _fpvConfig.fovDeg + '°');
+  _requestRender();
 }
 
 function setFpvCameraParams(gimbalPitchDeg, fovDeg, rollFollow, forwardOffset) {
@@ -1659,6 +2049,7 @@ function setFpvCameraParams(gimbalPitchDeg, fovDeg, rollFollow, forwardOffset) {
   }
   if (typeof rollFollow === 'boolean') _fpvConfig.rollFollow = rollFollow;
   if (typeof forwardOffset === 'number') _fpvConfig.forwardOffset = forwardOffset;
+  _requestRender();
 }
 
 // 多旋翼 SVG（X 型四軸 + 中央機身）
@@ -1696,26 +2087,55 @@ function _uavSvg(colorHex, vtype) {
   return _uavSvgCopter(colorHex);
 }
 
-if (typeof uavTrails === 'undefined') { var uavTrails = {}; var uavTrailPts = {}; }
-function _appendTrail(sysid, lat, lon, alt, colorHex) {
-  if (!uavTrailPts[sysid]) uavTrailPts[sysid] = [];
-  const arr = uavTrailPts[sysid];
-  arr.push(lon, lat, alt || 0);
-  // 限制最多 1500 點 (= 500 個 3D 點)
-  if (arr.length > 1500 * 3) arr.splice(0, 3);
-  if (arr.length < 6) return;
+// 尾跡：每架一條 polyline。
+//   uavTrailPend[sysid]  = [{c: Cartesian3, ms}]：收到、但這一架的顯示時間還沒走到的點（模型有顯示延遲，
+//                          點太早進尾跡會讓尾跡**凸出在機頭前面**）；算圖時 _trailAdvance 把到期的移進 uavTrailCart
+//   uavTrailCart[sysid]  = Cartesian3[]（最多 1500 點，超過從頭丟）—— append 時只轉那一點
+//   uavTrailDirty[sysid] = 有點移進來、交給 Cesium 的快取要重建
+//   uavTrailCache[sysid] = 上次交給 Cesium 的陣列（dirty 時 slice 出新副本）
+// ⚠ 以前存經緯度平面陣列（uavTrailPts），polyline 的 CallbackProperty **每個算圖幀對每架**把整條
+//    （最多 1500 點）fromDegreesArrayHeights 重算一遍 —— 2026-10-17 tools/swarm_perf_profiler.py 量到的 CPU 大頭之一。
+if (typeof uavTrails === 'undefined') {
+  var uavTrails = {}; var uavTrailCart = {}; var uavTrailDirty = {}; var uavTrailCache = {}; var uavTrailPend = {};
+}
+function _trailPushPoint(sysid, c) {
+  const pts = uavTrailCart[sysid];
+  pts.push(c);
+  if (pts.length > 1500) pts.shift();   // 限制最多 1500 個 3D 點
+  uavTrailDirty[sysid] = true;
+}
+// 把顯示時間已經走到的待進點移進尾跡（每次算圖由 polyline 的回呼呼叫；通常一次 0～1 點）
+function _trailAdvance(sysid) {
+  const pend = uavTrailPend[sysid];
+  if (!pend || !pend.length) return;
+  const st = _UAV_STATE[sysid];
+  const tdMs = st ? _uavDisplayMs(st) : Infinity;
+  while (pend.length && pend[0].ms <= tdMs) _trailPushPoint(sysid, pend.shift().c);
+}
+function _appendTrail(sysid, lat, lon, alt, colorHex, tMs) {
+  if (!uavTrailCart[sysid]) { uavTrailCart[sysid] = []; uavTrailCache[sysid] = []; uavTrailPend[sysid] = []; }
+  const pend = uavTrailPend[sysid];
+  pend.push({ c: Cesium.Cartesian3.fromDegrees(lon, lat, alt || 0), ms: (typeof tMs === 'number') ? tMs : Date.now() });
+  // 不算圖（頁面藏起來、rAF 停了）時待進點不能無限長：超過上限直接移進尾跡
+  while (pend.length > 1500) _trailPushPoint(sysid, pend.shift().c);
+  if (pend.length + uavTrailCart[sysid].length < 2) return;
 
   // ★ 修復閃爍：原本每次 update_uav_position (5-10Hz) 都 remove+add entity，
   // 造成軌跡先消失再重畫 → 視覺上「一閃一閃」。
-  // 改用 CallbackProperty：positions 從共享 arr 變數動態拉取，entity 只建一次，
-  // 之後僅 push 點到 arr，Cesium 每幀自動拿到最新陣列繪製，零閃爍。
+  // 改用 CallbackProperty：entity 只建一次，之後僅 push 點；回呼只回快取陣列，
+  // 有點移進來（dirty）才 slice 重建一次 —— 沒有每幀重算。不到 2 點時 Cesium 自己把線藏起來。
   if (!uavTrails[sysid]) {
     uavTrails[sysid] = viewer.entities.add({
       name: 'UAV-trail-' + sysid,
       polyline: {
         positions: new Cesium.CallbackProperty(function () {
-          return Cesium.Cartesian3.fromDegreesArrayHeights(arr);
-        }, false),    // false = 非 time-varying，每幀直接呼叫
+          _trailAdvance(sysid);
+          if (uavTrailDirty[sysid]) {
+            uavTrailCache[sysid] = (uavTrailCart[sysid] || []).slice();
+            uavTrailDirty[sysid] = false;
+          }
+          return uavTrailCache[sysid] || [];
+        }, false),    // false = 非 time-varying，每幀直接呼叫（但只回快取）
         width: 4,
         material: new Cesium.PolylineGlowMaterialProperty({
           glowPower: 0.15,
@@ -1725,7 +2145,7 @@ function _appendTrail(sysid, lat, lon, alt, colorHex) {
       }
     });
   }
-  // 後續呼叫不再動 entity；CallbackProperty 會自動讀取 arr 最新值
+  // 後續呼叫不再動 entity；CallbackProperty 在下一次算圖時拿到重建後的快取
 }
 
 // ── 碰撞預警系統 ────────────────────────────────────────────────
@@ -1788,6 +2208,8 @@ function _checkCollisions() {
         if (!entry) {
           // 第一次建立 — positions 用 CallbackProperty 動態取兩端 UAV 位置
           // 這樣後續位置變動時 entity 不需重建，僅 Cesium 內部刷新
+          // ⚠ 兩端讀的是 entity.position（_updateUAVOne 的 posProp：不看傳進來的時間、取該架顯示時間的內插位置），
+          //   所以端點和模型在同一幀同一點；不要改成讀 st.lat/lon（最新遙測，會領先模型 延遲 × 速度）。
           const idA = ids[i], idB = ids[j];
           const posCb = new Cesium.CallbackProperty(function () {
             const a = uavEntities[idA], b = uavEntities[idB];
@@ -1863,19 +2285,19 @@ function _checkCollisions() {
   }
 }
 
-function updateUAVPosition(lat, lon, alt, headingDeg, speedMs, sysid, mode, armed, vehicleType, pitchDeg, rollDeg) {
+// 單架更新的本體：位置／姿態（加取樣）／標籤／尾跡／sysid=1 狀態列，**不做**碰撞檢查、**不**要求算圖——
+// 那兩件事由 updateUAVPosition（單架）與 updateUAVPositions（批次）在外面各做一次。
+// 後四個參數可省略：crsDeg（航跡，度；狀態列顯示用，只有明確 setUavNoseFollowsTrack(true) 時才影響機鼻）；
+// 機鼻預設就是 headingDeg（飛控 yaw）；posT（鏈路收到 GLOBAL_POSITION_INT 的牆鐘 epoch ms）／attT（這則
+// ATTITUDE 的取樣時刻：飛控 time_boot_ms 換到牆鐘，epoch ms）⇒ 缺了用 Date.now()（舊的單架 API 就是這樣）；
+// attSamples（批次的 atts）：上一批之後、比 attT 舊的姿態 [[ms, roll, pitch, 機頭], …]，時間由舊到新。
+function _updateUAVOne(lat, lon, alt, headingDeg, speedMs, sysid, mode, armed, vehicleType, pitchDeg, rollDeg, crsDeg, posT, attT, attSamples) {
   sysid = sysid || 1;
+  const nowMs = Date.now();
+  const pMs = _uavSampleMs(posT, nowMs), aMs = _uavSampleMs(attT, nowMs);
   const pos = Cesium.Cartesian3.fromDegrees(lon, lat, alt || 0);
-  // 緩存最新姿態，供跟隨相機/其他模組使用
-  _UAV_STATE[sysid] = {
-    lat: lat, lon: lon, alt: alt || 0,
-    heading: headingDeg || 0,
-    pitch: pitchDeg || 0,
-    roll: rollDeg || 0,
-    speed: speedMs || 0,
-  };
+  const noseDeg = _uavNoseHeading(headingDeg, crsDeg, speedMs, vehicleType, mode);
   const color = _UAV_COLORS[(sysid - 1) % _UAV_COLORS.length];
-  _appendTrail(sysid, lat, lon, alt, color);
   const _vt = (vehicleType || '').toUpperCase();
   const isVtol = _vt.indexOf('VTOL') >= 0;
   const isPlane = _vt.indexOf('PLANE') >= 0 || _vt.indexOf('FIXED') >= 0
@@ -1891,26 +2313,94 @@ function updateUAVPosition(lat, lon, alt, headingDeg, speedMs, sysid, mode, arme
   if (isVtolGlb)   { headingOffset = _VTOL_HEADING_OFFSET;   pitchOffset = _VTOL_PITCH_OFFSET;   rollOffset = _VTOL_ROLL_OFFSET; }
   if (isPlaneGlb)  { headingOffset = _PLANE_HEADING_OFFSET;  pitchOffset = _PLANE_PITCH_OFFSET;  rollOffset = _PLANE_ROLL_OFFSET; }
   if (isCopterGlb) { headingOffset = _COPTER_HEADING_OFFSET; pitchOffset = _COPTER_PITCH_OFFSET; rollOffset = _COPTER_ROLL_OFFSET; }
-  const hpr = new Cesium.HeadingPitchRoll(
-    Cesium.Math.toRadians((headingDeg || 0) + headingOffset),
-    Cesium.Math.toRadians((pitchDeg || 0) + pitchOffset),
-    Cesium.Math.toRadians((rollDeg || 0) + rollOffset)
-  );
-  const orientation = Cesium.Transforms.headingPitchRollQuaternion(pos, hpr);
+  // 這一架現在該畫哪一種模型（上面的校正屬於它）：建 entity 時記在 entity._uavKind，機型變了就連模型一起換（見下方 st.kind）
+  const modelKind = isVtolGlb ? 'vtol' : isPlaneGlb ? 'plane' : isCopterGlb ? 'copter' : (isPlane ? 'planeBox' : 'copterBall');
+  // 模型用（含 GLB 校正、固定座標系）：校正是模型自己座標系下的固定旋轉，**不能**加進姿態角（見 _uavModelOrientation）
+  const orientation = _uavModelOrientation(pos, noseDeg, pitchDeg, rollDeg, headingOffset, pitchOffset, rollOffset);
+  const attitude = Cesium.Quaternion.fromHeadingPitchRoll(new Cesium.HeadingPitchRoll(   // 相機用（原始、機體座標系）
+    Cesium.Math.toRadians(noseDeg), Cesium.Math.toRadians(pitchDeg || 0), Cesium.Math.toRadians(rollDeg || 0)));
+
+  // 取樣（時間戳規則見 _uavPushSample）：位置只在 pt 比上一筆新時加；姿態只在 at 比上一筆新時加。
+  // 單一樣本靠 HOLD 撐住（不再補 1 s 前的假樣本）。
+  let st = _UAV_STATE[sysid];
+  if (!st) {
+    st = _UAV_STATE[sysid] = { props: _uavSampledProps(), lastPosMs: 0, lastAttMs: 0, lastPosJD: null, lastAttJD: null,
+                               nPos: 0, nAtt: 0, dtEma: null, delay: _UAV_DELAY_INIT, delayUpdMs: nowMs,
+                               lastPruneMs: nowMs, lastPos: pos, lastOri: orientation, lastAtt: attitude };
+  }
+  // ⚠ 機型中途變了（2026-10-22 審查）：第一批到的時候這一架的 HEARTBEAT 還沒進來（vehicle_type '---' ⇒ 當成多旋翼），
+  //   或 Q_ENABLE 讀回後 PLANE → VTOL。以前模型在建 entity 時就定死、GLB 校正卻每筆照新機型算 ⇒ 多旋翼 GLB 套上
+  //   固定翼校正（0/0/0）整架躺著、Barracuda 套上 VTOL 校正（-90/90/180）⇒ 畫出來的姿態和飛控回報的完全不同。
+  //   現在模型與校正一起換：已存的模型姿態樣本含舊校正 ⇒ 丟掉（相機用的 att 是純姿態、不受影響），entity 在下面重建。
+  if (st.kind !== undefined && st.kind !== modelKind) {
+    st.props.ori = _uavSampledProps().ori;
+    st.lastOri = orientation;
+  }
+  st.kind = modelKind;
+  st.lat = lat; st.lon = lon; st.alt = alt || 0;
+  st.heading = noseDeg; st.yaw = headingDeg || 0;
+  st.crs = (typeof crsDeg === 'number' && isFinite(crsDeg)) ? crsDeg : null;
+  st.pitch = pitchDeg || 0; st.roll = rollDeg || 0; st.speed = speedMs || 0;
+  const prevPosMs = st.lastPosMs;
+  const pj = _uavPushSample([st.props.pos], [pos], pMs, st.lastPosMs, st.lastPosJD);
+  if (pj) {
+    st.lastPosMs = pMs; st.lastPosJD = pj; st.lastPos = pos; st.nPos += 1;
+    _uavNoteInterval(st, prevPosMs > 0 ? pMs - prevPosMs : -1, nowMs);
+    _appendTrail(sysid, lat, lon, alt, color, pMs);
+  }
+  // 上一批之後、比這一筆舊的姿態（2026-10-22：50 Hz 姿態、30 Hz 合幀，只送最新一筆會丟掉約四成 ⇒ 懸停振盪畫不出來）：
+  // 照時間逐筆加，規則同 _uavPushSample（不新於上一筆不加、< 10 ms 取代）。時間不可信的那一筆略過、不退回現在
+  // （退回現在會佔掉「現在」，這一批的主樣本就被當成重送丟掉）；不比主樣本舊的也略過。機頭規則與主樣本相同；
+  // ENU 座標系用這一批的位置（樣本最多早幾十 ms，位置差不到 1 m，座標系差 1e-5°）。
+  if (Array.isArray(attSamples)) {
+    for (let i = 0; i < attSamples.length; i++) {
+      const s = attSamples[i];
+      if (!Array.isArray(s) || s.length !== 4) continue;
+      const sMs = s[0];
+      if (_uavSampleMs(sMs, nowMs) !== sMs || !(sMs < aMs)) continue;
+      const sNose = _uavNoseHeading(s[3], crsDeg, speedMs, vehicleType, mode);
+      const sOri = _uavModelOrientation(pos, sNose, s[2], s[1], headingOffset, pitchOffset, rollOffset);
+      const sAtt = Cesium.Quaternion.fromHeadingPitchRoll(new Cesium.HeadingPitchRoll(
+        Cesium.Math.toRadians(sNose), Cesium.Math.toRadians(s[2] || 0), Cesium.Math.toRadians(s[1] || 0)));
+      const sj = _uavPushSample([st.props.ori, st.props.att], [sOri, sAtt], sMs, st.lastAttMs, st.lastAttJD);
+      if (sj) { st.lastAttMs = sMs; st.lastAttJD = sj; st.nAtt += 1; }
+    }
+  }
+  const aj = _uavPushSample([st.props.ori, st.props.att], [orientation, attitude], aMs, st.lastAttMs, st.lastAttJD);
+  if (aj) { st.lastAttMs = aMs; st.lastAttJD = aj; st.lastOri = orientation; st.lastAtt = attitude; st.nAtt += 1; }
+  if (nowMs - st.lastPruneMs > _UAV_PRUNE_EVERY_MS) { _uavPruneSamples(st, nowMs); st.lastPruneMs = nowMs; }
 
   let entity = uavEntities[sysid];
+  if (entity && entity._uavKind !== modelKind) {      // 機型變了 ⇒ 換模型（理由見上方 st.kind）
+    try { if (entity._wingChild) viewer.entities.remove(entity._wingChild); } catch (_) {}
+    try { viewer.entities.remove(entity); } catch (_) {}
+    delete uavEntities[sysid];
+    entity = undefined;
+  }
   if (!entity) {
     const useGlbModel = isVtolGlb
                      || (isPlane && _PLANE_MODEL_URI && _PLANE_MODEL_URI.length > 0)
                      || (!isPlane && _COPTER_MODEL_URI && _COPTER_MODEL_URI.length > 0);
+    // entity 綁薄的 CallbackProperty：**不看** Cesium 傳進來的時間，在這一架的顯示時間取插值（不靠 viewer.clock：
+    // 時鐘被暫停／夾住／DataSource 暫停動畫都不影響飛機）。還沒有樣本才退回最後一筆。
+    const posProp = new Cesium.CallbackProperty(function (t, r) {
+      return st.props.pos.getValue(_uavDisplayTime(st, _uavScratchJD), r) || st.lastPos;
+    }, false);
+    const oriProp = new Cesium.CallbackProperty(function (t, r) {
+      return st.props.ori.getValue(_uavDisplayTime(st, _uavScratchJD), r) || st.lastOri;
+    }, false);
+    // 圖層面板「✈ 飛機」關著時，新建的模型（第一次出現、或機型變了重建）也要藏著：toggleLayer 只改已經存在的 entity
+    const lyrAircraft = document.getElementById('lyr_aircraft');
+    const layerShown = !lyrAircraft || lyrAircraft.checked;
     const entityOpts = {
       name: 'UAV-' + sysid,
-      position: new Cesium.ConstantPositionProperty(pos),
-      orientation: new Cesium.ConstantProperty(orientation),
+      show: layerShown,
+      position: posProp,
+      orientation: oriProp,
       billboard: {
         image: _uavSvg(color, vehicleType),
         scale: 1.1,
-        rotation: Cesium.Math.toRadians(-(headingDeg || 0)),
+        rotation: Cesium.Math.toRadians(-noseDeg),   // 平面圖示：和模型用同一個機鼻方向
         alignedAxis: Cesium.Cartesian3.UNIT_Z,
         heightReference: Cesium.HeightReference.NONE,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
@@ -1982,14 +2472,16 @@ function updateUAVPosition(lat, lon, alt, headingDeg, speedMs, sysid, mode, arme
     }
 
     entity = viewer.entities.add(entityOpts);
+    entity._uavKind = modelKind;
     uavEntities[sysid] = entity;
     if (sysid === 1) uavEntity = entity;  // 舊 API 相容
 
     // 為固定翼 fallback 加上機翼（無 GLB 時）
     if (isPlane && !useGlbModel) {
       const wingEntity = viewer.entities.add({
-        position: new Cesium.ConstantPositionProperty(pos),
-        orientation: new Cesium.ConstantProperty(orientation),
+        show: layerShown,
+        position: posProp,
+        orientation: oriProp,
         box: {
           dimensions: new Cesium.Cartesian3(16.0, 2.0, 0.4),
           material: Cesium.Color.fromCssColorString(color).withAlpha(0.85),
@@ -2000,18 +2492,10 @@ function updateUAVPosition(lat, lon, alt, headingDeg, speedMs, sysid, mode, arme
       entity._wingChild = wingEntity;
     }
   } else {
-    entity.position = new Cesium.ConstantPositionProperty(pos);
-    entity.orientation = new Cesium.ConstantProperty(orientation);
-    if (entity.billboard) entity.billboard.rotation = Cesium.Math.toRadians(-(headingDeg || 0));
+    // 位置／姿態已經 addSample 進 entity 綁定的取樣屬性；這裡只更新不插值的東西
+    if (entity.billboard) entity.billboard.rotation = Cesium.Math.toRadians(-noseDeg);
     if (entity.label) entity.label.text = labelTxt;
-    if (entity._wingChild) {
-      entity._wingChild.position = new Cesium.ConstantPositionProperty(pos);
-      entity._wingChild.orientation = new Cesium.ConstantProperty(orientation);
-    }
   }
-
-  // 碰撞檢測（每次位置更新都檢查）
-  _checkCollisions();
 
   // 狀態列：顯示主控（sysid=1）的資訊
   if (sysid === 1) {
@@ -2020,10 +2504,40 @@ function updateUAVPosition(lat, lon, alt, headingDeg, speedMs, sysid, mode, arme
     el.textContent =
       '✈ SITL[' + sysid + ']  ' + (mode || '') + (armed ? ' ARM' : ' DIS') +
       '  lat:' + lat.toFixed(5) + '  lon:' + lon.toFixed(5) +
-      '  alt:' + (alt||0).toFixed(1) + 'm  hdg:' + (headingDeg||0).toFixed(0) + '°  ' +
+      '  alt:' + (alt||0).toFixed(1) + 'm  hdg:' + (headingDeg||0).toFixed(0) + '°' +
+      (st.crs !== null ? ' crs:' + st.crs.toFixed(0) + '°' : '') + '  ' +
       'pitch:' + (pitchDeg||0).toFixed(1) + '° roll:' + (rollDeg||0).toFixed(1) + '°  ' +
       'spd:' + (speedMs||0).toFixed(1) + 'm/s';
   }
+}
+
+// 單架（舊 API；外部腳本與 Python 的單架路徑仍可直接呼叫）：更新 ⇒ 碰撞檢查 ⇒ 要求算圖。
+function updateUAVPosition(lat, lon, alt, headingDeg, speedMs, sysid, mode, armed, vehicleType, pitchDeg, rollDeg) {
+  _noteUavActivity();            // 自適應算圖：有遙測就連續算圖
+  _ensureClockRunning();         // 時鐘被打擊／俯衝動畫停掉或夾住時收回來
+  _updateUAVOne(lat, lon, alt, headingDeg, speedMs, sysid, mode, armed, vehicleType, pitchDeg, rollDeg);
+  _checkCollisions();
+  _requestRender();
+}
+
+// 批次（Python CesiumMapWidget.update_uav_positions 一次 runJavaScript 推全部）：
+//   arr = [{lat, lon, alt, hdg, spd, sysid, mode, armed, vt, pitch, roll, crs, pt, at, atts}, …]（也接受 JSON 字串；
+//   crs／pt／at／atts 可省略，pt = 鏈路收到位置訊息的牆鐘 epoch ms、at = 姿態的取樣時刻（飛控時間換到牆鐘）、
+//   atts = 上一批之後更舊的姿態樣本 [[ms, roll, pitch, 機頭], …]）。
+//   每架 _updateUAVOne（新的時間戳才加樣本）；碰撞檢查（O(N²)）整批只做一次；最後只要求一次算圖。
+//   ⚠ 2026-10-17 量測（6 架 × 25 Hz）：以前每架各呼叫一次 updateUAVPosition ⇒ 150 次碰撞檢查／秒。
+function updateUAVPositions(arr) {
+  if (typeof arr === 'string') { try { arr = JSON.parse(arr); } catch (_) { arr = []; } }
+  if (!Array.isArray(arr)) arr = [];
+  _noteUavActivity();            // 自適應算圖：有遙測就連續算圖（插值運動要以顯示更新率動）
+  _ensureClockRunning();         // 時鐘被打擊／俯衝動畫停掉或夾住時收回來
+  for (let i = 0; i < arr.length; i++) {
+    const u = arr[i];
+    if (!u || typeof u.lat !== 'number' || typeof u.lon !== 'number') continue;
+    _updateUAVOne(u.lat, u.lon, u.alt, u.hdg, u.spd, u.sysid, u.mode, u.armed, u.vt, u.pitch, u.roll, u.crs, u.pt, u.at, u.atts);
+  }
+  _checkCollisions();
+  _requestRender();
 }
 
 function clearUAV(sysid) {
@@ -2033,7 +2547,7 @@ function clearUAV(sysid) {
   }
   function _rmTrail(sid) {
     if (uavTrails[sid]) { try { viewer.entities.remove(uavTrails[sid]); } catch(_){} delete uavTrails[sid]; }
-    if (uavTrailPts[sid]) delete uavTrailPts[sid];
+    delete uavTrailCart[sid]; delete uavTrailDirty[sid]; delete uavTrailCache[sid]; delete uavTrailPend[sid];
   }
   if (sysid !== undefined && sysid !== null) {
     if (uavEntities[sysid]) { _rm(uavEntities[sysid]); delete uavEntities[sysid]; }
@@ -2047,10 +2561,12 @@ function clearUAV(sysid) {
     uavEntity = null;
     Object.keys(_UAV_STATE).forEach(k => delete _UAV_STATE[k]);
     Object.keys(uavTrails).forEach(_rmTrail);
+    Object.keys(uavTrailCart).forEach(_rmTrail);   // 只有一個點、還沒建 polyline 的也要清
     if (_chaseSysid > 0) setChaseCamera(0);
     if (_fpvSysid > 0) setFpvCamera(0);
   }
   document.getElementById('sitlStatus').style.display = 'none';
+  _requestRender();
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -2147,6 +2663,7 @@ function _clearNFZPolyPreview() {
     try { viewer.entities.remove(e); } catch (_) {}
   });
   _nfzPolyDotEntities = [];
+  _requestRender();
 }
 
 function _clearNFZCirclePreview() {
@@ -2162,6 +2679,7 @@ function _clearNFZCirclePreview() {
     try { viewer.entities.remove(_nfzCircleMouseMoveEntity); } catch (_) {}
     _nfzCircleMouseMoveEntity = null;
   }
+  _requestRender();
 }
 
 // ── 繪製模式浮動提示 banner（地圖頂部中央，純 HTML/CSS）──
@@ -2231,6 +2749,7 @@ function _redrawNFZPolyPreview() {
       },
     });
   }
+  _requestRender();
 }
 
 function _drawNFZCirclePreview(centerLat, centerLon, radiusM) {
@@ -2248,6 +2767,7 @@ function _drawNFZCirclePreview(centerLat, centerLon, radiusM) {
       height: 0.5,
     },
   });
+  _requestRender();
 }
 
 function _pickLatLon(screenPos) {
@@ -2404,6 +2924,7 @@ function clearDemOverlay() {
   if (demOutlineEntity) { viewer.entities.remove(demOutlineEntity); demOutlineEntity = null; }
   demLabelEntities.forEach(e => { try { viewer.entities.remove(e); } catch(_) {} });
   demLabelEntities = [];
+  _requestRender();
 }
 function showDemOverlay(latMin, latMax, lonMin, lonMax, pngDataUrl, minE, maxE, alpha) {
   clearDemOverlay();
@@ -2484,6 +3005,7 @@ function showDemOverlay(latMin, latMax, lonMin, lonMax, pngDataUrl, minE, maxE, 
     duration: 1.2,
   });
   console.log('[DEM] overlay 已載入: ' + minE.toFixed(1) + '~' + maxE.toFixed(1) + 'm');
+  _requestRender();
 }
 
 // ── DEM 3D 地形（CustomHeightmapTerrainProvider 平滑版）─────
@@ -2500,6 +3022,7 @@ function clearDemTerrain() {
     demOriginalTerrain = null;
   }
   demHeightData = null;
+  _requestRender();
 }
 // 採樣 DEM 高程（雙線性插值）
 function sampleDem(lat, lon) {
@@ -2547,6 +3070,7 @@ function applyDemTerrainProvider() {
   viewer.terrainProvider = provider;
   viewer.scene.globe.enableLighting = true;
   console.log('[DEM3D] CustomHeightmapTerrainProvider 已套用');
+  _requestRender();
 }
 // 新版：接收整份 DEM 陣列 → 套用 CustomHeightmapTerrainProvider
 function showDemTerrainHeightmap(latMin, latMax, lonMin, lonMax, rows, cols, flatHeights) {
@@ -2561,6 +3085,7 @@ function showDemTerrainHeightmap(latMin, latMax, lonMin, lonMax, rows, cols, fla
     destination: Cesium.Rectangle.fromDegrees(lonMin, latMin, lonMax, latMax),
     duration: 1.2,
   });
+  _requestRender();
 }
 // 舊版方塊模式（保留以供比對）
 function showDemTerrain3D(latMin, latMax, lonMin, lonMax, cellsFlat, minE, maxE) {
@@ -2608,6 +3133,7 @@ function showDemTerrain3D(latMin, latMax, lonMin, lonMax, cellsFlat, minE, maxE)
     duration: 1.2,
   });
   console.log('[DEM3D] 已載入 ' + instances.length + ' 格, 高程 ' + minE.toFixed(0) + '~' + maxE.toFixed(0) + 'm');
+  _requestRender();
 }
 
 function setInitialView(lat, lon, height) {
@@ -2616,6 +3142,7 @@ function setInitialView(lat, lon, height) {
     orientation: { heading: 0, pitch: Cesium.Math.toRadians(-55), roll: 0 },
     duration: 0,
   });
+  _requestRender();
 }
 setInitialView(__INIT_LAT__, __INIT_LON__, __INIT_HEIGHT__);
 
@@ -2648,6 +3175,7 @@ function updateElevationSlicer(minAlt, maxAlt) {
     globe.material = undefined;
     _elevSlicerActive = false;
     console.log('[FSDM] 高程切片已關閉');
+    _requestRender();
     return;
   }
 
@@ -2717,6 +3245,7 @@ function updateElevationSlicer(minAlt, maxAlt) {
 
   _elevSlicerActive = true;
   console.log('[FSDM] 高程切片啟用: ' + minAlt + 'm ~ ' + maxAlt + 'm');
+  _requestRender();
 }
 
 /**
@@ -2726,6 +3255,7 @@ function clearElevationSlicer() {
   viewer.scene.globe.material = undefined;
   _elevSlicerActive = false;
   console.log('[FSDM] 高程切片已清除');
+  _requestRender();
 }
 
 
@@ -2752,6 +3282,47 @@ let heatmapGrid = null;         // 網格狀態 {rows, cols, cells: [{lat, lon, 
 let _heatmapSweepWidth = 50.0;  // 掃描有效寬度 W (公尺)
 let _heatmapQuality = 0.8;      // 探測品質 q (0~1)
 
+// ── 光錐跟飛機用同一個顯示時間（2026-10-21）─────────────────────────────
+//   updateFOVCone 收到的是 Python 最新一筆遙測；飛機模型畫在「現在 − 該架顯示延遲」（_uavDisplayTime）。
+//   以前光錐直接用最新一筆 ⇒ 18 m/s 時頂點領先模型約 2 m、轉彎時光錐先轉；GPU 填色更只在遙測進來時才移動。
+//   現在：這一架有 _UAV_STATE ⇒ 位置／方向取 _uavShownPose（頂點 = 模型位置、方向 = 模型機鼻）；
+//   視場參數（HFOV／VFOV／掛載角／半徑／pitch）仍用 updateFOVCone 傳進來的。
+//   沒有這一架（外部腳本只畫光錐、或 clearUAV 之後）⇒ 退回傳進來的最新值（舊行為）。
+//   回傳物件 s._disp 自帶 _computeFrustumGroundCorners 的角點快取；同一毫秒（同一幀的 5 個回呼）只算一次姿態。
+function _fovDisplayState(sid) {
+  const s = _fovStates[sid];
+  if (!s) return null;
+  const st = _UAV_STATE[sid];
+  if (!st || !st.props) return s;
+  let d = s._disp;
+  if (!d) d = s._disp = {};
+  d.radius = s.radius; d.pitch = s.pitch; d.roll = s.roll;
+  d.hfov = s.hfov; d.vfov = s.vfov; d.mountAngle = s.mountAngle; d.mode = s.mode;
+  const nowMs = Date.now();
+  if (d._ms !== nowMs || d._st !== st) {
+    const p = _uavShownPose(st);
+    d.apex = p.pos;
+    d.lat = p.lat; d.lon = p.lon;
+    d.alt = Math.max(0.01, p.alt);   // 起飛瞬間顯示高度可能 ≤ 0（Python 端已 > 0）：足跡公式要正高度
+    d.heading = p.heading;
+    d._ms = nowMs; d._st = st;
+  }
+  return d;
+}
+// 光錐頂點：顯示狀態用模型位置本身（不經經緯度來回換算）；舊狀態用傳進來的經緯高
+function _fovApex(s) {
+  return s.apex || Cesium.Cartesian3.fromDegrees(s.lon, s.lat, s.alt);
+}
+// GPU 填色是 Primitive（不是 entity，沒有 CallbackProperty）⇒ 每幀算圖前把 modelMatrix 對到顯示狀態。
+// ⚠ 不在這裡要求算圖（preRender 裡要求 = 永久 60 fps）；有遙測時本來就在連續算圖。
+function _fovFillFollow() {
+  for (const k in fovFillPrimitives) {
+    const prim = fovFillPrimitives[k], d = _fovDisplayState(k);
+    if (prim && prim._bakeInv && d) prim.modelMatrix = _fovFillMatrix(prim, d);
+  }
+}
+viewer.scene.preRender.addEventListener(_fovFillFollow);
+
 /**
  * 計算 frustum Primitive 的 modelMatrix（位置/航向/高度純 GPU 變換）
  *
@@ -2760,13 +3331,13 @@ let _heatmapQuality = 0.8;      // 探測品質 q (0~1)
  * - canonical body frame 中：apex 在原點 (0,0,0)、角點在 (dx, dy, -1)
  * - Scale(alt) 把 z=-1 的角點拉到地面 z=-alt（uniform scale 不會破壞角度）
  * - RotZ(-h) 把 body +y 對齊到 heading h 的方位（ENU 右手系、CW = 負角）
- * - ENU 把原點放到 UAV 經緯高，整個角錐 apex 自動坐落在 UAV 模型上
+ * - ENU 把原點放到 _fovApex(s)（顯示狀態 = 模型位置本身），整個角錐 apex 坐落在 UAV 模型上
  *
- * @param {Object} s  _fovStates[sysid] 狀態物件
+ * @param {Object} s  _fovDisplayState(sysid)（或沒有該架 UAV 時的 _fovStates[sysid]）
  * @returns {Cesium.Matrix4}  4x4 變換矩陣
  */
 function _computeFrustumModelMatrix(s) {
-  var origin = Cesium.Cartesian3.fromDegrees(s.lon, s.lat, s.alt);
+  var origin = _fovApex(s);
   var enuMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(origin);
   var h = Cesium.Math.toRadians(s.heading || 0);
   // CW heading（北 0、東 90）→ ENU +Z 軸的 CCW 旋轉為 -h
@@ -2799,7 +3370,7 @@ function _computeFrustumModelMatrix(s) {
  * @returns {Cesium.Primitive | null}
  */
 function _buildFrustumPrimitive(sysid, color) {
-  var s = _fovStates[sysid];
+  var s = _fovDisplayState(sysid);
   if (!s) return null;
 
   var am = Cesium.Math.toRadians(Math.max(0, Math.min(89.5, s.mountAngle || 0)));
@@ -2857,9 +3428,15 @@ function _buildFrustumPrimitive(sysid, color) {
     boundingSphere: Cesium.BoundingSphere.fromVertices(positions),
   });
 
+  // ⚠ 幾何**烘在世界座標**（instance 的 modelMatrix = 建立當下的 M0），之後的移動只放在 primitive.modelMatrix，
+  //   而且放的是**相對**變換 M(現在) × M0⁻¹（見 _fovFillMatrix）：
+  //   * 以前之後直接設 primitive.modelMatrix = M(現在) ⇒ 變換套兩次，填色飛到離飛機約 76.5 萬 km（E9，2026-10-06 無頭實測）。
+  //   * 幾何也不能改留在機體座標：這個 viewer 不是 scene3DOnly，Primitive 建立時要把頂點投影成 2D，
+  //     機體座標的點在地心附近 ⇒ projectTo2D 丟例外 ⇒ Cesium 關掉算圖迴圈、整個 3D 靜默停住（2026-10-21 實測）。
+  var bake = _computeFrustumModelMatrix(s);
   var instance = new Cesium.GeometryInstance({
     geometry: geometry,
-    modelMatrix: _computeFrustumModelMatrix(s),
+    modelMatrix: bake,
     attributes: {
       color: Cesium.ColorGeometryInstanceAttribute.fromColor(
         color.withAlpha(0.20)
@@ -2868,7 +3445,7 @@ function _buildFrustumPrimitive(sysid, color) {
     id: 'fov-fill-uav' + sysid,
   });
 
-  return new Cesium.Primitive({
+  var prim = new Cesium.Primitive({
     geometryInstances: instance,
     appearance: new Cesium.PerInstanceColorAppearance({
       translucent: true,
@@ -2877,6 +3454,13 @@ function _buildFrustumPrimitive(sysid, color) {
     }),
     asynchronous: false,   // 立即建好以避免閃爍
   });
+  prim._bakeInv = Cesium.Matrix4.inverse(bake, new Cesium.Matrix4());   // 含均勻縮放 ⇒ 一般反矩陣
+  return prim;
+}
+
+// 填色 primitive 此刻該用的 modelMatrix：M(s) × M0⁻¹（幾何已烘在 M0 的世界座標，見 _buildFrustumPrimitive）
+function _fovFillMatrix(prim, s) {
+  return Cesium.Matrix4.multiply(_computeFrustumModelMatrix(s), prim._bakeInv, new Cesium.Matrix4());
 }
 
 /**
@@ -2887,13 +3471,13 @@ function _buildFrustumPrimitive(sysid, color) {
  *   - 其它 (lat/lon/alt/heading) 變 → 只改 primitive.modelMatrix，純 GPU
  */
 function _ensureFrustumFillPrimitive(sysid, color) {
-  var s = _fovStates[sysid];
+  var s = _fovDisplayState(sysid);
   if (!s) return;
   var shapeKey = (s.hfov || 0) + '|' + (s.vfov || 0) + '|' + (s.mountAngle || 0);
   var prim = fovFillPrimitives[sysid];
   if (prim && prim._shapeKey === shapeKey) {
-    // 形狀沒變 → 只更新矩陣（每幀的位置/航向/高度變動走這條，零幾何重建）
-    prim.modelMatrix = _computeFrustumModelMatrix(s);
+    // 形狀沒變 → 只更新矩陣（零幾何重建）；逐幀跟隨由 _fovFillFollow（preRender）做，這裡只是立即對齊一次
+    prim.modelMatrix = _fovFillMatrix(prim, s);
     return;
   }
   // shape 變了或首次：拆舊建新
@@ -3120,6 +3704,7 @@ function updateFOVCone(sysid, lat, lon, alt, fovRadius, headingDeg, pitchDeg, ro
     ? !!fovGroundPolyEntities[sysid]
     : !!fovConeEntities[sysid];
   if (now - st.lastUpdate < 100 && hasEntity) {
+    _requestRender();   // state 已更新，CallbackProperty 要在下一幀讀到（requestRenderMode 下沒人要求就不會有下一幀）
     // 節流期內：仍要把 modelMatrix 推給 GPU Primitive
     // （shape 沒變只會走純矩陣更新分支，零幾何重建）
     if (usePyramid) {
@@ -3164,11 +3749,10 @@ function updateFOVCone(sysid, lat, lon, alt, fovRadius, headingDeg, pitchDeg, ro
           name: 'FOV-Edge-' + idx + '-UAV' + sid,
           polyline: {
             positions: new Cesium.CallbackProperty(function () {
-              var s = _fovStates[sid];
+              var s = _fovDisplayState(sid);   // 和模型同一個顯示時間（見 _fovDisplayState）
               if (!s) return [];
-              var apex = Cesium.Cartesian3.fromDegrees(s.lon, s.lat, s.alt);
               var corners = _computeFrustumGroundCorners(s);
-              return [apex, corners[idx]];
+              return [_fovApex(s), corners[idx]];
             }, false),
             width: 1.5,
             material: coneColor.withAlpha(0.85),
@@ -3185,7 +3769,7 @@ function updateFOVCone(sysid, lat, lon, alt, fovRadius, headingDeg, pitchDeg, ro
       name: 'FOV-GroundLoop-UAV' + sid,
       polyline: {
         positions: new Cesium.CallbackProperty(function () {
-          var s = _fovStates[sid];
+          var s = _fovDisplayState(sid);
           if (!s) return [];
           var c = _computeFrustumGroundCorners(s);
           // 5 點封閉迴圈（c0→c1→c2→c3→c0）
@@ -3204,13 +3788,14 @@ function updateFOVCone(sysid, lat, lon, alt, fovRadius, headingDeg, pitchDeg, ro
     // ── Legacy 圓錐模式 ──
     fovConeEntities[sid] = viewer.entities.add({
       name: 'FOV-Cone-UAV' + sid,
+      // 位置／方向／長度都取顯示狀態（和模型同一個顯示時間，見 _fovDisplayState）
       position: new Cesium.CallbackProperty(function () {
-        var s = _fovStates[sid];
+        var s = _fovDisplayState(sid);
         if (!s) return Cesium.Cartesian3.ZERO;
         return Cesium.Cartesian3.fromDegrees(s.lon, s.lat, s.alt / 2.0);
       }, false),
       orientation: new Cesium.CallbackProperty(function () {
-        var s = _fovStates[sid];
+        var s = _fovDisplayState(sid);
         if (!s) return Cesium.Quaternion.IDENTITY;
         var pos = Cesium.Cartesian3.fromDegrees(s.lon, s.lat, s.alt / 2.0);
         var hpr = new Cesium.HeadingPitchRoll(
@@ -3220,7 +3805,7 @@ function updateFOVCone(sysid, lat, lon, alt, fovRadius, headingDeg, pitchDeg, ro
       }, false),
       cylinder: {
         length: new Cesium.CallbackProperty(function () {
-          var s = _fovStates[sid];
+          var s = _fovDisplayState(sid);
           return Math.max((s ? s.alt : 100), 10);
         }, false),
         topRadius: 0.5,
@@ -3239,7 +3824,7 @@ function updateFOVCone(sysid, lat, lon, alt, fovRadius, headingDeg, pitchDeg, ro
     fovOutlineEntities[sid] = viewer.entities.add({
       name: 'FOV-Ground-Ring-UAV' + sid,
       position: new Cesium.CallbackProperty(function () {
-        var s = _fovStates[sid];
+        var s = _fovDisplayState(sid);
         if (!s) return Cesium.Cartesian3.ZERO;
         var pitchRad = Cesium.Math.toRadians(s.pitch || 0);
         var hdgRad = Cesium.Math.toRadians(s.heading || 0);
@@ -3268,6 +3853,7 @@ function updateFOVCone(sysid, lat, lon, alt, fovRadius, headingDeg, pitchDeg, ro
 
     console.log('[FOV] UAV' + sid + ' 圓錐 Entity 建立（color=' + color + '）');
   }
+  _requestRender();
 }
 
 function _removeFOVConeForSysid(sysid) {
@@ -3298,6 +3884,7 @@ function _removeFOVConeForSysid(sysid) {
     delete fovFillPrimitives[sysid];
   }
   if (_fovStates[sysid]) delete _fovStates[sysid];
+  _requestRender();
 }
 
 /**
@@ -3332,6 +3919,7 @@ function clearFOVCone(sysid) {
   fovGroundPolyEntities = {};
   fovFillPrimitives = {};
   _fovStates = {};
+  _requestRender();
 }
 
 /**
@@ -3399,6 +3987,7 @@ function initSARHeatmap(latMin, latMax, lonMin, lonMax, rows, cols, sweepWidth, 
 
   console.log('[SAR] 熱力圖初始化: ' + rows + 'x' + cols +
               ' 網格, W=' + _heatmapSweepWidth + ', q=' + _heatmapQuality);
+  _requestRender();
 }
 
 /**
@@ -3434,9 +4023,14 @@ function updateHeatmap(uavLat, uavLon, fovRadius, sysid) {
   let llCorners = null;   // [{lat, lon} × 4]，順序 TL, TR, BR, BL
   if (sysid && _fovStates[sysid]
       && _fovStates[sysid].hfov > 0 && _fovStates[sysid].vfov > 0) {
-    // 觸發 memoized 角點計算（cache hit 時零成本），同步取得 lat/lon 版本
+    // 觸發 memoized 角點計算（cache hit 時零成本），同步取得 lat/lon 版本。
+    //   兩份：最新遙測的足跡（_fovStates 本身）只當下面「這一拍有沒有新足跡」的判別量；
+    //   消除用的是**畫面上那個**光錐（_fovDisplayState：和模型同一個顯示時間）——
+    //   用最新那份的話，格子會在光錐畫到之前約 顯示延遲 × 速度（18 m/s ≈ 2 m）就先變色。
     _computeFrustumGroundCorners(_fovStates[sysid]);
-    llCorners = _fovStates[sysid]._cornersLL;
+    const _fd = _fovDisplayState(sysid);
+    _computeFrustumGroundCorners(_fd);
+    llCorners = _fd._cornersLL;
     if (llCorners && llCorners.length === 4) useFrustum = true;
   }
 
@@ -3455,6 +4049,9 @@ function updateHeatmap(uavLat, uavLon, fovRadius, sysid) {
   //   而不是飛過多少地面 —— 同一格會被同一個位置重複「掃到」約 5 次。
   //   _cornersKey 就是足跡的完整識別(lat|lon|alt|heading|mount|hfov|vfov),
   //   一樣就代表這一拍沒有掃到任何新地面。
+  //   ⚠ 判別量刻意用**最新遙測**那份的 key、不用顯示狀態的：顯示狀態每毫秒都在動,
+  //   用它的話每次呼叫都算「新足跡」⇒ 累積速率又變成呼叫頻率(合幀關掉時 = 訊息種類數)。
+  //   代價:遙測停住後,顯示狀態追上最後一筆那段(≈ 延遲 × 速度)不會再被掃一次。
   var _fs = _fovStates[sysid];
   if (_fs._lastSweptKey === _fs._cornersKey) return;
   _fs._lastSweptKey = _fs._cornersKey;
@@ -3509,6 +4106,7 @@ function updateHeatmap(uavLat, uavLon, fovRadius, sysid) {
       cell.entity.rectangle.material = _sarRampColor(cell.cos);
     }
   }
+  _requestRender();
 }
 
 /**
@@ -3592,6 +4190,7 @@ function renderCoverageHeatmap(g) {
   }
   console.log('[Recon] renderCoverageHeatmap: ' + drawn + ' 格（其中 ' +
               gaps + ' 格全漏掃），網格 ' + g.rows + 'x' + g.cols);
+  _requestRender();
 }
 
 /**
@@ -3603,6 +4202,7 @@ function clearSARHeatmap() {
   });
   heatmapEntities = [];
   heatmapGrid = null;
+  _requestRender();
 }
 
 /**
@@ -3617,6 +4217,7 @@ function resetSARHeatmap() {
     cell.entity.rectangle.material = Cesium.Color.RED.withAlpha(0.5);
   }
   console.log('[SAR] 熱力圖已重置');
+  _requestRender();
 }
 
 
@@ -3723,6 +4324,7 @@ function addRadarDome(lat, lon, alt, radius, name) {
 
   console.log('[Radar] 新增威脅穹頂 #' + idx + ': ' + (name||'Radar') +
               ' (' + lat.toFixed(4) + ',' + lon.toFixed(4) + ') R=' + radius + 'm');
+  _requestRender();
   return idx;
 }
 
@@ -3736,6 +4338,7 @@ function clearRadarDomes() {
   radarDomeEntities = [];
   radarSources = [];
   console.log('[Radar] 所有威脅穹頂已清除');
+  _requestRender();
 }
 
 /**
@@ -3766,6 +4369,12 @@ function updateRCSSensitivity(uavLat, uavLon, uavAlt, uavHeading, sysid) {
   sysid = sysid || 1;
   const entity = uavEntities[sysid];
   if (!entity || !radarSources.length) return;
+  // 顏色染在模型上 ⇒ 威脅用模型此刻**畫出來**的位置／機鼻算（和模型同一個顯示時間），不用傳進來的最新遙測
+  const _st = _UAV_STATE[sysid];
+  if (_st && _st.props) {
+    const _p = _uavShownPose(_st);
+    uavLat = _p.lat; uavLon = _p.lon; uavAlt = _p.alt; uavHeading = _p.heading;
+  }
 
   const mPerDegLat = 111320.0;
   const mPerDegLon = 111320.0 * Math.cos(Cesium.Math.toRadians(uavLat));
@@ -3847,6 +4456,7 @@ function updateRCSSensitivity(uavLat, uavLon, uavAlt, uavHeading, sysid) {
   if (entity._wingChild && entity._wingChild.box) {
     entity._wingChild.box.material = rcsColor;
   }
+  _requestRender();
 }
 
 /**
@@ -3876,6 +4486,7 @@ function clearRCSSensitivity(sysid) {
   if (entity._wingChild && entity._wingChild.box) {
     entity._wingChild.box.material = Cesium.Color.fromCssColorString(color).withAlpha(0.85);
   }
+  _requestRender();
 }
 
 /**
@@ -3895,6 +4506,7 @@ function animateRadarScan(radarIdx, duration) {
     if (elapsed > duration) {
       // 恢復原始大小
       radar.entity.ellipsoid.radii = new Cesium.Cartesian3(baseRadius, baseRadius, baseRadius);
+      _requestRender();
       return;
     }
     // 脈衝效果：半徑在 80%~120% 之間振盪
@@ -3902,6 +4514,7 @@ function animateRadarScan(radarIdx, duration) {
     const scale = 1.0 + 0.2 * Math.sin(t * Math.PI * 6);
     const r = baseRadius * scale;
     radar.entity.ellipsoid.radii = new Cesium.Cartesian3(r, r, r);
+    _requestRender();
     requestAnimationFrame(_pulse);
   }
   _pulse();
@@ -3983,6 +4596,7 @@ function strikeAddTarget(lat, lon, idx) {
     },
   });
   strikeTargetEntities.push(entity);
+  _requestRender();
 }
 
 /**
@@ -4025,6 +4639,7 @@ function strikeClearAll() {
 
   const modeEl = document.getElementById('modeLabel');
   if (modeEl) modeEl.style.display = 'none';
+  _requestRender();
 }
 
 /**
@@ -4076,7 +4691,7 @@ function strikeExecuteAnimation(dataJson, animSpeedMultiplier) {
   viewer.clock.clockRange = Cesium.ClockRange.CLAMPED;
   viewer.clock.multiplier = 1.0;  // 實際速率由 speedMul 控制
   viewer.clock.shouldAnimate = true;
-  viewer.timeline.zoomTo(startTime, endTime);
+  if (viewer.timeline) viewer.timeline.zoomTo(startTime, endTime);   // 時間軸 widget 已關（timeline:false）
 
   // ── UCAV 顏色盤 ──────────────────────────────────────────────────
   const uavColors = ['#E53935','#1E88E5','#43A047','#FB8C00',
@@ -4279,6 +4894,7 @@ function strikeExecuteAnimation(dataJson, animSpeedMultiplier) {
     // 每個 UCAV 的時間軸監聽器
     const tickListener = function(clock) {
       const now = clock.currentTime;
+      _requestRender();   // 動畫中 UAV 位置跟著時鐘走（SampledPositionProperty），每個 tick 都要算圖
       // 計算當前動畫對應的任務時間（秒）
       const elapsedAnimSec = Cesium.JulianDate.secondsDifference(now, startTime);
       const currentMissionTime = elapsedAnimSec * speedMul;
@@ -4326,6 +4942,7 @@ function strikeExecuteAnimation(dataJson, animSpeedMultiplier) {
   // ── 飛向場景 ──────────────────────────────────────────────────────
   _strikeAnimRunning = true;
   viewer.flyTo(viewer.entities, { duration: 1.5 });
+  _requestRender();
 }
 
 /**
@@ -4377,6 +4994,7 @@ function _strikeAnimateExplosion(blastEntity, targetInfo) {
       blastEntity.ellipse.material = Cesium.Color.DARKRED.withAlpha(0.1);
       blastEntity.ellipse.outlineColor = Cesium.Color.RED.withAlpha(0.2);
     }
+    _requestRender();
   }
   _expand();
 }
@@ -4469,6 +5087,7 @@ function strikeVizBegin(targetLat, targetLon, targetAlt) {
   _strikeViz.t0 = Date.now();
   console.log('[Strike VIZ] BEGIN @ ('
               + targetLat.toFixed(5) + ', ' + targetLon.toFixed(5) + ')');
+  _requestRender();
 }
 
 /**
@@ -4566,6 +5185,7 @@ function strikeVizUpdateUav(sysid, lat, lon, alt, headingDeg,
       && !u.entities.loiter) {
     _strikeVizEnsureLoiter(u, loiterLat, loiterLon, loiterRad);
   }
+  _requestRender();
 }
 
 /**
@@ -4633,6 +5253,7 @@ function strikeVizEnd() {
               + ', meanMiss=' + summary.meanMissM.toFixed(1) + 'm'
               + ', ttSpread=' + summary.ttSpreadS.toFixed(2) + 's');
 
+  _requestRender();
   return JSON.stringify({ uavs: uavStats, summary: summary });
 }
 
@@ -4654,6 +5275,7 @@ function _strikeVizClearAll() {
   });
   _strikeViz.effectsEntities = [];
   _strikeViz.active = false;
+  _requestRender();
 }
 
 /**
@@ -4824,6 +5446,7 @@ function _strikeVizFireImpact(u) {
     var t = (Date.now() - shockStart) / shockMs;
     if (t >= 1) {
       shock.ellipse.outlineColor = Cesium.Color.TRANSPARENT;
+      _requestRender();
       return;
     }
     var eased = 1 - Math.pow(1 - t, 2);  // quad easeOut
@@ -4832,6 +5455,7 @@ function _strikeVizFireImpact(u) {
     shock.ellipse.semiMajorAxis = r;
     shock.ellipse.semiMinorAxis = r;
     shock.ellipse.outlineColor = Cesium.Color.WHITE.withAlpha(a);
+    _requestRender();
     requestAnimationFrame(_shockExpand);
   }
   _shockExpand();
@@ -4851,14 +5475,18 @@ function _strikeVizFireImpact(u) {
   });
   _strikeViz.effectsEntities.push(scorch);
   var scorchStart = Date.now();
+  var scorchLastReq = 0;
   function _scorchFade() {
     var t = (Date.now() - scorchStart) / 60000.0;
     if (t >= 1) {
       scorch.ellipse.material = new Cesium.Color(0.18, 0.10, 0.06, 0.30);
+      _requestRender();
       return;
     }
     var a = 0.75 - 0.45 * t;
     scorch.ellipse.material = new Cesium.Color(0.15, 0.08, 0.05, a);
+    // 60 s 的慢淡出不值得 60 fps：每 200 ms 要求一次算圖就夠
+    if (Date.now() - scorchLastReq > 200) { scorchLastReq = Date.now(); _requestRender(); }
     requestAnimationFrame(_scorchFade);
   }
   _scorchFade();
@@ -5112,6 +5740,7 @@ function strikeRenderPath(dataJson) {
     `[StrikePath] 靜態路徑渲染完成: ${trajectories.length} 機, ` +
     `R_min=${turnR}m, θ_max=${maxDive}°`
   );
+  _requestRender();
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -5339,6 +5968,7 @@ function drawVTOLSwarmPaths(uavDataJson) {
     });
   }
   console.log('[VTOL] drawVTOLSwarmPaths: 已繪製', uavList.length, '架 VTOL 軌跡');
+  _requestRender();
 }
 
 /**
@@ -5367,6 +5997,7 @@ function vtolClearAll() {
   });
   _vtolEntities = [];
   console.log('[VTOL] vtolClearAll: 已清除所有 VTOL 軌跡');
+  _requestRender();
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -5402,6 +6033,7 @@ function drawCoverageGaps(points) {
     } catch (e) { /* 單點失敗不應中斷整批 */ }
   });
   console.log('[Recon] drawCoverageGaps: 已標出 ' + _coverageGapEntities.length + ' 個漏掃格');
+  _requestRender();
 }
 
 function clearCoverageGaps() {
@@ -5409,6 +6041,7 @@ function clearCoverageGaps() {
     try { viewer.entities.remove(e); } catch(_){}
   });
   _coverageGapEntities = [];
+  _requestRender();
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -5759,7 +6392,9 @@ function renderTerminalDive(uavId, trajectoryData, targetPos, diveThreshold) {
         _shockwaveEntity = null;
       }
       console.log('[TerminalDive] UAV-' + uavId + ' 衝擊波動畫結束，已清理');
+      _requestRender();
     }, SHOCKWAVE_DURATION * 1000 + 200); // +200ms 緩衝
+    _renderPumpFor(SHOCKWAVE_DURATION * 1000 + 300);   // 自計時震波：這段時間要持續算圖
   }
 
   // ── Clock tick 監聽器：偵測命中 ──────────────────────────
@@ -5767,6 +6402,7 @@ function renderTerminalDive(uavId, trajectoryData, targetPos, diveThreshold) {
     if (_impacted) return; // 已命中，不再檢查
 
     const currentTime = clock.currentTime;
+    _requestRender();   // 俯衝中位置跟著時鐘走（SampledPositionProperty），每個 tick 都要算圖
 
     // 檢查 1：是否超過軌跡終點時間
     if (Cesium.JulianDate.greaterThan(currentTime, stopTime)) {
@@ -5812,6 +6448,7 @@ function renderTerminalDive(uavId, trajectoryData, targetPos, diveThreshold) {
     '[TerminalDive] UAV-' + uavId + ' 已初始化：' +
     trajectoryData.length + ' 航點，俯衝門檻=' + diveThreshold + 'm'
   );
+  _requestRender();
 }
 
 /**
@@ -5833,6 +6470,7 @@ function clearTerminalDive(uavId) {
 
   delete _terminalDiveEntities[uavId];
   console.log('[TerminalDive] UAV-' + uavId + ' 已清除');
+  _requestRender();
 }
 
 /**
@@ -5843,6 +6481,7 @@ function clearAllTerminalDives() {
     clearTerminalDive(id);
   });
   console.log('[TerminalDive] 已清除所有末端俯衝');
+  _requestRender();
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -5858,6 +6497,9 @@ function clearAllTerminalDives() {
 //    data URL 字串 ⇒ 材質圖集只放一份）在 30 萬點仍 60 fps。⚠ 不可每點各畫一個 canvas
 //    （10 萬點要 221 秒）。大量資料由頁面自己讀本機檔（loadPhotoPosesUrl），不走 runJavaScript 字串。
 // ══════════════════════════════════════════════════════════════════
+// 本段會被 tests/test_survey_map_layers.py 單獨抽出來在假 Cesium 頁跑（沒有頁面層的 _requestRender）：
+// 改場景後的算圖要求走這個薄包裝，沒有 _requestRender 時就什麼都不做。
+function _surveyRender() { if (typeof _requestRender === 'function') _requestRender(); }
 var _orthoLayers = {};          // id → { layer, scheme, url, alpha, rectangle, state, tileErrors }
 var _photoPoseLayers = {};      // id → { coll, ids[], yaws[], srcs[], drawn, skipped, noHeading, noHeight, url }
 var _photoPoseLoadSeq = {};     // id → 遞增序號；較舊的 loadPhotoPosesUrl 讀完後若序號已變就丟掉
@@ -5926,6 +6568,7 @@ function addOrthoLayer(id, url, opts) {
   });
   viewer.imageryLayers.add(layer);
   _orthoLayers[id] = rec;
+  _surveyRender();
   return true;
 }
 
@@ -5935,6 +6578,7 @@ function removeOrthoLayer(id) {
   if (!rec) return false;
   try { viewer.imageryLayers.remove(rec.layer, true); } catch (_) {}
   delete _orthoLayers[id];
+  _surveyRender();
   return true;
 }
 
@@ -6034,6 +6678,7 @@ function setPhotoPoses(id, data, opts) {
               + (rec.skipped ? '，略過 ' + rec.skipped + ' 點（經緯度無效）' : '')
               + (rec.noHeading ? '，' + rec.noHeading + ' 點沒有航向（以圓點顯示）' : '')
               + (rec.noHeight ? '，' + rec.noHeight + ' 點沒有高度（放在橢球面 0 m）' : ''));
+  _surveyRender();
   return { drawn: rec.drawn, skipped: rec.skipped, noHeading: rec.noHeading, noHeight: rec.noHeight };
 }
 
@@ -6045,6 +6690,7 @@ function clearPhotoPoses(id) {
   try { viewer.scene.primitives.remove(rec.coll); } catch (_) {}
   delete _photoPoseLayers[id];
   if (_photoPoseTip) _photoPoseTip.style.display = 'none';
+  _surveyRender();
   return true;
 }
 
@@ -6126,15 +6772,29 @@ function loadPhotoPosesUrl(id, url, opts) {
   });
 }
 
-/** photoPoseAt — 螢幕座標拾取位姿；沒點到回 null */
-function photoPoseAt(windowPosition) {
-  var picked = viewer.scene.pick(windowPosition);
+function _photoPoseFromPick(picked) {
   if (!picked || !picked.collection) return null;
   for (var k in _photoPoseLayers) {
     var rec = _photoPoseLayers[k];
     if (rec.coll === picked.collection && typeof picked.id === 'number') {
       var i = picked.id;
       return { layer: k, index: i, image_id: rec.ids[i], yaw: rec.yaws[i], source: rec.srcs[i] };
+    }
+  }
+  return null;
+}
+
+/** photoPoseAt — 螢幕座標拾取位姿；沒點到回 null */
+function photoPoseAt(windowPosition) {
+  var picked = viewer.scene.pick(windowPosition);
+  var hit = _photoPoseFromPick(picked);
+  if (hit || !picked) return hit;
+  // 預計成果的拍照點（disableDepthTestDistance=∞，永遠排在拾取最前面）蓋在位姿上 ⇒ 往下鑽幾層找位姿
+  if (typeof hdmapPreviewOwnsPick === 'function' && hdmapPreviewOwnsPick(picked)) {
+    var all = viewer.scene.drillPick(windowPosition, 6);
+    for (var j = 0; j < all.length; j++) {
+      hit = _photoPoseFromPick(all[j]);
+      if (hit) return hit;
     }
   }
   return null;
@@ -6260,6 +6920,7 @@ function setSurveyPoints(id, data) {
   _surveyPointLayers[id] = rec;
   console.log('[SurveyPoints] ' + id + '：畫了 ' + rec.drawn + ' 點'
               + (rec.skipped ? '，略過 ' + rec.skipped + ' 點（經緯度無效）' : ''));
+  _surveyRender();
   return { drawn: rec.drawn, skipped: rec.skipped, byType: rec.byType };
 }
 
@@ -6271,6 +6932,7 @@ function clearSurveyPoints(id) {
     try { viewer.entities.remove(rec.entities[i]); } catch (_) {}
   }
   delete _surveyPointLayers[id];
+  _surveyRender();
   return true;
 }
 
@@ -6295,10 +6957,25 @@ function surveyPointsInfo() {
 //  與 Cesium 投影 adapter 由 Python 端 ui/widgets/wind_layer.glue_js('cesium') 在 _load_cesium 時填進
 //  下面的 __WIND_GLUE__（2D folium 頁面用同一份膠水，只換 adapter），Python 端記住的狀態填進 __WIND_RESTORE__。
 //  兩個佔位都是註解：沒被替換（例如直接開這個模板）時什麼都不做、也不會報錯。
+//  分層風場（10／80／120 m，2026-10-19）也在同一份膠水裡：setWindProfile / clearWindProfile / setWindProfileView；
+//  每層一個引擎風場畫在自己的高度（與路徑同一個高度慣例：相對起降場、橢球面為 0），剖面柱用 viewer.entities 畫，
+//  每次變動都呼叫 _requestRender()；狀態一樣由 Python 在重載時套回。
 // ══════════════════════════════════════════════════════════════════
 /*__WIND_GLUE__*/
 /*__WIND_RESTORE__*/
 // WIND_END
+// ══════════════════════════════════════════════════════════════════
+
+// ══════════════════════════════════════════════════════════════════
+//  HDMAP_PREVIEW_BEGIN —— 預計成果圖層（高精地圖「規劃預測」，非實際成果）
+//
+//  頁面函式 setHdmapPreview / clearHdmapPreview / setHdmapPreviewVisible / hdmapPreviewInfo 由 Python 端
+//  ui/widgets/hdmap_preview_layer.glue_js('cesium') 在 _load_cesium 時填進下一行的佔位註解，Python 端記住的圖層
+//  也一起套回去（頁面重載不丟）。佔位是註解：沒被替換（例如直接開這個模板）時什麼都不做、也不會報錯；
+//  圖層面板的「預計成果」勾選框與 toggleLayer 的 'hdmap' 分支都用 typeof 守門。
+// ══════════════════════════════════════════════════════════════════
+/*__HDMAP_GLUE__*/
+// HDMAP_PREVIEW_END
 // ══════════════════════════════════════════════════════════════════
 
 

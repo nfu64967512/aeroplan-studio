@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import dataclasses
+import inspect
 import re
 import types
 
@@ -114,8 +115,15 @@ def fake(monkeypatch, tmp_path):
     shown = {}
     self_ = types.SimpleNamespace(
         CESIUM_TOKEN='', VTOL_MODEL_SCALE=1.0, VTOL_HEADING_OFFSET=0, VTOL_PITCH_OFFSET=0,
-        VTOL_ROLL_OFFSET=0, web_view=types.SimpleNamespace(setUrl=lambda u: shown.setdefault('url', u)))
+        VTOL_ROLL_OFFSET=0, web_view=types.SimpleNamespace(setUrl=lambda u: shown.setdefault('url', u)),
+        RENDER_MAX_DT=CesiumMapWidget.RENDER_MAX_DT, RENDER_DT_ENV=CesiumMapWidget.RENDER_DT_ENV)
     self_._resolve_token = types.MethodType(CesiumMapWidget._resolve_token, self_)
+    # 2026-10-17 起 _load_cesium 把置換拆成 _fill_cesium_template → _cesium_template_values → _render_mode_placeholders
+    # （→ _resolve_render_max_dt）；假 self 要綁上同一串真方法，token 的路徑才是真的那條
+    for name in ('_fill_cesium_template', '_cesium_template_values', '_render_mode_placeholders', '_resolve_render_max_dt'):
+        fn = inspect.getattr_static(CesiumMapWidget, name)
+        setattr(self_, name, fn.__get__(self_, type(self_)) if not isinstance(fn, (staticmethod, classmethod))
+                else getattr(CesiumMapWidget, name))
     return types.SimpleNamespace(self=self_, settings=settings, log=cap, out=out, shown=shown, holder=holder)
 
 

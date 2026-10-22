@@ -157,6 +157,11 @@ class MapWidget(MapWidgetBase):
         self._wind_field: Optional[dict] = None
         self._wind_arrows: dict = {}
         self._wind_options: dict = {}
+        #   _wind_profile = wind_layer.check_wind_profile() 的結果（分層風場；設著時它是流動層，單一風場先藏）
+        self._wind_profile: Optional[dict] = None
+        # 預計成果圖層（高精地圖規劃預測；持久化，隨 _render_map 重建）：圖層代號 → 檢查過的 payload；隱藏中的代號
+        self._hdmap_previews: dict = {}
+        self._hdmap_hidden: set = set()
 
         self._init_ui()
         self._init_map()
@@ -177,6 +182,10 @@ class MapWidget(MapWidgetBase):
 
         self.custom_page = ClickCapturePage(self.web_view, self)
         self.web_view.setPage(self.custom_page)
+        # 預計成果：整頁載入期間才 set／clear 的圖層會送到舊頁面上 ⇒ 載入完成時以 Python 端狀態補送一次
+        self.custom_page.loadFinished.connect(self._hdmap_resync_after_load)
+        # 分層風場同理（整頁重繪期間才 set／clear／換高度的會送到舊頁面上）
+        self.custom_page.loadFinished.connect(self._wind_profile_resync_after_load)
 
         # ⚠⚠ 地圖變黑底的原因在這裡。
         #   全域 QSS 的第一條是 `QWidget { background: {{BG_PRIMARY}} }`，
@@ -248,7 +257,9 @@ class MapWidget(MapWidgetBase):
             tiles='OpenStreetMap', name='OpenStreetMap',
             overlay=False, control=True, show=False,
         ).add_to(m)
-        folium.LayerControl().add_to(m)
+        # ⚠ 圖層控制（folium.LayerControl）不在這裡加：它在 render 時才收集 control=True 的圖層，但 JS 寫在
+        #   自己被加入的位置 ⇒ 放在疊圖之前時會引用還沒宣告的變數（undefined）→ Leaflet 對它呼叫 setZIndex
+        #   丟錯、整段 folium script 中止（照片位姿／GCP／正射一加就整張 2D 圖空白）。改在 _build_map 最後才加。
         plugins.Fullscreen().add_to(m)
         plugins.MousePosition().add_to(m)
         plugins.MeasureControl().add_to(m)
@@ -556,6 +567,8 @@ class MapWidget(MapWidgetBase):
                 padding=[40, 40],
             )
 
+        # 圖層控制一定要**最後**才加（所有 control=True 的疊圖都已宣告之後），理由見 _create_base_map
+        folium.LayerControl().add_to(m)
         return m
 
     def _rewrite_leaflet_to_local(self, html: str) -> str:
@@ -1247,8 +1260,12 @@ html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden;
 </script>
 """
         js_code += self._wind_js_block()
+        # 預計成果（高精地圖規劃預測）：膠水＋把 Python 端記住的圖層套回去
+        js_code += self._hdmap_js_block()
         # 任務疊圖（讀回／匯入預覽）：JS 圖層不隨 folium 重建，整頁重繪後要自己畫回來
         js_code += self._fc_mission_js_block()
+        # 即時 UAV 標記（批次更新函式 aeroUavUpdate；狀態與 clear_uav 共用）
+        js_code += self._uav_js_block()
 
         # 注入到 </html> 前（在 folium 的 Leaflet script 之後）
         if '</html>' in html:
@@ -1272,8 +1289,53 @@ html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden;
                 logger.error(f'[Wind/2D] {e}')
             return ''
         rows = list((self.__dict__.get('_wind_arrows') or {}).values())
-        restore = wl.restore_js(self.__dict__.get('_wind_field'), rows, self.__dict__.get('_wind_options'))
+        restore = wl.restore_js(self.__dict__.get('_wind_field'), rows, self.__dict__.get('_wind_options'),
+                                self.__dict__.get('_wind_profile'))
+        # 記下這份 HTML 帶的是第幾版分層風場：載入完成時版本若已變（載入期間又 set／clear 過）就補送
+        self.__dict__['_wind_profile_html_version'] = self.__dict__.get('_wind_profile_version', 0)
         return (f'\n<script src="{uri}"></script>\n<script>\n{wl.glue_js("leaflet")}\n{restore}\n</script>\n')
+
+    def _wind_profile_resync_after_load(self, ok: bool = True) -> bool:
+        """整頁載入完成：頁面裡套回的分層風場是產生 HTML 那一刻的；載入期間才 set／clear／換高度的會丟失
+        ⇒ 版本不同就以 Python 端狀態重送一次（冪等）。回傳有沒有重送。"""
+        if not ok:
+            return False
+        ver = self.__dict__.get('_wind_profile_version', 0)
+        if ver == self.__dict__.get('_wind_profile_html_version', 0):
+            return False
+        from ui.widgets import wind_layer as wl
+        self.__dict__['_wind_profile_html_version'] = ver
+        self._run_wind_js(wl.profile_resync_js(self.__dict__.get('_wind_profile')))
+        logger.info('[Wind/2D] 頁面載入期間分層風場有變動 ⇒ 載入完成後重送')
+        return True
+
+    def _hdmap_js_block(self) -> str:
+        """預計成果圖層：Leaflet 膠水（頁面函式永遠在）＋ 把 Python 端記住的圖層套回去（folium 每次重繪整頁都要）。"""
+        from ui.widgets import hdmap_preview_layer as hl
+        restore = hl.restore_js(self.__dict__.get('_hdmap_previews') or {},
+                                self.__dict__.get('_hdmap_hidden') or ())
+        # 記下這份 HTML 帶的是第幾版狀態：載入完成時版本若已變（載入期間又 set／clear 過）就補送
+        self.__dict__['_hdmap_html_version'] = self.__dict__.get('_hdmap_version', 0)
+        return f'\n<script>\n{hl.glue_js("leaflet")}\n{restore}\n</script>\n'
+
+    def _hdmap_bump(self) -> None:
+        self.__dict__['_hdmap_version'] = self.__dict__.get('_hdmap_version', 0) + 1
+
+    def _hdmap_resync_after_load(self, ok: bool = True) -> bool:
+        """整頁載入完成：頁面裡的套回段是「產生 HTML 那一刻」的狀態；之後（載入期間）才 set／clear／切換的
+        會送到舊頁面上而丟失 ⇒ 版本不同就以 Python 端狀態整份重送（先全清再畫，冪等）。回傳有沒有重送。"""
+        if not ok:
+            return False
+        ver = self.__dict__.get('_hdmap_version', 0)
+        if ver == self.__dict__.get('_hdmap_html_version', 0):
+            return False
+        from ui.widgets import hdmap_preview_layer as hl
+        js = hl.js_call('clearHdmapPreview', None) + ';\n' + hl.restore_js(
+            self.__dict__.get('_hdmap_previews') or {}, self.__dict__.get('_hdmap_hidden') or ())
+        self.__dict__['_hdmap_html_version'] = ver
+        self._run_hdmap_js(js)
+        logger.info(f'[HdmapPreview/2D] 頁面載入期間圖層有變動 ⇒ 載入完成後重送（{len(self.__dict__.get("_hdmap_previews") or {})} 層）')
+        return True
 
     # ─────────────────────────────────────
     # 地圖點擊處理
@@ -1505,100 +1567,166 @@ html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden;
     # ─────────────────────────────────────────────────────────────────
     # SITL 即時 UAV 標記（2D Leaflet）
     # ─────────────────────────────────────────────────────────────────
+    # ── 即時 UAV 標記（2D）：批次更新 ─────────────────────────────────────
+    #   2026-10-17 效能：以前每架每幀送兩段 ~2 KB 的 JS（連 SVG data URL 一起送、每幀重建 L.divIcon），
+    #   6 架 × 25 Hz ＝ 每秒 300 次 runJavaScript、465 kB。現在：
+    #     * 頁面注入時就定義 window.aeroUavUpdate(batch)（含兩種 SVG 範本），之後每次只送一小段 JSON；
+    #     * 標記只建一次：之後 setLatLng ＋ 改內層 div 的 transform（轉向）＋ 標籤文字變了才改；
+    #     * 一個批次（全部 UAV）一次 runJavaScript；主視窗合幀後約 12 Hz。
+    _UAV_COLORS_2D = ['#FFD700', '#E53935', '#43A047', '#1E88E5', '#8E24AA', '#00ACC1', '#FB8C00', '#3949AB']
+
+    @staticmethod
+    def _uav_batch_item(lat, lon, alt=0.0, heading_deg=0.0, speed_ms=0.0, sysid=1, mode='', armed=False,
+                        vehicle_type='', *, hdg=None, spd=None, vt=None, **_ignored) -> dict:
+        """正規化成批次的一筆：同時收舊參數名（heading_deg／speed_ms／vehicle_type）與批次鍵名（hdg／spd／vt）。
+
+        ⚠ 批次鍵名不能被 **_ignored 吃掉：主視窗送來的就是 hdg/spd/vt，吃掉的話每架航向都變 0、機型都變空
+          而且完全靜默（2026-10-17 測試抓到）。
+        """
+        if hdg is not None:
+            heading_deg = hdg
+        if spd is not None:
+            speed_ms = spd
+        if vt is not None:
+            vehicle_type = vt
+        out = {'sysid': int(sysid), 'lat': round(float(lat), 7), 'lon': round(float(lon), 7),
+               'alt': round(float(alt or 0.0), 2), 'hdg': round(float(heading_deg or 0.0), 1),
+               'spd': round(float(speed_ms or 0.0), 2), 'mode': str(mode or ''), 'armed': bool(armed),
+               'vt': str(vehicle_type or '')}
+        crs = _ignored.get('crs')
+        if crs is not None:
+            out['crs'] = round(float(crs), 1)       # 航跡方向：速度夠時圖示跟著航線轉（機頭不慢半拍）
+        return out
+
+    def update_uav_positions(self, batch) -> int:
+        """一次更新多架 UAV 標記與尾跡：batch 是 `[{'sysid','lat','lon','alt','hdg','spd','mode','armed','vt'}, …]`
+        （多餘鍵如 pitch/roll 會被忽略）。只送一段小 JSON；回傳送出的架數（0 = 沒送）。
+
+        頁面還沒載入注入的 `aeroUavUpdate` 時（整頁剛重繪），JS 端自己 no-op，下一批自然補上。
+        """
+        import json as _json
+        items = []
+        for it in (batch or []):
+            try:
+                items.append(self._uav_batch_item(**it) if isinstance(it, dict) else self._uav_batch_item(*it))
+            except Exception as e:                      # noqa: BLE001 — 一筆壞資料不能讓整批不畫
+                logger.debug(f'2D update_uav_positions 略過一筆: {e}')
+        if not items:
+            return 0
+        js = 'if(window.aeroUavUpdate){window.aeroUavUpdate(' + _json.dumps(items, separators=(',', ':')) + ');}'
+        page = self.__dict__.get('custom_page')
+        if page is not None:
+            try:
+                page.runJavaScript(js)
+            except Exception as e:                      # noqa: BLE001
+                logger.debug(f'2D update_uav_positions 失敗: {e}')
+        return len(items)
+
     def update_uav_position(self, lat: float, lon: float, alt: float = 0.0,
                              heading_deg: float = 0.0, speed_ms: float = 0.0,
                              sysid: int = 1, mode: str = '', armed: bool = False,
                              vehicle_type: str = '', **kwargs):
-        """在 2D 地圖上更新 UAV 標記（依機型顯示不同 SVG 圖示）"""
-        try:
-            import json as _json
-            vt = (vehicle_type or '').upper()
-            is_plane = ('PLANE' in vt) or ('FIXED' in vt) or ('VTOL' in vt)
-            colors = ['#FFD700','#E53935','#43A047','#1E88E5','#8E24AA','#00ACC1','#FB8C00','#3949AB']
-            color = colors[(sysid - 1) % len(colors)]
+        """單架版（舊 API）：包成一筆批次。"""
+        self.update_uav_positions([self._uav_batch_item(lat, lon, alt, heading_deg, speed_ms, sysid, mode,
+                                                        armed, vehicle_type)])
 
-            if is_plane:
-                svg = (
-                    '<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 48 48">'
-                    f'<polygon points="24,2 28,22 46,28 46,32 28,30 28,40 34,44 34,46 24,44 14,46 14,44 20,40 20,30 2,32 2,28 20,22" '
-                    f'fill="{color}" stroke="#1a1a1a" stroke-width="1.6" stroke-linejoin="round"/>'
-                    '<circle cx="24" cy="14" r="2" fill="#FFF"/></svg>'
-                )
-            else:
-                svg = (
-                    '<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 48 48">'
-                    '<line x1="8" y1="8" x2="40" y2="40" stroke="#222" stroke-width="3"/>'
-                    '<line x1="40" y1="8" x2="8" y2="40" stroke="#222" stroke-width="3"/>'
-                    f'<circle cx="8" cy="8" r="6" fill="{color}" stroke="#222" stroke-width="1.5"/>'
-                    f'<circle cx="40" cy="8" r="6" fill="{color}" stroke="#222" stroke-width="1.5"/>'
-                    f'<circle cx="8" cy="40" r="6" fill="{color}" stroke="#222" stroke-width="1.5"/>'
-                    f'<circle cx="40" cy="40" r="6" fill="{color}" stroke="#222" stroke-width="1.5"/>'
-                    '<rect x="18" y="18" width="12" height="12" rx="2" fill="#FFF" stroke="#222" stroke-width="1.5"/>'
-                    '<polygon points="24,12 28,20 20,20" fill="#E53935"/></svg>'
-                )
+    def _uav_js_block(self) -> str:
+        """2D 即時 UAV 標記的 JS（整頁注入一次）：`window.aeroUavUpdate(batch)`。
 
-            label = ('✈ ' if is_plane else '🚁 ') + f'UAV{sysid}' + (f' [{mode}]' if mode else '') + (' ●ARM' if armed else '')
-            svg_b64_url = "data:image/svg+xml;utf8," + svg.replace('#', '%23').replace('"', "'")
-            label_js = _json.dumps(label)
-            js = f"""
-            (function(){{
-              if (!window.currentMap) return;
-              if (!window._uavMarkers) window._uavMarkers = {{}};
-              var sysid = {sysid};
-              var lat = {lat}, lon = {lon}, hdg = {heading_deg};
-              var iconUrl = "{svg_b64_url}";
-              var lbl = {label_js};
-              var m = window._uavMarkers[sysid];
-              if (!m) {{
-                var icon = L.divIcon({{
-                  html: '<div style="transform:rotate(' + hdg + 'deg);transform-origin:center;">' +
-                        '<img src="' + iconUrl + '" width="44" height="44"/></div>' +
-                        '<div style="position:absolute;top:46px;left:50%;transform:translateX(-50%);' +
-                        'background:rgba(0,0,0,0.7);color:#fff;padding:1px 5px;border-radius:3px;' +
-                        'font-size:10px;white-space:nowrap;font-weight:bold;">' + lbl + '</div>',
-                  iconSize: [44, 44], iconAnchor: [22, 22], className: 'uav-icon'
-                }});
-                m = L.marker([lat, lon], {{ icon: icon, zIndexOffset: 1000 }}).addTo(window.currentMap);
-                window._uavMarkers[sysid] = m;
-              }} else {{
-                m.setLatLng([lat, lon]);
-                var newIcon = L.divIcon({{
-                  html: '<div style="transform:rotate(' + hdg + 'deg);transform-origin:center;">' +
-                        '<img src="' + iconUrl + '" width="44" height="44"/></div>' +
-                        '<div style="position:absolute;top:46px;left:50%;transform:translateX(-50%);' +
-                        'background:rgba(0,0,0,0.7);color:#fff;padding:1px 5px;border-radius:3px;' +
-                        'font-size:10px;white-space:nowrap;font-weight:bold;">' + lbl + '</div>',
-                  iconSize: [44, 44], iconAnchor: [22, 22], className: 'uav-icon'
-                }});
-                m.setIcon(newIcon);
-              }}
-            }})();
-            """
-            self.custom_page.runJavaScript(js)
-            # 軌跡尾跡（每架最多 800 點）
-            trail_js = f"""
-            (function(){{
-              if (!window.currentMap) return;
-              if (!window._uavTrails) window._uavTrails = {{}};
-              if (!window._uavTrailPts) window._uavTrailPts = {{}};
-              var sid = {sysid};
-              var c = "{color}";
-              if (!window._uavTrailPts[sid]) window._uavTrailPts[sid] = [];
-              var pts = window._uavTrailPts[sid];
-              pts.push([{lat}, {lon}]);
-              if (pts.length > 800) pts.shift();
-              if (!window._uavTrails[sid]) {{
-                window._uavTrails[sid] = L.polyline(pts, {{
-                  color: c, weight: 3, opacity: 0.85, dashArray: null
-                }}).addTo(window.currentMap);
-              }} else {{
-                window._uavTrails[sid].setLatLngs(pts);
-              }}
-            }})();
-            """
-            self.custom_page.runJavaScript(trail_js)
-        except Exception as e:
-            logger.debug(f'2D update_uav_position 失敗: {e}')
+        狀態變數名（`_uavMarkers`／`_uavTrails`／`_uavTrailPts`）與 `clear_uav` 共用，不要改名。
+        """
+        import json as _json
+        colors = _json.dumps(self._UAV_COLORS_2D)
+        # ⚠ 不用 % 格式化：JS 裡有 `% COLORS.length`、`50%` 這些 % 符號，一個沒逃掉整段就炸
+        return """
+<style>
+/* 批次更新之間的位移／轉向用 CSS 補間（約一個合幀週期），30 Hz 的更新看起來就是連續的 */
+.uav-icon { transition: transform 60ms linear; }
+.uav-icon .uav-rot { transition: transform 60ms linear; }
+</style>
+<script>
+(function(){
+  var COLORS = __COLORS__;
+  function svgPlane(c){ return '<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 48 48">'
+    + '<polygon points="24,2 28,22 46,28 46,32 28,30 28,40 34,44 34,46 24,44 14,46 14,44 20,40 20,30 2,32 2,28 20,22" '
+    + 'fill="' + c + '" stroke="#1a1a1a" stroke-width="1.6" stroke-linejoin="round"/>'
+    + '<circle cx="24" cy="14" r="2" fill="#FFF"/></svg>'; }
+  function svgCopter(c){ return '<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 48 48">'
+    + '<line x1="8" y1="8" x2="40" y2="40" stroke="#222" stroke-width="3"/>'
+    + '<line x1="40" y1="8" x2="8" y2="40" stroke="#222" stroke-width="3"/>'
+    + '<circle cx="8" cy="8" r="6" fill="' + c + '" stroke="#222" stroke-width="1.5"/>'
+    + '<circle cx="40" cy="8" r="6" fill="' + c + '" stroke="#222" stroke-width="1.5"/>'
+    + '<circle cx="8" cy="40" r="6" fill="' + c + '" stroke="#222" stroke-width="1.5"/>'
+    + '<circle cx="40" cy="40" r="6" fill="' + c + '" stroke="#222" stroke-width="1.5"/>'
+    + '<rect x="18" y="18" width="12" height="12" rx="2" fill="#FFF" stroke="#222" stroke-width="1.5"/>'
+    + '<polygon points="24,12 28,20 20,20" fill="#E53935"/></svg>'; }
+  function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  window.aeroUavUpdate = function(batch){
+    if (!window.currentMap || !batch) return;
+    if (!window._uavMarkers) window._uavMarkers = {};
+    if (!window._uavTrails) window._uavTrails = {};
+    if (!window._uavTrailPts) window._uavTrailPts = {};
+    if (!window._uavMeta) window._uavMeta = {};
+    for (var i = 0; i < batch.length; i++) {
+      var u = batch[i];
+      var sid = u.sysid, c = COLORS[(sid - 1) % COLORS.length];
+      var vt = String(u.vt || '').toUpperCase();
+      var isPlane = vt.indexOf('PLANE') >= 0 || vt.indexOf('FIXED') >= 0 || vt.indexOf('VTOL') >= 0;
+      var lbl = (isPlane ? '\\u2708 ' : '\\ud83d\\ude81 ') + 'UAV' + sid + (u.mode ? ' [' + u.mode + ']' : '') + (u.armed ? ' \\u25cfARM' : '');
+      // 圖示轉向：速度夠時用航跡方向（crs），機頭跟著航線走；慢速／懸停用機頭方向（hdg）
+      var rot = (u.crs !== undefined && u.spd > 2) ? u.crs : u.hdg;
+      var m = window._uavMarkers[sid];
+      if (!m) {
+        var svg = isPlane ? svgPlane(c) : svgCopter(c);
+        var url = 'data:image/svg+xml;utf8,' + svg.replace(/#/g, '%23').replace(/"/g, "'");
+        var icon = L.divIcon({
+          html: '<div class="uav-rot" style="transform:rotate(' + rot + 'deg);transform-origin:center;">'
+              + '<img src="' + url + '" width="44" height="44"/></div>'
+              + '<div class="uav-lbl" style="position:absolute;top:46px;left:50%;transform:translateX(-50%);'
+              + 'background:rgba(0,0,0,0.7);color:#fff;padding:1px 5px;border-radius:3px;'
+              + 'font-size:10px;white-space:nowrap;font-weight:bold;">' + esc(lbl) + '</div>',
+          iconSize: [44, 44], iconAnchor: [22, 22], className: 'uav-icon'
+        });
+        m = L.marker([u.lat, u.lon], { icon: icon, zIndexOffset: 1000 }).addTo(window.currentMap);
+        window._uavMarkers[sid] = m;
+        window._uavMeta[sid] = { lbl: lbl, plane: isPlane };
+      } else {
+        m.setLatLng([u.lat, u.lon]);
+        var el = m.getElement ? m.getElement() : m._icon;
+        if (el) {
+          var rotEl = el.querySelector('.uav-rot');
+          if (rotEl) rotEl.style.transform = 'rotate(' + rot + 'deg)';
+          var meta = window._uavMeta[sid] || {};
+          if (meta.lbl !== lbl) {
+            var lb = el.querySelector('.uav-lbl');
+            if (lb) lb.textContent = lbl;
+            meta.lbl = lbl; window._uavMeta[sid] = meta;
+          }
+          if (meta.plane !== isPlane) {
+            // 機型變了（心跳晚到、或 VTOL 轉換）⇒ 只換 <img> 的 src，不重建 divIcon
+            var img = el.querySelector('.uav-rot img');
+            if (img) {
+              var s2 = isPlane ? svgPlane(c) : svgCopter(c);
+              img.src = 'data:image/svg+xml;utf8,' + s2.replace(/#/g, '%23').replace(/"/g, "'");
+            }
+            meta.plane = isPlane; window._uavMeta[sid] = meta;
+          }
+        }
+      }
+      var pts = window._uavTrailPts[sid];
+      if (!pts) { pts = []; window._uavTrailPts[sid] = pts; }
+      pts.push([u.lat, u.lon]);
+      if (pts.length > 800) pts.shift();
+      if (!window._uavTrails[sid]) {
+        window._uavTrails[sid] = L.polyline(pts, { color: c, weight: 3, opacity: 0.85 }).addTo(window.currentMap);
+      } else {
+        window._uavTrails[sid].setLatLngs(pts);
+      }
+    }
+  };
+})();
+</script>
+""".replace('__COLORS__', colors)
 
     def clear_uav(self, sysid: int = None):
         """清除 2D UAV 標記與軌跡"""
@@ -1607,13 +1735,14 @@ html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden;
                 js = ("(function(){"
                       "if(window._uavMarkers){Object.values(window._uavMarkers).forEach(m=>{try{window.currentMap.removeLayer(m);}catch(_){}});window._uavMarkers={};}"
                       "if(window._uavTrails){Object.values(window._uavTrails).forEach(t=>{try{window.currentMap.removeLayer(t);}catch(_){}});window._uavTrails={};}"
-                      "window._uavTrailPts={};"
+                      "window._uavTrailPts={};window._uavMeta={};"
                       "})();")
             else:
                 js = (f"(function(){{"
                       f"if(window._uavMarkers && window._uavMarkers[{sysid}]){{try{{window.currentMap.removeLayer(window._uavMarkers[{sysid}]);}}catch(_){{}}delete window._uavMarkers[{sysid}];}}"
                       f"if(window._uavTrails && window._uavTrails[{sysid}]){{try{{window.currentMap.removeLayer(window._uavTrails[{sysid}]);}}catch(_){{}}delete window._uavTrails[{sysid}];}}"
                       f"if(window._uavTrailPts) delete window._uavTrailPts[{sysid}];"
+                      f"if(window._uavMeta) delete window._uavMeta[{sysid}];"
                       f"}})();")
             self.custom_page.runJavaScript(js)
         except Exception:
@@ -2176,6 +2305,8 @@ html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden;
         //    _fc_missions 與 window._fcMissionLayers 都還留著 ⇒ 預覽「消失」，下一次整頁
         //    重繪又「回來」。_fc_mission_js 建圖層時打了 options.fcMission=true，這裡跳過。
         if(layer.options && layer.options.fcMission) return;
+        // 預計成果（高精地圖規劃預測）同理：Python 端 _hdmap_previews 還在，畫面不可以被偷偷掃掉
+        if(layer.options && layer.options.hdmapPreview) return;
         if(layer instanceof L.Polyline || layer instanceof L.CircleMarker){
             // 保留邊界多邊形（藍色 fill）
             if(layer instanceof L.Polygon && layer.options && layer.options.fillColor === '#2196F3') return;
@@ -2460,6 +2591,8 @@ html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden;
         #    前置條件擋，只要狀態與畫面不同步就會漏清。
         self.clear_swarm_display()
         self.clear_fc_mission()
+        # 預計成果（高精地圖規劃預測）是由規劃結果推出來的疊圖：規劃都清了，預測不可以單獨留著
+        self.clear_hdmap_preview()
 
         # ③ 最後才重繪，而且只重繪這一次：重繪 = 整頁重載，多一次就是多一次
         #    白畫面閃爍。
@@ -2695,6 +2828,129 @@ html, body {{ margin:0; padding:0; width:100%; height:100%; overflow:hidden;
     def query_wind(self, callback) -> None:
         """向頁面查風場圖層狀態（引擎有沒有載入、畫了幾格／幾架）。callback(dict)。"""
         self.custom_page.runJavaScript('windInfo()', callback)
+
+    # ── 分層風場（Open-Meteo 同一模式、同一小時的 10／80／120 m；檢查：wind_layer.check_wind_profile）──
+    #   2D 是俯視：各層疊在一起分不出來 ⇒ 只畫 height_2d_m 那一層的流動＋左上角剖面表（每層風速／風向、畫的那層反白）。
+    #   設著的期間它就是這張圖的流動層：set_wind_field 的單一風場照樣記著但不畫，clear_wind_profile 後畫回來。
+    #   飛控即時風箭頭（set_wind_arrows）不受影響。狀態留在 Python（folium 每次重繪整頁都由 _wind_js_block 套回去）。
+    def set_wind_profile(self, payload: dict) -> dict:
+        """畫分層風場；回傳**實際生效**的值（2D 畫哪一層、要求的高度、各層、圖例字…）。
+        payload 不合法 ⇒ ValueError，原本的分層風場不動。"""
+        from ui.widgets import wind_layer as wl
+        p = wl.check_wind_profile(payload)
+        if p['limit_mps'] is not None:
+            self.set_wind_options(limitMps=p['limit_mps'])        # 粒子、剖面表與箭頭用同一個上色門檻
+        self._wind_profile = p
+        self.__dict__['_wind_profile_version'] = self.__dict__.get('_wind_profile_version', 0) + 1
+        self._run_wind_js(wl.js_call('setWindProfile', p))
+        eff = wl.profile_summary(p, '2d')
+        self._log_profile_substitution(eff)
+        return eff
+
+    def clear_wind_profile(self) -> bool:
+        """移除分層風場（單一風場若有，畫回來）；回傳原本有沒有。"""
+        existed = self.__dict__.get('_wind_profile') is not None
+        self._wind_profile = None
+        self.__dict__['_wind_profile_version'] = self.__dict__.get('_wind_profile_version', 0) + 1
+        self._run_wind_js('clearWindProfile()')
+        return existed
+
+    def set_wind_profile_view(self, *, height_2d_m: Optional[float] = None,
+                              layers_3d: Optional[list] = None) -> None:
+        """換 2D 畫哪一層（None ＝ 不變；不是現有的層 ⇒ 最接近的一層、一樣近取低的，不內插）；layers_3d 只記著
+        （2D 不用；None ＝ 全部）。沒有分層風場時什麼都不做。"""
+        from ui.widgets import wind_layer as wl
+        p = self.__dict__.get('_wind_profile')
+        if p is None:
+            logger.debug('[Wind/2D] 沒有分層風場，顯示高度切換略過')
+            return None
+        view = wl.resolve_profile_view(p, height_2d_m=height_2d_m, layers_3d=layers_3d)
+        p.update(view)
+        self.__dict__['_wind_profile_version'] = self.__dict__.get('_wind_profile_version', 0) + 1
+        self._run_wind_js(wl.js_call('setWindProfileView', view))
+        self._log_profile_substitution(wl.profile_summary(p, '2d'))
+        return None
+
+    @staticmethod
+    def _log_profile_substitution(eff: dict) -> None:
+        req = eff.get('height_2d_requested_m')
+        if req is not None and abs(req - eff['height_2d_m']) > 1e-6:
+            logger.warning(f'[Wind/2D] 分層風場沒有 {req:g} m 這一層，2D 改畫最接近的 {eff["height_2d_m"]:g} m'
+                           f'（現有 {"／".join(f"{h:g}" for h in eff["heights"])} m；不內插）')
+
+    # ── 預計成果圖層（高精地圖規劃預測；資料：survey.preview.HdmapPreview.to_js_payload；
+    #    膠水：ui.widgets.hdmap_preview_layer）──
+    #   狀態留在 Python（folium 每次重繪整頁都要套回去，見 _hdmap_js_block）；set/clear/visible 即時走 runJavaScript 不重繪。
+    #   ⚠ 每個 Leaflet 圖層都帶 options.hdmapPreview=true：clear_all_display_layers_js()（規劃前的清場）靠它跳過。
+    #   ⚠ clear_all() 會清它（它是由規劃推出來的）；clear_paths() 不清（由 MainWindow 決定）。
+    def _run_hdmap_js(self, js: str) -> None:
+        page = self.__dict__.get('custom_page')       # 裸實例上 getattr 會丟 RuntimeError
+        if page is not None:
+            page.runJavaScript(js)
+
+    def set_hdmap_preview(self, layer_id: str, payload: dict) -> dict:
+        """畫一層預計成果（同代號再畫一次 = 換掉）。回傳 ``{'ok': True, 計數…}``；
+        payload 不合法 ⇒ ``{'ok': False, 'error': 原因}``，而且**同代號的舊圖層一併移除**
+        （舊的是上一份規劃的預測，留著會被當成這一份的）。"""
+        from ui.widgets import hdmap_preview_layer as hl
+        store = self.__dict__.setdefault('_hdmap_previews', {})
+        hidden = self.__dict__.setdefault('_hdmap_hidden', set())
+        try:
+            hl.check_layer_id(layer_id)               # None 不可以退回 payload['id']：代號由呼叫端決定
+            p = hl.check_payload(payload, layer_id)
+        except ValueError as e:
+            removed = False
+            if isinstance(layer_id, str) and layer_id.strip():
+                removed = store.pop(layer_id, None) is not None
+                hidden.discard(layer_id)
+                self._hdmap_bump()
+                self._run_hdmap_js(hl.js_call('clearHdmapPreview', layer_id))
+            logger.error(f'[HdmapPreview/2D] {layer_id!r} 的資料不合法，沒畫'
+                         f'{"（已移除同代號的舊圖層）" if removed else ""}：{e}')
+            return {'ok': False, 'id': layer_id, 'error': str(e), 'removed_old': removed}
+        store[layer_id] = p
+        hidden.discard(layer_id)                      # 新畫的一律顯示（要藏請之後再呼叫 set_hdmap_preview_visible）
+        self._hdmap_bump()
+        self._run_hdmap_js(hl.js_call('setHdmapPreview', layer_id, p))
+        info = hl.summary(p)
+        logger.info(f'[HdmapPreview/2D] {layer_id}：點陣 {info["image_px"]}、範圍外框 {info["extent_rings"]}、'
+                    f'漏洞 {info["holes"]}、邊緣不足 {info["edge_short"]}、拍照點 {info["points"]}')
+        return {'ok': True, **info}
+
+    def clear_hdmap_preview(self, layer_id: Optional[str] = None) -> bool:
+        """移除一層（``None`` = 全部）；回傳原本有沒有東西。"""
+        from ui.widgets import hdmap_preview_layer as hl
+        store = self.__dict__.setdefault('_hdmap_previews', {})
+        hidden = self.__dict__.setdefault('_hdmap_hidden', set())
+        if layer_id is None:
+            existed = bool(store)
+            store.clear()
+            hidden.clear()
+        else:
+            existed = store.pop(layer_id, None) is not None
+            hidden.discard(layer_id)
+        self._hdmap_bump()
+        self._run_hdmap_js(hl.js_call('clearHdmapPreview', layer_id))
+        return existed
+
+    def set_hdmap_preview_visible(self, layer_id: str, visible: bool) -> None:
+        """顯示／隱藏一層（資料留著，整頁重繪後維持同一個狀態）。沒有這一層就只記 log。"""
+        from ui.widgets import hdmap_preview_layer as hl
+        store = self.__dict__.setdefault('_hdmap_previews', {})
+        hidden = self.__dict__.setdefault('_hdmap_hidden', set())
+        if layer_id not in store:
+            logger.debug(f'[HdmapPreview/2D] 沒有圖層 {layer_id!r}，顯示切換略過')
+            return
+        if visible:
+            hidden.discard(layer_id)
+        else:
+            hidden.add(layer_id)
+        self._hdmap_bump()
+        self._run_hdmap_js(hl.js_call('setHdmapPreviewVisible', layer_id, bool(visible)))
+
+    def query_hdmap_preview(self, callback) -> None:
+        """向頁面查預計成果圖層（畫了哪些、各幾個、顯示與否）。callback(dict)。"""
+        self.custom_page.runJavaScript('hdmapPreviewInfo()', callback)
 
     def _photo_pose_cap_notice(self, layer_id: str, n: int, k: int = 0) -> str:
         # 只用行內樣式（不加全域 CSS：body > div 那類規則曾把圖例撐成全螢幕）；pointer-events:none 不擋點擊

@@ -139,3 +139,17 @@ matlab/zarchan/_listings/
 # Simulink 建置快取與 MATLAB 執行輸出（可重生）
 slprj/
 matlab/out/
+
+# SITL 實例工作目錄與日誌（每趟實飛幾 GB，不進版控）
+sitl/vtol/
+sitl/copter/
+# 離屏截圖／產物與雜項暫存
+exports/
+runs_gz/
+scratchpad/
+research/cpp_benchmark/*.log
+research/cpp_benchmark/*.prof
+bite_result.txt
+cwt_cache.bin
+hal.html
+x.json

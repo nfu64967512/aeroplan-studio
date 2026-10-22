@@ -458,7 +458,7 @@ def _inject_survey(knobs: SurveyKnobs | None):
 
 def survey_effective(hv, knobs: SurveyKnobs, cam_cfg, sc: Scenario) -> dict:
     """規劃後**讀回**規劃器真正用的值，與旋鈕逐項比對；任何一項沒到 ⇒ SystemExit（不飛）。"""
-    from hv_dccpp.ardupilot import trigger_distance_m
+    from hv_dccpp.ardupilot import commanded_trigger_distance_m, trigger_distance_m
     want_hw = knobs.camera_hw()
     bad, sensors = [], {}
     for (cls, rid), s in sorted(hv.last_ctx.sensors.items()):
@@ -474,6 +474,10 @@ def survey_effective(hv, knobs: SurveyKnobs, cam_cfg, sc: Scenario) -> dict:
                         "camera": dict(zip(("focal_length_mm", "sensor_width_mm", "sensor_height_mm",
                                             "pixel_pitch_um"), geom)),
                         "trigger_distance_m": trigger_distance_m(s, float(sc.coverage_altitude_m)),
+                        # 實際下給飛控的 206 d：camera_cfg 開了 50 Hz 量化保護（VENDOR #12）⇒ × (1 − f_s/50)
+                        "trigger_distance_cmd_m": (commanded_trigger_distance_m(s, float(sc.coverage_altitude_m))
+                                                   if getattr(cam_cfg, "trigger_overshoot_guard", False)
+                                                   else trigger_distance_m(s, float(sc.coverage_altitude_m))),
                         "at_agl_m": float(sc.coverage_altitude_m)}
         if knobs.fwd_overlap is not None and not math.isclose(r.forward_overlap, knobs.fwd_overlap, abs_tol=1e-9):
             bad.append(f"{tag} 前向重疊 {r.forward_overlap} ≠ HV_FWD_OVERLAP {knobs.fwd_overlap}"
@@ -701,6 +705,11 @@ def plan_and_export(sc: Scenario, knobs: SurveyKnobs | None = None):
          # ★ 規劃風（上一行）與**模擬風**是兩件事，產物上必須分得出來
          "sim_wind": {"spd_mps": SIM_WIND_SPD, "dir_from_deg": SIM_WIND_DIR,
                       "turb": SIM_WIND_TURB, "profile_type": SIM_WIND_T},
+         # 2026-10-20：兩者並排＋一致與否（啟動前的設定值；飛完以 wind_readback.json 的讀回值為準）
+         "plan_wind": {"spd_mps": float(sc.wind[0]), "dir_from_deg": float(sc.wind[1]),
+                       "source": plan_wind_source()},
+         "wind_plan_vs_sim": wind_plan_vs_sim(sc.wind, SIM_WIND_SPD, SIM_WIND_DIR, SIM_WIND_T, SIM_WIND_TURB,
+                                              plan_source=plan_wind_source()),
          "sensor_kinds": kinds, "speedup": SPEEDUP,
          # ⚠ 沒有這一欄的話，分散起降點的航次與共點航次在產物上**分不出來**
          #   （唯一的痕跡是 sitl_cmdlines.txt 裡的 --home）。
@@ -791,6 +800,146 @@ def _write_wind(i: int) -> Path:
         f"SIM_WIND_T    {SIM_WIND_T:g}\n"
         "SIM_WIND_DIR_Z 0\n", encoding="utf-8")
     return p
+
+
+# ── 規劃風 vs 模擬風（2026-10-20）────────────────────────────────────
+#   兩個旋鈕**刻意獨立**（做「規劃 0 飛 5」不匹配對照要用），所以不一致時**不擋**；
+#   但 2026-10-14 那趟「規劃 5、模擬 0」就是沒人發現兩者不同 ⇒ 讀回之後大聲說，並寫進產物。
+#   風速差 > 0.05 m/s，或兩邊都有風（≥ 0.05）而來向差 > 0.5° ⇒ 不一致；兩邊都 < 0.05 ⇒ 都是無風、風向不比。
+#   模擬風隨高度變（SIM_WIND_T ≠ 1）或有湍流（TURB > 0）也算：規劃只有一個定值風層、沒有湍流。
+_WIND_SPD_TOL = 0.05
+_WIND_DIR_TOL = 0.5
+
+
+def plan_sim_wind_problems(plan_wind, sim_spd: float, sim_dir: float,
+                           sim_t: float = 1.0, sim_turb: float = 0.0) -> list[str]:
+    """規劃風 ``(風速, 來向°)`` 與模擬風（SIM_WIND_*）哪裡不一樣 → 每項一句；空 list ＝ 一致。"""
+    ps, pd = float(plan_wind[0]), float(plan_wind[1]) % 360.0
+    ss, sd = float(sim_spd), float(sim_dir) % 360.0
+    out = []
+    if abs(ps - ss) > _WIND_SPD_TOL:
+        out.append(f"風速：規劃 {ps:g} m/s ≠ 模擬 {ss:g} m/s")
+    if ps >= _WIND_SPD_TOL and ss >= _WIND_SPD_TOL and abs((pd - sd + 180.0) % 360.0 - 180.0) > _WIND_DIR_TOL:
+        out.append(f"風向（來向）：規劃 {pd:g}° ≠ 模擬 {sd:g}°")
+    if ss >= _WIND_SPD_TOL and abs(float(sim_t) - 1.0) > 1e-9:
+        out.append(f"模擬風隨高度變（SIM_WIND_T={float(sim_t):g}）；規劃是單一定值風層（SIM_WIND_T=1 才相同）")
+    if float(sim_turb) > 0.0:
+        out.append(f"模擬有湍流（SIM_WIND_TURB={float(sim_turb):g}）；規劃沒有")
+    return out
+
+
+def wind_plan_vs_sim(plan_wind, sim_spd: float, sim_dir: float,
+                     sim_t: float = 1.0, sim_turb: float = 0.0, *, plan_source: str = "") -> dict:
+    """產物用的對照紀錄（scenario.json／wind_readback.json）。"""
+    probs = plan_sim_wind_problems(plan_wind, sim_spd, sim_dir, sim_t, sim_turb)
+    return {"plan": {"spd_mps": float(plan_wind[0]), "dir_from_deg": float(plan_wind[1]), "source": plan_source},
+            "sim": {"spd_mps": float(sim_spd), "dir_from_deg": float(sim_dir),
+                    "profile_type": float(sim_t), "turb": float(sim_turb)},
+            "match": not probs, "problems": probs,
+            "note": "兩個旋鈕刻意獨立（不匹配對照用）；不一致不擋，只警告"}
+
+
+def warn_plan_vs_sim_wind(plan_wind, sim_spd: float, sim_dir: float,
+                          sim_t: float = 1.0, sim_turb: float = 0.0) -> list[str]:
+    """不一致 ⇒ 印一段醒目的警告（不擋）；一致 ⇒ 只印一行「一致」。回傳不一致的項目。"""
+    probs = plan_sim_wind_problems(plan_wind, sim_spd, sim_dir, sim_t, sim_turb)
+    if not probs:
+        print(f"規劃風 = 模擬風：{float(plan_wind[0]):g} m/s 來自 {float(plan_wind[1]) % 360.0:g}°")
+        return probs
+    bar = "!" * 72
+    print(f"\n{bar}\n⚠⚠⚠ 規劃風 ≠ 模擬風（不擋；刻意做不匹配對照才該是這樣）")
+    print(f"    規劃假設 {float(plan_wind[0]):g} m/s 來自 {float(plan_wind[1]) % 360.0:g}°"
+          f"　SITL 實際 SIM_WIND_SPD={float(sim_spd):g} DIR={float(sim_dir):g}"
+          f" T={float(sim_t):g} TURB={float(sim_turb):g}")
+    for p_ in probs:
+        print(f"    ✗ {p_}")
+    print("    ⇒ 逐段時間／照片會量到「規劃沒料到的風」，不能當成「有考慮風」的驗證"
+          "（HV_PLAN_WIND_* 與 HV_SIM_WIND_* 是兩個旋鈕）")
+    print(bar + "\n")
+    return probs
+
+
+def plan_wind_source() -> str:
+    """規劃風從哪來（產物用）：HV_PLAN_WIND_* 覆寫或情境預設。"""
+    if os.environ.get("HV_PLAN_WIND_SPD"):
+        return "HV_PLAN_WIND_SPD／HV_PLAN_WIND_DIR 覆寫"
+    return "情境預設（Scenario.wind）"
+
+
+def wind_readback(out: Path, links: dict, sc: Scenario) -> dict:
+    """SITL 風場讀回（C2）→ 寫 wind_readback.json；讀回不符 ⇒ SystemExit（不起飛）；
+    讀回之後拿**讀回值**跟規劃風比，不一致大聲警告（不擋）。回傳寫進檔案的那份 dict。
+
+    ⚠⚠ 與 params_readback.csv **分開寫**：SIM_* 不屬於「匯出參數」那一組，
+    混進去會把論文的 34 × 3 = 102 變成 38 × 3，把 C4 的數字攪亂。
+    ⚠ 讀回 None ＝ 韌體沒有這個參數名（非 SITL build）⇒ 當成失敗，不可放行。
+    ⚠⚠⚠ MIN_GROUNDSPEED 也在這一組：它不是 SIM_ 參數，但只要 > 0，TECS 會為了
+    維持地速而在逆風腿**自己加空速** ⇒ 風的影響被飛控吃掉，整個對照作廢，
+    而且沒有任何徵狀。匯出檔沒有設它（韌體預設 0），所以這裡是讀回確認。
+    """
+    want_wind = {"SIM_WIND_SPD": SIM_WIND_SPD, "SIM_WIND_DIR": SIM_WIND_DIR,
+                 "SIM_WIND_TURB": SIM_WIND_TURB, "SIM_WIND_T": SIM_WIND_T,
+                 "MIN_GROUNDSPEED": 0.0}
+    wind_rows, wind_bad, got_by_uav = [], [], {}
+    for uav, lk in links.items():
+        for name, exp in want_wind.items():
+            got = lk.get_param(name, timeout_s=10.0)
+            ok = got is not None and abs(float(got) - exp) <= 0.01
+            wind_rows.append({"uav": uav, "param": name, "expected": exp,
+                              "actual": got, "ok": bool(ok)})
+            got_by_uav.setdefault(uav, {})[name] = got
+            if not ok:
+                wind_bad.append(f"{uav}.{name} 期望 {exp} 實得 {got}")
+    rec = {"sim_wind": want_wind, "plan_wind": list(sc.wind), "rows": wind_rows,
+           "dir_convention": "氣象「來向」（270 = 西風，吹向東），與 hv_dccpp dir_from_deg 同約定"}
+    n_ok = sum(r["ok"] for r in wind_rows)
+    print(f"\nSITL 風場讀回：{n_ok}/{len(wind_rows)} 相符"
+          f"（SIM_WIND_SPD={SIM_WIND_SPD:g} DIR={SIM_WIND_DIR:g}）"
+          f"；規劃假設風 {sc.wind}")
+    if wind_bad:
+        (out / "wind_readback.json").write_text(json.dumps(rec, ensure_ascii=False, indent=1), encoding="utf-8")
+        for b in wind_bad:
+            print("   ✗", b)
+        raise SystemExit("風場參數沒有生效，停止起飛（見 wind_readback.json）")
+    # 讀回之後：拿**讀回值**跟規劃風比（每架都已在 0.01 內等於期望值 ⇒ 取第一架；沒有鏈路就沒得比）
+    if got_by_uav:
+        g = got_by_uav[sorted(got_by_uav)[0]]
+        sim = (float(g["SIM_WIND_SPD"]), float(g["SIM_WIND_DIR"]), float(g["SIM_WIND_T"]), float(g["SIM_WIND_TURB"]))
+        rec["plan_vs_sim"] = {**wind_plan_vs_sim(sc.wind, *sim, plan_source=plan_wind_source()),
+                              "from": "SITL 讀回值"}
+        (out / "wind_readback.json").write_text(json.dumps(rec, ensure_ascii=False, indent=1), encoding="utf-8")
+        warn_plan_vs_sim_wind(sc.wind, *sim)
+    else:
+        (out / "wind_readback.json").write_text(json.dumps(rec, ensure_ascii=False, indent=1), encoding="utf-8")
+    return rec
+
+
+def wind_header_lines(meta: dict, readback: dict | None = None) -> list[str]:
+    """報告開頭的風（hv_sitl_report.py）：規劃風、模擬風、一致與否。
+
+    優先用 wind_readback.json 的 ``plan_vs_sim``（讀回值）；其次 scenario.json 的 ``wind_plan_vs_sim``；
+    舊產物沒有這兩欄 ⇒ 用 ``wind``（規劃）＋ ``sim_wind``（模擬）現算；沒記模擬風就明說，不猜。"""
+    cmp_ = (readback or {}).get("plan_vs_sim") or meta.get("wind_plan_vs_sim")
+    src = "SITL 讀回" if (readback or {}).get("plan_vs_sim") else "scenario.json（啟動前的設定值）"
+    if cmp_ is None:
+        pw, sw = meta.get("wind"), meta.get("sim_wind")
+        if pw is None:
+            return ["規劃風：scenario.json 沒有記錄"]
+        if sw is None:
+            return [f"規劃風 {float(pw[0]):g} m/s 來自 {float(pw[1]) % 360.0:g}°；"
+                    "模擬風：scenario.json 沒有記錄（無法比對）"]
+        cmp_ = wind_plan_vs_sim(pw, sw["spd_mps"], sw["dir_from_deg"],
+                                sw.get("profile_type", 1.0), sw.get("turb", 0.0))
+    p_, s_ = cmp_["plan"], cmp_["sim"]
+    lines = [f"規劃風 {p_['spd_mps']:g} m/s 來自 {float(p_['dir_from_deg']) % 360.0:g}°"
+             + (f"（{p_['source']}）" if p_.get("source") else "")
+             + f"｜模擬風 SIM_WIND_SPD={s_['spd_mps']:g} DIR={s_['dir_from_deg']:g}"
+             f" T={s_.get('profile_type', 1.0):g} TURB={s_.get('turb', 0.0):g}（{src}）"]
+    if cmp_.get("match"):
+        lines.append("規劃風 = 模擬風")
+    else:
+        lines.append("⚠⚠ 規劃風 ≠ 模擬風（不匹配對照才該是這樣）：" + "；".join(cmp_.get("problems") or []))
+    return lines
 
 
 def launch(sc: Scenario, hv) -> list[dict]:
@@ -944,37 +1093,8 @@ def fly(sc: Scenario, knobs: SurveyKnobs | None = None) -> int:
             print("  ⚠ 有機體沒吃到速率設定 ⇒ 該機的間距量測仍是 5 s 解析度，"
                   "低於數百公尺的結論不可信")
 
-        # ── 風場讀回（C2）─────────────────────────────────────────
-        #   ⚠⚠ 與 params_readback.csv **分開寫**：SIM_* 不屬於「匯出參數」那一組，
-        #   混進去會把論文的 34 × 3 = 102 變成 38 × 3，把 C4 的數字攪亂。
-        #   ⚠ 讀回 None ＝ 韌體沒有這個參數名（非 SITL build）⇒ 當成失敗，不可放行。
-        #   ⚠⚠⚠ MIN_GROUNDSPEED 也在這一組：它不是 SIM_ 參數，但只要 > 0，TECS 會為了
-        #   維持地速而在逆風腿**自己加空速** ⇒ 風的影響被飛控吃掉，整個對照作廢，
-        #   而且沒有任何徵狀。匯出檔沒有設它（韌體預設 0），所以這裡是讀回確認。
-        want_wind = {"SIM_WIND_SPD": SIM_WIND_SPD, "SIM_WIND_DIR": SIM_WIND_DIR,
-                     "SIM_WIND_TURB": SIM_WIND_TURB, "SIM_WIND_T": SIM_WIND_T,
-                     "MIN_GROUNDSPEED": 0.0}
-        wind_rows, wind_bad = [], []
-        for uav, lk in links.items():
-            for name, exp in want_wind.items():
-                got = lk.get_param(name, timeout_s=10.0)
-                ok = got is not None and abs(float(got) - exp) <= 0.01
-                wind_rows.append({"uav": uav, "param": name, "expected": exp,
-                                  "actual": got, "ok": bool(ok)})
-                if not ok:
-                    wind_bad.append(f"{uav}.{name} 期望 {exp} 實得 {got}")
-        (out / "wind_readback.json").write_text(json.dumps(
-            {"sim_wind": want_wind, "plan_wind": list(sc.wind), "rows": wind_rows,
-             "dir_convention": "氣象「來向」（270 = 西風，吹向東），與 hv_dccpp dir_from_deg 同約定"},
-            ensure_ascii=False, indent=1), encoding="utf-8")
-        n_ok = sum(r["ok"] for r in wind_rows)
-        print(f"\nSITL 風場讀回：{n_ok}/{len(wind_rows)} 相符"
-              f"（SIM_WIND_SPD={SIM_WIND_SPD:g} DIR={SIM_WIND_DIR:g}）"
-              f"；規劃假設風 {sc.wind}")
-        if wind_bad:
-            for b in wind_bad:
-                print("   ✗", b)
-            raise SystemExit("風場參數沒有生效，停止起飛（見 wind_readback.json）")
+        # ── 風場讀回（C2）＋ 規劃風 vs 模擬風（不一致大聲警告、不擋）── 見 wind_readback()
+        wind_readback(out, links, sc)
 
         # ── 生成點讀回：飛機真的生在規劃說的那個起飛站嗎 ────────────
         #   ⚠⚠⚠ 這是 vendored #8 之後必要的一道。規劃層在 spawn_spread_m > 0 時

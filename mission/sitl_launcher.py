@@ -196,6 +196,8 @@ _DEFAULT_PARAMS = {
 #   上限：陀螺儀 400 Hz ÷ 1.8 = 222（PreArm 要 gyro >= loop×1.8）、本機實測 267。
 #   100 是三個窗口的交集裡**最接近使用者要的低 Hz** 的值。由 tests/test_sitl_param_names.py
 #   與 tests/test_vtol_prearm_real.py 依值鎖住 —— 要改先問使用者。
+#   ⚠⚠ 2026-10-22：100 Hz 配 vtol_default.parm 的 Alti 真機角速率增益會俯仰自激振盪、有風起飛不了
+#   ⇒ GUI 另疊 vtol_rate_gains.parm（VTOL_SITL_RATE_GAINS，只對 100 Hz 驗過；改這裡要重測那組）。
 _SCHED_LOOP_RATE = {
     'COPTER': 50,
     'PLANE':  50,
@@ -276,11 +278,183 @@ def write_vtol_enforced_parm(directory: Optional[Path] = None) -> Path:
     return out
 
 
-def build_defaults_list(vehicle: str, base, vtol, identity, enforced) -> List[str]:
+# ═════════════════════════════════════════════════════════════════════
+#  VTOL 角速率增益：配 SITL 通用 quadplane 模型 @ SCHED_LOOP_RATE 100（2026-10-22 實測）
+# ═════════════════════════════════════════════════════════════════════
+#   症狀：GUI 帶入規劃風（5 m/s、270°）開的 VTOL，AUTO 垂直起飛一直報「Potential VTOL Thrust
+#   Loss (1)/(2)」，15 分鐘高度 0.1–0.5 m；無風飛得起來但慢（55 m 要 68 s，指令 2.5 m/s）。
+#   根因（.BIN 的 RATE／PIQP／RCOU／QTUN／MOTB）：vtol_default.parm 的角速率增益是 Alti Transition
+#   **真機**值（俯仰 P 0.3／I 0.3／D 0.01、滾轉 P 0.2／I 0.2），對 SITL 的通用 quadplane 模型太高。
+#   GUI 的 VTOL 主迴圈 100 Hz（_SCHED_LOOP_RATE）相位落後大 ⇒ 俯仰角速率環 ~8–10 Hz 自激振盪、
+#   輸出打滿（POut ±1.4、實際角速率 RMS 150 dps、爬升段 100 % 取樣有馬達頂在 1950 µs）；
+#   姿態優先吃掉推力：QTUN ThO＝1.0 但 MOTB ThrOut 只剩 0.56。側風要的穩態滾轉（−5°）與偏航
+#   （YOut +0.16）把剩下的餘裕吃光 ⇒ 停在 5 m、被吹走；推力損失訊息就是「馬達頂到最大、機體不爬」。
+#   風只是最後一根稻草：舊增益在 2、3 m/s 也飛不起來；與 SIM_WIND_T（風剖面）無關。
+#   scripts/hv_sitl_run.py 同一份 vtol_default.parm 飛得起來，差在它用 200 Hz（落後少一半），
+#   但它爬升段仍有 20–26 % 時間馬達打滿——只是沒打垮。
+#
+#   修法：GUI 這條路（本檔 SITLLauncher）在 vtol_default.parm 之後疊這份，換成 100 Hz 下有餘裕的值。
+#   **不改 vtol_default.parm**：hv_sitl_run 也讀它（200 Hz），改了會動到論文 SITL 證據鏈。
+#   掃描（5 m/s 270°、同一 home 與航向，只差增益）：P 0.08–0.15 配 D 0.0015–0.002、或 P 0.1 配
+#   D 0.004 平穩；P 0.2、D ≥ 0.006、ArduCopter 預設 P 0.135／D 0.0036 失穩（振盪慢慢長大）。
+#   取 P 0.1／I 0.1／D 0.002：P 方向離失穩 1.5–2 倍、D 方向 2–3 倍。完整任務（60 m 起飛→轉態→
+#   600 m 正方形→垂直降落）見 SITL_VTOL_WIND_VERIFIED_MAX_MPS。偏航與固定翼增益不動。
+#   ⚠ 只對 SCHED_LOOP_RATE 100 驗過：改 _SCHED_LOOP_RATE['VTOL'] 要重測（測試依值鎖住兩者）。
+#   報告：docs/修正_2026-10-22_GUI_VTOL有風起飛不了.md
+VTOL_RATE_GAINS_PARM_NAME = 'vtol_rate_gains.parm'
+#: 下面這組增益實測驗證時的主迴圈速率（與 _SCHED_LOOP_RATE['VTOL'] 必須相同）
+VTOL_RATE_GAINS_LOOP_HZ = 100
+VTOL_SITL_RATE_GAINS = (
+    ('Q_A_RAT_RLL_P', 0.1, '滾轉角速率 P（Alti 0.2）'),
+    ('Q_A_RAT_RLL_I', 0.1, '滾轉角速率 I（Alti 0.2）'),
+    ('Q_A_RAT_RLL_D', 0.002, '滾轉角速率 D（與 Alti 相同，寫明以免被前面的檔改掉）'),
+    ('Q_A_RAT_PIT_P', 0.1, '俯仰角速率 P（Alti 0.3：100 Hz 下自激振盪的主因之一）'),
+    ('Q_A_RAT_PIT_I', 0.1, '俯仰角速率 I（Alti 0.3）'),
+    ('Q_A_RAT_PIT_D', 0.002, '俯仰角速率 D（Alti 0.01：振盪的主力）'),
+)
+
+
+def vtol_rate_gains_parm_text() -> str:
+    """角速率增益檔內容（每行 ``名稱 值``；說明放整行註解，每行 <= 98 bytes，見強制檔）。"""
+    lines = ['# AeroPlan Studio：GUI VTOL SITL 角速率增益（SITL 通用 quadplane 模型 @ 100 Hz）',
+             '# 取代 vtol_default.parm 的 Alti 真機值；理由見 mission/sitl_launcher.py']
+    for name, val, why in VTOL_SITL_RATE_GAINS:
+        lines.append(f'# {name}：{why}')
+        lines.append(f'{name} {val:g}')
+    return '\n'.join(lines) + '\n'
+
+
+def write_vtol_rate_gains_parm(directory) -> Path:
+    """把角速率增益檔寫到 ``directory/vtol_rate_gains.parm``，**寫完讀回比對**，回傳路徑。
+
+    讀回少值／值不符 ⇒ RuntimeError（呼叫端不啟動：靜默少了它＝又回到「有風就起飛不了」）。"""
+    want = {n: float(v) for n, v, _ in VTOL_SITL_RATE_GAINS}
+    d = Path(directory)
+    d.mkdir(parents=True, exist_ok=True)
+    out = d / VTOL_RATE_GAINS_PARM_NAME
+    out.write_text(vtol_rate_gains_parm_text(), encoding='utf-8')
+    got = parse_parm_values(out.read_text(encoding='utf-8'))
+    bad = [f'{k} 期望 {v:g} 讀回 {got.get(k)}' for k, v in want.items()
+           if k not in got or abs(float(got[k]) - v) > 1e-9]
+    extra = sorted(set(got) - set(want))
+    if extra:
+        bad.append(f'多出 {extra}')
+    if bad:
+        raise RuntimeError(f'VTOL 角速率增益檔讀回不符（{out}）：' + '；'.join(bad))
+    return out
+
+
+# ═════════════════════════════════════════════════════════════════════
+#  SITL 模擬風（GUI「帶入規劃風」，2026-10-20）
+# ═════════════════════════════════════════════════════════════════════
+#   2026-10-20 之前 ui/、mission/、core/ 沒有任何程式寫 SIM_WIND_* ⇒ GUI 開的 SITL **一律無風**，
+#   有考慮風的計畫被無風模擬飛（docs/評估_2026-10-20_風場是否真的被考慮進去.md §5.1）。
+#   約定與 scripts/hv_sitl_run.py 的 _write_wind 相同：
+#     SIM_WIND_DIR = 氣象「來向」（ArduPilot SITL.cpp: "Direction simulated wind is coming from"），
+#       與 hv_dccpp 的 dir_from_deg、偵察頁風向欄位同一個約定 ⇒ 270 = 西風、吹向東；
+#     SIM_WIND_T = 1（none）：不隨高度衰減，與規劃的單一 0–3000 m AGL 風層一致
+#       （韌體預設 0 = square law，AGL < SIM_WIND_T_ALT(60 m) 的風會被乘上 sqrt(agl/60)）；
+#     SIM_WIND_TURB = 0：湍流走 rand() ⇒ 打掉 SITL 的決定性，規劃也沒有湍流；SIM_WIND_DIR_Z = 0。
+#   名字由 tests/test_sitl_wind_offer.py 對照韌體參數表快照鎖住；每行 <= 98 bytes（見強制檔）。
+SIM_WIND_PARM_NAME = 'sim_wind.parm'
+#: 讀回比對的容差（值寫成 3 位小數）
+_SIM_WIND_TOL = 1e-3
+
+
+def sim_wind_params(speed_mps: float, dir_from_deg: float) -> tuple:
+    """``((名稱, 值), ...)``：SIM_WIND_SPD／DIR（來向）＋ 固定的 T=1、TURB=0、DIR_Z=0。非有限值或負風速丟錯。"""
+    import math
+    s, d = float(speed_mps), float(dir_from_deg)
+    if not (math.isfinite(s) and math.isfinite(d)) or s < 0.0:
+        raise ValueError(f'模擬風不合法：風速 {speed_mps!r} m/s、風向 {dir_from_deg!r}°')
+    return (('SIM_WIND_SPD', round(s, 3)), ('SIM_WIND_DIR', round(d % 360.0, 3) % 360.0),
+            ('SIM_WIND_T', 1), ('SIM_WIND_TURB', 0), ('SIM_WIND_DIR_Z', 0))
+
+
+def sim_wind_parm_text(speed_mps: float, dir_from_deg: float) -> str:
+    """模擬風參數檔內容（每行 ``名稱 值``；說明放整行註解）。"""
+    lines = ['# AeroPlan Studio：SITL 模擬風（GUI 帶入規劃風）',
+             '# SIM_WIND_DIR 是氣象「來向」（270 = 西風），與規劃器同約定',
+             '# SIM_WIND_T 1 = 不隨高度變；SIM_WIND_TURB 0 = 無湍流']
+    for name, val in sim_wind_params(speed_mps, dir_from_deg):
+        lines.append(f'{name} {val:g}')
+    return '\n'.join(lines) + '\n'
+
+
+def parse_parm_values(text: str) -> dict:
+    """``.parm`` 內容 → ``{名稱: float}``（略過 ``#`` 註解與空行；分隔可為空白、``=`` 或 ``,``）。
+
+    解析不了的行**丟錯**，不跳過：跳過的話讀回比對會對著少掉的值空轉成假綠燈。"""
+    import re
+    pat = re.compile(r'^([A-Z0-9_]+)\s*[=,\s]\s*(-?[\d.eE+]+)\s*$')
+    out: dict = {}
+    for lineno, raw in enumerate(text.splitlines(), 1):
+        line = raw.split('#')[0].strip()
+        if not line:
+            continue
+        m = pat.match(line)
+        if m is None:
+            raise ValueError(f'第 {lineno} 行解析不了：{raw!r}')
+        out[m.group(1)] = float(m.group(2))
+    return out
+
+
+def write_sim_wind_parm(directory, speed_mps: float, dir_from_deg: float) -> Path:
+    """把模擬風參數檔寫到 ``directory/sim_wind.parm``，**寫完讀回比對**，回傳路徑。
+
+    讀回少了任何一個值、或值對不上 ⇒ RuntimeError（呼叫端不啟動：靜默少了它＝又回到「規劃有風、模擬無風」）。"""
+    want = dict(sim_wind_params(speed_mps, dir_from_deg))
+    d = Path(directory)
+    d.mkdir(parents=True, exist_ok=True)
+    out = d / SIM_WIND_PARM_NAME
+    out.write_text(sim_wind_parm_text(speed_mps, dir_from_deg), encoding='utf-8')
+    got = parse_parm_values(out.read_text(encoding='utf-8'))
+    bad = [f'{k} 期望 {v:g} 讀回 {got.get(k)}' for k, v in want.items()
+           if k not in got or abs(float(got[k]) - float(v)) > _SIM_WIND_TOL]
+    extra = sorted(set(got) - set(want))
+    if extra:
+        bad.append(f'多出 {extra}')
+    if bad:
+        raise RuntimeError(f'模擬風參數檔讀回不符（{out}）：' + '；'.join(bad))
+    return out
+
+
+#: GUI 通用 VTOL（vtol_rate_gains.parm、100 Hz）實測驗證過的模擬風上限 [m/s]（2026-10-22，5 倍速）：
+#:   完整任務（60 m 起飛→轉態→600 m 正方形→垂直降落）無風、5、8、10、12 m/s（270°）與 12 m/s
+#:   來自 164°／344°（機頭 344°）全部飛完、0 次推力損失、降落離起飛點 ≤ 0.8 m、到 55 m 用 23–25 s；
+#:   15 m/s 飛完但爬升 33 s；18 m/s 爬升 61 s、降落 1 次推力損失＋彈地 2 次、偏 2.3 m。
+SITL_VTOL_WIND_VERIFIED_MAX_MPS = 12.0
+#: 超過這個值實測已明顯劣化（見上）⇒ 警告升級
+SITL_VTOL_WIND_DEGRADED_MPS = 15.0
+
+
+def sim_wind_limit_warning(vehicle: str, speed_mps) -> Optional[str]:
+    """模擬風超過 GUI 通用 VTOL 實測驗證上限 ⇒ 回傳警告文字，否則 None。
+
+    只管 VTOL（垂直起降段才吃得到這個上限；PLANE／COPTER 沒驗過、不亂說）。不擋：使用者可能就是要測。"""
+    if str(vehicle or '').upper() != 'VTOL' or speed_mps is None:
+        return None
+    s = float(speed_mps)
+    if not s > SITL_VTOL_WIND_VERIFIED_MAX_MPS:
+        return None
+    lim = f'{SITL_VTOL_WIND_VERIFIED_MAX_MPS:g}'
+    if s > SITL_VTOL_WIND_DEGRADED_MPS:
+        return (f'⚠⚠ 模擬風 {s:g} m/s 遠超過 GUI 通用 VTOL 實測驗證上限 {lim} m/s：18 m/s 實測垂直起飛'
+                f'到 55 m 要 2.6 倍時間、降落有推力損失與彈地——可能飛不起來或降落失控'
+                f'（SITL 通用模型的極限，不是任務問題）。')
+    return (f'⚠ 模擬風 {s:g} m/s 超過 GUI 通用 VTOL 實測驗證上限 {lim} m/s：15 m/s 實測仍飛完，'
+            f'但垂直起飛到 55 m 多花約 40 % 時間；再往上明顯劣化。')
+
+
+def build_defaults_list(vehicle: str, base, vtol, identity, enforced, wind=None, gains=None) -> List[str]:
     """``--defaults`` 的檔案順序（後面蓋前面）。None / 空字串的項目略過。
 
-    PLANE / COPTER：[base, identity]
-    VTOL：[base, vtol, identity, enforced]  ← enforced **永遠最後**，缺任何前置檔也一樣。
+    PLANE / COPTER：[base, identity, wind]
+    VTOL：[base, vtol, gains, identity, wind, enforced]  ← enforced **永遠最後**，缺任何前置檔也一樣。
+    ``gains``（VTOL 角速率增益，vtol_rate_gains.parm）緊接 vtol 之後：要蓋掉 vtol_default.parm 的
+    Alti 真機值；identity／wind／enforced 都沒有 Q_A_RAT_*，排在它後面不影響。
+    ``wind``（模擬風）排在 identity 之後：base／vtol 檔若哪天帶了 SIM_WIND_* 也會被它蓋掉；
+    強制檔沒有 SIM_WIND_*，排它前面不影響風。
     """
     v = (vehicle or '').upper()
     out: List[str] = []
@@ -288,8 +462,12 @@ def build_defaults_list(vehicle: str, base, vtol, identity, enforced) -> List[st
         out.append(base)
     if v == 'VTOL' and vtol:
         out.append(vtol)
+    if v == 'VTOL' and gains:
+        out.append(gains)
     if identity:
         out.append(identity)
+    if wind:
+        out.append(wind)
     if v == 'VTOL' and enforced:
         out.append(enforced)
     return out
@@ -591,7 +769,8 @@ class SITLLauncher:
               instance: int = 0,
               sysid: Optional[int] = None,
               extra_outputs: Optional[List[str]] = None,
-              auto_firewall: bool = False) -> str:
+              auto_firewall: bool = False,
+              sim_wind: Optional[tuple] = None) -> str:
         """
         啟動單一 SITL 子行程實例。
         instance N → TCP port 5760+10*N（與 ArduPilot 慣例一致）
@@ -606,6 +785,8 @@ class SITLLauncher:
                            會依序綁到 --serial1 / --serial2 / ...
             auto_firewall: True 時於 Popen 前嘗試新增 Windows Firewall 入站規則
                            （TCP SERIAL0 + 所有 udpclient 目標 port 的 UDP）
+            sim_wind:      ``(風速 m/s, 來向°)`` ⇒ 寫 sim_wind.parm（SIM_WIND_SPD／DIR、T=1、TURB=0）
+                           排進 --defaults 並讀回比對；None ⇒ 不寫（韌體預設 SIM_WIND_SPD 0 ＝ 無風）
         """
         vehicle = vehicle.upper()
         if vehicle not in _VEHICLE_BINARIES:
@@ -703,6 +884,7 @@ class SITLLauncher:
             )
         vtol_parm = None
         enforced_parm = None
+        gains_parm = None
         if vehicle == 'VTOL':
             # 額外疊加 QuadPlane 啟用參數 + **強制檔排最後**（ARMING_REQUIRE=1 等，見上方說明）。
             # ⚠ 強制檔寫不出來就直接失敗：靜默少了它 = 飛機解得了鎖、進得了 AUTO、就是不起飛。
@@ -716,12 +898,55 @@ class SITLLauncher:
                     f'無法寫入 VTOL 強制參數檔（{work_dir}）：{_e}\n'
                     f'沒有它 SITL 會變成「永遠已解鎖、AUTO 不起飛」，所以不啟動。'
                 ) from _e
+            # 角速率增益（見 VTOL_SITL_RATE_GAINS）：寫不出來／讀回不符同樣不啟動——
+            #   少了它 100 Hz 下俯仰自激振盪，2 m/s 的風就起飛不了，而且只會看到「推力損失」。
+            try:
+                gains_parm = write_vtol_rate_gains_parm(work_dir)
+            except Exception as _e:
+                raise RuntimeError(
+                    f'無法寫入 VTOL 角速率增益檔（{work_dir}）：{_e}\n'
+                    f'沒有它 VTOL 在 100 Hz 下俯仰自激振盪、有風就起飛不了，所以不啟動。'
+                ) from _e
+            if _SCHED_LOOP_RATE['VTOL'] != VTOL_RATE_GAINS_LOOP_HZ:
+                logger.warning(
+                    f'[SITL Launcher] ⚠ VTOL 主迴圈 {_SCHED_LOOP_RATE["VTOL"]} Hz ≠ 角速率增益驗證時的 '
+                    f'{VTOL_RATE_GAINS_LOOP_HZ} Hz ⇒ {VTOL_RATE_GAINS_PARM_NAME} 沒在這個速率驗過，要重測')
+        else:
+            # 同一個工作目錄 PLANE／VTOL 共用 ⇒ 刪掉上一趟 VTOL 留下的檔，免得以為這趟也套了
+            try:
+                (work_dir / VTOL_RATE_GAINS_PARM_NAME).unlink(missing_ok=True)
+            except OSError:
+                pass
+        # 模擬風：使用者要了就一定要帶上（寫不出來／讀回不符 ⇒ 不啟動，否則又是「規劃有風、模擬無風」）。
+        #   沒要 ⇒ 刪掉上一趟留下的檔，免得工作目錄裡的舊風檔讓人以為這趟有風。
+        wind_parm = None
+        if sim_wind is not None:
+            try:
+                wind_parm = write_sim_wind_parm(work_dir, float(sim_wind[0]), float(sim_wind[1]))
+            except Exception as _e:
+                raise RuntimeError(
+                    f'無法寫入 SITL 模擬風參數檔（{work_dir}）：{_e}\n'
+                    f'要求帶入的風沒有生效，所以不啟動。'
+                ) from _e
+            logger.info(f'[SITL Launcher] 模擬風 SIM_WIND_SPD={float(sim_wind[0]):g} m/s、'
+                        f'SIM_WIND_DIR={float(sim_wind[1]):g}°（來向；T=1、TURB=0）→ {wind_parm.name}')
+            _wwarn = sim_wind_limit_warning(vehicle, float(sim_wind[0]))
+            if _wwarn:
+                logger.warning(f'[SITL Launcher] {_wwarn}')
+        else:
+            try:
+                (work_dir / SIM_WIND_PARM_NAME).unlink(missing_ok=True)
+            except OSError:
+                pass
+            logger.info('[SITL Launcher] 模擬風：未設（SIM_WIND_SPD 韌體預設 0 ＝ 無風）')
         defaults_list = build_defaults_list(
             vehicle,
             str(param_file) if param_file.exists() else None,
             str(vtol_parm) if vtol_parm is not None else None,
             str(identity_file) if identity_file.exists() else None,
             str(enforced_parm) if enforced_parm is not None else None,
+            wind=str(wind_parm) if wind_parm is not None else None,
+            gains=str(gains_parm) if gains_parm is not None else None,
         )
         if defaults_list:
             cmd += ['--defaults', ','.join(defaults_list)]
@@ -822,7 +1047,8 @@ class SITLLauncher:
                     spacing_deg: float = 0.0008,
                     homes: list = None,
                     instance_configs: Optional[List[dict]] = None,
-                    auto_firewall: bool = False) -> list:
+                    auto_firewall: bool = False,
+                    sim_wind: Optional[tuple] = None) -> list:
         """啟動多台 SITL，回傳 ``[(邏輯序號, conn_str, 實際 instance), ...]``
 
         ⚠ 第一個是**邏輯**序號（0..count-1，與寫進 MAV_SYSID 的值同源），
@@ -838,6 +1064,7 @@ class SITLLauncher:
                     被動模式，嵌入式 MAVROS 為主動 sender）
                    未提供 → 無 fan-out；sysid 一律 = 邏輯序號+1（與 UI 標籤同源）
             auto_firewall: 是否於啟動前自動新增 Windows Firewall 入站規則
+            sim_wind: ``(風速 m/s, 來向°)`` ⇒ 每一台都帶同一個模擬風（見 :meth:`start`）；None ⇒ 無風
         """
         results = []
         for i in range(count):
@@ -876,6 +1103,7 @@ class SITLLauncher:
                 sysid=sysid_i,
                 extra_outputs=extra_outputs_i,
                 auto_firewall=auto_firewall,
+                sim_wind=sim_wind,
             )
             # ⚠⚠⚠ 回傳**三**元組 (邏輯序號, 連線字串, 實際 instance)。
             #   port 被佔用時 `start()` 會自動位移（實測 wslrelay 佔住 5760-5790

@@ -14,15 +14,24 @@
  *             不掛進 DOM 的離屏 canvas，每幀合成到這一個可見 canvas。
  *   adapter : { project(lat, lon, h_m) -> {x, y}（host 的 CSS 像素）或 null（看不到）,
  *               viewKey() -> 字串（平移／縮放／旋轉就要變） }
+ *             透視投影的 adapter 可以多回傳 w（裁切空間的 w，> 0；3D 頁的快速路徑有）：格網四角都有 w 時，
+ *             引擎改在齊次座標內插 (x·w, y·w, w) 再相除——平面在透視下的投影對齊次座標是線性的，所以靠近鏡頭、
+ *             一格跨幾百公尺時也準（只內插 x、y 的話，追機時 p90 誤差 40–55 px）。沒有 w（2D 頁）⇒ 照舊雙線性。
  *             ⚠ 建議畫面外的點照樣回傳座標、只有在地球背面／相機後方才回 null；回 null 也能用
  *               （引擎會加密取樣找可見區），只是放大到很深時找區塊比較費工。
  *
  * 實例方法（id 可省略，省略時用 'default'）：
  *   setField(field) | setField(id, field)
  *       field = {lats:[遞增], lons:[遞增], u:[[...]], v:[[...]], height_m, label, mode:'flow'|'arrows'|'both',
- *                bbox?:[latMin, lonMin, latMax, lonMax], particles?:int}
+ *                bbox?:[latMin, lonMin, latMax, lonMax], particles?:int, group?:string, groupLabel?:string}
  *       u[i][j] 對應 lats[i]、lons[j]；null／NaN 格點略過。1×1 格點 = 均勻風場，範圍取 bbox
  *       （沒給 bbox 時是 ±0.01°）。遞減的 lats／lons 會自動翻轉。沒有任何有效格點 ⇒ 移除該 id、回傳 false。
+ *       group：同組的多個風場（例：分層風場 10／80／120 m 各一個 id）在圖例只佔「一個區塊」——
+ *       groupLabel（可用換行分多行）＋全組最大風速，不再每層一行。沒給 group 的風場照舊一層一行。
+ *       particleShare（0–1）：粒子數＝依可見面積的自動值 × share（同組幾層分一個自動預算，總工作量≈單一風場），
+ *         至少 particlesMin（但不超過面積密度上限 max(20, area/25) × share），particles 有給時變成**上限**而不是固定數。
+ *       faint：true ⇒ 這層的粒子畫淡、畫細（分層風場 3D 只強調一層，其餘層淡化）。同 id 再 setField 只換樣式／
+ *         資料時粒子陣列沿用（不重生）。
  *   clearField(id?)            省略 id = 全部移除
  *   setArrows(rows, opts?) | setArrows(id, rows, opts?)
  *       rows = [[sysid, lat, lon, alt_rel, dir_from_deg, speed_mps, label, color?], ...]
@@ -35,13 +44,25 @@
  *       animate(true) limitMps(3.0) pxPerMps(0.6) maxAge(90) fade(0.92) particles(0=自動) opacity(1)
  *       zIndex(450) showLegend(true) legendCorner('top-right') legendMargin([10,10]) lineWidth(1.5)
  *       particleAlpha(0.9) arrowPxPerMps(12) arrowMinPx(18) arrowMaxPx(70) arrowSpacingPx(60) visible(true) seed(null)
+ *       trailsFollowView(false)：true ⇒ 視角變時不清軌跡，改用每顆粒子最近 TRAIL_HIST 個經緯度位置以新視角重畫
+ *         （3D 追機／旋轉時軌跡跟著場景，見下方「粒子」）；false ⇒ 舊行為（2D 頁用這個）。
  *       不認得的鍵或無效的值：console.warn 一次並忽略（不靜默吃掉）。
+ *   setMask(rects)             rects = [[x, y, w, h], ...]（host 的 CSS 像素，最多 32 個）：這些框裡不畫粒子軌跡
+ *                              （每幀清掉；例：3D 剖面柱文字底下挖空，粒子不蓋字）。空陣列＝取消
  *   options()  redraw()  interpAt(id, lat, lon) -> {u, v}|null  state()  destroy()
  *
  * 粒子：在 lat/lon 上依內插 (u, v) 平流，但每步長度在螢幕上量：用 adapter 的投影量出局部「公尺／像素」
  * （粒子位置與順風 10 m 外一點），使螢幕速度 = 風速 × pxPerMps（與縮放無關）。投影只在 viewKey 變（或資料變）
- * 時重算：引擎把可見區的經緯度格網投影一次，之後每幀用這張格網雙線性換算（格網碰到 null 的邊緣格才逐點呼叫
- * adapter.project）。視角一變軌跡全清；離開範圍／看不到／超過 maxAge 的粒子重生（初始年齡隨機）。
+ * 時重算：引擎把可見區的經緯度格網投影一次，之後每幀用這張格網雙線性換算（adapter 有給 w 時在齊次座標內插；
+ * 格網碰到 null 的邊緣格才逐點呼叫 adapter.project）。離開範圍／看不到／超過 maxAge 的粒子重生（初始年齡隨機）。
+ * 視角不變的幀：軌跡畫布乘上 fade 再疊上這一步的線段（累積畫布）。視角一變：
+ *   trailsFollowView=false ⇒ 軌跡全清、那一幀不畫（舊行為；2D 頁）。
+ *   trailsFollowView=true  ⇒ 清掉畫布後，把每顆粒子最近 TRAIL_HIST 個經緯度位置（每幀記一個）用新視角投影、
+ *     每隔 TRAIL_STRIDE 點連成折線重畫，透明度 = particleAlpha × fade^年齡（跟累積畫布的拖尾同一條淡出曲線）。
+ *     優先用 WebGL（每段一個四邊形、逐頂點透明度；Canvas 2D 描寬線的成本跟總線長成正比，最大化追機會掉到 13 FPS），
+ *     拿不到 WebGL 才用 Canvas 2D（透明度分 TRAIL_BANDS 段）。畫好的拖尾放進軌跡畫布，之後視角沒變的幀照常淡出、疊新段。
+ *     追機時鏡頭每幀都在動，累積畫布每幀都被清 ⇒ 只剩點；這樣軌跡錨在世界座標、跟著場景走。
+ *     單顆粒子上一段的螢幕長度跟記錄時差超過 TRAIL_JUMP 倍（拉近拉遠、瞬間換視角）⇒ 只丟那顆的歷史，不畫被拉長的舊線。
  * animate=false：不畫粒子，風場一律以箭頭格網顯示，只在 viewKey 或資料變時重畫。
  *
  * AeroWind.speedColor(speed, limit)：綠 < 0.7·limit、琥珀 < limit、紅 ≥ limit（limit 無效時用 3.0）。
@@ -65,9 +86,21 @@
   var EDGE_PX = 10;                // 粒子允許超出畫面的邊界
   var LATTICE_PX = 48;             // 投影格網目標格寬（螢幕像素）
   var MAX_PARTICLES = 20000;
+  var FAINT_ALPHA = 0.3;           // faint 風場：粒子不透明度 × 0.3、線寬 × 0.7
+  var FAINT_WIDTH = 0.7;
+  var MAX_MASK_RECTS = 32;
   var DENSE_THROTTLE_MS = 400;
+  var TRAIL_HIST = 25;             // trailsFollowView：每顆粒子記的位置數（含現在，≈ 24 幀的拖尾）
+  var TRAIL_STRIDE = 4;            // 重畫時每隔幾個位置取一點（風場平滑，6 段折線看不出差別；投影次數是逐點的 1/4）
+  var TRAIL_BANDS = 4;             // 透明度分段：每段 TRAIL_BAND_FRAMES 幀，透明度 = particleAlpha × fade^段首年齡
+  var TRAIL_BAND_FRAMES = (TRAIL_HIST - 1) / TRAIL_BANDS;   // 6：年齡 0–5、6–11、12–17、18–23 各一段（各 3 條線段）
+  var TRAIL_JUMP = 1.6;            // 上一段螢幕長度 / 記錄時長度超過這個倍數（或低於倒數）⇒ 丟掉那顆粒子的歷史
+  var HAS_PATH2D = typeof root.Path2D === 'function';
+  var GL_FLOATS = 8;               // WebGL 拖尾每個頂點：x, y（CSS px）、side（−1／+1 橫跨線寬）、半線寬（裝置 px）、r, g, b, a
+  var GL_CHUNK = 16383;            // 一次 drawElements 最多幾個四邊形（16 位元索引：4 × 16383 < 65536）
   var COLORS = { ok: '#2fbf71', caution: '#f5a623', warn: '#d03b3b', unknown: '#9e9e9e' };
   var CLASS_COLORS = [COLORS.ok, COLORS.caution, COLORS.warn];
+  var CLASS_RGB = [[47 / 255, 191 / 255, 113 / 255], [245 / 255, 166 / 255, 35 / 255], [208 / 255, 59 / 255, 59 / 255]];
   var TEXT_COLOR = '#e8eef5';
   var WARN_TEXT = '#ff8a80';
   var FONT = '12px "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", "Noto Sans CJK TC", sans-serif';
@@ -322,19 +355,20 @@
   var DEFAULTS = {
     animate: true, limitMps: DEFAULT_LIMIT, pxPerMps: 0.6, maxAge: 90, fade: 0.92, particles: 0, opacity: 1,
     zIndex: 450, showLegend: true, legendCorner: 'top-right', legendMargin: [10, 10], lineWidth: 1.5,
-    particleAlpha: 0.9, arrowPxPerMps: 12, arrowMinPx: 18, arrowMaxPx: 70, arrowSpacingPx: 60, visible: true, seed: null
+    particleAlpha: 0.9, arrowPxPerMps: 12, arrowMinPx: 18, arrowMaxPx: 70, arrowSpacingPx: 60, visible: true, seed: null,
+    trailsFollowView: false
   };
   var OPT_ALIASES = {
     limit_mps: 'limitMps', px_per_mps: 'pxPerMps', max_age: 'maxAge', z_index: 'zIndex', show_legend: 'showLegend',
     legend: 'showLegend', legend_corner: 'legendCorner', legend_margin: 'legendMargin', line_width: 'lineWidth',
     particle_alpha: 'particleAlpha', arrow_px_per_mps: 'arrowPxPerMps', arrow_min_px: 'arrowMinPx',
-    arrow_max_px: 'arrowMaxPx', arrow_spacing_px: 'arrowSpacingPx'
+    arrow_max_px: 'arrowMaxPx', arrow_spacing_px: 'arrowSpacingPx', trails_follow_view: 'trailsFollowView'
   };
   function vBool(v) { return (typeof v === 'boolean' || v === 0 || v === 1) ? !!v : INVALID; }
   function vPos(v) { v = num(v); return (isFinite(v) && v > 0) ? v : INVALID; }
   function vUnit(v) { v = num(v); return (isFinite(v) && v >= 0 && v <= 1) ? v : INVALID; }
   var VALIDATORS = {
-    animate: vBool, showLegend: vBool, visible: vBool,
+    animate: vBool, showLegend: vBool, visible: vBool, trailsFollowView: vBool,
     limitMps: vPos, pxPerMps: vPos, lineWidth: vPos, arrowPxPerMps: vPos, arrowMinPx: vPos, arrowMaxPx: vPos,
     arrowSpacingPx: function (v) { v = num(v); return (isFinite(v) && v >= 10) ? v : INVALID; },
     maxAge: function (v) { v = num(v); return (isFinite(v) && v >= 1) ? Math.round(v) : INVALID; },
@@ -436,15 +470,54 @@
     ctx.closePath();
   }
   function allocParticles(old, n) {
-    var pt = { n: n, lat: new Float64Array(n), lon: new Float64Array(n), age: new Int32Array(n), alive: new Uint8Array(n) };
+    var pt = { n: n, lat: new Float64Array(n), lon: new Float64Array(n), age: new Int32Array(n), alive: new Uint8Array(n),
+               hist: null };
     if (old) {
       var m = Math.min(old.n, n);
       pt.lat.set(old.lat.subarray(0, m));
       pt.lon.set(old.lon.subarray(0, m));
       pt.age.set(old.age.subarray(0, m));
       pt.alive.set(old.alive.subarray(0, m));
+      if (old.hist) {
+        allocHistory(pt);
+        var H = pt.hist, G = old.hist;
+        H.lat.set(G.lat.subarray(0, m * TRAIL_HIST));
+        H.lon.set(G.lon.subarray(0, m * TRAIL_HIST));
+        H.head.set(G.head.subarray(0, m));
+        H.cnt.set(G.cnt.subarray(0, m));
+        H.step.set(G.step.subarray(0, m));
+        H.cls.set(G.cls.subarray(0, m));
+      }
     }
     return pt;
+  }
+  // trailsFollowView 的位置歷史（環狀）：第 k 顆的第 i 格在 k*TRAIL_HIST + i；head = 最新那格、cnt = 有效格數；
+  // step = 最新一步記錄時的螢幕長度（px，判斷視角是否跳太大）；cls = 最新一步的風速等級（0／1／2，拖尾整條用這個顏色）。
+  // 只在選項打開時才配置（2D 頁不付這個成本）。
+  function allocHistory(pt) {
+    var n = pt.n;
+    pt.hist = { lat: new Float64Array(n * TRAIL_HIST), lon: new Float64Array(n * TRAIL_HIST), head: new Uint8Array(n),
+                cnt: new Uint8Array(n), step: new Float32Array(n), cls: new Uint8Array(n) };
+    return pt.hist;
+  }
+  function histReset(H, k, lat, lon) {
+    var b = k * TRAIL_HIST;
+    H.head[k] = 0;
+    H.cnt[k] = 1;
+    H.step[k] = 0;
+    H.lat[b] = lat;
+    H.lon[b] = lon;
+  }
+  function histPush(H, k, lat, lon, stepPx, cls) {
+    var h = H.head[k] + 1;
+    if (h >= TRAIL_HIST) { h = 0; }
+    var i = k * TRAIL_HIST + h;
+    H.head[k] = h;
+    if (H.cnt[k] < TRAIL_HIST) { H.cnt[k]++; }
+    H.step[k] = stepPx;
+    H.cls[k] = cls;
+    H.lat[i] = lat;
+    H.lon[i] = lon;
   }
   function expandBox(b, f, full) {
     var dla = (b[2] - b[0]) * f, dlo = (b[3] - b[1]) * f;
@@ -474,6 +547,7 @@
     this._warned = {};
     this._destroyed = false;
     this._px = 0;
+    this._pw = NaN;                  // 上一次 _proj 的 w（adapter 沒給 ⇒ NaN）
     this._py = 0;
     this._dx = 0;
     this._dy = 0;
@@ -481,6 +555,9 @@
     this._lastDense = -1e12;
     this._scratch = { u: 0, v: 0 };
     this._segs = [[], [], []];
+    this._segsF = [[], [], []];      // faint 風場的軌跡（先畫、較淡）
+    this._trail = { mode: 'none', segments: 0, jumps: 0, renderer: null };   // 上一幀的軌跡畫法（測試／診斷用）
+    this._mask = [];
     this._legend = [];
     this._geom = [];
     var cv = document.createElement('canvas');
@@ -529,10 +606,16 @@
       mode = 'flow';
     }
     var h = num(f.height_m), np = num(f.particles), old = this.fields.get(id);
+    var sh = num(f.particleShare), nm = num(f.particlesMin);
     this.fields.set(id, {
       id: id, P: P, mode: mode, h: isFinite(h) ? h : 0,
       label: (f.label === null || f.label === undefined || f.label === '') ? null : String(f.label),
+      group: (typeof f.group === 'string' && f.group) ? f.group : null,
+      groupLabel: (f.groupLabel === null || f.groupLabel === undefined || f.groupLabel === '') ? null : String(f.groupLabel),
       nReq: (isFinite(np) && np > 0) ? Math.min(MAX_PARTICLES, Math.round(np)) : 0,
+      share: (isFinite(sh) && sh > 0 && sh <= 1) ? sh : 0,
+      nMin: (isFinite(nm) && nm > 0) ? Math.min(MAX_PARTICLES, Math.round(nm)) : 0,
+      faint: f.faint === true,
       pt: old ? old.pt : null, region: old ? old.region : null, lat: null, regionDirty: true, pendingDense: false,
       alive: 0, stat: { dx: 0, dy: 0, len: 0, n: 0 }
     });
@@ -616,7 +699,7 @@
     this.canvas.style.display = O.visible ? '' : 'none';
     if (wasAnimate && !O.animate) {
       this._clearCanvas(this._ctxT, this._trailCanvas);
-      this.fields.forEach(function (F) { F.alive = 0; });
+      this.fields.forEach(function (F) { F.alive = 0; if (F.pt && F.pt.hist) { F.pt.hist.cnt.fill(0); } });
     }
     this._overlayDirty = true;
     this._afterChange();
@@ -702,13 +785,14 @@
     var p;
     try { p = this.adapter.project(lat, lon, h); } catch (e) { return false; }
     if (!p) { return false; }
-    var x, y;
-    if (typeof p.x === 'number') { x = p.x; y = p.y; }
+    var x, y, w = NaN;
+    if (typeof p.x === 'number') { x = p.x; y = p.y; if (typeof p.w === 'number' && p.w > 0 && isFinite(p.w)) { w = p.w; } }
     else if (isRowLike(p)) { x = p[0]; y = p[1]; }
     else { return false; }
     if (!(typeof x === 'number' && typeof y === 'number' && isFinite(x) && isFinite(y))) { return false; }
     this._px = x;
     this._py = y;
+    this._pw = w;
     return true;
   };
 
@@ -737,17 +821,35 @@
     var o = this.opts, self = this, stepped = false;
     if (o.visible && o.animate && this.w >= 2 && this.h >= 2) {
       if (!viewChanged) { this._fade(); }
-      var segs = this._segs;
+      var segs = this._segs, segsF = this._segsF;
       segs[0].length = 0;
       segs[1].length = 0;
       segs[2].length = 0;
+      segsF[0].length = 0;
+      segsF[1].length = 0;
+      segsF[2].length = 0;
+      var follow = o.trailsFollowView && viewChanged, gl = follow ? this._glInit() : null;
+      if (follow && !gl && !HAS_PATH2D) { follow = false; }
+      var record = o.trailsFollowView && (gl !== null || HAS_PATH2D);
+      var paths = (follow && !gl) ? this._newTrailPaths() : null, nHist = 0, nJump = 0;
+      if (gl) { this._glN[0] = 0; this._glN[1] = 0; }
       this.fields.forEach(function (F) {
+        F.trailSegs = 0;
         if (F.mode === 'arrows') { F.alive = 0; return; }
         if (F.regionDirty) { self._computeRegion(F); }
-        self._stepParticles(F, !viewChanged);
+        self._stepParticles(F, !viewChanged, record, follow);
+        if (follow) {
+          F.trailSegs = gl ? self._traceHistoryGL(F) : self._traceHistory(F, paths);
+          nHist += F.trailSegs;
+          nJump += F.trailJumps;
+        }
       });
+      if (follow) { if (gl) { this._glDraw(); } else { this._strokeTrails(paths); } }
       this._drawSegs();
+      this._applyMask();
       if (this._hasContent()) { this.frames++; }
+      this._trail = { mode: follow ? 'follow' : (viewChanged ? 'cleared' : 'accumulate'), segments: nHist, jumps: nJump,
+                      renderer: follow ? (gl ? 'webgl' : 'canvas2d') : null };
       stepped = true;
     }
     var overlayChanged = false;
@@ -771,12 +873,15 @@
   // 在 [la0,la1]×[lo0,lo1] 上取 (N+1)² 個點投影；回傳格點座標與「可見格」（任一角投影成功且外框碰到畫面）。
   Wind.prototype._sample = function (F, la0, lo0, la1, lo1, N) {
     var NP = N + 1, n = NP * NP, xs = new Float64Array(n), ys = new Float64Array(n), ok = new Uint8Array(n);
+    var ws = new Float64Array(n), anyW = false;
     var dla = (la1 - la0) / N, dlo = (lo1 - lo0) / N, nulls = false, a, b, k, q;
     for (a = 0; a < NP; a++) {
       for (b = 0; b < NP; b++) {
         k = a * NP + b;
-        if (this._proj(la0 + a * dla, lo0 + b * dlo, F.h)) { ok[k] = 1; xs[k] = this._px; ys[k] = this._py; }
-        else { nulls = true; }
+        if (this._proj(la0 + a * dla, lo0 + b * dlo, F.h)) {
+          ok[k] = 1; xs[k] = this._px; ys[k] = this._py; ws[k] = this._pw;
+          if (this._pw === this._pw) { anyW = true; }
+        } else { ws[k] = NaN; nulls = true; }
       }
     }
     if (nulls) { this._sawNull = true; }
@@ -808,7 +913,7 @@
         if (b > bmax) { bmax = b; }
       }
     }
-    return { N: N, NP: NP, la0: la0, lo0: lo0, dla: dla, dlo: dlo, xs: xs, ys: ys, ok: ok, vis: vis, cw: cw, csz: csz,
+    return { N: N, NP: NP, la0: la0, lo0: lo0, dla: dla, dlo: dlo, xs: xs, ys: ys, ws: anyW ? ws : null, ok: ok, vis: vis, cw: cw, csz: csz,
              full: full, cnt: cnt, nulls: nulls, amin: amin, amax: amax, bmin: bmin, bmax: bmax };
   };
 
@@ -943,8 +1048,16 @@
     if (j >= N) { j = N - 1; }
     var ti = fi - i, tj = fj - j, NP = L.NP, k = i * NP + j, ok = L.ok;
     if (ok[k] && ok[k + 1] && ok[k + NP] && ok[k + NP + 1]) {
-      var xs = L.xs, ys = L.ys;
+      var xs = L.xs, ys = L.ys, ws = L.ws;
       var w00 = (1 - ti) * (1 - tj), w01 = (1 - ti) * tj, w10 = ti * (1 - tj), w11 = ti * tj;
+      if (ws) {                                          // 透視：在齊次座標內插（四角都要有 w）
+        var a0 = ws[k] * w00, a1 = ws[k + 1] * w01, a2 = ws[k + NP] * w10, a3 = ws[k + NP + 1] * w11, cw = a0 + a1 + a2 + a3;
+        if (cw > 0) {                                    // 有 NaN ⇒ cw 是 NaN ⇒ 不成立 ⇒ 下面照舊雙線性
+          this._px = (xs[k] * a0 + xs[k + 1] * a1 + xs[k + NP] * a2 + xs[k + NP + 1] * a3) / cw;
+          this._py = (ys[k] * a0 + ys[k + 1] * a1 + ys[k + NP] * a2 + ys[k + NP + 1] * a3) / cw;
+          return true;
+        }
+      }
       this._px = xs[k] * w00 + xs[k + 1] * w01 + xs[k + NP] * w10 + xs[k + NP + 1] * w11;
       this._py = ys[k] * w00 + ys[k + 1] * w01 + ys[k + NP] * w10 + ys[k + NP + 1] * w11;
       return true;
@@ -953,13 +1066,26 @@
   };
 
   // ── 粒子 ──
-  Wind.prototype._targetCount = function (F) {
-    if (F.nReq > 0) { return F.nReq; }
-    if (this.opts.particles > 0) { return this.opts.particles; }
-    var area = F.region ? F.region.area : 0;
-    if (!(area > 0)) { return F.pt ? F.pt.n : 0; }
+  function areaCount(area) {             // 依可見面積的自動粒子數：每 1200 px² 一顆（400–1500），且不密於每 25 px² 一顆
     var n = clamp(Math.round(area / 1200), 400, 1500);
     return Math.min(n, Math.max(20, Math.round(area / 25)));
+  }
+
+  Wind.prototype._targetCount = function (F) {
+    var area = F.region ? F.region.area : 0;
+    if (F.share > 0) {                     // 同組分一個自動預算；particles 有給時是上限
+      if (!(area > 0)) { return F.pt ? F.pt.n : 0; }
+      var auto = this.opts.particles > 0 ? this.opts.particles : areaCount(area);
+      // 下限 particlesMin，但不超過「面積密度上限 × share」：拉得很遠時全組加起來也不密於單一風場
+      var n = Math.round(auto * F.share), floor = Math.min(F.nMin, Math.max(1, Math.round(Math.max(20, Math.round(area / 25)) * F.share)));
+      if (n < floor) { n = floor; }
+      if (F.nReq > 0 && n > F.nReq) { n = F.nReq; }
+      return n;
+    }
+    if (F.nReq > 0) { return F.nReq; }
+    if (this.opts.particles > 0) { return this.opts.particles; }
+    if (!(area > 0)) { return F.pt ? F.pt.n : 0; }
+    return areaCount(area);
   };
 
   Wind.prototype._spawn = function (F, k, randomAge) {
@@ -974,21 +1100,29 @@
       pt.lon[k] = lon;
       pt.alive[k] = 1;
       pt.age[k] = randomAge ? Math.floor(rng() * this.opts.maxAge) : 0;
+      if (pt.hist) { histReset(pt.hist, k, lat, lon); }
       return true;
     }
     pt.alive[k] = 0;
+    if (pt.hist) { pt.hist.cnt[k] = 0; }
     return false;
   };
 
-  Wind.prototype._stepParticles = function (F, draw) {
-    var target = this._targetCount(F), pt = F.pt, explicit = F.nReq > 0 || this.opts.particles > 0;
+  // draw：把這一步的線段排進累積畫布（視角沒變的幀）。record：記位置歷史（trailsFollowView）。
+  // follow：這一幀視角變了、要用歷史重畫 ⇒ 先檢查每顆粒子上一段的螢幕長度有沒有跳（TRAIL_JUMP）。
+  Wind.prototype._stepParticles = function (F, draw, record, follow) {
+    var target = this._targetCount(F), pt = F.pt, explicit = F.share > 0 ? false : (F.nReq > 0 || this.opts.particles > 0);
     if (!pt || (pt.n !== target && (explicit || Math.abs(target - pt.n) > 0.15 * pt.n))) { F.pt = pt = allocParticles(pt, target); }
     F.alive = 0;
     F.stat = { dx: 0, dy: 0, len: 0, n: 0 };
+    F.trailJumps = 0;
     var R = F.region;
-    if (!R || !R.nCells || !pt.n) { pt.alive.fill(0); return; }
+    if (!R || !R.nCells || !pt.n) { pt.alive.fill(0); if (pt.hist) { pt.hist.cnt.fill(0); } return; }
+    if (record && !pt.hist) { allocHistory(pt); }         // 剛打開：歷史從空的開始（cnt 0 ⇒ 下一步只記一點）
+    if (!record && pt.hist) { pt.hist = null; }
+    var H = pt.hist, jumps = 0;
     var P = F.P, o = this.opts, sc = this._scratch, lim = o.limitMps, cf = CAUTION_FRAC * lim, pxm = o.pxPerMps;
-    var maxAge = o.maxAge, segs = this._segs, sdx = 0, sdy = 0, sl = 0, sn = 0, alive = 0;
+    var maxAge = o.maxAge, segs = F.faint ? this._segsF : this._segs, sdx = 0, sdy = 0, sl = 0, sn = 0, alive = 0;
     for (var k = 0; k < pt.n; k++) {
       if (!pt.alive[k]) { if (this._spawn(F, k, true)) { alive++; } continue; }
       if (pt.age[k] >= maxAge) { if (this._spawn(F, k, false)) { alive++; } continue; }
@@ -998,7 +1132,25 @@
         continue;
       }
       var x0 = this._px, y0 = this._py, u = sc.u, v = sc.v, s = Math.sqrt(u * u + v * v);
-      if (s < 1e-9) { pt.age[k]++; alive++; continue; }
+      if (H) {
+        if (!H.cnt[k]) { histReset(H, k, lat, lon); }
+        else if (follow && H.cnt[k] >= 2 && H.step[k] > 0.5) {
+          // 上一段（前一格 → 現在）在新視角下的長度 vs 記錄時：跳太多 ⇒ 舊歷史在新視角裡會被拉長／壓扁，丟掉
+          var hp = H.head[k] - 1;
+          if (hp < 0) { hp += TRAIL_HIST; }
+          var jL = -1;
+          if (this._mapLL(F, H.lat[k * TRAIL_HIST + hp], H.lon[k * TRAIL_HIST + hp])) {
+            jL = Math.sqrt((this._px - x0) * (this._px - x0) + (this._py - y0) * (this._py - y0)) / H.step[k];
+          }
+          if (!(jL <= TRAIL_JUMP && jL >= 1 / TRAIL_JUMP)) { histReset(H, k, lat, lon); jumps++; }
+        }
+      }
+      if (s < 1e-9) {                                     // 無風：不動也不畫；歷史只留現在這一點（不留一條凍住的舊線）
+        pt.age[k]++;
+        alive++;
+        if (H) { histReset(H, k, lat, lon); }
+        continue;
+      }
       var cosLat = Math.cos(lat * D2R);
       if (cosLat < 1e-6) { cosLat = 1e-6; }
       var dLat = (v / s) * PROBE_M / M_PER_DEG, dLon = (u / s) * PROBE_M / (M_PER_DEG * cosLat), wx, wy;
@@ -1007,8 +1159,8 @@
       else { if (this._spawn(F, k, true)) { alive++; } continue; }
       var wl = Math.sqrt(wx * wx + wy * wy);
       if (!(wl > 1e-12)) { if (this._spawn(F, k, true)) { alive++; } continue; }
-      var stepPx = s * pxm, frac = stepPx / wl, x1 = x0 + wx * frac, y1 = y0 + wy * frac;
-      if (draw) { segs[s >= lim ? 2 : (s >= cf ? 1 : 0)].push(x0, y0, x1, y1); }
+      var stepPx = s * pxm, frac = stepPx / wl, x1 = x0 + wx * frac, y1 = y0 + wy * frac, cls = s >= lim ? 2 : (s >= cf ? 1 : 0);
+      if (draw) { segs[cls].push(x0, y0, x1, y1); }
       sdx += x1 - x0;
       sdy += y1 - y0;
       sl += stepPx;
@@ -1017,9 +1169,233 @@
       pt.lat[k] = lat + dLat * frac;
       pt.lon[k] = lon + dLon * frac;
       pt.age[k]++;
+      if (H) { histPush(H, k, pt.lat[k], pt.lon[k], stepPx, cls); }
     }
     F.alive = alive;
     F.stat = { dx: sn ? sdx / sn : 0, dy: sn ? sdy / sn : 0, len: sn ? sl / sn : 0, n: sn };
+    F.trailJumps = jumps;
+  };
+
+  // trailsFollowView、視角變了的那一幀：把每顆活粒子的位置歷史用「現在的」投影連成折線，依年齡分段放進
+  // paths[faint][等級][段]（Path2D），最後由 _strokeTrails 一段一段描（舊的先畫、淡；新的後畫）。
+  // 投影走 _mapLL（可見區格網雙線性）；某一點投影失敗就在那裡截斷（更舊的不畫）。回傳畫了幾段。
+  Wind.prototype._traceHistory = function (F, paths) {
+    var pt = F.pt, H = pt ? pt.hist : null;
+    if (!H || !F.lat) { return 0; }
+    var fi = F.faint ? 1 : 0, fp = paths.p[fi], used = paths.used[fi], nSeg = 0;
+    for (var k = 0; k < pt.n; k++) {
+      var c = H.cnt[k];
+      if (!pt.alive[k] || c < 2) { continue; }
+      var base = k * TRAIL_HIST, head = H.head[k], cl = H.cls[k], cp = fp[cl], px = 0, py = 0, prev = -1;
+      for (var a = 0; a < c; a += TRAIL_STRIDE) {
+        if (a + TRAIL_STRIDE >= c) { a = c - 1; }        // 最後一點用最舊那格（不一定落在步距上）
+        var j = head - a;
+        if (j < 0) { j += TRAIL_HIST; }
+        if (!this._mapLL(F, H.lat[base + j], H.lon[base + j])) { break; }
+        if (prev >= 0) {                                  // 這一段的「新端」年齡 prev 決定透明度分段
+          var p = cp[Math.min(TRAIL_BANDS - 1, (prev / TRAIL_BAND_FRAMES) | 0)];
+          p.moveTo(px, py);
+          p.lineTo(this._px, this._py);
+          nSeg++;
+        }
+        px = this._px;
+        py = this._py;
+        prev = a;
+      }
+      if (prev > 0) { used[cl] = 1; }
+    }
+    return nSeg;
+  };
+
+  Wind.prototype._newTrailPaths = function () {
+    var out = { p: [], used: [[0, 0, 0], [0, 0, 0]] };
+    for (var f = 0; f < 2; f++) {
+      var byCls = [];
+      for (var c = 0; c < 3; c++) {
+        var bands = [];
+        for (var b = 0; b < TRAIL_BANDS; b++) { bands.push(new root.Path2D()); }
+        byCls.push(bands);
+      }
+      out.p.push(byCls);
+    }
+    return out;
+  };
+
+  Wind.prototype._strokeTrails = function (paths) {
+    var ctx = this._ctxT, o = this.opts;
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.lineCap = 'round';
+    for (var f = 1; f >= 0; f--) {                       // faint 先畫
+      ctx.lineWidth = f ? o.lineWidth * FAINT_WIDTH : o.lineWidth;
+      var a0 = f ? o.particleAlpha * FAINT_ALPHA : o.particleAlpha;
+      for (var b = TRAIL_BANDS - 1; b >= 0; b--) {        // 舊的先畫
+        ctx.globalAlpha = a0 * Math.pow(o.fade, b * TRAIL_BAND_FRAMES);
+        for (var c = 0; c < 3; c++) {
+          if (!paths.used[f][c]) { continue; }
+          ctx.strokeStyle = CLASS_COLORS[c];
+          ctx.stroke(paths.p[f][c][b]);
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+  };
+
+  // ── WebGL 拖尾（trailsFollowView 的重畫，優先用）──
+  // 為什麼不用 Canvas 2D：Chromium 的 2D canvas 描「寬度 > 1 裝置像素」的反鋸齒線，成本跟總線長成正比（2026-10-21
+  // 在 QtWebEngine 最大化 2560×1369、dpr 1.5 實測：每幀 1,500 段 × 30 px ⇒ 43 FPS、12,000 段 ⇒ 13 FPS）。靜止時便宜是因為
+  // 每幀只畫 3 px 的新段、靠淡出累積；重畫整條拖尾就要畫全長。WebGL 每段一個四邊形，GPU 畫幾萬段不到 1 ms；
+  // 透明度逐頂點給（= particleAlpha × fade^年齡，與累積畫布的淡出同一條曲線）、橫向用距離算覆蓋率（反鋸齒）。
+  // 畫好之後在同一個 task 裡 drawImage 到軌跡畫布，之後的靜止幀照常在上面淡出、疊新段。
+  // 拿不到 WebGL（或 context 掉了、著色器編不過）⇒ 回 null，改用 Canvas 2D（_traceHistory／_strokeTrails）。
+  var GL_VS = 'attribute vec2 p; attribute vec2 s; attribute vec4 c; uniform vec2 sz; varying vec2 vs; varying vec4 vc;' +
+              'void main() { vs = s; vc = c; gl_Position = vec4(p.x / sz.x * 2.0 - 1.0, 1.0 - p.y / sz.y * 2.0, 0.0, 1.0); }';
+  var GL_FS = 'precision mediump float; varying vec2 vs; varying vec4 vc;' +
+              'void main() { float d = abs(vs.x) * (vs.y + 1.0); float a = vc.a * clamp(vs.y + 0.5 - d, 0.0, 1.0);' +
+              ' gl_FragColor = vec4(vc.rgb * a, a); }';
+
+  Wind.prototype._glInit = function () {
+    if (this._gl !== undefined) { return this._gl; }       // null = 不可用（之後都走 Canvas 2D）
+    this._gl = null;
+    if (this._noGL) { return null; }
+    var self = this, cv, gl, why = '';
+    try {
+      cv = document.createElement('canvas');
+      gl = cv.getContext('webgl', { alpha: true, premultipliedAlpha: true, antialias: false, depth: false, stencil: false,
+                                    preserveDrawingBuffer: false });
+      if (!gl) { why = '拿不到 WebGL'; }
+    } catch (e) { gl = null; why = String(e); }
+    var prog = null;
+    if (gl) {
+      var sh = function (type, src) {
+        var o = gl.createShader(type);
+        gl.shaderSource(o, src);
+        gl.compileShader(o);
+        if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) { why = '著色器：' + gl.getShaderInfoLog(o); return null; }
+        return o;
+      };
+      var vs = sh(gl.VERTEX_SHADER, GL_VS), fs = vs ? sh(gl.FRAGMENT_SHADER, GL_FS) : null;
+      if (vs && fs) {
+        prog = gl.createProgram();
+        gl.attachShader(prog, vs);
+        gl.attachShader(prog, fs);
+        gl.linkProgram(prog);
+        if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) { why = '連結：' + gl.getProgramInfoLog(prog); prog = null; }
+      }
+    }
+    if (!prog) {
+      this._warnOnce('gl', '[AeroWind] 拖尾改用 Canvas 2D（' + (why || 'WebGL 不可用') + '）：大畫面追機時可能掉幀');
+      return null;
+    }
+    var idx = new Uint16Array(GL_CHUNK * 6);
+    for (var q = 0; q < GL_CHUNK; q++) {
+      var v = q * 4, i = q * 6;
+      idx[i] = v; idx[i + 1] = v + 1; idx[i + 2] = v + 2; idx[i + 3] = v + 2; idx[i + 4] = v + 1; idx[i + 5] = v + 3;
+    }
+    var ibo = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idx, gl.STATIC_DRAW);
+    cv.addEventListener('webglcontextlost', function () {
+      self._gl = null;                                       // 之後改用 Canvas 2D；不再重建
+      self._warnOnce('gllost', '[AeroWind] WebGL context 遺失，拖尾改用 Canvas 2D');
+    }, false);
+    this._glBuf = [new Float32Array(4096 * 4 * GL_FLOATS), new Float32Array(4096 * 4 * GL_FLOATS)];
+    this._glN = [0, 0];
+    this._gl = { cv: cv, gl: gl, prog: prog, vbo: gl.createBuffer(), ibo: ibo,
+                 aP: gl.getAttribLocation(prog, 'p'), aS: gl.getAttribLocation(prog, 's'),
+                 aC: gl.getAttribLocation(prog, 'c'), uSz: gl.getUniformLocation(prog, 'sz') };
+    return this._gl;
+  };
+
+  function glVert(B, w, x, y, side, hw, rgb, a) {
+    B[w] = x; B[w + 1] = y; B[w + 2] = side; B[w + 3] = hw; B[w + 4] = rgb[0]; B[w + 5] = rgb[1]; B[w + 6] = rgb[2]; B[w + 7] = a;
+    return w + GL_FLOATS;
+  }
+
+  // 跟 _traceHistory 同樣的點（每隔 TRAIL_STRIDE 格、最後一點用最舊那格、投影失敗就截斷），每段一個四邊形放進
+  // _glBuf[faint ? 1 : 0]（兩端各帶自己年齡的透明度）。回傳畫了幾段。
+  Wind.prototype._traceHistoryGL = function (F) {
+    var pt = F.pt, H = pt ? pt.hist : null;
+    if (!H || !F.lat) { return 0; }
+    var o = this.opts, fi = F.faint ? 1 : 0, a0 = o.particleAlpha * (fi ? FAINT_ALPHA : 1);
+    var hw = o.lineWidth * (fi ? FAINT_WIDTH : 1) * this.dpr / 2, ext = (hw + 1) / this.dpr;   // 半線寬（裝置 px）、外擴（CSS px）
+    var fpow = this._fpow, nSeg = 0;
+    if (!fpow || this._fpowOf !== o.fade) {
+      fpow = this._fpow = new Float64Array(TRAIL_HIST);
+      this._fpowOf = o.fade;
+      for (var t = 0; t < TRAIL_HIST; t++) { fpow[t] = Math.pow(o.fade, t); }
+    }
+    for (var k = 0; k < pt.n; k++) {
+      var c = H.cnt[k];
+      if (!pt.alive[k] || c < 2) { continue; }
+      var base = k * TRAIL_HIST, head = H.head[k], rgb = CLASS_RGB[H.cls[k]], px = 0, py = 0, prev = -1;
+      for (var a = 0; a < c; a += TRAIL_STRIDE) {
+        if (a + TRAIL_STRIDE >= c) { a = c - 1; }
+        var j = head - a;
+        if (j < 0) { j += TRAIL_HIST; }
+        if (!this._mapLL(F, H.lat[base + j], H.lon[base + j])) { break; }
+        var x = this._px, y = this._py;
+        if (prev >= 0) {
+          var dx = x - px, dy = y - py, L = Math.sqrt(dx * dx + dy * dy);
+          if (L > 1e-6) {
+            var nx = -dy / L * ext, ny = dx / L * ext, n = this._glN[fi], need = (n + 1) * 4 * GL_FLOATS, B = this._glBuf[fi];
+            if (B.length < need) {
+              var nb = new Float32Array(Math.max(need, B.length * 2));
+              nb.set(B);
+              B = this._glBuf[fi] = nb;
+            }
+            var w = n * 4 * GL_FLOATS, ah = a0 * fpow[prev], at = a0 * fpow[a];
+            w = glVert(B, w, px + nx, py + ny, 1, hw, rgb, ah);
+            w = glVert(B, w, px - nx, py - ny, -1, hw, rgb, ah);
+            w = glVert(B, w, x + nx, y + ny, 1, hw, rgb, at);
+            glVert(B, w, x - nx, y - ny, -1, hw, rgb, at);
+            this._glN[fi] = n + 1;
+            nSeg++;
+          }
+        }
+        px = x;
+        py = y;
+        prev = a;
+      }
+    }
+    return nSeg;
+  };
+
+  // faint 先畫、再畫實線層；畫完在同一個 task 裡 drawImage 到（這一幀已清空的）軌跡畫布。
+  Wind.prototype._glDraw = function () {
+    var G = this._gl, gl = G.gl, cv = G.cv, tw = this._trailCanvas.width, th = this._trailCanvas.height;
+    if (cv.width !== tw || cv.height !== th) { cv.width = tw; cv.height = th; }
+    gl.viewport(0, 0, tw, th);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    if (!this._glN[0] && !this._glN[1]) { return; }
+    gl.useProgram(G.prog);
+    gl.uniform2f(G.uSz, this.w, this.h);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);           // 輸出是預乘 alpha
+    gl.bindBuffer(gl.ARRAY_BUFFER, G.vbo);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, G.ibo);
+    gl.enableVertexAttribArray(G.aP);
+    gl.enableVertexAttribArray(G.aS);
+    gl.enableVertexAttribArray(G.aC);
+    var stride = GL_FLOATS * 4;
+    for (var fi = 1; fi >= 0; fi--) {
+      var n = this._glN[fi];
+      if (!n) { continue; }
+      gl.bufferData(gl.ARRAY_BUFFER, this._glBuf[fi].subarray(0, n * 4 * GL_FLOATS), gl.STREAM_DRAW);
+      for (var q0 = 0; q0 < n; q0 += GL_CHUNK) {
+        var off = q0 * 4 * stride;
+        gl.vertexAttribPointer(G.aP, 2, gl.FLOAT, false, stride, off);
+        gl.vertexAttribPointer(G.aS, 2, gl.FLOAT, false, stride, off + 8);
+        gl.vertexAttribPointer(G.aC, 4, gl.FLOAT, false, stride, off + 16);
+        gl.drawElements(gl.TRIANGLES, Math.min(GL_CHUNK, n - q0) * 6, gl.UNSIGNED_SHORT, 0);
+      }
+    }
+    var ctx = this._ctxT;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.drawImage(cv, 0, 0);
   };
 
   Wind.prototype._fade = function () {
@@ -1033,24 +1409,53 @@
   };
 
   Wind.prototype._drawSegs = function () {
-    var ctx = this._ctxT, segs = this._segs, o = this.opts;
+    var ctx = this._ctxT, o = this.opts;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.globalCompositeOperation = 'source-over';
-    ctx.globalAlpha = o.particleAlpha;
-    ctx.lineWidth = o.lineWidth;
     ctx.lineCap = 'round';
-    for (var b = 0; b < 3; b++) {
-      var a = segs[b];
-      if (!a.length) { continue; }
-      ctx.strokeStyle = CLASS_COLORS[b];
-      ctx.beginPath();
-      for (var i = 0; i < a.length; i += 4) {
-        ctx.moveTo(a[i], a[i + 1]);
-        ctx.lineTo(a[i + 2], a[i + 3]);
+    var passes = [[this._segsF, o.particleAlpha * FAINT_ALPHA, o.lineWidth * FAINT_WIDTH],
+                  [this._segs, o.particleAlpha, o.lineWidth]];
+    for (var p = 0; p < passes.length; p++) {
+      var segs = passes[p][0];
+      ctx.globalAlpha = passes[p][1];
+      ctx.lineWidth = passes[p][2];
+      for (var b = 0; b < 3; b++) {
+        var a = segs[b];
+        if (!a.length) { continue; }
+        ctx.strokeStyle = CLASS_COLORS[b];
+        ctx.beginPath();
+        for (var i = 0; i < a.length; i += 4) {
+          ctx.moveTo(a[i], a[i + 1]);
+          ctx.lineTo(a[i + 2], a[i + 3]);
+        }
+        ctx.stroke();
       }
-      ctx.stroke();
     }
     ctx.globalAlpha = 1;
+  };
+
+  Wind.prototype._applyMask = function () {
+    var m = this._mask;
+    if (!m.length) { return; }
+    var ctx = this._ctxT;
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    for (var i = 0; i < m.length; i++) { ctx.clearRect(m[i][0], m[i][1], m[i][2], m[i][3]); }
+  };
+
+  Wind.prototype.setMask = function (rects) {
+    if (this._destroyed) { return 0; }
+    var out = [];
+    if (isRowLike(rects)) {
+      for (var i = 0; i < rects.length && out.length < MAX_MASK_RECTS; i++) {
+        var r = rects[i];
+        if (!isRowLike(r) || r.length !== 4) { continue; }
+        var x = num(r[0]), y = num(r[1]), w = num(r[2]), h = num(r[3]);
+        if (isFinite(x) && isFinite(y) && isFinite(w) && isFinite(h) && w > 0 && h > 0) { out.push([x, y, w, h]); }
+      }
+    }
+    this._mask = out;
+    this._applyMask();
+    return out.length;
   };
 
   // ── 箭頭與圖例 ──
@@ -1193,12 +1598,25 @@
   };
 
   Wind.prototype._drawLegend = function (ctx) {
-    var o = this.opts, lim = o.limitMps, lines = [], maxShown = 0;
+    var o = this.opts, lim = o.limitMps, entries = [], maxShown = 0, groups = {};
     this.fields.forEach(function (F, id) {
-      var lab = F.label || (id === DEFAULT_ID ? '風場' : id), mx = F.P.maxSpeed;
-      lines.push({ t: lab + '　最大 ' + fmt1(mx) + ' m/s', warn: mx >= lim });
+      var mx = F.P.maxSpeed;
       if (mx > maxShown) { maxShown = mx; }
+      if (F.group) {                          // 同組的風場合成一個區塊（佔第一個成員的位置）
+        var g = groups[F.group];
+        if (!g) { groups[F.group] = { label: F.groupLabel || F.group, mx: mx, at: entries.length }; entries.push(null); }
+        else if (mx > g.mx) { g.mx = mx; }
+        return;
+      }
+      entries.push({ lab: F.label || (id === DEFAULT_ID ? '風場' : id), mx: mx });
     });
+    Object.keys(groups).forEach(function (k) { var g = groups[k]; entries[g.at] = { lab: g.label, mx: g.mx }; });
+    var lines = [], i, j;
+    for (i = 0; i < entries.length; i++) {    // label 可用換行分多行：第一行接最大風速（超過上限變紅），其餘照常
+      var parts = String(entries[i].lab).split('\n');
+      lines.push({ t: parts[0] + '　最大 ' + fmt1(entries[i].mx) + ' m/s', warn: entries[i].mx >= lim });
+      for (j = 1; j < parts.length; j++) { if (parts[j]) { lines.push({ t: parts[j], warn: false }); } }
+    }
     this.arrowLayers.forEach(function (A, id) {
       var lab = A.label || (id === DEFAULT_ID ? '各機風向' : id);
       lines.push({ t: lab + '　' + A.items.length + ' 點　最大 ' + fmt1(A.max) + ' m/s', warn: A.max >= lim });
@@ -1206,7 +1624,7 @@
     });
     if (!lines.length) { return; }
     ctx.font = FONT;
-    var pad = 8, lh = 16, rampW = 160, rampH = 8, maxTextW = 320, i;
+    var pad = 8, lh = 16, rampW = 160, rampH = 8, maxTextW = 360;
     var title = '風速 m/s（上限 ' + fmt1(lim) + '）';
     var texts = [], tw = rampW;
     for (i = 0; i < lines.length; i++) {
@@ -1266,8 +1684,10 @@
       fields[id] = {
         n_particles: F.pt ? F.pt.n : 0, n_alive: F.alive || 0, max_speed: P.maxSpeed,
         extent: [P.latMin, P.lonMin, P.latMax, P.lonMax], mode: F.mode, label: F.label, height_m: F.h,
+        group: F.group, group_label: F.groupLabel, n_requested: F.nReq, share: F.share, n_min: F.nMin, faint: F.faint,
         grid: [P.ni, P.nj], cells: P.nValid, visible_area_px: R.area, region_cells: R.nCells,
-        last_step: { dx: F.stat.dx, dy: F.stat.dy, len: F.stat.len, n: F.stat.n }
+        last_step: { dx: F.stat.dx, dy: F.stat.dy, len: F.stat.len, n: F.stat.n },
+        trail_segments: F.trailSegs || 0, trail_jumps: F.trailJumps || 0
       };
       if (!any) { label = F.label; }
       any = true;
@@ -1289,7 +1709,10 @@
         for (var k in g) { if (Object.prototype.hasOwnProperty.call(g, k)) { c[k] = isRowLike(g[k]) ? g[k].slice() : g[k]; } }
         return c;
       }),
-      options: this.options(), size: [self.w, self.h, self.dpr], destroyed: this._destroyed
+      options: this.options(), size: [self.w, self.h, self.dpr], destroyed: this._destroyed,
+      mask: this._mask.map(function (r) { return r.slice(); }),
+      trail: { mode: this._trail.mode, segments: this._trail.segments, jumps: this._trail.jumps,
+               renderer: this._trail.renderer }
     };
   };
 
@@ -1300,6 +1723,10 @@
     this.fields.clear();
     this.arrowLayers.clear();
     if (this.canvas.parentNode) { this.canvas.parentNode.removeChild(this.canvas); }
+    if (this._gl) {                                          // 拖尾的 WebGL context 交還（一頁的 context 數有上限）
+      try { var ext = this._gl.gl.getExtension('WEBGL_lose_context'); if (ext) { ext.loseContext(); } } catch (e) { /* 無 */ }
+      this._gl = null;
+    }
     this._legend = [];
     this._geom = [];
   };
@@ -1315,14 +1742,28 @@
   Wind.prototype._debug = function (id) {
     var F = this.fields.get(id === undefined || id === null ? DEFAULT_ID : String(id));
     if (!F) { return null; }
-    var pt = F.pt, R = F.region || EMPTY_REGION;
+    var pt = F.pt, R = F.region || EMPTY_REGION, H = pt ? pt.hist : null;
     return {
       n: pt ? pt.n : 0,
       lat: pt ? Array.from(pt.lat) : [], lon: pt ? Array.from(pt.lon) : [],
       age: pt ? Array.from(pt.age) : [], alive: pt ? Array.from(pt.alive) : [],
+      hist_cnt: H ? Array.from(H.cnt) : null,
       region: { nCells: R.nCells, area: R.area, sub: R.sub ? R.sub.slice() : null, bbox: R.bbox ? R.bbox.slice() : null,
                 lattice: F.lat ? F.lat.N : 0 }
     };
+  };
+
+  // 測試用：第 k 顆粒子的位置歷史（trailsFollowView），新的在前：[[lat, lon], …]；沒有歷史 ⇒ []
+  Wind.prototype._history = function (id, k) {
+    var F = this.fields.get(id === undefined || id === null ? DEFAULT_ID : String(id)), out = [];
+    var pt = F ? F.pt : null, H = pt ? pt.hist : null;
+    if (!H || !(k >= 0 && k < pt.n)) { return out; }
+    for (var a = 0; a < H.cnt[k]; a++) {
+      var j = H.head[k] - a;
+      if (j < 0) { j += TRAIL_HIST; }
+      out.push([H.lat[k * TRAIL_HIST + j], H.lon[k * TRAIL_HIST + j]]);
+    }
+    return out;
   };
 
   root.AeroWind = {

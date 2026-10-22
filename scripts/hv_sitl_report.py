@@ -27,7 +27,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from scripts.hv_sitl_run import out_dir  # noqa: E402
+from scripts.hv_sitl_run import out_dir, wind_header_lines  # noqa: E402
 from scripts.hv_sitl_scenarios import SCENARIOS  # noqa: E402
 
 CLS_NAME = {"A": "Pioneer", "B": "HERO"}
@@ -272,6 +272,10 @@ def main() -> int:
     meta = json.loads((out / "scenario.json").read_text(encoding="utf-8"))
     mission = json.loads((out / "plan" / "mission_summary.json").read_text(encoding="utf-8"))
     uavs = sorted(p for p in mission["uavs"])
+    # 報告開頭先寫風：規劃風與模擬風是兩個獨立旋鈕，不一致時讀者要第一眼就知道（2026-10-20）
+    _rb = out / "wind_readback.json"
+    for _ln in wind_header_lines(meta, json.loads(_rb.read_text(encoding="utf-8")) if _rb.exists() else None):
+        print(_ln)
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15.5, 6.5))
     for i, area in enumerate(meta["areas"]):

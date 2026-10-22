@@ -9,7 +9,9 @@
   * interp 的雙線性值、範圍外／四角有 null 或 NaN ⇒ null、遞減座標自動翻轉、1×1＋bbox 均勻場
   * speedColor 綠 < 0.7·limit ≤ 琥珀 < limit ≤ 紅
   * 西風 5 m/s：粒子往東、每幀螢幕位移 = 5 × pxPerMps（與縮放無關），60 幀存活者位移 180 px
-  * 視角不變時 0 次 adapter.project（只在 viewKey 變時重投影）；viewKey 一變軌跡清成 0
+  * 視角不變時 0 次 adapter.project（只在 viewKey 變時重投影）；viewKey 一變軌跡清成 0（預設；2D 頁）
+  * trailsFollowView（3D 頁）：視角每幀都動（追機）時軌跡不清、用位置歷史在新視角重畫在「歷史投影到的位置」；
+    縮放一跳就丟歷史；定點鏡頭逐像素與預設相同
   * 箭頭指向下風處（從 90° 來 ⇒ 指西）、長度夾 18–70 px、文字＝label＋風速
   * 圖例文字、animate=false 停止 frames、destroy 移除 canvas、壞輸入不丟例外
   * 轉接器對畫面外回 null（leader 的 2D／3D 轉接器）時仍找得到可見區、邊緣沒有空白帶
@@ -57,10 +59,10 @@ def test_source_is_utf8_lf_and_safe_to_inline_into_both_pages():
 _PAGE_JS = r"""
 window.LAT0 = %(LAT0)r; window.LON0 = %(LON0)r; window.K = %(K)r; window.KX = %(KX)r;
 window.LAT1 = %(LAT1)r; window.LON1 = %(LON1)r; window.LATC = %(LATC)r; window.LONC = %(LONC)r;
-window.__view = {ox: 0, oy: %(H)d, key: 'v0', nullOff: false};
+window.__view = {ox: 0, oy: %(H)d, key: 'v0', nullOff: false, s: 1};
 window.__calls = 0;
-window.screenOf = function (lat, lon) {
-  return {x: __view.ox + (lon - LON0) * KX, y: __view.oy - (lat - LAT0) * K};
+window.screenOf = function (lat, lon) {          // s = 縮放倍數（拉近拉遠）；其他測試都是 1
+  return {x: __view.ox + (lon - LON0) * KX * __view.s, y: __view.oy - (lat - LAT0) * K * __view.s};
 };
 window.__adapter = {
   project: function (lat, lon, h) {
@@ -75,7 +77,7 @@ window.newWind = function (opts) {
   if (window.W) W.destroy();
   var host = document.getElementById('host');
   host.style.width = '%(W)dpx'; host.style.height = '%(H)dpx';
-  __view.ox = 0; __view.oy = %(H)d; __view.key = 'v0'; __view.nullOff = false;
+  __view.ox = 0; __view.oy = %(H)d; __view.key = 'v0'; __view.nullOff = false; __view.s = 1;
   window.W = AeroWind.create(host, __adapter);
   W.setOptions(Object.assign({seed: 12345}, opts || {}));
   return true;
@@ -101,6 +103,18 @@ window.measure = function (id, n) {
   return {n: dx.length, total: a.n, mdx: mean(dx), mdy: mean(dy),
           minLen: Math.min.apply(null, len), maxLen: Math.max.apply(null, len),
           minDx: Math.min.apply(null, dx)};
+};
+window.pixHash = function (cv) {                 // 整張畫布的 RGBA 指紋（逐像素相同才相等）
+  var d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data, h = 2166136261;
+  for (var i = 0; i < d.length; i++) { h = Math.imul(h ^ d[i], 16777619); }
+  return h >>> 0;
+};
+window.alphaAt = function (cv, x, y) {            // CSS 像素 (x, y) 附近 3×3 的最大 alpha（線寬 1.5 px、反鋸齒）
+  var r = W.state().size[2], X = Math.round(x * r), Y = Math.round(y * r), best = 0;
+  if (X < 1 || Y < 1 || X >= cv.width - 1 || Y >= cv.height - 1) return -1;
+  var d = cv.getContext('2d').getImageData(X - 1, Y - 1, 3, 3).data;
+  for (var i = 3; i < d.length; i += 4) if (d[i] > best) best = d[i];
+  return best;
 };
 window.alphaSum = function (cv) {
   var d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data, s = 0;
@@ -368,6 +382,107 @@ def test_view_key_change_clears_the_trails_completely(page):
     assert a2 == 0, "viewKey 一變那一幀軌跡全清、不畫新段"
     assert a3 > 255 * 500
     assert page.evaluate("W.state().viewKey") == "v1"
+
+
+# ── B2b. 視角每幀都動（3D 追機）：trailsFollowView ─────────────────────────
+# 每幀平移 dx px、換 viewKey、跑一幀；回傳每幀軌跡層的 alpha 總和與引擎回報的畫法。
+# ⚠ 統計要在同一次 evaluate 裡讀：兩次 evaluate 之間引擎自己的 rAF 會用「沒變的視角」再跑幾幀（那幾幀是累積畫布）。
+_PAN_EACH_FRAME = """([n, dx, dy]) => { const out = [];
+  for (let i = 0; i < n; i++) { __view.ox += dx; __view.oy += dy; __view.key = 'cam' + Math.random(); W._step(1);
+    const st = W.state(), f = st.fields['default'] || {}, d = W._debug();
+    out.push({a: alphaSum(W._trailCanvas), t: st.trail, alive: f.n_alive, field_segments: f.trail_segments,
+              full: d && d.hist_cnt ? d.hist_cnt.filter((c, k) => d.alive[k] && c === 25).length : 0}); }
+  return out; }"""
+
+
+@pytest.fixture(params=["webgl", "canvas2d"])
+def renderer(request, page):
+    """重畫拖尾的兩條路：WebGL（優先）與 Canvas 2D（拿不到 WebGL 時）。兩條都要對。"""
+    page.evaluate("([g]) => { W._noGL = g; }", [request.param == "canvas2d"])
+    if request.param == "webgl" and not page.evaluate(
+            "(() => { try { return !!document.createElement('canvas').getContext('webgl'); } catch (e) { return false; } })()"):
+        pytest.skip("這個瀏覽器拿不到 WebGL")
+    return request.param
+
+
+def test_follow_view_keeps_the_trails_while_the_view_moves_every_frame(page, renderer):
+    """追機：鏡頭每幀都動。預設（2D）每幀清空 ⇒ 什麼都看不到；trailsFollowView 用位置歷史重畫 ⇒ 跟靜止時差不多亮。"""
+    page.evaluate("W.setField(uniform(270, 5)); W._step(40)")
+    off = page.evaluate(_PAN_EACH_FRAME, [10, -3, 1])
+    assert all(f["a"] == 0 and f["t"]["mode"] == "cleared" for f in off), "前提：預設行為每幀清空（追機只剩點的原因）"
+    page.evaluate("W.setOptions({trailsFollowView: true}); W._step(40)")
+    still = page.evaluate("alphaSum(W._trailCanvas)")
+    assert page.evaluate("W.state().trail.mode") == "accumulate"
+    on = page.evaluate(_PAN_EACH_FRAME, [30, -3, 1])
+    assert all(f["t"]["mode"] == "follow" and f["t"]["renderer"] == renderer for f in on)
+    assert min(f["a"] for f in on) > 0.5 * still, (still, [f["a"] for f in on])
+    last = on[-1]
+    assert last["alive"] > 300 and last["t"]["segments"] == last["field_segments"], last
+    assert last["t"]["segments"] > 4 * last["alive"], f"每顆粒子的拖尾要有多段（歷史 25 點、每 4 點一段 ⇒ 最多 6 段）：{last}"
+    assert all(f["t"]["jumps"] == 0 for f in on), "平移不改縮放：不能丟歷史"
+    assert last["full"] > 0.6 * last["alive"], f"歷史沒有在每幀被清掉：{last}"
+
+
+def test_follow_view_trails_are_drawn_where_the_history_projects_in_the_new_view(page, renderer):
+    """軌跡錨在世界座標：一跳平移 (−37, +23) px 之後，每顆粒子的歷史用「測試自己的投影公式＋新視角」算出的位置上要有線；
+    舊畫面原地（沒跟著場景）的位置就只是偶爾碰到別的粒子。"""
+    page.evaluate("W.setOptions({trailsFollowView: true}); W.setField(uniform(270, 5)); W._step(40)")
+    r = page.evaluate("""() => { __view.ox -= 37; __view.oy += 23; __view.key = 'jump'; W._step(1);
+      const d = W._debug(), cv = W._trailCanvas, hit = [0, 0, 0], stale = [0, 0, 0]; let n = 0;
+      for (let k = 0; k < d.n && n < 150; k++) {
+        if (!d.alive[k] || d.hist_cnt[k] !== 25) continue;
+        const h = W._history('default', k), ok = [0, 10, 20].map(a => {
+          const p = screenOf(h[a][0], h[a][1]), q = screenOf(h[a + 2][0], h[a + 2][1]);
+          return [(p.x + q.x) / 2, (p.y + q.y) / 2]; });
+        if (ok.some(m => m[0] < 3 || m[0] > 797 || m[1] < 3 || m[1] > 597 || m[0] + 37 > 797 || m[1] - 23 < 3)) continue;
+        n++;
+        ok.forEach((m, i) => { if (alphaAt(cv, m[0], m[1]) > 0) hit[i]++;
+                               if (alphaAt(cv, m[0] + 37, m[1] - 23) > 0) stale[i]++; });
+      }
+      return {n: n, hit: hit, stale: stale, trail: W.state().trail}; }""")
+    n = r["n"]
+    assert n >= 100, r
+    assert r["trail"]["mode"] == "follow" and r["trail"]["jumps"] == 0 and r["trail"]["renderer"] == renderer, r
+    assert all(h == n for h in r["hit"]), f"年齡 0–2、10–12、20–22 那段都要畫在歷史投影的位置：{r}"
+    assert all(x < 0.5 * n for x in r["stale"]), f"舊畫面原地不該有成排的線（那是沒重投影）：{r}"
+
+
+def test_follow_view_drops_the_history_when_the_scale_jumps(page, renderer):
+    """拉近 2 倍（Leaflet 換級、Cesium 瞬間換視角）：舊歷史在新視角裡會被拉長 2 倍 ⇒ 那顆粒子只留現在這一步。"""
+    page.evaluate("W.setOptions({trailsFollowView: true}); W.setField(uniform(270, 5)); W._step(40)")
+    pan = page.evaluate(_PAN_EACH_FRAME, [1, -5, 0])[0]
+    assert pan["t"]["jumps"] == 0
+    r = page.evaluate("""() => { __view.s = 2; __view.ox -= 800; __view.oy += 600; __view.key = 'zoom'; W._step(1);
+      const d = W._debug(); let alive = 0, longest = 0;
+      for (let k = 0; k < d.n; k++) if (d.alive[k]) { alive++; longest = Math.max(longest, d.hist_cnt[k]); }
+      return {alive: alive, longest: longest, trail: W.state().trail}; }""")
+    assert r["trail"]["mode"] == "follow" and r["trail"]["jumps"] > 50, r
+    assert r["longest"] <= 2, f"縮放一跳之後不能還留著舊歷史：{r}"
+    nxt = page.evaluate(_PAN_EACH_FRAME, [5, -2, 0])
+    assert all(f["t"]["jumps"] == 0 for f in nxt), "跳完之後的連續小移動照常保留"
+
+
+def test_follow_view_leaves_a_still_camera_pixel_identical(page):
+    """定點鏡頭的外觀不變：同一個亂數種子，選項開或關，60 幀後累積畫布逐像素相同。"""
+    out = []
+    for follow in (False, True):
+        # 一次 evaluate 做完：中間不能插進引擎自己的 rAF 幀（幀數不同畫面就不同）
+        out.append(page.evaluate("([f]) => { newWind({trailsFollowView: f}); W.setField(uniform(250, 4)); "
+                                 "W.setField('b', uniform(200, 2.5, {height_m: 30, faint: true})); W._step(60); "
+                                 "return [pixHash(W._trailCanvas), alphaSum(W._trailCanvas), W.state().trail.mode]; }",
+                                 [follow]))
+    assert out[0][1] > 255 * 2000, out
+    assert out[0][:2] == out[1][:2], out
+    assert out[1][2] == "accumulate"
+
+
+def test_follow_view_option_is_validated_and_has_a_snake_case_alias(page):
+    assert page.evaluate("W.options().trailsFollowView") is False, "預設關（2D 頁）"
+    assert page.evaluate("W.setOptions({trails_follow_view: true}).trailsFollowView") is True
+    assert page.evaluate("W.setOptions({trailsFollowView: 'yes'}).trailsFollowView") is True
+    assert any("trailsFollowView" in t for t in _console(page, "warning")), "無效值要警告、保留原值"
+    page.evaluate("W.setField(uniform(270, 5)); W._step(30); W.setOptions({trailsFollowView: false}); W._step(1)")
+    assert page.evaluate("W._debug().hist_cnt") is None, "關掉後不再保留歷史（不付成本）"
 
 
 @pytest.mark.parametrize("limit,cls", [(3, "warn"), (6, "caution"), (10, "ok")])

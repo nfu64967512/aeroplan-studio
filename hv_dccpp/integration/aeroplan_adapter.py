@@ -1532,6 +1532,51 @@ def from_mission_plan(plan: MissionPlan, ctx: MissionContext, *, areas: Sequence
     }
 
 
+def _crab_flown_effective(per_class: Mapping[str, Any], plan: MissionPlan, ctx: MissionContext) -> dict[str, Any]:
+    """建圖偏流餘裕 ``crab_margin_basis="crosswind"`` 的有效值（vendored 2026-10-20）：preflight 的
+    ``derived[c]["mapping"]`` 只知道全方向最壞值（ψ_max、對應間距），真正飛的條帶依各自航跡的側風分量鋪。
+    這裡改寫成**實際飛的主條帶**的值：``crab_deg`` = 飛的條帶中最大的 ψ、``w_eff_m``／``s_m`` = 該 ψ 在主作業高度的
+    保守寬與間距（＝飛的條帶中最窄的標稱間距）；原本的最壞值留在 ``crab_envelope_deg``／``s_envelope_m``，逐航跡軸的
+    實際間距範圍在 ``crab_flown``。ψ 與最壞值相同（純側風、無風）時 ``crab_deg``／``w_eff_m``／``s_m`` 原值不動。
+    沒有飛的條帶 → 原樣。不改傳進來的 dict（preflight 報告共用）。"""
+    from ..decompose import track_crab_rad
+    from ..platform import crabbed_width_m
+    from ..wind import crosswind_max_mps
+    out: dict[str, Any] = {}
+    for c, m in per_class.items():
+        if not isinstance(m, dict) or "crab_deg" not in m:
+            out[c] = m
+            continue
+        rows: dict[float, dict[str, Any]] = {}
+        for up in plan.plans.values():
+            for sid, _d in up.strips:
+                st = plan.strips.get(sid)
+                if st is None or st.cls != c or is_cross_strip(sid):
+                    continue
+                ax = round(math.degrees(float(st.theta_LR_rad)) % 180.0, 1) % 180.0
+                r = rows.setdefault(ax, {"axis_deg": ax, "crosswind_mps": crosswind_max_mps(ctx.wind, float(st.theta_LR_rad)),
+                                         "crab_deg": math.degrees(track_crab_rad(ctx, c, float(st.theta_LR_rad))),
+                                         "s_min_m": math.inf, "s_max_m": -math.inf, "n": 0})
+                r["s_min_m"] = min(r["s_min_m"], float(st.spacing_m))
+                r["s_max_m"] = max(r["s_max_m"], float(st.spacing_m))
+                r["n"] += 1
+        if not rows:
+            out[c] = m
+            continue
+        e = dict(m)
+        psi = max(r["crab_deg"] for r in rows.values())
+        e.update({"crab_basis": "crosswind", "crab_envelope_deg": m.get("crab_deg"), "s_envelope_m": m.get("s_m"),
+                  "crab_flown": [rows[k] for k in sorted(rows)]})
+        psi_env = m.get("crab_deg")
+        if psi_env is not None and abs(psi - float(psi_env)) > 1e-12 and None not in (m.get("w_m"), m.get("l_m"), m.get("s_m")):
+            w_c, l_c = float(m["w_m"]), float(m["l_m"])
+            weff_env = crabbed_width_m(w_c, l_c, math.radians(float(psi_env)))
+            weff = crabbed_width_m(w_c, l_c, math.radians(psi))
+            e.update({"crab_deg": psi, "w_eff_m": weff, "s_m": float(m["s_m"]) * weff / weff_env})
+        out[c] = e
+    return out
+
+
 def _home_msl(ctx: MissionContext) -> float:
     """**規劃** home 地面之 MSL 高（m）＝ ``HvBuiltWaypoint.alt`` 的基準。⚠ 飛控的 home 是各機自己的起飛坪
     （``fc_home``）；送飛控前要減掉路徑的 ``fc_alt_offset_m``。"""
@@ -2423,10 +2468,16 @@ class HvDccppCoordinator:
                             f"能量或走廊不允許)")
         rep = plan.feasibility
         note.extend(f"preflight:{w}" for w in rep.warnings)
+        # vendored 修改 #11：收尾重排為解 4D 殘留改了起飛時刻（cap=relaxed 時工期變長）——規劃器警告只以
+        #   "preflight:" 前綴進 notes（_HV_LOUD_NOTES 比對不到），這裡原樣再放一份讓 GUI 大聲顯示
+        note.extend(str(w) for w in rep.warnings if str(w).startswith("reschedule_resolved_residual("))
         self.mapping_effective = None
         if self.mapping_mode is not None:
             # 有效值契約：使用者開了建圖模式，就把實際用的偏流角／間距／接縫重疊／外擴／引入段寫出來
             per_class = {c: d.get("mapping") for c, d in (rep.derived or {}).items() if isinstance(d, dict)}
+            if getattr(self.mapping_mode, "crab_margin", False) and \
+                    getattr(self.mapping_mode, "crab_margin_basis", "max_speed") == "crosswind":
+                per_class = _crab_flown_effective(per_class, plan, ctx)
             seam = {aid: r.get("mapping_seam") for aid, r in (rep.per_area or {}).items() if isinstance(r, dict)}
             self.mapping_effective = {"config": self.mapping_mode.to_dict(), "per_class": per_class,
                                       "seam_by_area": seam}

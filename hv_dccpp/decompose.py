@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import itertools
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Sequence
 
 import numpy as np
@@ -41,7 +41,7 @@ from .geometry import (
 )
 from .mission import AreaSpec, PlannerConfig
 from .platform import PLATFORM_HERO, EnergyModel, PlatformSpec, Sensor
-from .wind import circle_time_factor, ground_speed, proxy_turn_time
+from .wind import circle_time_factor, crosswind_max_mps, ground_speed, proxy_turn_time, reference_dir_from_rad
 
 __all__ = [
     "AltitudeBand",
@@ -58,6 +58,8 @@ __all__ = [
     "sensor_compatible",
     "class_can_serve",
     "resolve_sensor",
+    "track_sensor",
+    "track_crab_rad",
     "r_eff_for_class",
     "end_extension_for",
     "seam_tie_overlap_m",
@@ -201,6 +203,41 @@ def resolve_sensor(ctx: DecomposeContext, cls: str, req_id: str) -> tuple[Sensor
     if key2 in ctx.sensors:
         return ctx.sensors[key2], req_id + RGB_REQ_SUFFIX
     return None
+
+
+def _sensor_crab_rad(sensor: Sensor) -> float:
+    """感測器（或 CombinedSensor 各子感測器）目前的偏流角 ψ（取最大）。"""
+    subs = getattr(sensor, "sensors", None)
+    return max(float(getattr(x, "crab_rad", 0.0)) for x in (subs or (sensor,)))
+
+
+def track_crab_rad(ctx: DecomposeContext, cls: str, alpha_rad: float) -> float:
+    """航跡 α 的建圖偏流角 ψ(α) = asin(W⊥(α)/V_a,c)，W⊥(α) = max_層 |W sin(α − β)|（`wind.crosswind_max_mps`）。
+
+    沿風 → 0；純側風 → asin(W/V_a) = 舊的全方向值。只在 ``crab_margin_basis="crosswind"`` 時被 :func:`track_sensor` 用。"""
+    va = float(ctx.specs[cls].cruise_airspeed_mps)
+    w_perp = crosswind_max_mps(ctx.wind, float(alpha_rad))
+    return math.asin(min(w_perp / va, 1.0)) if w_perp > 0.0 else 0.0
+
+
+def track_sensor(ctx: DecomposeContext, cls: str, sensor: Sensor, alpha_rad: float) -> Sensor:
+    """已知條帶航跡 α 時實際用的感測器（建圖偏流餘裕的方向版；vendored 2026-10-20）。
+
+    ``ctx.sensors`` 存的是全方向最壞 ψ_max = asin(W_max/V_a)（`context.apply_crab_margin`），給**不知方向**的消費者
+    （高度帶 d_turn、接縫重疊目標、圍籬、preflight）——那些量與舊行為逐位元相同。``crab_margin_basis="crosswind"``
+    時，**知道方向**的消費者（`proxy_time`、`build_strips`、`suitability`、交叉航帶）改用 ψ(α) = :func:`track_crab_rad`
+    （≤ ψ_max，間距只會變寬或不變）。非建圖、沒開 crab_margin、``"max_speed"`` 基準、或 ψ_max = 0 → 原樣回傳。"""
+    mp = getattr(ctx, "mapping", None)
+    if mp is None or not getattr(mp, "crab_margin", False) or getattr(mp, "crab_margin_basis", "max_speed") != "crosswind":
+        return sensor
+    psi_max = _sensor_crab_rad(sensor)
+    if psi_max == 0.0:
+        return sensor
+    psi = min(track_crab_rad(ctx, cls, alpha_rad), psi_max)
+    subs = getattr(sensor, "sensors", None)
+    if subs is not None:
+        return replace(sensor, sensors=tuple(replace(x, crab_rad=psi) for x in subs))
+    return replace(sensor, crab_rad=psi)
 
 
 def sensor_compatible(sensor_req: str, available_kinds: frozenset[str] | set[str]) -> bool:
@@ -484,8 +521,11 @@ def direction_candidates(cell_poly: Polygon, ctx: DecomposeContext, z_ref_m: flo
     """候選掃描方向 C_q（規格 §7.3）：各邊方位 ∪ {θ_minw} ∪ {β, β+π} ∪ {β±90°} ∪ {等高線主方向}。
     β = 風來向（`ctx.wind.dir_from_at(z_ref_m)`，ENU z）；無風層時 β = 0。回傳 [0, 2π) 之 rad 清單，去重 1°
     （順序 β、β+π、β±90°、θ_minw、各邊（長者優先；短於周長 2% 之邊略去——DP 簡化之角落碎邊）、等高線；
-    去重保留先出現者，故與風軸相差 < 1° 之邊以風軸代表）；β 與 β+π 一律在內（即使風速 0）。"""
-    beta = float(ctx.wind.dir_from_at(float(z_ref_m))) if ctx.wind is not None and ctx.wind.n_layers else 0.0
+    去重保留先出現者，故與風軸相差 < 1° 之邊以風軸代表）；β 與 β+π 一律在內（即使風速 0）。
+
+    vendored 修改 2026-10-20：z_ref 處風速 < ``wind.CALM_WIND_MPS``（2 m/s）時 β 取 0（與沒有風層時相同），
+    無風的候選集與順序不再隨輸入風向改變；W ≥ 2 m/s 逐位元不變。"""
+    beta = reference_dir_from_rad(ctx.wind, float(z_ref_m))
     cands: list[float] = [_mod2pi(beta), _mod2pi(beta + math.pi), _mod2pi(beta + 0.5 * math.pi), _mod2pi(beta - 0.5 * math.pi)]
     a_minw, _w = min_width_direction(cell_poly)
     cands.append(_mod2pi(a_minw))
@@ -534,6 +574,7 @@ def proxy_time(cell_poly: Polygon, alpha_rad: float, cls: str, h_op_m: float, re
         return ProxyTime(float(alpha_rad), math.inf, 0, 0.0, 0.0, 0.0, 0.0, False, 0)
     sensor, _ = found
     alpha = float(alpha_rad)
+    sensor = track_sensor(ctx, cls, sensor, alpha)
     h_op = float(h_op_m)
     w = float(sensor.swath_m(h_op))
     s = float(sensor.strip_spacing_m(h_op))
@@ -683,6 +724,7 @@ def build_strips(cell: Cell, cls: str, alpha_rad: float, ctx: DecomposeContext) 
     sensor, _ = found
     h_op = float(cell.h_op_m[cls])
     alpha = float(alpha_rad)
+    sensor = track_sensor(ctx, cls, sensor, alpha)
     origin = sweep_origin(cell.polygon, alpha)
     z_min_c, z_max_c = _terrain_minmax(ctx, cell.polygon)
     z_op = (z_max_c if math.isfinite(z_max_c) else _z_ground_home(ctx)) + h_op
@@ -960,7 +1002,7 @@ def suitability(cell: Cell, cls: str, ctx: DecomposeContext, T_use_s: float, rho
         return 0.0
     h_op = float(cell.h_op_m.get(cls, spec.min_fw_operation_agl_m))
     alpha = float(cell.alpha_rad.get(cls, cell.min_width_dir_rad))
-    s_c = float(sensor.strip_spacing_m(h_op))
+    s_c = float(track_sensor(ctx, cls, sensor, alpha).strip_spacing_m(h_op))
     r_eff = r_eff_for_class(ctx, cls)
     d_turn = float(cell.d_turn_m.get(cls, d_turn_from_r(r_eff, s_c, 0.0)))
     # ---- 硬限制 ----
@@ -992,7 +1034,8 @@ def suitability(cell: Cell, cls: str, ctx: DecomposeContext, T_use_s: float, rho
         fa = resolve_sensor(ctx, "A", cell.payload_req_id)
         if fa is not None:
             h_a = float(cell.h_op_m.get("A", ctx.specs["A"].min_fw_operation_agl_m))
-            s_A = float(fa[0].strip_spacing_m(h_a))
+            a_a = float(cell.alpha_rad.get("A", cell.min_width_dir_rad))
+            s_A = float(track_sensor(ctx, "A", fa[0], a_a).strip_spacing_m(h_a))
     s_area_a = _sat(cell.area_m2 / (5000.0 * s_A))
     s_area = s_area_a if cls == "A" else 1.0 - s_area_a
     s_dist_a = _sat(cell.dist_home_m / _rho_sym_b(ctx, rho_sym_m))
@@ -1520,7 +1563,7 @@ def build_cross_set(parent: Cell, cls: str, main_strips: Sequence[Strip], ctx: D
         notes.append(f"區塊不連續（{len(parts)} 片），交叉帶只鋪最大一片")
     A = float(block.area)
     w_x = float(sensor.swath_m(h_x))
-    s_x = float(sensor.strip_spacing_m(h_x))
+    s_x = float(track_sensor(ctx, cls, sensor, beta).strip_spacing_m(h_x))   # = build_strips(…, beta) 實際用的間距
 
     def lay(region: shapely.Geometry) -> list[Strip]:
         tmp = _replace(parent, polygon=region, h_op_m={**parent.h_op_m, cls: h_x})

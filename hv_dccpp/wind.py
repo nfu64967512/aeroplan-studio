@@ -41,10 +41,39 @@ __all__ = [
     "circle_time_factor",
     "proxy_turn_time",
     "DEFAULT_ARC_STEP_RAD",
+    "CALM_WIND_MPS",
+    "reference_dir_from_rad",
+    "crosswind_max_mps",
 ]
 
 TWO_PI: float = 2.0 * math.pi
 DEFAULT_ARC_STEP_RAD: float = 0.0873          # 5°（規格 §8.1、D14）
+CALM_WIND_MPS: float = 2.0
+"""無風門檻（規格 §3.4）：W < 2 m/s 視為無風。轉換段（起降）方位與掃描軸候選在無風時**不跟著輸入的風向走**
+（見 :func:`reference_dir_from_rad`），所以 0 m/s 的規劃與輸入風向無關，「無風」只有一個基準（vendored 修改
+2026-10-20）。風三角（地速、時間、偏流）一律照實際風向量算，與此門檻無關。"""
+
+
+def reference_dir_from_rad(wind: Any, z_m: float) -> float:
+    """方位決策用的風來向 β（rad）：沒有風層、或 z 處風速 < :data:`CALM_WIND_MPS` ⇒ 0（正北，與「沒有風層」時
+    舊行為相同）；否則 ``wind.dir_from_at(z)``。只給「方位要不要對著風」的決策用（轉換段方位、掃描軸候選）；
+    W ≥ 2 m/s 時回傳值與舊碼逐位元相同。"""
+    if wind is None or not wind.n_layers:
+        return 0.0
+    if float(wind.speed_at(float(z_m))) < CALM_WIND_MPS:
+        return 0.0
+    return float(wind.dir_from_at(float(z_m)))
+
+
+def crosswind_max_mps(wind: Any, theta_rad: float) -> float:
+    """航跡 θ（rad，自北順時針）在所有風層中最大的側風分量 :math:`\\max_i |W_i\\sin(\\theta-\\beta_i)|`（m/s）。
+
+    與 θ+π 相同（條帶來回同值）；沿風（θ = β 或 β+π）→ 0（< 1e-9 截為 0.0）；沒有風層 → 0。與 :meth:`WindField.max_speed`
+    同樣不分高度取所有層（建圖偏流餘裕 ``crab_margin_basis="crosswind"`` 用；vendored 2026-10-20）。"""
+    if wind is None or not wind.n_layers:
+        return 0.0
+    c = float(np.max(np.abs(wind.speeds_mps * np.sin(float(theta_rad) - wind.dir_from_rad))))
+    return c if c >= 1e-9 else 0.0
 _CURVATURE_NOTE = ("wind layer bounds converted MSL->ENU z at home only; the curvature term "
                    "(~196 m at 50 km) is not applied per position (known approximation)")
 

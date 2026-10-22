@@ -20,6 +20,7 @@ from shapely.geometry import Polygon
 import hv_dccpp.planner as P
 from hv_dccpp import decompose as D
 from hv_dccpp.allocate import Team
+from hv_dccpp.ardupilot import commanded_trigger_distance_m  # noqa: E402  （206 實際下的 d：量化保護，2026-10-21）
 from hv_dccpp.ardupilot import MAV_CMD_DO_SET_CAM_TRIGG_DIST, CameraTriggerConfig, plan_to_mission_items, \
     trigger_distance_m
 from hv_dccpp.context import build_context
@@ -382,13 +383,14 @@ def test_206_on_off_per_cross_strip_and_trigger_distance(which, on, low):
         for (sid, _d), d in zip(up.strips, wins):
             h = plan.strips[sid].h_op_m
             other = 120.0 if abs(h - 100.0) < 1e-6 else 100.0
-            assert abs(d - trigger_distance_m(sen, h)) < abs(d - trigger_distance_m(sen, other)), (u, sid, h, d)
+            td = commanded_trigger_distance_m                                    # 給了 camera_cfg ⇒ 扣 50 Hz 量化保護
+            assert abs(d - td(sen, h)) < abs(d - td(sen, other)), (u, sid, h, d)
             if not is_cross_strip(sid):
-                assert d == pytest.approx(trigger_distance_m(sen, h), rel=1e-9)     # 主條帶：吸附到作業高度，逐值
+                assert d == pytest.approx(td(sen, h), rel=1e-9)     # 主條帶：吸附到作業高度，逐值
             else:
                 # 交叉帶：以相機開著時飛到的最低 AGL 算 ⇒ 不比作業高度的 d 大（前向重疊不低於規劃）；
                 #   帶終點可能已在下一段的升降上（縮點後線性），最多小幾 %
-                assert trigger_distance_m(sen, h) * 0.97 <= d <= trigger_distance_m(sen, h) * (1 + 5e-3), (u, sid, h, d)
+                assert td(sen, h) * 0.97 <= d <= td(sen, h) * (1 + 5e-3), (u, sid, h, d)
     if which == "low":
         assert trigger_distance_m(sen, 100.0) == pytest.approx(100.0 * 3040 * 1.55e-3 / 6.0 * 0.2)   # 15.707 m
 
@@ -409,8 +411,8 @@ def test_exporter_uses_lowest_strip_agl_for_cross_trigger_distance(low):
     items = plan_to_mission_items(up2, ctx, CFG, camera_trigger=True, camera_cfg=cc)
     wins = _on_windows(items)
     k = [s for s, _d in up.strips].index(sid)
-    assert wins[k] == pytest.approx(trigger_distance_m(sen, 100.0), rel=5e-3)        # 不是 d(115) = 18.06 m
-    assert trigger_distance_m(sen, 115.0) > wins[k] * 1.1
+    assert wins[k] == pytest.approx(commanded_trigger_distance_m(sen, 100.0), rel=5e-3)   # 不是 d(115)（量化保護後）
+    assert commanded_trigger_distance_m(sen, 115.0) > wins[k] * 1.1
 
 
 def test_validate_passes_with_cross_strips(on):

@@ -55,7 +55,7 @@ from .platform import (
     crabbed_width_m,
     sensor_model,
 )
-from .wind import WindField
+from .wind import CALM_WIND_MPS, WindField
 
 __all__ = [
     "TERRAIN_MARGIN_M",
@@ -652,10 +652,15 @@ _CRAB_REF_AGL_M: float = 100.0
 
 
 def apply_crab_margin(sensors: dict[tuple[str, str], Sensor], specs: dict[str, PlatformSpec],
-                      wind_speed_mps: float) -> tuple[dict[tuple[str, str], Sensor], list[str]]:
+                      wind_speed_mps: float, basis: str = "max_speed"
+                      ) -> tuple[dict[tuple[str, str], Sensor], list[str]]:
     """建圖模式偏流餘裕（`MappingModeConfig.crab_margin`）：逐構型 ψ_c = asin(W / V_a,c)（V_a,c = 巡航空速、
     W = 規劃風速），寫進該構型每個感測器的 ``crab_rad``（CombinedSensor 寫進各子感測器），使條帶間距改用
     w_eff = w cosψ − l sinψ。W ≥ V_a,c 或 w_eff ≤ 0 → MissionInputError（不默默照原間距飛）。
+
+    ``basis="crosswind"``（vendored 2026-10-20）：這裡寫的 ψ 是**全方向最壞值**（給不知方向的檢查），已知條帶航跡
+    θ 時 `decompose.track_sensor` 改用側風分量的 ψ(θ) ≤ 此值；警告字串前段與 ``"max_speed"``（舊行為）相同，
+    尾端加註基準。
 
     回傳 ``(sensors, warnings)``；每個 (cls, req_id) 一筆 ``mapping_crab_margin(...)`` 有效值紀錄（ψ = 0 也記）。
     """
@@ -689,8 +694,10 @@ def apply_crab_margin(sensors: dict[tuple[str, str], Sensor], specs: dict[str, P
                     f"⇒ 足跡轉了之後沒有保守可用寬；降低規劃風速或把相機長邊轉成垂直航跡")
             ratio = min(ratio, w_eff / w)
         out[(cls, rid)] = new
+        tail = ("；crosswind 基準：此為全方向最壞值（給不知方向的檢查），條帶間距依各胞航跡的側風分量，"
+                "見 mapping_crab_effective" if basis == "crosswind" else "")
         warnings.append(f"mapping_crab_margin({cls}/{rid}: ψ={math.degrees(psi):.2f}°（W {W:.2f} / V_a {va:.2f} m/s）"
-                        f" → w_eff/w={ratio:.4f}；間距 = w_eff·(1 − side_overlap))")
+                        f" → w_eff/w={ratio:.4f}；間距 = w_eff·(1 − side_overlap){tail})")
     return out, warnings
 
 
@@ -854,6 +861,13 @@ def build_context(inputs: MissionInputs, cfg: PlannerConfig, *,
     z_ground_home = sites_enu[home.site_id][1]
     wind = WindField(list(inputs.wind), frame, z_ground_home)
     warnings += [f"wind: {n}" for n in wind.notes]
+    if wind.n_layers and wind.max_speed() < CALM_WIND_MPS:
+        # 有效值紀錄（vendored 2026-10-20）：無風時起降轉換方位與掃描軸候選不跟輸入風向（wind.reference_dir_from_rad）
+        dirs = sorted({round(math.degrees(float(b)) % 360.0, 1) % 360.0 for b in wind.dir_from_rad})
+        if any(d != 0.0 for d in dirs):
+            warnings.append(f"calm_wind_direction_ignored(規劃風 {wind.max_speed():g} m/s < {CALM_WIND_MPS:g} m/s ⇒ "
+                            f"起降轉換方位與掃描軸候選以正北 0° 為基準、不跟輸入來向 "
+                            f"{'/'.join(f'{d:g}' for d in dirs)}°；地速與時間仍照風向量算)")
 
     # 5) 淨空
     h_clr, w = resolve_terrain_clearance(inputs.airspace, specs, dem.sigma_z_m)
@@ -891,7 +905,9 @@ def build_context(inputs: MissionInputs, cfg: PlannerConfig, *,
         warnings.append("routing_unavailable_keepouts_none")
     else:
         keepouts = KeepoutSet.build(list(inputs.obstacles), active_nofly, frame, terrain, cfg, t_window)
-    if obstacles_enu and np.array_equal(terrain.z, terrain.z_raw):
+    # ⚠ vendored #14：「KeepoutSet 沒燒入」改問 same_as_raw()（含 nan 位置的位元組相同）。原本的 np.array_equal
+    #   遇到網格邊緣的 nan（DEM 範圍外節點，真 DEM 與內建情境都有）永遠不等 ⇒ 這一支從不執行、障礙沒燒進地形。
+    if obstacles_enu and terrain.same_as_raw():
         burned = burn_obstacles(terrain, obstacles_enu, cfg)
         if burned:
             warnings.append(f"obstacles_burned_by_context({','.join(burned)})")
@@ -904,7 +920,7 @@ def build_context(inputs: MissionInputs, cfg: PlannerConfig, *,
     if mapping is not None:
         warnings.append("mapping_mode(" + ", ".join(f"{k}={v}" for k, v in mapping.to_dict().items()) + ")")
         if mapping.crab_margin:
-            sensors, w = apply_crab_margin(sensors, specs, wind.max_speed())
+            sensors, w = apply_crab_margin(sensors, specs, wind.max_speed(), basis=mapping.crab_margin_basis)
             warnings += w
 
     # 11) 能量模型

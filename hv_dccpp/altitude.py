@@ -35,7 +35,7 @@ from .geometry import Cell, Strip, to_sweep_coords
 from .mission import FW_PHASES, Mode, Phase, PlannerConfig, UAVInstance, UAVState, Waypoint, mode_phase_violation
 from .platform import EnergyModel, PlatformSpec, Sensor
 from .routing import KeepoutSet, RoutingError, avoid
-from .wind import WindField, circle_time_factor, ground_speed, heading_from_track, time_arc
+from .wind import CALM_WIND_MPS, WindField, circle_time_factor, ground_speed, heading_from_track, time_arc
 
 __all__ = [
     "EnvelopeResult", "envelope",
@@ -52,7 +52,7 @@ ORBIT_WORD: str = "ORBIT"
 """盤旋段之 `DubinsPath.word`（單一弧段、|Δθ| 可 ≥ 2π；`dubins.sample` 可直接取樣）。"""
 _BIG_TAN: float = 1e6           # 無限坡度（旋翼／不受限）之數值替身
 _TOL_M: float = 1e-6
-_CALM_WIND_MPS: float = 2.0     # 規格 §3.4：W < 2 m/s 時轉換方位取障礙最少方位
+_CALM_WIND_MPS: float = CALM_WIND_MPS     # 規格 §3.4：W < 2 m/s 時轉換方位取障礙最少方位（與 wind.CALM_WIND_MPS 同一個數）
 _N_EXIT_CANDIDATES: int = 24    # 盤旋出口角 ϑ 之候選數（15° 間隔）
 _MAX_EXTRA_LAPS: int = 3
 
@@ -270,11 +270,12 @@ def local_envelope(centerline_xy: np.ndarray, theta_rad: np.ndarray, strip_mask:
         raise ValueError("local_envelope: empty centerline")
     dv = _dv_of(terrain)
     nat = terrain.raw_view()                      # AGL 以自然地形量（同 `sample_bounds`）
-    zg_max = nat.corridor_max(xy, theta, float(corridor_half_width_m), dv, offset_m=float(corridor_offset_m))
-    zg_min = nat.corridor_min(xy, theta, float(corridor_half_width_m), dv, offset_m=float(corridor_offset_m))
+    # vendored 修改 #13：max／min 同參數只取樣一次；z 與 z_raw 相同時燒入後的最大值就是 zg_max（逐位元相同），
+    #   改問 same_as_raw()——raw_view() 不再回傳 terrain 本身，不能再比物件身分。
+    zg_max, zg_min = nat.corridor_minmax(xy, theta, float(corridor_half_width_m), dv, offset_m=float(corridor_offset_m))
     zg0 = nat.z_at(xy)
     zb_max = (terrain.corridor_max(xy, theta, float(corridor_half_width_m), dv, offset_m=float(corridor_offset_m))
-              if nat is not terrain else zg_max)
+              if not terrain.same_as_raw() else zg_max)
     if not np.isfinite(zg_max).all():
         return LocalProfile(z=zg_max + h_op_m, h_min_m=float(h_op_m), agl_max_m=float(h_op_m), feasible=False)
     h_min_fw = spec.min_fw_operation_agl_m
@@ -654,10 +655,9 @@ def sample_bounds(samples: list[Sample2D], cls: str, ctx: MissionContext, strips
             is_x[j] = is_cross_strip(p.strip_id)
     dv = _dv_of(ctx.terrain)
     nat = ctx.terrain.raw_view()                  # AGL 一律以自然地形量（障礙淨空走 z_obs，見下）
-    zg_max = nat.corridor_max(A.xy, A.theta, hw, dv)
-    zg_min = nat.corridor_min(A.xy, A.theta, hw, dv)
+    zg_max, zg_min = nat.corridor_minmax(A.xy, A.theta, hw, dv)       # 修改 #13：同 local_envelope
     zg0 = nat.z_at(A.xy)
-    zb_max = ctx.terrain.corridor_max(A.xy, A.theta, hw, dv) if nat is not ctx.terrain else zg_max
+    zb_max = ctx.terrain.corridor_max(A.xy, A.theta, hw, dv) if not ctx.terrain.same_as_raw() else zg_max
     z_obs = _obstacle_tops(ctx, A.xy)
     h_clr = float(ctx.h_clr_m)
     h_minfw = spec.min_fw_operation_agl_m
@@ -970,8 +970,7 @@ def build_3d(segments: list[PathSegment2D], uav: UAVInstance, seq: Any, ctx: Mis
         hw_op = np.array([0.5 * strips[p.strip_id].width_m if (p.phase is Phase.OPERATE and p.strip_id in strips)
                           else cfg.b_trk_m for p in samples])
         nat_v = ctx.terrain.raw_view()             # 條帶 AGL 驗證與 h_min,l（local_envelope）同基準
-        zg_max = nat_v.corridor_max(A.xy, A.theta, hw_op, _dv_of(ctx.terrain))
-        zg_min = nat_v.corridor_min(A.xy, A.theta, hw_op, _dv_of(ctx.terrain))
+        zg_max, zg_min = nat_v.corridor_minmax(A.xy, A.theta, hw_op, _dv_of(ctx.terrain))   # 修改 #13
         for j, p in enumerate(samples):
             if p.phase is Phase.OPERATE and p.strip_id is not None:
                 a_min, a_max = float(z[j] - zg_max[j]), float(z[j] - zg_min[j])
@@ -1086,17 +1085,22 @@ def _orbit_path(entry: Pose, center: np.ndarray, R: float, turn: int, dtheta_abs
 def _corridor_heading(ctx: MissionContext, spec: PlatformSpec, site_id: str, site_xy: np.ndarray, z_ref_m: float,
                       d_tr: float, landing: bool) -> tuple[float, list[str]]:
     """轉換段方位（規格 §3.4、D19）：站點 `approach_heading_deg` → 逆風 β（W ≥ 2）→ 障礙最少方位（W < 2；
-    以走廊線 site ↔ P_tc 至 keep-out 淨空最大者）。另回報側風／陣風限制違反（D8）。"""
+    以走廊線 site ↔ P_tc 至 keep-out 淨空最大者；沒有 keep-out 或並列時取正北 0，**不跟輸入風向**）。
+    另回報側風／陣風限制違反（D8；側風照實際風向算）。
+
+    vendored 修改 2026-10-20：舊碼在 W < 2 且沒有 keep-out 時退回 θ = β（輸入風向），0 m/s 來自 270° 與來自 0°
+    的計畫總時間差 28%；現在無風的基準方位 = 0（與「沒有風層」時相同），W ≥ 2 的結果逐位元不變。"""
     issues: list[str] = []
     site = ctx.inputs.sites.get(site_id)
     w = _wind_speed_at(ctx.wind, z_ref_m)
     beta = float(ctx.wind.dir_from_at(z_ref_m)) if ctx.wind is not None and ctx.wind.n_layers else 0.0
+    beta_ref = beta if w >= _CALM_WIND_MPS else 0.0           # 無風：方位決策不跟風向（側風檢查仍用 beta）
     if site is not None and site.approach_heading_deg is not None:
         theta = math.radians(float(site.approach_heading_deg))   # 進場與起飛皆逆風 → 同一方位
     elif w >= _CALM_WIND_MPS or ctx.keepouts is None or len(ctx.keepouts) == 0:
-        theta = beta
+        theta = beta_ref
     else:
-        best, best_clr = beta, -1.0
+        best, best_clr = beta_ref, -1.0
         for k in range(12):
             th = k * math.pi / 6.0
             end = site_xy + (-1.0 if landing else 1.0) * d_tr * _t_hat(th)

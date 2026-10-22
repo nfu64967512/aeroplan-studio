@@ -458,7 +458,7 @@ class TerrainGrid:
         self.sigma_z_m: float | None = None if sigma_z_m is None else float(sigma_z_m)
         self.is_dsm: bool = bool(is_dsm)
         self._grad: dict[str, tuple[np.ndarray, np.ndarray]] = {}
-        self._raw_view: "TerrainGrid | None" = None
+        self._raw_view: "tuple[TerrainGrid, bool] | None" = None    # (自然地形視圖, same_as_raw)，見 raw_view
 
     def __repr__(self) -> str:  # pragma: no cover - 顯示用
         return (f"TerrainGrid(x0_m={self.x0_m}, y0_m={self.y0_m}, step_m={self.step_m}, "
@@ -524,14 +524,37 @@ class TerrainGrid:
         ``z`` 量 AGL，等同要求在障礙頂之上再加 ``h_minfw``（規格未要求），並使空域上限 ``z_g^0 + h_ceil``
         在障礙旁相互矛盾（此為 hills 情境 ``above_ceiling`` 之根因）。
         `z_raw` 未被燒入修改，故視圖可安全快取；`burn()` 不影響其內容。
+
+        vendored 修改 #13：視圖**永遠是另一個物件**，``z``／``z_raw`` 都是 ``self.z_raw`` 的**唯讀**檢視（不複製）。
+        ⇒ 上面那句保證對任何時候拿到的視圖都成立（燒入只改 ``self.z``；對視圖本身 ``burn()`` 會因唯讀而報錯）。
+        舊版在「z 與 z_raw 相等」時回傳 ``self``，之後的 ``burn()`` 會改到已拿走的視圖；而網格邊緣有 nan 時
+        ``np.array_equal`` 永遠不等，又白白複製一份並讓呼叫端重算一次同樣的走廊最大值。要知道兩者是否相同，用
+        :meth:`same_as_raw`（不要再比物件身分）。
         """
-        if self._raw_view is None:
-            if self.z is self.z_raw or np.array_equal(self.z, self.z_raw):
-                self._raw_view = self
-            else:
-                self._raw_view = TerrainGrid(self.x0_m, self.y0_m, self.step_m, self.z_raw, z_raw=self.z_raw,
-                                             sigma_z_m=self.sigma_z_m, is_dsm=self.is_dsm)
-        return self._raw_view
+        return self._raw_cache()[0]
+
+    def same_as_raw(self) -> bool:
+        """``z`` 與 ``z_raw`` 是否相同（燒入沒有改到任何節點）⇒ 以 ``z`` 與以 :meth:`raw_view` 取樣逐位元相同，
+        呼叫端可直接共用結果（如 ``altitude.local_envelope`` 的 ``zb_max``）。
+
+        判準：逐值相等（``np.array_equal``，與舊版「回傳 self」同一條件），或位元組完全相同（含 nan 位置——
+        舊版漏掉的情形）。結果與 :meth:`raw_view` 一起快取，:meth:`burn` 改動後重設。"""
+        return self._raw_cache()[1]
+
+    def _raw_cache(self) -> "tuple[TerrainGrid, bool]":
+        cache = self._raw_view
+        if cache is None:
+            ro = self.z_raw.view()
+            ro.flags.writeable = False
+            v = TerrainGrid.__new__(TerrainGrid)
+            v.x0_m, v.y0_m, v.step_m, v.nx, v.ny = self.x0_m, self.y0_m, self.step_m, self.nx, self.ny
+            v.z, v.z_raw = ro, ro
+            v.sigma_z_m, v.is_dsm = self.sigma_z_m, self.is_dsm
+            v._grad = {}
+            v._raw_view = (v, True)
+            same = bool(np.array_equal(self.z, self.z_raw)) or self.z.tobytes() == self.z_raw.tobytes()
+            cache = self._raw_view = (v, same)
+        return cache
 
     # -- 幾何 -----------------------------------------------------------------
     def bounds(self) -> tuple[float, float, float, float]:
@@ -626,6 +649,12 @@ class TerrainGrid:
         zc = self._corridor_z(path_xy, theta_rad, half_width_m, dv_m, offset_m)
         return zc.min(axis=1)
 
+    def corridor_minmax(self, path_xy: np.ndarray, theta_rad: np.ndarray, half_width_m: np.ndarray | float,
+                        dv_m: float, offset_m: float = 0.0) -> tuple[np.ndarray, np.ndarray]:
+        """``(corridor_max, corridor_min)``：同一組參數只取樣一次（vendored 修改 #13；與分開呼叫兩次逐位元相同）。"""
+        zc = self._corridor_z(path_xy, theta_rad, half_width_m, dv_m, offset_m)
+        return zc.max(axis=1), zc.min(axis=1)
+
     # -- 多邊形 ---------------------------------------------------------------
     def _bbox_indices(self, bounds: tuple[float, float, float, float]) -> tuple[int, int, int, int] | None:
         minx, miny, maxx, maxy = bounds
@@ -708,4 +737,4 @@ class TerrainGrid:
                 changed = True
         if changed:
             self._grad.pop("z", None)
-            self._raw_view = None                 # 燒入後 z ≠ z_raw：自然地形視圖需重建
+            self._raw_view = None                 # 燒入後 z ≠ z_raw：same_as_raw 需重算（視圖本身不受影響）

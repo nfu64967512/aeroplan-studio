@@ -826,6 +826,13 @@ class MappingModeConfig:
     * ``crab_margin``：機身固定的相機在側風下偏流 ψ = asin(W/V_a)（W = 規劃風速各層最大值、V_a = 該構型巡航空速），
       足跡（橫 w、縱 l）跟著轉 ψ，保守可用寬 w_eff = w cosψ − l sinψ；條帶間距改用 w_eff(1 − side_overlap)。
       w_eff ≤ 0 → `build_context` 丟 MissionInputError（preflight／plan_mission 轉 NO_GO）。
+    * ``crab_margin_basis``（vendored 2026-10-20）：``"max_speed"``（預設）＝舊行為，不分方向一律 ψ = asin(W_max/V_a)；
+      ``"crosswind"`` ＝偏流只來自**側風分量**，鋪某個航跡 θ 的條帶時用 ψ(θ) = asin(W⊥(θ)/V_a)，
+      W⊥(θ) = max_層 |W sin(θ − β)|（沿風 0、純側風 = W）。兩者 ctx.sensors 都存全方向最壞 ψ_max，給不知方向的檢查用
+      （高度帶 d_turn、接縫重疊目標、圍籬、preflight 有效值），所以那些量兩種基準相同；只有「已知 θ 的條帶間距與條帶數」不同。
+      ⚠ 評估後**沒有**設成預設：首飛情境在 crosswind 下 validate 不過、規劃器會偏好沿風條帶（文獻建議垂直於風）、
+      沿風邊界帶會少掉附帶的重疊。依據與切換條件：docs/評估_2026-10-20_HARVEST偏流餘裕與無風基準.md 第 5 節。
+      ``to_dict`` 只在 crosswind 時列出此鍵（預設時與加入前逐位元相同，比照 ``cross_*``）。
     * ``lead_in_m``：條帶兩端在 e_ext 之外再各延長 lead_in_m（匯出器在帶起點之後 lead_in_m 才開相機時不掉覆蓋；
       **匯出器的 camera_lead_in_m 必須是同一個數**）。
     * ``min_block_strips``：實際飛的區塊（胞）條帶數少於此值者列警告 `mapping_small_blocks`（不改分解）；0 ＝ 不檢查。
@@ -881,6 +888,7 @@ class MappingModeConfig:
     seam_tie: bool = True
     no_altitude_layering: bool = True
     crab_margin: bool = True
+    crab_margin_basis: str = "max_speed"
     lead_in_m: float = 0.0
     min_block_strips: int = 3
     cross_strips: bool = False
@@ -893,6 +901,13 @@ class MappingModeConfig:
         for key in ("seam_tie", "no_altitude_layering", "crab_margin", "cross_strips", "cross_allow_neighbor_airspace"):
             if not isinstance(getattr(self, key), bool):
                 raise MissionInputError(f"MappingModeConfig.{key} 須為 bool，得 {getattr(self, key)!r}")
+        if self.crab_margin_basis not in _CRAB_BASES:
+            raise MissionInputError(f"MappingModeConfig.crab_margin_basis 須為 {'／'.join(_CRAB_BASES)}，"
+                                    f"得 {self.crab_margin_basis!r}")
+        if not self.crab_margin and self.crab_margin_basis != "max_speed":
+            # 有效值契約：沒開偏流餘裕時基準不會生效 ⇒ 設了非預設值就是「會被靜默忽略的值」，拒絕
+            raise MissionInputError(f"MappingModeConfig：crab_margin=False（沒開偏流餘裕）卻設了 crab_margin_basis="
+                                    f"{self.crab_margin_basis!r} ⇒ 不會生效；要用就把 crab_margin 設 True")
         object.__setattr__(self, "lead_in_m", _nonneg(_num(self.lead_in_m, "MappingModeConfig.lead_in_m"),
                                                       "MappingModeConfig.lead_in_m"))
         n = self.min_block_strips
@@ -922,12 +937,17 @@ class MappingModeConfig:
 
     def to_dict(self) -> dict[str, Any]:
         d = {f.name: getattr(self, f.name) for f in fields(self)}
+        if self.crab_margin_basis == "max_speed":
+            d.pop("crab_margin_basis")            # 預設＝舊行為 ⇒ 不列，與加入這個欄位前逐位元相同
         if not self.cross_strips:
             # 沒開交叉航帶 ⇒ cross_* 必為預設（__post_init__ 已擋），不列 ⇒ 與加入交叉航帶前的輸出逐位元相同
             for k in ("cross_strips", *_CROSS_DEFAULTS):
                 d.pop(k, None)
         return d
 
+
+#: 建圖偏流餘裕的基準（`MappingModeConfig.crab_margin_basis`）：舊的不分方向最大風速（預設）／側風分量
+_CRAB_BASES: tuple[str, ...] = ("max_speed", "crosswind")
 
 #: 交叉航帶參數的預設值（`MappingModeConfig.cross_strips=False` 時必須維持這些值）
 _CROSS_DEFAULTS: dict[str, float | bool] = {"cross_fraction": 0.2, "cross_alt_offset_m": 0.0, "cross_angle_offset_deg": 90.0,

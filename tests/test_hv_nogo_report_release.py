@@ -166,7 +166,8 @@ def test_auto_assign_trial_report_is_never_released(monkeypatch):
     """基準規劃成功、自動指派的試跑在轉接層 NO_GO（先送 report 再 raise）⇒ 試跑那份不可以送出去。
 
     試跑本身用替身（第 2 次呼叫轉接層時送一則帶 TRIAL_LOSER 的報告再丟例外）；
-    候選指派用替身強迫它跑試跑。整趟最後成功或失敗都不在這條的範圍。
+    候選指派用替身強迫它跑試跑。整趟最後成功或失敗都不在這條的範圍
+    （試跑失敗＝落選、跑回基準：見 tests/test_hv_recovery_trial_failure.py ⇒ 會有第 3 次呼叫）。
     """
     calls = []
     orig = hv.HvDccppCoordinator.plan_coverage_dccpp
@@ -192,7 +193,7 @@ def test_auto_assign_trial_report_is_never_released(monkeypatch):
                               overlap_rate=0.30, coverage_altitude=140.0, mounting_angle_deg=0.0)
     except hv.AeroPlanAdapterError:
         pass
-    assert len(calls) == 2 and calls[1] == {"X": "ALT1"}, f"前提：試跑要真的跑到（{calls}）"
+    assert len(calls) >= 2 and calls[1] == {"X": "ALT1"}, f"前提：試跑要真的跑到（{calls}）"
     leaked = [r for r in reports if "TRIAL_LOSER" in str(r.get("notes"))]
     assert not leaked, f"自動指派試跑落選那份被放行了：{leaked}"
 

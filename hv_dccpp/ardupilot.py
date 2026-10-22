@@ -223,6 +223,10 @@ class CameraTriggerConfig:
       lead_in + v·0.1 s（10 Hz 任務更新）；飛前模擬實測 50 m 引入段的首張落在帶起點後 49.0–51.1 m。任何 > 0 的值都照用
       （不另設下限）：小於 1 m 的引入段等於在帶起點開拍。
     * ``terrain_retrigger_tol``：條帶中途之 OPERATE 航點 AGL 與目前 d 所依據之 AGL 相對差 > tol 時，於該點後重發 206(d_new)。
+    * ``trigger_overshoot_guard``（vendored 2026-10-21，預設 True）：206 的 d 改用 :func:`commanded_trigger_distance_m`
+      ＝ l(1 − o_fwd)·(1 − f_s/:data:`CAMERA_UPDATE_HZ`)。飛控每 20 ms 才比一次距離，實際間距是 d 再加最多一個週期的
+      位移（v_g/50）；規劃器保證條帶地速 ≤ V_g,cap = l(1 − o_fwd)·f_s ⇒ 扣掉 V_g,cap/50 後實際間距不超過 l(1 − o_fwd)，
+      前向重疊不低於設定值。False ＝ 舊行為（d ＝ l(1 − o_fwd)）。
     """
     backend: str = "servo"
     firmware: str | None = None
@@ -240,6 +244,7 @@ class CameraTriggerConfig:
     first_shot_immediate: bool = True
     camera_lead_in_m: float = 0.0
     terrain_retrigger_tol: float | None = None
+    trigger_overshoot_guard: bool = True
 
     def __post_init__(self) -> None:
         if self.backend not in CAMERA_BACKEND_TYPE:
@@ -255,7 +260,7 @@ class CameraTriggerConfig:
             # CAM_MAX_ROLL 在 ArduPlane 是 AP_Int16（AP_Camera.h 4.5.7:227 `AP_Int16 _max_roll`）：小數會被飛控截掉
             raise ValueError(f"max_roll_deg 須為整數度：CAM_MAX_ROLL 在 ArduPlane 以 AP_Int16 儲存，"
                              f"{float(self.max_roll_deg):g}° 會被飛控存成 {int(float(self.max_roll_deg))}°")
-        for name in ("auto_only", "first_shot_immediate"):
+        for name in ("auto_only", "first_shot_immediate", "trigger_overshoot_guard"):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f"{name} 須為 bool，得 {getattr(self, name)!r}")
         _check_int("servo_channel", self.servo_channel, 1, _SERVO_CH_MAX)
@@ -785,6 +790,35 @@ def trigger_distance_m(sensor: Sensor, h_agl_m: float) -> float:
     return max(0.0, l_fp * (1.0 - fwd))
 
 
+CAMERA_UPDATE_HZ: int = 50
+"""ArduPlane 排 ``AP_Camera::update`` 的頻率（ArduPlane.cpp ``SCHED_TASK_CLASS(AP_Camera, …, update, 50, …)``；與
+``core.recon.exposure_verifier.CAMERA_UPDATE_HZ``、``scripts/survey_sitl_s1.CAMERA_UPDATE_HZ`` 同一個數）。等距觸發每個
+週期比一次「離上一張 ≥ d」，所以實際間距是 d 再加這一個週期裡多走的距離（0 到 v_g/50）。"""
+
+
+def trigger_overshoot_fraction(sensor: Sensor) -> float:
+    """量化保護比例 f_s/:data:`CAMERA_UPDATE_HZ`（f_s ＝ 規劃拍照率 ``r.shutter_rate_hz``，即 V_g,cap 用的那個數）。
+
+    V_g,cap = l(1 − o_fwd)·f_s 是規劃器允許的條帶地速上限，一個週期最多多走 V_g,cap/50 = d·f_s/50。
+    沒有拍照率（V_g,cap = ∞，上限無從界定）→ 0.0。f_s ≥ 50 Hz（保護會讓 d ≤ 0）→ ValueError。"""
+    f_s = getattr(getattr(sensor, "r", None), "shutter_rate_hz", None)
+    if f_s is None or not math.isfinite(float(f_s)) or float(f_s) <= 0.0:
+        return 0.0
+    frac = float(f_s) / float(CAMERA_UPDATE_HZ)
+    if frac >= 1.0:
+        raise ValueError(f"拍照率 {float(f_s):g} Hz ≥ 飛控相機更新率 {CAMERA_UPDATE_HZ} Hz：等距觸發無法提供這個拍照率")
+    return frac
+
+
+def commanded_trigger_distance_m(sensor: Sensor, h_agl_m: float) -> float:
+    """206 實際下給飛控的觸發距離 ＝ :func:`trigger_distance_m` × (1 − :func:`trigger_overshoot_fraction`)。
+
+    ⇒ 條帶地速 ≤ V_g,cap 時，飛控 50 Hz 量化後的實際間距 ≤ l(1 − o_fwd)，前向重疊不低於設定（vendored 2026-10-21）。
+    前向重疊 0.8 時一條帶剛好 l/d = 5 視，不扣的話實拍間距多 0.3–2.4 %，邊界只有最外側一條帶拍到的那一帶只剩 4 視。
+    沒有拍照率 → 與 :func:`trigger_distance_m` 相同（呼叫端要記警告）。"""
+    return trigger_distance_m(sensor, h_agl_m) * (1.0 - trigger_overshoot_fraction(sensor))
+
+
 # ---------------------------------------------------------------------------
 # Plan → 任務項目
 # ---------------------------------------------------------------------------
@@ -833,6 +867,8 @@ def plan_to_mission_items(uav_plan: UAVPlan, ctx: MissionContext, cfg: PlannerCo
       開拍點只剩 lead_in − 30）。條帶短於 2·lead_in 或首段短於 lead_in 時不插並記 WARNING；
     * 給了 ``camera_cfg`` 時，206 的 d 用 :func:`_trigger_agl`（AGL 與規劃作業高度差 ≤ :data:`AGL_SNAP_TOL_M` ⇒ 作業高度），
       平地各條帶的 p1 逐位元相同；``camera_cfg`` None ＝ 舊行為（該點 AGL）；
+    * ``trigger_overshoot_guard``（預設 True）→ 206 的 d 再乘 (1 − f_s/50)（:func:`commanded_trigger_distance_m`；
+      飛控 50 Hz 量化最多讓間距多 V_g,cap/50）。``camera_cfg`` None 時不扣（舊行為）；
     * ``terrain_retrigger_tol`` → 條帶**中途既有**之 OPERATE 航點，其 AGL 與目前 d 所依據之 AGL 相對差 > tol 時，於該點
       NAV 之後重發 206(d_new, 0, 0, 0)。不另造航點：只有起訖兩點的條帶（平直條帶的常態）不會重發。
     """
@@ -892,6 +928,23 @@ def plan_to_mission_items(uav_plan: UAVPlan, ctx: MissionContext, cfg: PlannerCo
     cam_subs: tuple[Any, ...] = ()    # 目前條帶之 rgb 感測器（地形重發 206 用）
     cam_agl_ref = 0.0                 # 目前 206 之 d 所依據之 AGL
 
+    guard_unbounded: set[str] = set()     # 開了量化保護但感測器沒有拍照率（V_g,cap 無從界定）——只警告一次
+
+    def cmd_dist(sub: Any, agl: float) -> float:
+        """206 的 d：給了 camera_cfg ⇒ 作業高度吸附（:func:`_trigger_agl`）＋量化保護（``trigger_overshoot_guard``）。"""
+        if cc is None:
+            return trigger_distance_m(sub, agl)
+        h = _trigger_agl(sub, agl)
+        if not cc.trigger_overshoot_guard:
+            return trigger_distance_m(sub, h)
+        if trigger_overshoot_fraction(sub) == 0.0 and trigger_distance_m(sub, h) > 0.0:
+            key = str(getattr(getattr(sub, "hw", None), "name", "") or id(sub))
+            if key not in guard_unbounded:
+                guard_unbounded.add(key)
+                _log.warning("%s: 相機感測器沒有拍照率 ⇒ 條帶地速上限 V_g,cap 無從界定，206 觸發距離不扣 50 Hz 量化保護"
+                             "（實際間距可能比 l(1 − o_fwd) 多到 v_g/50）", uav_plan.uav_id)
+        return commanded_trigger_distance_m(sub, h)
+
     def strip_subs(k: int) -> tuple[Any, tuple[Any, ...]]:
         sensor = _sensor_for(uav_plan, ctx, pts[k].strip_id, strip_sensors)
         # 規格 §6.2：同機雙感測（`platform.CombinedSensor`）一次飛行同時開兩個酬載 → 兩個 DO_ 皆送出。
@@ -936,7 +989,7 @@ def plan_to_mission_items(uav_plan: UAVPlan, ctx: MissionContext, cfg: PlannerCo
         cam_agl_ref = agl_ref
         for sub in subs:
             if getattr(sub, "kind", None) == "rgb":
-                dist = trigger_distance_m(sub, _trigger_agl(sub, agl_ref) if cc is not None else agl_ref)
+                dist = cmd_dist(sub, agl_ref)
                 if defer_cam:
                     pending.append(dist)
                 else:
@@ -1079,7 +1132,7 @@ def plan_to_mission_items(uav_plan: UAVPlan, ctx: MissionContext, cfg: PlannerCo
             if abs(float(p.agl) - cam_agl_ref) > float(rt_tol) * max(abs(cam_agl_ref), 1e-9):
                 for sub in cam_subs:
                     items.append(_item(0, MAV_CMD_DO_SET_CAM_TRIGG_DIST, MAV_FRAME_GLOBAL_RELATIVE_ALT,
-                                       (trigger_distance_m(sub, _trigger_agl(sub, p.agl)), 0.0, 0.0, 0.0)))
+                                       (cmd_dist(sub, p.agl), 0.0, 0.0, 0.0)))
                 cam_agl_ref = float(p.agl)
     if camera_trigger and (cam_on or lidar_on):
         close_strip()
@@ -1869,6 +1922,7 @@ def export_all(plan: MissionPlan, ctx: MissionContext, cfg: PlannerConfig, out_d
 
 __all__ = [
     "MissionItem", "plan_to_mission_items", "reduce_waypoints", "arc_vertices", "accept_radius_m", "trigger_distance_m",
+    "CAMERA_UPDATE_HZ", "trigger_overshoot_fraction", "commanded_trigger_distance_m",
     "write_qgc_wpl", "read_qgc_wpl", "rally_items", "fence_items", "fence_polygons", "fence_buffer_m", "recommended_params",
     "write_param_file", "read_param_file", "to_qgc_plan_json", "export_all", "renumber", "PARAM_COMMENTS",
     "NAV_COMMANDS", "FRAME_OF", "LIDAR_SERVO_CHANNEL", "LIDAR_SERVO_PWM_ON", "LIDAR_SERVO_PWM_OFF",

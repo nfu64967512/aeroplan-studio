@@ -21,13 +21,23 @@
   不採垂直偏置（D18）：本模組永不改變任何航點之 z。
 
 風中盤旋圈時間 T_lap = 2πR/V_a · circle_time_factor(V_a, W)（規格 §11.6；A、W=5 → 60.9 s，B → 41.9 s）。
+
+效能（vendored 修改 #13，**結果逐位元不變**）：一次 :func:`repair` 範圍內的軌跡／KD 樹／機對結果快取
+（:class:`_Scope`，離開 repair 即丟掉）、修復內部只要「有無衝突」或「(衝突數, ΣΔ_req)」時不算延遲與禁止區間
+（:func:`_sep_core` 的 ``_ANY``／``_SCORE``）、全域重排先查走廊且候選軌跡由快取陣列平移（:func:`_global_reschedule`）、
+:func:`shift_plan` 位置參數建構、:func:`_escape` 二分搜尋。對照原版的差分測試在
+``tests/hv_dccpp/test_deconflict_speedup_identity.py``（原版凍結在 ``tests/hv_dccpp/reference/``）。
 """
 from __future__ import annotations
 
+import bisect
+import contextvars
+import functools
 import inspect
 import itertools
 import math
-from dataclasses import dataclass, field, replace
+from collections import OrderedDict
+from dataclasses import dataclass, field, fields, replace
 from typing import Any, Callable, Iterable, Literal, Protocol, Sequence
 
 import numpy as np
@@ -165,6 +175,59 @@ INSERTABLE_PHASES: frozenset[Phase] = frozenset({
 """可插入延遲盤旋之航點階段（固定翼、非作業、非加減速／轉換）。"""
 
 _EPS = 1e-9
+
+
+# ---------------------------------------------------------------------------
+# 一次 repair() 範圍內的快取（vendored 修改 #13：加速，結果逐位元不變）
+# ---------------------------------------------------------------------------
+
+class _Scope:
+    """**一次** :func:`repair`（或單獨呼叫的 :func:`_global_reschedule`）範圍內的快取；離開即整個丟掉，
+    不是行程層級的狀態（放在 :data:`_SCOPE` 這個 ContextVar 裡 ⇒ 每個執行緒／context 各自一份）。
+
+    * ``tracks``：軌跡（:func:`_track_from_plan`）。鍵 = 建軌跡用到的**全部輸入**：航點 t/x/y/z/航跡角的 float64
+      位元組、走廊階段碼、起降區間、站點、Δt_4d／t_sync／k_t／σ 上限的位元組 ⇒ 就地改航點欄位、換一份同長度的
+      航點清單，都會變成另一個鍵（騙不過；只是重建）。
+    * ``trees``／``pairs``：KD 樹與機對結果，以軌跡**物件身分**為鍵；條目持有軌跡（與 cfg）的強參照，id 不會被
+      回收再用。只收 ``_Track.cacheable`` 的軌跡（由上面的軌跡快取建出的、或全域重排自己擺好的）；幽靈與一次性
+      候選軌跡走呼叫內的區域字典。機對只存「無衝突」或「(t_s, uav_a, uav_b, Δ_req) 序列」這種不可變的東西：
+      ``Conflict`` 是可變物件，一律現算、不共用。
+    * ``esc``：禁止區間 tuple 的左端點表（:func:`_escape` 二分搜尋用），以 tuple 身分為鍵、持有強參照。
+
+    每一種都有 LRU 上限（8 機實測峰值多約 26 MB，repair 結束即釋放）。
+    """
+    __slots__ = ("tracks", "trees", "pairs", "esc")
+    CAP_TRACKS, CAP_TREES, CAP_PAIRS, CAP_ESC = 96, 256, 512, 512
+
+    def __init__(self) -> None:
+        self.tracks: OrderedDict = OrderedDict()
+        self.trees: OrderedDict = OrderedDict()
+        self.pairs: OrderedDict = OrderedDict()
+        self.esc: OrderedDict = OrderedDict()
+
+
+_SCOPE: "contextvars.ContextVar[_Scope | None]" = contextvars.ContextVar("hv_dccpp_deconflict_scope", default=None)
+
+
+def _lru_put(od: OrderedDict, key: Any, val: Any, cap: int) -> None:
+    od[key] = val
+    od.move_to_end(key)
+    if len(od) > cap:
+        od.popitem(last=False)
+
+
+def _in_scope(fn: Callable) -> Callable:
+    """裝飾器：呼叫期間確保有一個 :class:`_Scope`（外層已有就沿用——快取條目都以內容或強參照身分驗證，共用是安全的）。"""
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        if _SCOPE.get() is not None:
+            return fn(*args, **kwargs)
+        token = _SCOPE.set(_Scope())
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            _SCOPE.reset(token)
+    return wrapper
 
 
 # ---------------------------------------------------------------------------
@@ -600,6 +663,7 @@ class _Track:
     is_ghost: bool
     corr_pad: np.ndarray | None = None   # (M,2)：該樣本所屬起降場坪之 (x, y)；非走廊樣本為 nan
     corr_site: np.ndarray | None = None  # (M,)：該樣本所屬起降站之 site_id；非走廊樣本／未知為 ""
+    cacheable: bool = False              # 可否以物件身分進 :class:`_Scope` 的 KD 樹／機對快取（修改 #13）
 
     def pad(self) -> np.ndarray:
         if self.corr_pad is not None:
@@ -617,48 +681,93 @@ class _Track:
         return int(self.samples.shape[0])
 
 
-def _corridor_masks(plan: UAVPlan, cfg: PlannerConfig, t_grid: np.ndarray, seg: np.ndarray
-                    ) -> tuple[np.ndarray, np.ndarray]:
-    """豁免條件 (1)+(2) 之樣本遮罩 ``(起飛段, 降落段)``。
+def _phase_code(p: Any) -> int:
+    """走廊階段碼（位元旗標，三個判斷與原式逐字相同、彼此獨立）：1 = OPERATE（``is``）、
+    2 = 起飛段（``in (TAKEOFF, TRANS_OUT)``）、4 = 降落段（``in (TRANS_IN, LAND)``）。"""
+    return ((1 if p is Phase.OPERATE else 0) | (2 if p in (Phase.TAKEOFF, Phase.TRANS_OUT) else 0)
+            | (4 if p in (Phase.TRANS_IN, Phase.LAND) else 0))
 
-    ⚠ 場坪座標與站點身分**必須**共用同一組遮罩，分開算會漂移（兩者要指同一批樣本）。
+
+_PHASE_CODE_BY_ID: dict[int, int] = {id(p): _phase_code(p) for p in Phase}
+"""Phase 成員（行程內的單例）→ 階段碼；以 id 查表避開 Enum 的 Python 層 ``__hash__``。非成員查不到 ⇒ 退回 :func:`_phase_code`。"""
+
+
+def _plan_arrays_exact(wps: Sequence[Waypoint]) -> np.ndarray:
+    """原版的轉換與檢查順序（``float(w.欄位)`` 逐一轉、t 轉完先檢查非遞減）→ ``(5, N)`` [t, x, y, z, track_deg]。"""
+    t, x, y, z = _waypoint_arrays(wps)
+    trk = np.array([float(w.track_deg) for w in wps], dtype=np.float64)
+    return np.vstack([t, x, y, z, trk])
+
+
+def _plan_arrays(wps: Sequence[Waypoint]) -> tuple[np.ndarray, np.ndarray]:
+    """建軌跡要的航點輸入：``(A, code)``，A = ``(5, N)`` float64 [t, x, y, z, track_deg]、code = ``(N,)`` int8
+    （:func:`_phase_code`）。值與例外都與原版（``float(w.欄位)``）相同：``np.fromiter`` 只在 ``None`` 時與
+    ``float()`` 不同（變 nan 而不是 TypeError）⇒ 有 nan 就整份改走 :func:`_plan_arrays_exact`。"""
+    n = len(wps)
+    A = np.empty((5, n), dtype=np.float64)
+    A[0] = np.fromiter((w.t_s for w in wps), np.float64, n)
+    if np.isnan(A[0]).any():
+        A = _plan_arrays_exact(wps)
+    else:
+        if n > 1 and np.any(np.diff(A[0]) < -1e-9):
+            raise ValueError("UAVPlan.waypoints 之 t_s 須非遞減")
+        A[1] = np.fromiter((w.x_m for w in wps), np.float64, n)
+        A[2] = np.fromiter((w.y_m for w in wps), np.float64, n)
+        A[3] = np.fromiter((w.z_m for w in wps), np.float64, n)
+        A[4] = np.fromiter((w.track_deg for w in wps), np.float64, n)
+        if np.isnan(A[1:]).any():
+            A = _plan_arrays_exact(wps)
+    get = _PHASE_CODE_BY_ID.get
+    codes = [get(id(w.phase)) for w in wps]
+    if None in codes:
+        codes = [_phase_code(w.phase) for w in wps]
+    return A, np.array(codes, dtype=np.int8)
+
+
+def _build_track(uav_id: Any, t_grid: np.ndarray, A: np.ndarray, t: np.ndarray, code: np.ndarray,
+                 windows: tuple[tuple[float, float], tuple[float, float]], to_id: str, ld_id: str, t_sync_s: float,
+                 cfg: PlannerConfig, cacheable: bool) -> _Track:
+    """由 :func:`_plan_arrays` 的輸入建 :class:`_Track`（``t`` 另給，供全域重排直接平移；其餘取 ``A``）。
+
+    走廊豁免條件 (1)+(2) 的遮罩只算**一次**，場坪座標（``corr_pad``，計畫未帶站點時的退回判準）與站點身分
+    （``corr_site``，正式判準）共用它。⚠ 兩者**必須**指同一批樣本，分開算會漂移（見 :data:`SITE_CORRIDOR_PHASES`）。
+    起飛段取首航點／``takeoff_site``、降落段取末航點／``landing_site``；非走廊樣本或落在該機自己的走廊預約區間
+    之外者為 nan／``""``（站點空字串 ⇒ :func:`_pair_metrics` 退回比座標）。
     """
-    wps = plan.waypoints
-    phase_wp = [w.phase for w in wps]
-    dep_wp = np.array([p in (Phase.TAKEOFF, Phase.TRANS_OUT) for p in phase_wp], dtype=bool)
-    arr_wp = np.array([p in (Phase.TRANS_IN, Phase.LAND) for p in phase_wp], dtype=bool)
-    (ts0, ts1), (ls0, ls1) = plan_windows(plan, cfg)
+    x, y, z = A[1], A[2], A[3]
+    n = t.size
+    if n == 1:
+        m = t_grid.size
+        xs, ys, zs, seg = np.full(m, x[0]), np.full(m, y[0]), np.full(m, z[0]), np.zeros(m, dtype=int)
+    else:
+        seg = np.clip(np.searchsorted(t, t_grid, side="right") - 1, 0, n - 2)
+        dt_seg = t[seg + 1] - t[seg]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            frac = np.where(dt_seg > 1e-12, (t_grid - t[seg]) / dt_seg, 1.0)
+        frac = np.clip(frac, 0.0, 1.0)
+        xs = x[seg] + frac * (x[seg + 1] - x[seg])
+        ys = y[seg] + frac * (y[seg + 1] - y[seg])
+        zs = z[seg] + frac * (z[seg + 1] - z[seg])
+    sigma = _sigma(t_grid, t_sync_s, cfg.k_t, sigma_t_max_of(cfg))
+    samples = np.column_stack([xs, ys, zs, t_grid, sigma])
+    trk = np.radians(A[4])
+    oper_wp = (code & 1).astype(bool)
+    dep_wp = (code & 2).astype(bool)
+    arr_wp = (code & 4).astype(bool)
+    (ts0, ts1), (ls0, ls1) = windows
     dep = dep_wp[seg] & (t_grid >= ts0 - _EPS) & (t_grid <= ts1 + _EPS)
     arr = arr_wp[seg] & (t_grid >= ls0 - _EPS) & (t_grid <= ls1 + _EPS)
-    return dep, arr
-
-
-def _corridor_pads(plan: UAVPlan, cfg: PlannerConfig, t_grid: np.ndarray, seg: np.ndarray) -> np.ndarray:
-    """每一樣本之「起降場坪座標」(M,2)：起飛段取首航點、降落段取末航點；非走廊樣本或落在該機自己的
-    走廊預約區間之外者為 nan（見 :data:`SITE_CORRIDOR_PHASES` 之豁免三條件）。
-
-    ⚠ 這是**退回路徑**用的：正式判準是 :func:`_corridor_sites` 的站點身分。"""
-    wps = plan.waypoints
     pads = np.full((t_grid.size, 2), np.nan)
-    dep, arr = _corridor_masks(plan, cfg, t_grid, seg)
     if dep.any():
-        pads[dep] = (float(wps[0].x_m), float(wps[0].y_m))
+        pads[dep] = (float(x[0]), float(y[0]))
     if arr.any():
-        pads[arr] = (float(wps[-1].x_m), float(wps[-1].y_m))
-    return pads
-
-
-def _corridor_sites(plan: UAVPlan, cfg: PlannerConfig, t_grid: np.ndarray, seg: np.ndarray) -> np.ndarray:
-    """每一樣本之「起降站 site_id」(M,)：起飛段取 ``takeoff_site``、降落段取 ``landing_site``；
-    非走廊樣本、或該欄為空（手搭 UAVPlan）者為 ``""``（⇒ :func:`_pair_metrics` 退回比座標）。"""
+        pads[arr] = (float(x[-1]), float(y[-1]))
     sites = np.full(t_grid.size, "", dtype=object)
-    dep, arr = _corridor_masks(plan, cfg, t_grid, seg)
-    to_id, ld_id = str(getattr(plan, "takeoff_site", "") or ""), str(plan.landing_site or "")
     if to_id and dep.any():
         sites[dep] = to_id
     if ld_id and arr.any():
         sites[arr] = ld_id
-    return sites
+    return _Track(uav_id, samples, trk[seg], oper_wp[seg], False, pads, sites, cacheable)
 
 
 def _track_from_plan(plan: UAVPlan, dt_s: float, t_sync_s: float, cfg: PlannerConfig) -> _Track:
@@ -666,13 +775,23 @@ def _track_from_plan(plan: UAVPlan, dt_s: float, t_sync_s: float, cfg: PlannerCo
     if not wps:
         return _Track(plan.uav_id, np.zeros((0, 5)), np.zeros(0), np.zeros(0, dtype=bool), False)
     t_grid = _time_grid(float(wps[0].t_s), float(wps[-1].t_s), float(dt_s))
-    xs, ys, zs, seg = _interp_plan(wps, t_grid)
-    sigma = _sigma(t_grid, t_sync_s, cfg.k_t, sigma_t_max_of(cfg))
-    samples = np.column_stack([xs, ys, zs, t_grid, sigma])
-    trk = np.radians(np.array([float(w.track_deg) for w in wps], dtype=np.float64))
-    oper_wp = np.array([w.phase is Phase.OPERATE for w in wps], dtype=bool)
-    return _Track(plan.uav_id, samples, trk[seg], oper_wp[seg], False,
-                  _corridor_pads(plan, cfg, t_grid, seg), _corridor_sites(plan, cfg, t_grid, seg))
+    A, code = _plan_arrays(wps)
+    windows = plan_windows(plan, cfg)
+    to_id, ld_id = str(getattr(plan, "takeoff_site", "") or ""), str(plan.landing_site or "")
+    S = _SCOPE.get()
+    if S is None:
+        return _build_track(plan.uav_id, t_grid, A, A[0], code, windows, to_id, ld_id, t_sync_s, cfg, False)
+    # 鍵＝建軌跡的全部輸入（數值取 float64 位元組：−0.0／nan 也分得開）⇒ 就地改計畫只會 miss、不會拿到舊軌跡
+    nums = np.array([float(dt_s), float(t_sync_s), float(cfg.k_t), sigma_t_max_of(cfg),
+                     windows[0][0], windows[0][1], windows[1][0], windows[1][1]], dtype=np.float64)
+    key = (type(plan.uav_id), plan.uav_id, to_id, ld_id, nums.tobytes(), A.tobytes(), code.tobytes())
+    hit = S.tracks.get(key)
+    if hit is not None:
+        S.tracks.move_to_end(key)
+        return hit
+    trk = _build_track(plan.uav_id, t_grid, A, A[0], code, windows, to_id, ld_id, t_sync_s, cfg, True)
+    _lru_put(S.tracks, key, trk, S.CAP_TRACKS)
+    return trk
 
 
 def _track_from_ghost(ghost: GhostLike) -> _Track:
@@ -755,9 +874,37 @@ def _forbidden_intervals(dt_ab: np.ndarray, win: np.ndarray, k_t: float) -> tupl
     return tuple(merged)
 
 
+def _escape_lows(intervals: Sequence[tuple[float, float]]) -> list[float] | None:
+    """二分搜尋用的左端點表（修改 #13）；只在 :class:`_Scope` 內、``intervals`` 是 ≥ 8 段的 tuple、而且結構
+    滿足「全是 float 二元組、左端非遞減、``lo[i+1] ≥ hi[i]``」（:func:`_forbidden_intervals`／:func:`_merge_intervals`
+    產出的都是）時才給，否則 None ⇒ 呼叫端照原式線性掃。以 tuple 身分快取（持有強參照）。"""
+    S = _SCOPE.get()
+    if S is None or type(intervals) is not tuple or len(intervals) < 8:
+        return None
+    ent = S.esc.get(id(intervals))
+    if ent is not None and ent[0] is intervals:
+        return ent[1]
+    lows: list[float] | None = None
+    if all(type(iv) is tuple and len(iv) == 2 and type(iv[0]) is float and type(iv[1]) is float for iv in intervals):
+        lo = [iv[0] for iv in intervals]
+        if all(lo[i] <= lo[i + 1] and lo[i + 1] >= intervals[i][1] for i in range(len(lo) - 1)):
+            lows = lo
+    _lru_put(S.esc, id(intervals), (intervals, lows), S.CAP_ESC)
+    return lows
+
+
 def _escape(s: float, intervals: Sequence[tuple[float, float]]) -> float:
-    """最小 s' ≥ s 且不落在任何禁止開區間內（``intervals`` 須已合併且依左端排序）。"""
+    """最小 s' ≥ s 且不落在任何禁止開區間內（``intervals`` 須已合併且依左端排序）。
+
+    有 :func:`_escape_lows` 時改二分搜尋（結果相同）：左端排序且 ``lo[i+1] ≥ hi[i]`` ⇒ 含 s 的區間至多一個
+    （第 k−1 個，k = #{lo < s}）；跳到它的 hi 之後，後面的區間 lo ≥ hi，再也跳不動。"""
+    lows = _escape_lows(intervals)
     s = float(s)
+    if lows is not None:
+        k = bisect.bisect_left(lows, s)
+        if k > 0 and lows[k - 1] < s < intervals[k - 1][1]:
+            return intervals[k - 1][1]
+        return s
     for lo, hi in intervals:
         if lo < s < hi:
             s = hi
@@ -765,8 +912,16 @@ def _escape(s: float, intervals: Sequence[tuple[float, float]]) -> float:
 
 
 def _escape_down(s: float, intervals: Sequence[tuple[float, float]]) -> float:
-    """最大 s' ≤ s 且不落在任何禁止開區間內（:func:`_escape` 之反向；起飛「提前」換序用）。"""
+    """最大 s' ≤ s 且不落在任何禁止開區間內（:func:`_escape` 之反向；起飛「提前」換序用）。
+
+    二分搜尋版同 :func:`_escape`：唯一含 s 的是第 k−1 個，跳到它的 lo 之後，前面的區間 hi ≤ lo，不再含它。"""
+    lows = _escape_lows(intervals)
     s = float(s)
+    if lows is not None:
+        k = bisect.bisect_left(lows, s)
+        if k > 0 and lows[k - 1] < s < intervals[k - 1][1]:
+            return intervals[k - 1][0]
+        return s
     for lo, hi in reversed(list(intervals)):
         if lo < s < hi:
             s = lo
@@ -829,6 +984,166 @@ def _candidate_pairs(ta: _Track, tb: _Track, cfg: PlannerConfig, v_ref_mps: floa
     return ii, jj, True
 
 
+# -- 修改 #13：KD 樹／機對快取與分級的分離檢查（與上面三個函式逐位元同結果）------------------------------
+
+_ANY, _SCORE, _FULL = 0, 1, 2
+""":func:`_sep_core` 的細節層級：``_ANY`` = 有無衝突（遇第一筆就停）；``_SCORE`` = 每事件
+``(t_s, uav_a, uav_b, dt_req_s)``（:meth:`_Repair.involved_score` 只要這些，不算延遲與禁止區間）；
+``_FULL`` = :func:`check_separation` 的完整 :class:`Conflict` 清單。"""
+
+
+def _tree(trk: _Track, dims: int, v_ref: float | None, local: dict) -> cKDTree:
+    """``trk`` 的 (x, y) 或 (x, y, V_ref·t) KD 樹，點集與 :func:`_cross_pairs`／:func:`_candidate_pairs` 建的完全相同。
+    ``cacheable`` 的軌跡在 :class:`_Scope` 內跨呼叫共用，其餘只在本次呼叫內（``local``）共用。"""
+    key = (id(trk), dims, v_ref)
+    S = _SCOPE.get() if trk.cacheable else None
+    store = local if S is None else S.trees
+    ent = store.get(key)
+    if ent is not None and ent[0] is trk:
+        if S is not None:
+            S.trees.move_to_end(key)
+        return ent[1]
+    if dims == 2:
+        tree = cKDTree(trk.samples[:, :2])
+    else:
+        tree = cKDTree(np.column_stack([trk.samples[:, 0], trk.samples[:, 1], float(v_ref) * trk.samples[:, 3]]))
+    if S is None:
+        local[key] = (trk, tree)
+    else:
+        _lru_put(S.trees, key, (trk, tree), S.CAP_TREES)
+    return tree
+
+
+def _near_pairs(ta: _Track, tb: _Track, dims: int, v_ref: float | None, r: float, local: dict
+                ) -> tuple[np.ndarray, np.ndarray]:
+    """= :func:`_cross_pairs` 的 (i, j)（同樣的兩棵樹 ⇒ 同樣的對、同樣的順序）。"""
+    if ta.n == 0 or tb.n == 0:
+        return np.zeros(0, dtype=int), np.zeros(0, dtype=int)
+    m = _tree(ta, dims, v_ref, local).sparse_distance_matrix(_tree(tb, dims, v_ref, local), r, output_type="ndarray")
+    return m["i"].astype(int), m["j"].astype(int)
+
+
+def _pair_compute(ta: _Track, tb: _Track, skipped: bool, ghost: bool, cfg: PlannerConfig, v_ref_mps: float,
+                  gap_samples: int, level: int, local: dict) -> bool | list:
+    """:func:`check_separation` 內層迴圈對**一個已定向機對**做的事，依 ``level`` 只算到需要的地方
+    （``_FULL`` 時與原迴圈逐位元相同；``_SCORE``／``_ANY`` 不算 :func:`_pair_delays` 與禁止區間）。"""
+    r_xy = max(float(cfg.d_sep_m), float(cfg.d_sep_lat_m))
+    win_max = float(cfg.dt_4d_s) + float(ta.samples[:, 4].max()) + float(tb.samples[:, 4].max())
+    r3 = math.hypot(r_xy, float(v_ref_mps) * win_max)
+    if r3 <= 3.0 * r_xy:                                         # 同 _candidate_pairs
+        li, lj = _near_pairs(ta, tb, 3, float(v_ref_mps), r3, local)
+        spatial_only = False
+    else:
+        li, lj = _near_pairs(ta, tb, 2, None, r_xy, local)
+        spatial_only = True
+    if li.size == 0:
+        return False if level == _ANY else []
+    d_h, d_v, dt_ab, win, spatial = _pair_metrics(ta, tb, li, lj, cfg, skip_oper=skipped)
+    flag = spatial & (np.abs(dt_ab) < win)
+    if not flag.any():
+        return False if level == _ANY else []
+    if level == _ANY:
+        return True
+    t_a = ta.samples[li[flag], 3]
+    evs = _events(li[flag], lj[flag], d_h[flag], d_v[flag], (win - np.abs(dt_ab))[flag], dt_ab[flag], t_a, gap_samples)
+    if level == _SCORE:
+        return [(ts, ta.uav_id, tb.uav_id, dreq) for (_ia, _ib, _dh, _dv, ts, _dab, dreq) in evs]
+    if spatial_only:
+        pre = (dt_ab[spatial], win[spatial])
+    else:                                                        # = _pair_delays(pre=None) 的 2-D 查詢
+        ii, jj = _near_pairs(ta, tb, 2, None, r_xy, local)
+        _, _, dt2, win2, sp2 = _pair_metrics(ta, tb, ii, jj, cfg, skip_oper=skipped)
+        pre = (dt2[sp2], win2[sp2])
+    delay_a, delay_b, forbid_a, forbid_b = _pair_delays(ta, tb, cfg, pre, skip_oper=skipped)
+    w_now = win[flag] + REPAIR_MARGIN_S                          # 只解「目前真的違規」之樣本對
+    fn_a = _forbidden_intervals(-dt_ab[flag], w_now, cfg.k_t)
+    fn_b = _forbidden_intervals(dt_ab[flag], w_now, cfg.k_t)
+    return [Conflict(uav_a=ta.uav_id, uav_b=tb.uav_id, t_s=ts, d_h_m=dh, d_v_m=dv, idx_a=ia, idx_b=ib,
+                     kind="ghost" if ghost else "4d", dt_req_s=dreq, dt_ab_s=dab,
+                     delay_a_s=delay_a, delay_b_s=delay_b, forbid_a=forbid_a, forbid_b=forbid_b,
+                     forbid_now_a=fn_a, forbid_now_b=fn_b)
+            for (ia, ib, dh, dv, ts, dab, dreq) in evs]
+
+
+def _pair_eval(ta: _Track, tb: _Track, skipped: bool, ghost: bool, cfg: PlannerConfig, v_ref_mps: float,
+               gap_samples: int, level: int, local: dict) -> bool | list | tuple:
+    """:func:`_pair_compute` 加上 :class:`_Scope` 的機對快取（只存 False＝無衝突、True＝有衝突、或 SCORE 序列）。"""
+    S = _SCOPE.get()
+    if S is None or ghost or not (ta.cacheable and tb.cacheable):
+        return _pair_compute(ta, tb, skipped, ghost, cfg, v_ref_mps, gap_samples, level, local)
+    key = (id(ta), id(tb), bool(skipped), float(v_ref_mps), id(cfg), gap_samples)
+    ent = S.pairs.get(key)
+    if ent is not None and ent[0] is ta and ent[1] is tb and ent[2] is cfg:
+        S.pairs.move_to_end(key)
+        val = ent[3]
+        if val is False:
+            return False if level == _ANY else []
+        if level == _ANY:
+            return True
+        if level == _SCORE and val is not True:
+            return val
+    res = _pair_compute(ta, tb, skipped, ghost, cfg, v_ref_mps, gap_samples, level, local)
+    if level == _ANY:
+        val = bool(res)
+    elif level == _SCORE:
+        val = tuple(res) if res else False
+    else:
+        val = tuple((c.t_s, c.uav_a, c.uav_b, c.dt_req_s) for c in res) if res else False
+    _lru_put(S.pairs, key, (ta, tb, cfg, val), S.CAP_PAIRS)
+    return res
+
+
+def _sep_core(tracks: list[_Track], cfg: PlannerConfig, v_ref_mps: float,
+              skip_pairs: Iterable[tuple[str, str]] | None, only_uavs: Iterable[str] | None, level: int,
+              local: dict | None = None) -> bool | list:
+    """:func:`check_separation` 的機對迴圈（同樣的機對、同樣的定向與排序），細節依 ``level``（:data:`_ANY` …）。"""
+    tracks = [t for t in tracks if t.n > 0]
+    nt = len(tracks)
+    if nt < 2:
+        return False if level == _ANY else []
+    skip = _norm_pairs(skip_pairs)
+    only = None if only_uavs is None else {str(u) for u in only_uavs}
+    gap_samples = max(1, int(math.ceil(EVENT_GAP_S / float(cfg.dt_4d_s))))
+    local = {} if local is None else local
+    out: list = []
+    for a_i in range(nt):
+        for b_i in range(a_i + 1, nt):
+            tr_a, tr_b = tracks[a_i], tracks[b_i]
+            ghost = tr_a.is_ghost or tr_b.is_ghost
+            if tr_a.is_ghost and tr_b.is_ghost:
+                continue
+            if only is not None and tr_a.uav_id not in only and tr_b.uav_id not in only:
+                continue
+            skipped = _norm_pair(tr_a.uav_id, tr_b.uav_id) in skip
+            if skipped and ghost:
+                continue                                    # 幽靈：無階段資訊 → 整對豁免
+            if (not ghost and tr_a.uav_id > tr_b.uav_id) or (ghost and tr_a.is_ghost):
+                tr_a, tr_b = tr_b, tr_a
+            res = _pair_eval(tr_a, tr_b, skipped, ghost, cfg, v_ref_mps, gap_samples, level, local)
+            if level == _ANY:
+                if res:
+                    return True
+            else:
+                out.extend(res)
+    if level == _ANY:
+        return False
+    if level == _FULL:
+        out.sort(key=lambda c: (c.t_s, c.uav_a, c.uav_b))
+    else:
+        out.sort(key=lambda r: (r[0], r[1], r[2]))
+    return out
+
+
+def _check(plans: dict[str, UAVPlan], cfg: PlannerConfig, ghosts: Sequence[GhostLike] | None, v_ref_mps: float,
+           skip_pairs: set[tuple[str, str]] | None, t_sync_s: float, only_uavs: Iterable[str] | None,
+           level: int) -> bool | list:
+    """:func:`check_separation` 之本體（可選細節層級）。"""
+    tracks: list[_Track] = [_track_from_plan(p, cfg.dt_4d_s, t_sync_s, cfg) for p in plans.values()]
+    for g in (ghosts or ()):
+        tracks.append(_track_from_ghost(g))
+    return _sep_core(tracks, cfg, v_ref_mps, skip_pairs, only_uavs, level)
+
+
 def check_separation(plans: dict[str, UAVPlan], cfg: PlannerConfig, ghosts: Sequence[GhostLike] | None = None,
                      v_ref_mps: float = 20.0, skip_pairs: set[tuple[str, str]] | None = None, *,
                      t_sync_s: float = 0.0, only_uavs: Iterable[str] | None = None) -> list[Conflict]:
@@ -854,52 +1169,12 @@ def check_separation(plans: dict[str, UAVPlan], cfg: PlannerConfig, ghosts: Sequ
     對稱：(a, b) 與 (b, a) 為同一筆（uav_a ≤ uav_b）；幽靈航跡（``ghosts``）為額外航跡，衝突 kind="ghost"
     （uav_a = 計畫機、uav_b = 幽靈）；幽靈之間不檢查。
     ``only_uavs`` 給定時只檢查「至少一方屬於該集合」之機對（修復之局部重算用）。
+
+    實作（vendored 修改 #13）：機對迴圈在 :func:`_sep_core`；在 :func:`repair` 範圍內軌跡、KD 樹、機對結果走
+    :class:`_Scope` 快取，範圍外每次現算（只在本次呼叫內共用 KD 樹）。輸出與修改前逐位元相同——驗證器也用本函式，
+    所以 ``tests/hv_dccpp/test_deconflict_speedup_identity.py`` 拿凍結的原版逐筆對照，不是自己驗自己。
     """
-    tracks: list[_Track] = [_track_from_plan(p, cfg.dt_4d_s, t_sync_s, cfg) for p in plans.values()]
-    for g in (ghosts or ()):
-        tracks.append(_track_from_ghost(g))
-    tracks = [t for t in tracks if t.n > 0]
-    nt = len(tracks)
-    if nt < 2:
-        return []
-    skip = _norm_pairs(skip_pairs)
-    only = None if only_uavs is None else {str(u) for u in only_uavs}
-    gap_samples = max(1, int(math.ceil(EVENT_GAP_S / float(cfg.dt_4d_s))))
-    out: list[Conflict] = []
-    for a_i in range(nt):
-        for b_i in range(a_i + 1, nt):
-            tr_a, tr_b = tracks[a_i], tracks[b_i]
-            ghost = tr_a.is_ghost or tr_b.is_ghost
-            if tr_a.is_ghost and tr_b.is_ghost:
-                continue
-            if only is not None and tr_a.uav_id not in only and tr_b.uav_id not in only:
-                continue
-            skipped = _norm_pair(tr_a.uav_id, tr_b.uav_id) in skip
-            if skipped and ghost:
-                continue                                    # 幽靈：無階段資訊 → 整對豁免
-            if (not ghost and tr_a.uav_id > tr_b.uav_id) or (ghost and tr_a.is_ghost):
-                tr_a, tr_b = tr_b, tr_a
-            li, lj, spatial_only = _candidate_pairs(tr_a, tr_b, cfg, v_ref_mps)
-            if li.size == 0:
-                continue
-            d_h, d_v, dt_ab, win, spatial = _pair_metrics(tr_a, tr_b, li, lj, cfg, skip_oper=skipped)
-            flag = spatial & (np.abs(dt_ab) < win)
-            if not flag.any():
-                continue
-            pre = (dt_ab[spatial], win[spatial]) if spatial_only else None
-            delay_a, delay_b, forbid_a, forbid_b = _pair_delays(tr_a, tr_b, cfg, pre, skip_oper=skipped)
-            w_now = win[flag] + REPAIR_MARGIN_S                  # 只解「目前真的違規」之樣本對
-            fn_a = _forbidden_intervals(-dt_ab[flag], w_now, cfg.k_t)
-            fn_b = _forbidden_intervals(dt_ab[flag], w_now, cfg.k_t)
-            t_a = tr_a.samples[li[flag], 3]
-            for (ia, ib, dh, dv, ts, dab, dreq) in _events(li[flag], lj[flag], d_h[flag], d_v[flag],
-                                                           (win - np.abs(dt_ab))[flag], dt_ab[flag], t_a, gap_samples):
-                out.append(Conflict(uav_a=tr_a.uav_id, uav_b=tr_b.uav_id, t_s=ts, d_h_m=dh, d_v_m=dv, idx_a=ia,
-                                    idx_b=ib, kind="ghost" if ghost else "4d", dt_req_s=dreq, dt_ab_s=dab,
-                                    delay_a_s=delay_a, delay_b_s=delay_b, forbid_a=forbid_a, forbid_b=forbid_b,
-                                    forbid_now_a=fn_a, forbid_now_b=fn_b))
-    out.sort(key=lambda c: (c.t_s, c.uav_a, c.uav_b))
-    return out
+    return _check(plans, cfg, ghosts, v_ref_mps, skip_pairs, t_sync_s, only_uavs, _FULL)
 
 
 # ---------------------------------------------------------------------------
@@ -926,17 +1201,39 @@ def orbit_lap_time_s(spec: PlatformSpec, wind: Any, z_m: float, r_orb_m: float |
     return 2.0 * math.pi * r / va * circle_time_factor(va, w), r
 
 
+_WP_FIELDS: tuple[str, ...] = ("x_m", "y_m", "z_m", "lat_deg", "lon_deg", "alt_msl_m", "agl_m", "t_s", "mode", "phase",
+                                "sensor_on", "strip_id", "cell_id", "dir", "airspeed_mps", "ground_speed_mps",
+                                "track_deg", "heading_deg", "energy_remaining_wh", "nearest_alternate",
+                                "alt_reachable", "lost_link_action", "arc", "accept_radius_m")
+_WP_POSITIONAL: bool = (tuple(f.name for f in fields(Waypoint)) == _WP_FIELDS
+                        and all(f.init for f in fields(Waypoint)) and not hasattr(Waypoint, "__post_init__"))
+"""修改 #13：:func:`shift_plan` 可用位置參數建 :class:`Waypoint`（欄位與上表逐一相同、全是 init 欄位、沒有
+``__post_init__``）。``Waypoint`` 日後增減欄位 ⇒ 自動退回 ``dataclasses.replace``（慢但對）；
+``tests/hv_dccpp/test_deconflict_speedup_identity.py`` 鎖住快路徑仍在作用。"""
+
+
 def shift_plan(plan: UAVPlan, delay_s: float, from_index: int = 0, energy_wh: float = 0.0) -> UAVPlan:
     """回傳時間戳自 ``from_index`` 起平移 ``delay_s`` 之新 UAVPlan（原物件不變；前段航點物件共用）。
 
     ``from_index == 0`` 時 t_takeoff_s 亦平移；t_arr_ptc_s / t_land_s 一律平移；
     ``energy_wh`` > 0 時自 from_index 起每航點 energy_remaining_wh 減去該值。
+
+    每個航點用位置參數直接建（同樣的 ``w.t_s + d``、``w.energy_remaining_wh − e``），取代每點一次
+    ``dataclasses.replace``（它就是 ``obj.__class__(**changes)``；實測 1.9k 航點 6.8 → 0.7 ms）；
+    子類別或欄位表對不上時照舊用 ``replace``。
     """
     d = float(delay_s)
     e = float(energy_wh)
     wps = list(plan.waypoints[:from_index])
+    ap = wps.append
     for w in plan.waypoints[from_index:]:
-        wps.append(replace(w, t_s=w.t_s + d, energy_remaining_wh=w.energy_remaining_wh - e))
+        if _WP_POSITIONAL and type(w) is Waypoint:
+            ap(Waypoint(w.x_m, w.y_m, w.z_m, w.lat_deg, w.lon_deg, w.alt_msl_m, w.agl_m, w.t_s + d, w.mode, w.phase,
+                        w.sensor_on, w.strip_id, w.cell_id, w.dir, w.airspeed_mps, w.ground_speed_mps, w.track_deg,
+                        w.heading_deg, w.energy_remaining_wh - e, w.nearest_alternate, w.alt_reachable,
+                        w.lost_link_action, w.arc, w.accept_radius_m))
+        else:
+            ap(replace(w, t_s=w.t_s + d, energy_remaining_wh=w.energy_remaining_wh - e))
     return replace(plan, waypoints=wps,
                    t_takeoff_s=plan.t_takeoff_s + (d if from_index == 0 else 0.0),
                    t_arr_ptc_s=plan.t_arr_ptc_s + d, t_land_s=plan.t_land_s + d,
@@ -1065,6 +1362,9 @@ class _Repair:
 
         只重跑與被改動之機相關的機對（其餘機對不受影響），成本 ≈ n_U 次雙軌檢查（8 機約 10 ms）。
         以字典序嚴格下降為接受條件 ⇒ 修復不會把衝突推給別的機對，且必然終止。
+
+        修改 #13：4D 部分只要每事件的 ``dt_req_s`` ⇒ 以 :data:`_SCORE` 層級檢查（不算延遲與禁止區間）；
+        加總的值與順序和完整 :class:`Conflict` 清單相同（同樣依 (t_s, uav_a, uav_b) 穩定排序，走廊衝突接在後面）。
         """
         uavs = {u for u in uavs if u in self.plans}
         if not uavs:
@@ -1072,17 +1372,17 @@ class _Repair:
         merged = dict(self.plans)
         if new:
             merged.update({u: p for u, p in new.items() if u in merged})
-        cs = list(check_separation(merged, self.cfg, list(self.ghosts.values()) or None, self.v_ref_mps, self.skip,
-                                   t_sync_s=self.t_sync_s, only_uavs=uavs))
+        vals = [r[3] for r in _check(merged, self.cfg, list(self.ghosts.values()) or None, self.v_ref_mps,
+                                     self.skip, self.t_sync_s, uavs, _SCORE)]
         s2 = self.sched.copy()
         for u in uavs:
             s2.release(u)
             s2.reserve_plan(merged[u], self.to_site[u])
-        cs += [x for x in s2.conflicts() if any(x.involves(u) for u in uavs)]
-        return (len(cs), float(sum(max(0.0, c.dt_req_s) for c in cs)))
+        vals += [x.dt_req_s for x in s2.conflicts() if any(x.involves(u) for u in uavs)]
+        return (len(vals), float(sum(max(0.0, v) for v in vals)))
 
     def pair_clear(self, c: Conflict, new: dict[str, UAVPlan]) -> bool:
-        """乾跑驗證：套用候選計畫後該機對（或機–幽靈、走廊）不再衝突。"""
+        """乾跑驗證：套用候選計畫後該機對（或機–幽靈、走廊）不再衝突（4D／幽靈只問有無：:data:`_ANY`，修改 #13）。"""
         if c.kind == "corridor":
             s2 = self.sched.copy()
             ids = [u for u in (c.uav_a, c.uav_b) if u in self.plans]
@@ -1094,10 +1394,10 @@ class _Repair:
         if c.kind == "ghost":
             g = self.ghosts.get(c.uav_b)
             sub = {c.uav_a: new.get(c.uav_a, self.plans[c.uav_a])}
-            return not check_separation(sub, self.cfg, [g] if g is not None else None, self.v_ref_mps, None,
-                                        t_sync_s=self.t_sync_s)
+            return not _check(sub, self.cfg, [g] if g is not None else None, self.v_ref_mps, None, self.t_sync_s,
+                              None, _ANY)
         sub = {u: new.get(u, self.plans[u]) for u in (c.uav_a, c.uav_b) if u in self.plans}
-        return not check_separation(sub, self.cfg, None, self.v_ref_mps, None, t_sync_s=self.t_sync_s)
+        return not _check(sub, self.cfg, None, self.v_ref_mps, None, self.t_sync_s, None, _ANY)
 
 
 def _merge_conflicts(*lists: Iterable[Conflict]) -> list[Conflict]:
@@ -1583,13 +1883,14 @@ def _advance_4d_limit(R: _Repair, u: str, cache: dict | None = None) -> tuple[tu
     hi_all: list[float] = []
     others: list[_Track] = [t for v, t in trks.items() if v != u]
     others += [_track_from_ghost(g) for g in R.ghosts.values()]
+    local: dict = {}
     for tb in others:
         if tb.n == 0:
             continue
         skipped = _norm_pair(ta.uav_id, tb.uav_id) in R.skip
         if skipped and tb.is_ghost:
             continue
-        ii, jj, _ = _cross_pairs(ta.samples[:, :2], tb.samples[:, :2], r_xy)
+        ii, jj = _near_pairs(ta, tb, 2, None, r_xy, local)          # = _cross_pairs（KD 樹走快取，修改 #13）
         if ii.size == 0:
             continue
         _, _, dt_ab, win, sp = _pair_metrics(ta, tb, ii, jj, R.cfg, skip_oper=skipped)
@@ -1690,9 +1991,66 @@ def _fresh_schedule(R: "_Repair", placed: dict[str, UAVPlan]) -> CorridorSchedul
     return s2
 
 
+class _ShiftedTimes:
+    """``shift_plan(p0, s)`` 在走廊時刻表裡會被讀到的欄位（:meth:`CorridorSchedule.reserve_plan` 只看這些），
+    運算式與 :func:`shift_plan` 相同（``from_index == 0``）。"""
+    __slots__ = ("uav_id", "landing_site", "t_takeoff_s", "t_arr_ptc_s", "t_land_s")
+
+    def __init__(self, p0: UAVPlan, s: float) -> None:
+        d = float(s)
+        self.uav_id = p0.uav_id
+        self.landing_site = p0.landing_site
+        self.t_takeoff_s = p0.t_takeoff_s + d
+        self.t_arr_ptc_s = p0.t_arr_ptc_s + d
+        self.t_land_s = p0.t_land_s + d
+
+
+class _ShiftedTrack:
+    """``_track_from_plan(shift_plan(p0, s), cfg.dt_4d_s, t_sync_s, cfg)`` 不建 UAVPlan 的版本（修改 #13）。
+
+    航點陣列只抽一次；平移後的時間 ``A[0] + d`` 與 :func:`shift_plan` 逐點的 ``w.t_s + d`` 是同一個 IEEE 雙精度
+    加法——前提是每個 ``w.t_s`` 本來就是 float／np.float64（np.float32 之類照 NEP 50 會用別的精度加），否則
+    整機退回「真的 shift_plan 再建軌跡」。起降區間用 :class:`_ShiftedTimes`（同 shift_plan 的運算式）算。
+    """
+    __slots__ = ("p0", "cfg", "t_sync_s", "A", "code", "to_id", "ld_id")
+
+    def __init__(self, p0: UAVPlan, cfg: PlannerConfig, t_sync_s: float) -> None:
+        self.p0, self.cfg, self.t_sync_s = p0, cfg, t_sync_s
+        self.A: np.ndarray | None = None
+        wps = p0.waypoints
+        if all(type(w.t_s) is float or type(w.t_s) is np.float64 for w in wps):
+            self.A, self.code = _plan_arrays(wps)
+            self.to_id = str(getattr(p0, "takeoff_site", "") or "")
+            self.ld_id = str(p0.landing_site or "")
+
+    def track(self, s: float, *, cacheable: bool) -> _Track:
+        cfg = self.cfg
+        if self.A is None:
+            trk = _track_from_plan(shift_plan(self.p0, s), cfg.dt_4d_s, self.t_sync_s, cfg)
+            return trk if cacheable or not trk.cacheable else replace(trk, cacheable=False)
+        d = float(s)
+        t = self.A[0] + d
+        t_grid = _time_grid(float(t[0]), float(t[-1]), float(cfg.dt_4d_s))
+        if t.size > 1 and np.any(np.diff(t) < -1e-9):
+            raise ValueError("UAVPlan.waypoints 之 t_s 須非遞減")
+        windows = plan_windows(_ShiftedTimes(self.p0, d), cfg)
+        return _build_track(self.p0.uav_id, t_grid, self.A, t, self.code, windows, self.to_id, self.ld_id,
+                            self.t_sync_s, cfg, cacheable)
+
+
+@_in_scope
 def _global_reschedule(R: "_Repair", *, step_s: float = 10.0, objective: str = "landing",
-                       max_evals: int = 20000) -> set[str]:
+                       max_evals: int = 20000, resolve: bool = False) -> set[str]:
     """**全隊起飛時刻全域重排**（修復＋工期壓縮之後的最後一手）。
+
+    ``resolve``（vendored 修改 #11）：現況**仍有殘留衝突**時由 :func:`repair` 設 True。
+    此時現況本身不合格，任何全綠的擺放都比它好 ⇒ 不再要求目標函數嚴格改善
+    （``incumbent`` 從 ∞ 起算），只在全綠候選之間比目標函數。兩段搜尋：
+    (1) 落地上界 = 現況 makespan（不拿工期換）；(2) 第一段無解才把上界放寬一趟最長架次
+    （``land_cap + max(dur)``）再找一次——紅的計畫不能上傳，拉長工期換全綠仍比較好。
+    「套用前全機對完整驗證」不變 ⇒ 找不到全綠解就原樣退回，殘留衝突照舊回報；套用時在
+    被動到的每一架 ``UAVPlan.warnings`` 留 ``residual_resolved_by_reschedule(...)``（含 makespan 前後）。
+    resolve=False 時（沒有殘留）行為與修改前逐位元相同。
 
     ⚠⚠⚠ 為什麼需要：``repair`` 是逐衝突貪婪（``_repair_one`` 一有候選通過就 return），
     而 :func:`_compact_makespan` 收尾時**一次只平移一機**（``involved_score(new, {u})``）
@@ -1715,12 +2073,18 @@ def _global_reschedule(R: "_Repair", *, step_s: float = 10.0, objective: str = "
 
     永不改變航點 x/y/z、不改變能量（:func:`shift_plan` 在 ``energy_wh=0`` 下只動時間戳）
     ⇒ 條帶、刈幅、側疊、``uncovered`` 一個都不會變。已起飛者（``R.airborne``）不可動。
+
+    實作（vendored 修改 #13，結果逐位元不變：同樣的順序、同樣的候選格點、同樣的 ``evals`` 計數）：
+    每個候選先查走廊時刻表（便宜，原本排在 4D 之後；實測擋掉 63–95% 的候選）；兩者都是純判斷，次序不影響
+    「可行」與否。4D 不再為每個候選建 UAVPlan：候選軌跡由該機的航點陣列直接平移（:class:`_ShiftedTrack`，
+    ``t + d`` 與 :func:`shift_plan` 的 ``w.t_s + d`` 是同一個 IEEE 加法），已擺放者的軌跡與 KD 樹只建一次，
+    檢查遇到第一筆衝突就停（:data:`_ANY`）。只有選定的擺放才真的 :func:`shift_plan`。
     """
     movable = [u for u in sorted(R.plans) if not R.airborne(u) and R.plans[u].waypoints]
     if len(movable) < 2:
         return set()
     fixed = {u: p for u, p in R.plans.items() if u not in movable}
-    incumbent = _objective_of(R.plans, objective)
+    incumbent = math.inf if resolve else _objective_of(R.plans, objective)
     # ⚠ 剪枝的界必須與被比較的量**同單位**。`earliest` 用的是落地時刻
     #   （t_takeoff + dur），所以界要用落地 makespan，不能用 incumbent ——
     #   objective="scan" 時 incumbent 是掃描時刻（比落地早），拿去剪落地時刻會
@@ -1732,19 +2096,39 @@ def _global_reschedule(R: "_Repair", *, step_s: float = 10.0, objective: str = "
     horizon = max(land_cap - t_floor, step_s)
     step = max(1.0, float(step_s))
     evals = 0
+    cfg = R.cfg
+    ghost_tracks: list[_Track] | None = None                 # 第一次 fits 才建（同原版：沒評估就不碰任何軌跡）
+    fixed_tracks: dict[str, _Track] = {}
+    shifters: dict[str, _ShiftedTrack] = {}
 
-    def fits(placed: dict[str, UAVPlan], u: str, cand: UAVPlan) -> bool:
-        nonlocal evals
+    def shifter(u: str) -> _ShiftedTrack:
+        sh = shifters.get(u)
+        if sh is None:
+            sh = shifters[u] = _ShiftedTrack(base_plans[u], cfg, R.t_sync_s)
+        return sh
+
+    def fits(placed: dict[str, UAVPlan], ptracks: dict[str, Any], u: str, s: float) -> bool:
+        """== 原版 ``fits(placed, u, shift_plan(p0, s))``：4D（only_uavs={u}）與走廊都與已擺放者相容。"""
+        nonlocal evals, ghost_tracks
         evals += 1
         merged = dict(placed)
-        merged[u] = cand
-        if check_separation(merged, R.cfg, list(R.ghosts.values()) or None, R.v_ref_mps, R.skip,
-                            t_sync_s=R.t_sync_s, only_uavs={u}):
+        merged[u] = _ShiftedTimes(base_plans[u], s)          # 走廊只看起降時刻、站點、uav_id
+        if any(x.involves(u) for x in _fresh_schedule(R, merged).conflicts()):
             return False
-        return not any(x.involves(u) for x in _fresh_schedule(R, merged).conflicts())
+        if ghost_tracks is None:
+            ghost_tracks = [_track_from_ghost(g) for g in R.ghosts.values()]
+        for k, v in ptracks.items():                         # 已擺放者的軌跡：用到才建、建一次
+            if v is None:
+                if k not in fixed_tracks:
+                    fixed_tracks[k] = _track_from_plan(placed[k], cfg.dt_4d_s, R.t_sync_s, cfg)
+                ptracks[k] = fixed_tracks[k]
+            elif not isinstance(v, _Track):
+                ptracks[k] = shifter(k).track(v, cacheable=True)
+        tracks = list(ptracks.values()) + [shifter(u).track(s, cacheable=False)] + ghost_tracks
+        return not _sep_core(tracks, cfg, R.v_ref_mps, R.skip, {u}, _ANY, {})
 
-    def earliest(placed: dict[str, UAVPlan], u: str, cap: float) -> UAVPlan | None:
-        """u 在不超過 ``cap``（落地時刻上界）之下的最早可行擺放；找不到回 None。"""
+    def earliest(placed: dict[str, UAVPlan], ptracks: dict[str, Any], u: str, cap: float) -> float | None:
+        """u 在不超過 ``cap``（落地時刻上界）之下的最早可行平移量；找不到回 None。"""
         p0 = base_plans[u]
         lo = t_floor - float(p0.t_takeoff_s)
         s = lo
@@ -1754,17 +2138,16 @@ def _global_reschedule(R: "_Repair", *, step_s: float = 10.0, objective: str = "
                 return None                                  # 再往後只會更差 ⇒ 剪枝
             if evals >= max_evals:
                 return None
-            cand = shift_plan(p0, s)
-            if fits(placed, u, cand):
+            if fits(placed, ptracks, u, s):
                 fine = step / 5.0                            # 往回細找，別停在粗格上
                 t = s
+                best_s = s
                 while t - fine >= lo - 1e-9:
-                    c2 = shift_plan(p0, t - fine)
-                    if not fits(placed, u, c2):
+                    if not fits(placed, ptracks, u, t - fine):
                         break
                     t -= fine
-                    cand = c2
-                return cand
+                    best_s = t
+                return best_s
             s += step
         return None
 
@@ -1778,42 +2161,63 @@ def _global_reschedule(R: "_Repair", *, step_s: float = 10.0, objective: str = "
                   tuple(sorted(movable, key=lambda u: base_plans[u].t_takeoff_s)),
                   tuple(sorted(movable, key=lambda u: -base_plans[u].t_land_s))]
 
-    best: dict[str, UAVPlan] | None = None
-    for order in orders:
-        if evals >= max_evals:
-            break
-        placed = dict(fixed)
-        ok = True
-        for u in order:
-            # 落地 makespan 不得比現況差（無論目標是哪一個）；目標本身另外比。
-            cand = earliest(placed, u, land_cap - 1e-9)
-            if cand is None:
-                ok = False
+    def search(cap_land: float) -> dict[str, UAVPlan] | None:
+        """每一種順序逐機擺到最早可行時刻（落地 ≤ ``cap_land``），回傳目標最小的完整擺放；沒有 → None。"""
+        nonlocal incumbent, horizon
+        horizon = max(cap_land - t_floor, step_s)
+        found: dict[str, UAVPlan] | None = None
+        for order in orders:
+            if evals >= max_evals:
                 break
-            placed[u] = cand
-        if not ok:
-            continue
-        score = _objective_of(placed, objective)
-        # ⚠ 同樣誠實說明：這個「嚴格改善」條件也**咬不到突變**（改成 `if True`
-        #   實測輸出逐位相同 1450.8 / 1216.4）。因為上面的 `earliest` 已經用
-        #   `land_cap` 把每個完成的候選都框在「落地 makespan 優於現況」之內。
-        #   保留它是為了「目標＝掃描完成」那條路徑：那時 score 與 land_cap 不同軸，
-        #   沒有這個比較就會挑到落地較早但**掃描較晚**的解。
-        if score < incumbent - 1e-9:
-            incumbent = score
-            best = {u: placed[u] for u in movable}
+            placed = dict(fixed)
+            ptracks: dict[str, Any] = {k: None for k in fixed}   # 與 placed 同序：None＝固定機、float＝擺放的平移量
+            ok = True
+            for u in order:
+                # 落地 makespan 不得超過上界（第一段＝現況；無論目標是哪一個）；目標本身另外比。
+                s_u = earliest(placed, ptracks, u, cap_land - 1e-9)
+                if s_u is None:
+                    ok = False
+                    break
+                placed[u] = shift_plan(base_plans[u], s_u)
+                ptracks[u] = s_u
+            if not ok:
+                continue
+            score = _objective_of(placed, objective)
+            # ⚠ 同樣誠實說明：這個「嚴格改善」條件也**咬不到突變**（改成 `if True`
+            #   實測輸出逐位相同 1450.8 / 1216.4）。因為上面的 `earliest` 已經用
+            #   `land_cap` 把每個完成的候選都框在「落地 makespan 優於現況」之內。
+            #   保留它是為了「目標＝掃描完成」那條路徑：那時 score 與 land_cap 不同軸，
+            #   沒有這個比較就會挑到落地較早但**掃描較晚**的解。
+            #   （resolve 時 incumbent 從 ∞ 起算，這裡只在全綠候選之間比；見 docstring。）
+            if score < incumbent - 1e-9:
+                incumbent = score
+                found = {u: placed[u] for u in movable}
+        return found
+
+    best = search(land_cap)
+    relaxed: float | None = None
+    if best is None and resolve:
+        # vendored 修改 #11 第二段：現況上界內沒有全綠擺放 ⇒ 上界放寬一趟最長架次再找一次。
+        #   紅的計畫不能上傳，拉長工期換全綠仍比較好；只在第一段失敗時才付這個搜尋成本，
+        #   評估次數與第一段共用 ``max_evals``。實測（gui_legal_120_1a2b_pw3、舊基準、5 m/s 來自 300°）
+        #   上界內 1520 次評估無解，放寬後 2041 次找到，makespan 3255.5 → 3357.8 s（+3.1%）。
+        relaxed = land_cap + max(dur.values())
+        best = search(relaxed)
 
     if best is None:
         return set()
 
     # ── 套用前的**完整**驗證（全機對，不是只看被改動的機）────────────────
-    #   ⚠⚠ 誠實說明：這一道在目前的演算法下**可以證明是多餘的**，所以它
+    #   ⚠⚠ 誠實說明：resolve=False 時這一道在目前的演算法下**可以證明是多餘的**，所以它
     #   **沒有**突變臂能咬到（實測拿掉它，10 條測試全綠）。理由是歸納法：
     #   逐機插入時每擺一台就用 only_uavs={u} 對**所有已擺放者**檢查一次，
     #   而已擺放者之後不再變動 ⇒ 每一對 (a,b) 都在較晚那一台被擺放時檢查過。
     #   保留它是**縱深防禦**：只要有人改動上面的插入迴圈（例如改成先全擺再調整、
     #   或讓已擺放者可回頭平移），那個歸納就不成立，而這一行仍然擋得住。
     #   ⇒ 不可以因為「突變咬不到」就把它刪掉，但也不可以宣稱它被測試涵蓋。
+    #   ⚠⚠ resolve=True（修改 #11）時它**不再多餘**：兩架**都已起飛**（fixed）之間的衝突從來不在
+    #   擺放時檢查（only_uavs 只含可動機），重排也解不掉 ⇒ 只能靠這一道把整個重排退回
+    #   （否則會為了一筆解不掉的衝突白白改動、甚至拉長其他機的時程）。
     merged = dict(R.plans)
     merged.update(best)
     if check_separation(merged, R.cfg, list(R.ghosts.values()) or None, R.v_ref_mps, R.skip,
@@ -1822,6 +2226,12 @@ def _global_reschedule(R: "_Repair", *, step_s: float = 10.0, objective: str = "
     if _fresh_schedule(R, merged).conflicts():
         return set()
 
+    if resolve:                                                  # 修改 #11：留下「為解衝突重排過」的紀錄
+        ms_old = land_cap
+        ms_new = _objective_of(merged, "landing")
+        note = (f"residual_resolved_by_reschedule(makespan {ms_old:.1f}->{ms_new:.1f}s, "
+                f"cap={'relaxed' if relaxed is not None else 'kept'})")
+        best = {u: replace(p, warnings=list(p.warnings) + [note]) for u, p in best.items()}
     for u, p in best.items():
         R.plans[u] = p
         R.sched.release(u)
@@ -1838,6 +2248,7 @@ def _takeoff_sites(plans: dict[str, UAVPlan], ctx: MissionContext, takeoff_site:
     return {u: str(takeoff_site.get(u, home)) for u in plans}
 
 
+@_in_scope
 def repair(plans: dict[str, UAVPlan], conflicts: list[Conflict], ctx: MissionContext, models: dict[str, EnergyModel],
            schedule: CorridorSchedule, cfg: PlannerConfig, max_rounds: int = 3, *,
            ghosts: Sequence[GhostLike] | None = None, skip_pairs: set[tuple[str, str]] | None = None,
@@ -1864,7 +2275,9 @@ def repair(plans: dict[str, UAVPlan], conflicts: list[Conflict], ctx: MissionCon
     每個候選以乾跑（該機對重跑 :func:`check_separation`／走廊重排）驗證，取修復後 makespan 最小者
     （tie → 總平移／圈數最小），且須通過全域單調性檢查（:meth:`_Repair.involved_score`）。
     走廊衝突「降落優先於起飛」；幽靈航跡不可修改。每輪後以 :func:`check_separation`
-    + ``schedule.conflicts()`` 重驗；``max_rounds`` 輪後仍存在者即為殘餘衝突。輸入 ``plans`` 不被修改（受影響機以新
+    + ``schedule.conflicts()`` 重驗。``max_rounds`` 輪（＋工期壓縮）後仍有衝突時，收尾的全域重排
+    （``cfg.global_reschedule``）改求全綠（vendored 修改 #11，見 :func:`_global_reschedule` 之 ``resolve``）；
+    仍解不掉者才是殘餘衝突。輸入 ``plans`` 不被修改（受影響機以新
     物件取代）；``schedule`` 就地更新（尚未登記之計畫先依 :func:`plan_windows` 登記，起飛站由 ``takeoff_site`` 給定，
     預設 home）。永不改變航點 z（D18）。
     """
@@ -1891,10 +2304,14 @@ def repair(plans: dict[str, UAVPlan], conflicts: list[Conflict], ctx: MissionCon
         current = _merge_conflicts(
             check_separation(plans, cfg, ghosts, v_ref_mps, skip_pairs, t_sync_s=t_sync_s), schedule.conflicts())
     # vendored 修改 #3：工期壓縮只能逐機平移，協同平移要靠全域重排（見 _global_reschedule）
-    if getattr(cfg, "global_reschedule", False) and not current:
+    # vendored 修改 #11：貪婪修復卡住（仍有殘留）時，全域重排是唯一能做協同平移的一步 ⇒ 照樣跑、改求全綠。
+    #   ⚠ 從前這裡是 `and not current`：衝突解不掉時正好跳過唯一解得掉它的那一步。
+    #   沒有殘留時走的是原路徑（resolve=False），計畫逐位元不變。
+    if getattr(cfg, "global_reschedule", False):
         if _global_reschedule(R, step_s=float(getattr(cfg, "reschedule_step_s", 10.0)),
                               objective=str(getattr(cfg, "reschedule_objective", "landing")),
-                              max_evals=int(getattr(cfg, "reschedule_max_evals", 20000))):
+                              max_evals=int(getattr(cfg, "reschedule_max_evals", 20000)),
+                              resolve=bool(current)):
             current = _merge_conflicts(
                 check_separation(plans, cfg, ghosts, v_ref_mps, skip_pairs, t_sync_s=t_sync_s),
                 schedule.conflicts())

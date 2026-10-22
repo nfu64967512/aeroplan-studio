@@ -1,7 +1,8 @@
 """tests/hv_dccpp/test_camera_trigger_config.py — 相機觸發設定（`ardupilot.CameraTriggerConfig`）與任務中 206 之擺放。
 
 數值鎖（不是「沒丟例外」）：
-* 每條帶恰一個 206 開，p1 與 `trigger_distance_m(感測器, 條帶起點 AGL)` 在 float32 下相等；
+* 每條帶恰一個 206 開，p1 與 `trigger_distance_m(感測器, 條帶起點 AGL)` 在 float32 下相等（給了 camera_cfg 時是
+  `commanded_trigger_distance_m`：再乘 1 − f_s/50 的 50 Hz 量化保護，vendored 2026-10-21）；
 * DO_LAND_START 緊接 206(0)（失效保護 RTL 跳到此處會略過所有條帶的關閉）；DO_LAND_START 與 NAV_VTOL_LAND 之間沒有開；
 * lead-in：共線 NAV 在條帶起點後 lead_in 處（haversine 誤差 < 0.5 m），206 開掛在它之後；
 * 地形重發：條帶中途 AGL 偏離 > tol 才重發、p3 = 0、依據之 AGL 隨重發更新；
@@ -148,7 +149,8 @@ def test_one_on_per_strip_and_float32_distance(mini):
             # 給了 camera_cfg ⇒ 帶起點 AGL 與規劃作業高度 100 m 差 ≤ 0.5 m 時用 100 m（F1 (e)：平地各帶 p1 逐位元相同）；
             # None ＝ 舊行為（該點 AGL）
             h = w.agl_m if cc is None else (100.0 if abs(w.agl_m - 100.0) <= 0.5 else w.agl_m)
-            d = ap.trigger_distance_m(mini.sensor, h)
+            # 給了 camera_cfg ⇒ 量化保護（trigger_overshoot_guard 預設 True）：d × (1 − f_s/50)
+            d = ap.trigger_distance_m(mini.sensor, h) if cc is None else ap.commanded_trigger_distance_m(mini.sensor, h)
             assert np.float32(it.param1) == np.float32(d)
             assert it.param3 == 1.0 and it.param2 == 0.0 and it.param4 == 0.0
             # 開掛在條帶起點 NAV 之後（< 1 m）
@@ -156,6 +158,8 @@ def test_one_on_per_strip_and_float32_distance(mini):
             xy = mini.ctx.frame.to_enu(nav.x, nav.y)[0, :2]
             assert math.hypot(xy[0] - w.x_m, xy[1] - w.y_m) < 1.0
         assert ap.trigger_distance_m(mini.sensor, 100.0) == pytest.approx(29.25, abs=0.01)
+    assert mini.sensor.r.shutter_rate_hz == pytest.approx(1.0)                       # mini 範例相機 1 Hz
+    assert ap.commanded_trigger_distance_m(mini.sensor, 100.0) == pytest.approx(29.25 * (1 - 1.0 / 50), abs=0.01)
     # first_shot_immediate=False → p3 = 0，其餘不變
     items0 = ap.plan_to_mission_items(up, mini.ctx, mini.cfg,
                                       camera_cfg=ap.CameraTriggerConfig(first_shot_immediate=False))
@@ -301,8 +305,9 @@ def test_terrain_retrigger(mini):
     items = ap.plan_to_mission_items(up, ctx, cfg, camera_cfg=ap.CameraTriggerConfig(terrain_retrigger_tol=0.10))
     on = _on(items)
     assert len(on) == 2
-    assert np.float32(on[0].param1) == np.float32(ap.trigger_distance_m(sensor, 100.0)) and on[0].param3 == 1.0
-    assert np.float32(on[1].param1) == np.float32(ap.trigger_distance_m(sensor, 130.0)) and on[1].param3 == 0.0
+    # 地形重發的 206 也要扣量化保護（與條帶開同一個 commanded_trigger_distance_m）
+    assert np.float32(on[0].param1) == np.float32(ap.commanded_trigger_distance_m(sensor, 100.0)) and on[0].param3 == 1.0
+    assert np.float32(on[1].param1) == np.float32(ap.commanded_trigger_distance_m(sensor, 130.0)) and on[1].param3 == 0.0
     corner = {it.seq: it for it in items}[on[1].seq - 1]
     assert corner.is_nav
     xy = ctx.frame.to_enu(corner.x, corner.y)[0, :2]
@@ -315,7 +320,7 @@ def test_terrain_retrigger(mini):
     # 容差 0.03：130 重發，135 相對 130 為 3.85% > 3% 也重發
     it3 = ap.plan_to_mission_items(up, ctx, cfg, camera_cfg=ap.CameraTriggerConfig(terrain_retrigger_tol=0.03))
     assert [round(it.param1, 4) for it in _on(it3)] == \
-        [round(ap.trigger_distance_m(sensor, a), 4) for a in (100.0, 130.0, 135.0)]
+        [round(ap.commanded_trigger_distance_m(sensor, a), 4) for a in (100.0, 130.0, 135.0)]
     # 平地 mini（條帶只有起訖兩點）→ 不重發
     b1 = ap.plan_to_mission_items(mini.mp.plans["B1"], ctx, cfg,
                                   camera_cfg=ap.CameraTriggerConfig(terrain_retrigger_tol=0.10))

@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import math
+import re
 import time
 from dataclasses import dataclass, field, replace
 from typing import Any, Hashable, Iterable, Mapping, Sequence
@@ -1308,6 +1309,35 @@ def _mapping_plan_notes(plans: Mapping[str, UAVPlan], strips: Mapping[str, Strip
     return out
 
 
+def _mapping_crab_effective(plans: Mapping[str, UAVPlan], strips: Mapping[str, Strip], dc: Any, mapping: Any) -> str | None:
+    """建圖偏流餘裕的有效值（``crab_margin_basis="crosswind"`` 才寫；vendored 2026-10-20）：實際飛的條帶依
+    （構型、航跡軸）分組，列出側風分量 W⊥、偏流 ψ 與實際間距——`mapping_crab_margin(...)` 寫的是全方向最壞值，
+    真正用在條帶上的是這裡的數。"""
+    if mapping is None or not mapping.crab_margin or getattr(mapping, "crab_margin_basis", "max_speed") != "crosswind":
+        return None
+    from .decompose import track_crab_rad
+    from .wind import crosswind_max_mps
+    groups: dict[tuple[str, float, bool], list[float]] = {}
+    axis_of: dict[tuple[str, float, bool], float] = {}
+    for p in plans.values():
+        for sid, _d in p.strips:
+            st = strips.get(sid)
+            if st is None:
+                continue
+            ax = round(math.degrees(float(st.theta_LR_rad)) % 180.0, 1) % 180.0
+            k = (st.cls, ax, bool(is_cross_strip(sid)))
+            groups.setdefault(k, []).append(float(st.spacing_m))
+            axis_of[k] = float(st.theta_LR_rad)
+    if not groups:
+        return None
+    parts = []
+    for (cls, ax, xs), sp in sorted(groups.items()):
+        th = axis_of[(cls, ax, xs)]
+        parts.append(f"{cls}{'（交叉帶）' if xs else ''} 航跡軸 {ax:g}°：側風 {crosswind_max_mps(dc.wind, th):.2f} m/s、"
+                     f"ψ {math.degrees(track_crab_rad(dc, cls, th)):.2f}°、間距 {min(sp):.2f}–{max(sp):.2f} m × {len(sp)} 條")
+    return "mapping_crab_effective(crosswind 基準：ψ = asin(側風分量/V_a)；" + "；".join(parts) + ")"
+
+
 # ---------------------------------------------------------------------------
 # 建圖模式：交叉航帶（MappingModeConfig.cross_strips；設計見 mission.MappingModeConfig docstring）
 # ---------------------------------------------------------------------------
@@ -1854,6 +1884,42 @@ def _cross_skip_filter(skip: set[tuple[str, str]], teams: Sequence[Team], cells_
     return out
 
 
+_RESCHED_NOTE = "residual_resolved_by_reschedule("          # deconflict._global_reschedule(resolve=True) 的逐機註記
+_RESCHED_NOTE_RE = re.compile(r"makespan (-?\d+(?:\.\d+)?)->(-?\d+(?:\.\d+)?)s, cap=(kept|relaxed)")
+
+
+def _reschedule_resolved_note(plans: Mapping[str, UAVPlan]) -> str | None:
+    """vendored 修改 #11 的收尾全域重排**有出手**時回傳一條 planner 警告，沒出手回 None。
+
+    ``deconflict._global_reschedule(resolve=True)`` 套用時只在被動到的 ``UAVPlan.warnings`` 留
+    ``residual_resolved_by_reschedule(makespan a->b s, cap=kept|relaxed)``，而 ``UAVPlan.warnings`` 不會進
+    ``feasibility.warnings`` ⇒ GUI／轉接層報告看不到（與 ``delay_orbit``、``resequenced`` 相同）。這裡彙整成一條。
+    ``a`` 是貪婪修復＋工期壓縮後**仍有殘留**（紅、不能上傳）那份的落地 makespan；``cap=relaxed`` ⇒ 現況工期內
+    排不出全綠、落地上界放寬過，工期多半比那份紅的長。格式對不上時原樣帶出（不靜默吞掉）。
+    """
+    hit: dict[str, list[str]] = {}
+    for u, p in sorted(plans.items()):
+        for w in p.warnings:
+            if str(w).startswith(_RESCHED_NOTE):
+                hit.setdefault(str(w), []).append(u)
+    if not hit:
+        return None
+    parts = []
+    for raw, uavs in hit.items():
+        m = _RESCHED_NOTE_RE.search(raw)
+        if m is None:
+            parts.append(f"{raw}；參與重排：{'、'.join(uavs)}")
+            continue
+        a, b, cap = float(m.group(1)), float(m.group(2)), m.group(3)
+        d = b - a
+        pct = 100.0 * d / a if a > 0.0 else 0.0
+        cap_txt = ("落地上界維持原 makespan" if cap == "kept" else
+                   "原工期內排不出全綠 ⇒ 落地上界放寬一趟最長架次" + ("、工期拉長" if d > 0.05 else ""))
+        parts.append(f"makespan {a:.1f}->{b:.1f} s（{d:+.1f} s，{pct:+.1f}%；前者是貪婪修復後仍有殘留、不能上傳的那份），"
+                     f"cap={cap}（{cap_txt}）；參與重排：{'、'.join(uavs)}")
+    return "reschedule_resolved_residual(4D 殘留衝突由收尾全域重排解掉（vendored #11）：" + "；".join(parts) + ")"
+
+
 def plan_mission(inputs: MissionInputs, cfg: PlannerConfig = PlannerConfig(), *, terrain_margin_m: float | None = None,
                  ctx: MissionContext | None = None) -> MissionPlan:
     """完整流程（契約 §10 步驟）：build_context → preflight → decompose_area×區（含 residual_candidates）→ layering
@@ -2202,6 +2268,10 @@ def plan_mission(inputs: MissionInputs, cfg: PlannerConfig = PlannerConfig(), *,
                                          recovery, landing_rep, skip, cell_order, warnings)
             plans, residual_conf = repair(plans, conflicts, ctx, ctx.models, schedule, cfg, skip_pairs=skip,
                                           takeoff_site=start_of, resequence_hook=hook)
+            # vendored 修改 #11：收尾重排有出手（為解殘留改了起飛時刻、可能拉長工期）就說出來；沒出手不寫一個字
+            resched_note = _reschedule_resolved_note(plans)
+            if resched_note is not None:
+                warnings.append(resched_note)
             if residual_conf:
                 warnings.append(f"residual_conflicts({len(residual_conf)})")
         if cross_placed:
@@ -2223,6 +2293,9 @@ def plan_mission(inputs: MissionInputs, cfg: PlannerConfig = PlannerConfig(), *,
     makespan = max((p.t_land_s for p in plans.values()), default=0.0)
     if mapping is not None:
         warnings += _mapping_plan_notes(plans, strips_all, mapping.min_block_strips, list(dict.fromkeys(uncovered)))
+        crab_note = _mapping_crab_effective(plans, strips_all, dc, mapping)
+        if crab_note:
+            warnings.append(crab_note)
     report.warnings = list(dict.fromkeys(list(report.warnings) + warnings))
     timing["total"] = (time.perf_counter() - t_all) * 1e3
     return MissionPlan(plans, float(makespan), list(cells_by_id.values()), strips_all,

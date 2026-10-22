@@ -234,3 +234,32 @@ def test_crab_margin_spacing_in_flown_strips():
         assert any(w.startswith("mapping_incomplete(") for w in on.last_plan.feasibility.warnings)
     else:
         assert not any(w.startswith("mapping_incomplete(") for w in on.last_plan.feasibility.warnings)
+
+
+@pytest.mark.parametrize("wind", [(5.0, 270.0), (5.0, 0.0)])
+def test_crab_margin_follows_crosswind_component(wind):
+    """crab_margin_basis="crosswind"（vendored 2026-10-20；預設仍是舊的 max_speed）：每條飛的條帶間距 = w_eff(ψ(該條航跡))·(1 − side)，
+    ψ = asin(側風分量/V_a)。1 km 正方形：風來自 270° ⇒ 東西向沿風；來自 0° ⇒ 規劃器改鋪南北向（沿風、不用縮間距）。
+    有效值：per_class 的 crab_deg／s_m 是實際飛的值，全方向最壞值留在 crab_envelope_deg。"""
+    hv, _ = _plan(MappingModeConfig(crab_margin_basis="crosswind"), km=1.0, wind=wind)
+    l_over_w = (3040 * 1.55e-3) / (4056 * 1.55e-3)
+    va = {"A": PLATFORM_PIONEER.cruise_airspeed_mps, "B": PLATFORM_HERO.cruise_airspeed_mps}
+    axes = set()
+    for u, st in _flown(hv).items():
+        for s in st:
+            w_perp = abs(wind[0] * math.sin(float(s.theta_LR_rad) - math.radians(wind[1])))
+            psi = math.asin(w_perp / va[s.cls]) if w_perp >= 1e-9 else 0.0
+            w = float(s.width_m)
+            want = (w * math.cos(psi) - w * l_over_w * math.sin(psi)) * (1 - SIDE)
+            assert float(s.spacing_m) == pytest.approx(want, abs=0.02), (u, s.strip_id)
+            axes.add(round(math.degrees(s.theta_LR_rad) % 180.0))
+    assert axes == {90 if wind[1] == 270.0 else 0}                   # 兩種風向都鋪沿風
+    for c, crab_env in (("A", 13.4477), ("B", 15.2575)):
+        m = hv.mapping_effective["per_class"][c]
+        assert m["crab_basis"] == "crosswind" and m["crab_deg"] == 0.0
+        assert m["crab_envelope_deg"] == pytest.approx(crab_env, abs=1e-3)
+        assert m["s_m"] == pytest.approx(W120 * (1 - SIDE)) and m["s_envelope_m"] < m["s_m"]
+        assert [r["axis_deg"] for r in m["crab_flown"]] == [90.0 if wind[1] == 270.0 else 0.0]
+    note = next(n for n in hv.notes if n.startswith("mapping_mode_effective("))
+    assert "ψ=0.00°" in note and "s=37.7 m" in note
+    assert any(str(w).startswith("mapping_crab_effective(crosswind 基準") for w in hv.last_plan.feasibility.warnings)

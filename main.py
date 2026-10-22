@@ -260,6 +260,14 @@ def run_gui_mode(logger, settings, vehicle_profiles, args=None):
         except Exception as e:
             logger.warning(f"設置 OpenGL 共享上下文失敗: {e}")
 
+        # ── 3D/2D 地圖幀率：Windows 上 Qt 視窗端每幀等 vsync 會把 QtWebEngine 壓在 ~22 FPS ──
+        # （量測與原因見 ui/render_setup.py；必須在 QApplication 建立前設定）
+        try:
+            from ui.render_setup import configure_qt_presentation
+            configure_qt_presentation(logger)
+        except Exception as e:
+            logger.warning(f"Qt 呈現設定失敗: {e}")
+
         # ── 高 DPI 支援：4K 螢幕字型/圖示等比例放大，避免視覺過小 ──
         # Qt 6 預設已啟用 HiDPI，只需設定 rounding policy 讓比例連續而非階梯式
         try:

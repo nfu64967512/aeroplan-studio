@@ -1237,20 +1237,18 @@ def _mapping_survey_polygons(ctx):
             if g.geom_type == 'Polygon' and not g.is_empty and g.area > 0.0], len(nofly)
 
 
-def mapping_exposure_summary(hv, camera, *, cell_size_m: float = MAPPING_EXPOSURE_CELL_M) -> dict:
-    """B3：飛前曝光驗證（:func:`core.recon.exposure_verifier.verify_preflight`）→ **只留摘要**的 dict。
+def mapping_exposure_report(hv, camera, *, cell_size_m: float = MAPPING_EXPOSURE_CELL_M):
+    """飛前曝光驗證的**完整報告**＋這次實際用了哪些輸入 → ``(ExposureReport, inputs)``。
 
-    輸入全部取「上傳／規劃當時生效的值」：
+    上傳閘門（:func:`mapping_exposure_summary`）與「預覽高精地圖成果」（``survey.preview.compute_hdmap_preview``）
+    **共用這一支**：兩邊吃同一組生效值（有效值契約），只有格距可以不同。輸入的來源見 :func:`mapping_exposure_summary`。
 
-    * 任務項目＝上傳那一支 ``hv.mission_items(did, camera_cfg=hv.camera_cfg)``（相對本機起飛坪；第 0 列 home）；
-    * 測區＝規劃器要蓋的面（:func:`_mapping_survey_polygons`）；地形＝規劃用 DEM（``ctx.inputs.dem.sample_msl``，
-      與第 0 列 home 同一基準；N 未知的橢球高 DEM 兩邊都是橢球高，AGL 照樣對）；
-    * 風＝規劃風（:func:`_mapping_planning_wind`）；初始空速與 AIRSPEED_MIN/MAX＝匯出 .param 的值
-      （``recommended_params``，上傳讀回閘門也比這組）；CAM1_INTRVAL_MIN／CAM1_DURATION＝``hv.camera_cfg``。
+    ``inputs``：``k``（視數門檻）、``ks``、``airspeed_mps``／``airspeed_limits_mps``（每架）、``drone_of``（uav → drone_id）、
+    ``wind``／``wind_source``、``polygons``／``n_nofly``（測區）、``dem``（規劃 DEM）、``terrain``（傳給驗證器的地面函式）、
+    ``intrval_min_s``、``trigger_duration_s``、``cam_max_roll_deg``、``cell_size_m``。
 
-    ⚠ 報告本身不留（``grid.views_by_uav`` 每架一張 int32 全格網、照片、模擬結果；大面積上百 MB），
-    只回傳下列純資料：``ok``、視數比例、內部／邊緣帶統計、內部破洞（前 5 大）、接縫、照片數、``effective``（用了哪些值）、
-    ``assumptions``（沒建模的事）、``verifier_notes``（驗證器原樣的 notes）。驗證失敗讓例外往上丟（呼叫端決定）。
+    ⚠ 報告含全格網（``grid.views_by_uav`` 每架一張 int32；大面積上百 MB）：呼叫端用完就丟，不要掛在長壽物件上。
+    驗證失敗讓例外往上丟（呼叫端決定）。
     """
     from core.recon.exposure_verifier import verify_preflight
     from hv_dccpp.ardupilot import recommended_params
@@ -1286,6 +1284,45 @@ def mapping_exposure_summary(hv, camera, *, cell_size_m: float = MAPPING_EXPOSUR
                            intrval_min_s=float(cc.interval_min_s), trigger_duration_s=float(cc.duration_s),
                            accept_radius='mission', airspeed_limits_mps=lim, cell_size_m=float(cell_size_m),
                            ks=ks, undercover_k=k)
+    inputs = {'k': k, 'ks': ks, 'airspeed_mps': spd, 'airspeed_limits_mps': lim, 'drone_of': drone_of,
+              'wind': wind, 'wind_source': wind_src, 'polygons': polygons, 'n_nofly': n_nofly, 'dem': dem,
+              'terrain': _ground, 'intrval_min_s': float(cc.interval_min_s),
+              'trigger_duration_s': float(cc.duration_s), 'cam_max_roll_deg': getattr(cc, 'max_roll_deg', None),
+              'cell_size_m': float(cell_size_m)}
+    return rep, inputs
+
+
+def mapping_exposure_assumptions(wind, wind_source, cell_size_m, cam_max_roll_deg) -> list:
+    """曝光驗證沒建模／假設的事（摘要的 ``assumptions``；預覽成果沿用同一份文字）。"""
+    roll = cam_max_roll_deg
+    return [
+        f'規劃風 {wind[0]:g} m/s 來自 {wind[1]:g}°（{wind_source}）—— 不是現場實測風',
+        f'格 {float(cell_size_m):g} m（視數以格心計，量化約 ±1 格）',
+        f'CAM_MAX_ROLL{"" if roll is None else f" {float(roll):g}°"} 未建模：轉彎改出時側傾超過門檻的觸發會被延後，'
+        '實際張數可能較少',
+        '轉彎切角與轉彎動態未建模（路徑＝相鄰 NAV 間直線）；足跡一律 pitch = roll = 0',
+    ]
+
+
+def mapping_exposure_summary(hv, camera, *, cell_size_m: float = MAPPING_EXPOSURE_CELL_M) -> dict:
+    """B3：飛前曝光驗證（:func:`core.recon.exposure_verifier.verify_preflight`）→ **只留摘要**的 dict。
+
+    輸入全部取「上傳／規劃當時生效的值」（由 :func:`mapping_exposure_report` 取，預覽成果也走那一支）：
+
+    * 任務項目＝上傳那一支 ``hv.mission_items(did, camera_cfg=hv.camera_cfg)``（相對本機起飛坪；第 0 列 home）；
+    * 測區＝規劃器要蓋的面（:func:`_mapping_survey_polygons`）；地形＝規劃用 DEM（``ctx.inputs.dem.sample_msl``，
+      與第 0 列 home 同一基準；N 未知的橢球高 DEM 兩邊都是橢球高，AGL 照樣對）；
+    * 風＝規劃風（:func:`_mapping_planning_wind`）；初始空速與 AIRSPEED_MIN/MAX＝匯出 .param 的值
+      （``recommended_params``，上傳讀回閘門也比這組）；CAM1_INTRVAL_MIN／CAM1_DURATION＝``hv.camera_cfg``。
+
+    ⚠ 報告本身不留（``grid.views_by_uav`` 每架一張 int32 全格網、照片、模擬結果；大面積上百 MB），
+    只回傳下列純資料：``ok``、視數比例、內部／邊緣帶統計、內部破洞（前 5 大）、接縫、照片數、``effective``（用了哪些值）、
+    ``assumptions``（沒建模的事）、``verifier_notes``（驗證器原樣的 notes）。驗證失敗讓例外往上丟（呼叫端決定）。
+    """
+    rep, inp = mapping_exposure_report(hv, camera, cell_size_m=cell_size_m)
+    k, ks, drone_of = inp['k'], inp['ks'], inp['drone_of']
+    spd, lim, wind, wind_src = inp['airspeed_mps'], inp['airspeed_limits_mps'], inp['wind'], inp['wind_source']
+    polygons, n_nofly, dem = inp['polygons'], inp['n_nofly'], inp['dem']
 
     def _region(r):
         if r is None:
@@ -1295,7 +1332,7 @@ def mapping_exposure_summary(hv, camera, *, cell_size_m: float = MAPPING_EXPOSUR
                 'undercovered_frac': float(r.undercovered_frac)}
     holes = [a for a in rep.undercovered if a.region == 'interior']
     edge = [a for a in rep.undercovered if a.region == 'edge_band']
-    roll = getattr(cc, 'max_roll_deg', None)
+    roll = inp['cam_max_roll_deg']
     out = {
         'ok': True, 'level': '曝光層級（視數）', 'cell_size_m': float(rep.cell_size_m), 'min_views': k, 'ks': ks,
         'area_m2': float(rep.area_m2), 'frac_ge': {int(a): float(b) for a, b in rep.frac_ge.items()},
@@ -1318,15 +1355,9 @@ def mapping_exposure_summary(hv, camera, *, cell_size_m: float = MAPPING_EXPOSUR
                       'polygon_source': '規劃器作業區聯集' + (f' − 禁航區 {n_nofly} 個 ⊕ b_trk' if n_nofly else ''),
                       'camera_model': rep.effective.get('camera_model'),
                       'airspeed_initial_mps': spd, 'airspeed_limits_mps': lim,
-                      'intrval_min_s': float(cc.interval_min_s), 'trigger_duration_s': float(cc.duration_s),
+                      'intrval_min_s': inp['intrval_min_s'], 'trigger_duration_s': inp['trigger_duration_s'],
                       'accept_radius': 'mission（NAV_WAYPOINT param2）', 'cam_max_roll_deg': roll},
-        'assumptions': [
-            f'規劃風 {wind[0]:g} m/s 來自 {wind[1]:g}°（{wind_src}）—— 不是現場實測風',
-            f'格 {float(rep.cell_size_m):g} m（視數以格心計，量化約 ±1 格）',
-            f'CAM_MAX_ROLL{"" if roll is None else f" {float(roll):g}°"} 未建模：轉彎改出時側傾超過門檻的觸發會被延後，'
-            '實際張數可能較少',
-            '轉彎切角與轉彎動態未建模（路徑＝相鄰 NAV 間直線）；足跡一律 pitch = roll = 0',
-        ],
+        'assumptions': mapping_exposure_assumptions(wind, wind_src, rep.cell_size_m, roll),
         'verifier_notes': [str(n) for n in rep.notes],
         'elapsed_s': float(rep.elapsed_s),
     }
@@ -1377,6 +1408,54 @@ def mapping_exposure_note(summary) -> str:
             + '；'.join(summary.get('assumptions') or []) + ')')
 
 
+#: hv_dccpp.sim 的 AGL 違規前綴（``_AGL_KEYS``；validate 的 ``agl_ok`` 由它們決定）
+_HV_AGL_DETAIL_KINDS = ("agl_below_h_clr", "agl_below_h_minfw", "oper_agl_below_h_min", "oper_agl_above_h_max",
+                        "terrain_unknown")
+
+
+def hv_validate_fail_labels(v) -> list:
+    """``hv_dccpp.validate`` 沒過 → ``validate_failed(…)`` 括號裡的原因標籤。
+
+    2026-10-21：原本只列 coverage／energy／conflicts，**只有 AGL 失敗**（或坡度、曲率…）時 GUI 看到的是
+    ``validate_failed(unknown)``。AGL 列出 ``details`` 裡實際的種類（``agl(agl_below_h_minfw)``），其餘旗標用名字；
+    舊的三個標籤順序與寫法不變。"""
+    bad = [k for k, ok in (('coverage', v.coverage_ok), ('energy', v.energy_ok)) if not ok]
+    agl = sorted({str(s).split(':', 1)[0] for lst in (getattr(v, 'details', None) or {}).values()
+                  for s in (lst or []) if str(s).startswith(_HV_AGL_DETAIL_KINDS)})
+    if agl:
+        bad.append('agl(' + '、'.join(agl) + ')')
+    if v.conflicts:
+        bad.append(f'conflicts={len(v.conflicts)}')
+    for name, attr in (('slope', 'slope_ok'), ('curvature', 'curvature_ok'), ('link', 'link_ok'),
+                       ('airspace', 'airspace_ok'), ('time_window', 'time_window_ok'),
+                       ('integrity', 'integrity_ok'), ('separation', 'separation_ok')):
+        if getattr(v, attr, True) is False:
+            bad.append(name)
+    return bad
+
+
+def hv_terrain_clearance_notes(hv, terrain_label: str = ''):
+    """上傳那份任務（已縮點）的沿線 AGL（:func:`core.terrain_clearance.hv_uploaded_clearance`）→ ``(report, notes)``。
+
+    notes：摘要 ``terrain_clearance(…)``（每架最小 AGL、階段、位置、門檻、地形來源；只寫 log）＋每架有違規時
+    ``terrain_clearance_failed(…)``（GUI 大聲）。檢查本身壞掉 ⇒ ``(None, ['terrain_clearance_failed(…沒跑成功…)'])``：
+    沒驗過不能當驗過。"""
+    import logging as _log
+    try:
+        from core.terrain_clearance import hv_uploaded_clearance
+        rep = hv_uploaded_clearance(hv, terrain_label=terrain_label)
+    except Exception as e:      # noqa: BLE001 — 驗證壞掉不能吃掉規劃結果，也不能當驗過
+        m = (f'terrain_clearance_failed(上傳任務沿線 AGL 沒跑成功：{type(e).__name__}: {e} '
+             '⇒ 上傳那份任務對地形的高度沒驗過，不能當驗過)')
+        _log.getLogger(__name__).error(f"HARVEST: {m}", exc_info=True)
+        return None, [m]
+    notes = [rep.summary_note()] + rep.problem_notes()
+    _log.getLogger(__name__).info(f"HARVEST: {notes[0]}")
+    for m in notes[1:]:
+        _log.getLogger(__name__).error(f"HARVEST: {m}")
+    return rep, notes
+
+
 # ==========================================
 # 群飛協調器
 # ==========================================
@@ -1421,6 +1500,8 @@ class SwarmCoordinator:
         #   （'validate_failed(…)'，時空衝突／能量不足／驗證本身沒跑成功）。建圖閘門 hv_mapping_gate 會併入它，
         #   GUI 上傳前也讀它（MainWindow._hv_upload_gate）。
         self.hv_validation_reasons = None
+        # 上傳那份任務（已縮點）的沿線 AGL 報告（core.terrain_clearance.ClearanceReport）：None ＝ 沒跑到或沒跑成功
+        self.hv_terrain_clearance = None
         # 航測建圖（harvest_params['hv_map_enabled']）：規劃後填入 build_mapping_setup() 的結果與上傳閘門；
         #   沒開建圖 ⇒ 兩者都是 None（舊行為不變）。相機觸發設定同時存在 hv_coordinator.camera_cfg。
         self.hv_mapping_setup = None
@@ -2234,6 +2315,7 @@ class SwarmCoordinator:
                 self.hv_exposure_summary = None
                 self.hv_validation = None
                 self.hv_validation_reasons = None
+                self.hv_terrain_clearance = None
                 _map = None
                 if bool(_hv_get('hv_map_enabled', default=False)):
                     _map = build_mapping_setup(_p)
@@ -2699,13 +2781,23 @@ class SwarmCoordinator:
                     if _cand and _cand != (_rec0 or {}):
                         _base_m = measure_harvest_plan(_hv)
                         _hv.progress = None                     # 試跑不要再推一次進度條
+                        _trial_err = None
                         try:
                             _res2 = _plan_once(_cand)
                             _cand_m = measure_harvest_plan(_hv)
+                        except Exception as _e:                 # noqa: BLE001
+                            # ⚠⚠ 試跑失敗＝候選落選，不是整趟失敗（基準已經成功了）。轉接層 preflight NO_GO
+                            #   是 plan_mission 跑完、last_plan 換成候選**之後**才 raise ⇒ 一樣走下面落選那條
+                            #   跑回基準；重跑會清掉緩衝裡試跑那份，不會被放行。
+                            _trial_err = f"{type(_e).__name__}: {_e}"
+                            _log.getLogger(__name__).debug("HARVEST: 自動指派試跑失敗", exc_info=True)
                         finally:
                             _hv.progress = _real_prog
-                        _ok, _why = recovery_regression_guard(_base_m, _cand_m)
-                        _better = _cand_m['makespan_s'] < _base_m['makespan_s'] - 1e-9
+                        if _trial_err is not None:
+                            _ok, _why, _better = False, f"試跑失敗：{_trial_err}", False
+                        else:
+                            _ok, _why = recovery_regression_guard(_base_m, _cand_m)
+                            _better = _cand_m['makespan_s'] < _base_m['makespan_s'] - 1e-9
                         if _ok and _better:
                             result, _win_reports = _res2, list(_rep_buf)
                             _m = (f"recovery_auto_applied({_cand}；makespan "
@@ -2816,10 +2908,7 @@ class SwarmCoordinator:
                     _v = _hvlib.validate(_hv.last_plan, _hv.last_ctx, _cache, _hv.cfg)
                     self.hv_validation = _v
                     if not _v.passed:
-                        _bad = [k for k, ok in (('coverage', _v.coverage_ok),
-                                                ('energy', _v.energy_ok)) if not ok]
-                        if _v.conflicts:
-                            _bad.append(f'conflicts={len(_v.conflicts)}')
+                        _bad = hv_validate_fail_labels(_v)      # 含 agl(agl_below_*)：只有 AGL 失敗時不再是 unknown
                         _msg = f"validate_failed({', '.join(_bad) or 'unknown'})"
                         _log.getLogger(__name__).error(f"HARVEST: {_msg}")
                         _vnotes.append(_msg)
@@ -2837,6 +2926,19 @@ class SwarmCoordinator:
                     _vnotes.append('validate_failed(驗證本身沒跑成功)')
                     self.hv_validation_reasons = [
                         f'validate_failed(驗證本身沒跑成功：{type(_e).__name__}: {_e})']
+                # ── 收尾（二之二）：**上傳那一份**任務的沿線 AGL ─────────────
+                #   validate 的 AGL 檢查看的是規劃器的密集航點；送上飛控的是 reduce_waypoints 縮點後的項目（高度剖面
+                #   DP 容差 cfg.delta_prof_m＝10 m、弧段外切頂點、整圈盤旋 → LOITER）。這裡對 mission_items 那份、
+                #   用同一份自然地形重算（core/terrain_clearance.py；docs/實作_2026-10-21_上傳任務沿線AGL.md）。
+                #   有違規（或檢查本身壞掉）⇒ terrain_clearance_failed(…) 一定送（GUI 大聲）。不改上傳閘門。
+                #   摘要 terrain_clearance(…) 只是資訊（helper 已寫 log）：**只搭尾端 report 的便車**，不為它多送一份
+                #   （下面 A6／M2：沒有尾端 report 時轉接層那份必須是最後一份）。
+                #   ⚠ 沒有地形資料（平地 DEM）時只對平地驗 ⇒ 摘要裡寫明，不當成驗過真地形。
+                _tl = ('Cesium World Terrain' if self._world_terrain is not None
+                       else ('DEM' if terrain_func is not None else '平地 DEM（沒有地形資料：只對平地驗）'))
+                self.hv_terrain_clearance, _tcn = hv_terrain_clearance_notes(_hv, _tl)
+                _tc_summary = _tcn[0] if self.hv_terrain_clearance is not None else None
+                _vnotes.extend(_tcn[1:] if _tc_summary is not None else _tcn)
                 # ── 收尾（三）：建圖上傳閘門 ─────────────────────────────
                 #   ⚠⚠ preflight 的 GO_WITH_WARNINGS 不夠：實測有 GO_WITH_WARNINGS 卻丟掉約 35% 面積的計畫。
                 #   未覆蓋／mapping_incomplete ⇒ 這份計畫不可上傳（GUI 上傳鈕依 hv_mapping_gate 擋）。
@@ -2875,6 +2977,8 @@ class SwarmCoordinator:
                 #   「N 未知 ⇒ 只准相對高度」。⇒ 有尾端 report 時原樣併進來（勝出那次規劃的 _hv.notes；不重複；
                 #   接在前置 notes 之後）。沒有尾端 report 時轉接層那份就是最後一份、本來就帶著它們 ⇒ 不多送一份
                 #   （多送會把轉接層 report 的 uncovered／status 一起蓋掉）。
+                if _vnotes and _tc_summary is not None:
+                    _vnotes.append(_tc_summary)      # 上傳任務沿線 AGL 摘要：只在本來就有尾端 report 時附上
                 if _vnotes:
                     _fwd: list[str] = []
                     for _n in (str(x) for x in (_hv.notes or [])):

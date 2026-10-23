@@ -447,9 +447,18 @@ def test_model_and_its_glb_calibration_come_from_one_model_kind_and_change_toget
     """機型中途變了（第一批還沒 HEARTBEAT ⇒ '---' 當多旋翼；Q_ENABLE 讀回後 PLANE → VTOL）：以前模型建立時定死、
     校正卻每筆照新機型算 ⇒ 多旋翼 GLB 套固定翼校正。行為見 test_real_cesium_vehicle_type_change_rebuilds_the_model…"""
     one = _strip_comments(_fn('_updateUAVOne'))
-    k = one.index("const modelKind = isVtolGlb ? 'vtol' : isPlaneGlb ? 'plane' : isCopterGlb ? 'copter' "
-                  ": (isPlane ? 'planeBox' : 'copterBall');")
+    k = one.index("const modelKind = isHeroGlb ? 'hero' : isPioneerGlb ? 'pioneer' : isVtolGlb ? 'vtol' : isPlaneGlb ? 'plane' "
+                  ": isCopterGlb ? 'copter'\n                    : (isPlane ? 'planeBox' : 'copterBall');")
     assert one.index('if (isCopterGlb) { headingOffset = _COPTER_HEADING_OFFSET;') < k, '校正與模型種類出自同一組旗標'
+    assert one.index('if (isHeroGlb)   { headingOffset = _HERO_HEADING_OFFSET;') < k
+    assert one.index('if (isPioneerGlb) { headingOffset = _PIONEER_HEADING_OFFSET;') < k
+    # 旗標互斥（校正是依序 if 指定的；isPlane 包含 VTOL）：機體專用模型優先，通用 VTOL、固定翼都要排除它們
+    assert "const airframe = isVtol ? _uavAirframeOf(sysid) : '';" in one, '機體只對 VTOL 有效'
+    assert "const isHeroGlb = airframe === 'hero' && !!_HERO_MODEL_URI;" in one
+    assert "const isPioneerGlb = airframe === 'pioneer' && !!_PIONEER_MODEL_URI;" in one
+    assert 'const isAirframeGlb = isHeroGlb || isPioneerGlb;' in one
+    assert 'const isVtolGlb = !isAirframeGlb && isVtol &&' in one
+    assert 'const isPlaneGlb = !isAirframeGlb && !isVtolGlb && isPlane &&' in one
     assert 'if (st.kind !== undefined && st.kind !== modelKind) {' in one
     assert 'st.props.ori = _uavSampledProps().ori;' in one, '舊校正的模型姿態樣本要丟掉'
     assert one.index('st.kind = modelKind;') < one.index('_uavPushSample([st.props.ori, st.props.att]')
@@ -1512,7 +1521,12 @@ def test_setview_direction_up_form_is_lossy_near_nadir_so_fpv_converts_to_hpr_it
 #   這兩種配對錯誤整個檔案照樣全過（審查實測）。這裡的頁面三個 URI 各填一個**不同的**小 GLB（一個三角形，真的載得起來），
 #   校正用頁面真的那幾組（VTOL 的由 widget 常數填、固定翼／多旋翼是頁面常數）。
 #   期望值**寫死在這裡**（使用者目視確認過、GLB 幾何稽核證實的那幾組），不從頁面讀 —— 從頁面讀就是拿錯的值去驗錯的值。
-_GLB_EXPECT = {'VTOL': ('vtol', (-90, 90, 180)), 'PLANE': ('plane', (0, 0, 0)), 'COPTER': ('copter', (-90, 90, 180))}
+#   HERO（2026-10-23）：tools/build_hero_glb.py 匯出就是 Barracuda 慣例（glTF +X 機鼻、+Y 上、+Z 右翼）⇒ 0/0/0。
+#   'HERO' 不是飛控的機型字串：飛控回報 VTOL、setUavAirframes 指定 'hero'（見 _hero_step）。
+_GLB_EXPECT = {'VTOL': ('vtol', (-90, 90, 180)), 'PLANE': ('plane', (0, 0, 0)), 'COPTER': ('copter', (-90, 90, 180)),
+               'HERO': ('hero', (0, 0, 0)), 'PIONEER': ('pioneer', (0, 0, 0))}
+# 模型 scale（實際尺寸）：P25-ID 與多旋翼 GLB 是公分 ⇒ 0.01；Barracuda、Hero、Pioneer 匯出就是公尺 ⇒ 1
+_GLB_SCALE = {'vtol': 0.01, 'plane': 1.0, 'copter': 0.01, 'hero': 1.0, 'pioneer': 1.0}
 
 
 def _tiny_glb() -> bytes:
@@ -1538,14 +1552,16 @@ def page_glb3d(_pw, tmp_path_factory):
         pytest.skip("沒有本機 Cesium（assets/cesium 是 gitignored）")
     d = tmp_path_factory.mktemp("uavglb")
     uris = {}
-    for kind in ('vtol', 'plane', 'copter'):
+    for kind in ('vtol', 'plane', 'copter', 'hero', 'pioneer'):
         p = d / f'{kind}_dummy.glb'
         p.write_bytes(_tiny_glb())
         uris[kind] = p.as_uri()
     with pytest.MonkeyPatch.context() as mp:
         vals = _template_values(mp)
     vals.update({'__PLANE_MODEL_URI__': uris['plane'], '__COPTER_MODEL_URI__': uris['copter'],
-                 '__VTOL_MODEL_URI__': uris['vtol'], '__INIT_LAT__': str(LAT0), '__INIT_LON__': str(LON0)})
+                 '__VTOL_MODEL_URI__': uris['vtol'], '__INIT_LAT__': str(LAT0), '__INIT_LON__': str(LON0),
+                 '/*__AIRFRAME_MODELS__*/': (f'_HERO_MODEL_URI = {json.dumps(uris["hero"])}; '
+                                             f'_PIONEER_MODEL_URI = {json.dumps(uris["pioneer"])};')})
     f = d / "main.html"
     f.write_text(_NoDel.__new__(_NoDel)._fill_cesium_template(HTML, vals), encoding="utf-8")
     try:
@@ -1557,6 +1573,7 @@ def page_glb3d(_pw, tmp_path_factory):
         pg.goto(f.as_uri())
         pg.wait_for_function("typeof viewer !== 'undefined' && typeof updateUAVPositions === 'function'", timeout=60000)
         pg.add_script_tag(content=_PAGE_HELPERS)
+        pg.evaluate("() => { T_.heroUri = _HERO_MODEL_URI; T_.pioneerUri = _PIONEER_MODEL_URI; }")
     except Exception as e:                                   # pragma: no cover - 沒有 WebGL 等
         pytest.skip(f"真的 Cesium 起不來：{e}")
     pg._errs = errs
@@ -1568,7 +1585,9 @@ def page_glb3d(_pw, tmp_path_factory):
 @pytest.fixture
 def page_glb(page_glb3d):
     yield page_glb3d
-    page_glb3d.evaluate("() => { clearUAV(); _RENDER_IDLE_MS = 2000; }")
+    page_glb3d.evaluate("() => { clearUAV(); _RENDER_IDLE_MS = 2000; _HERO_MODEL_URI = T_.heroUri; "
+                        "_PIONEER_MODEL_URI = T_.pioneerUri; "
+                        "_UAV_AIRFRAME_DEFAULT = ''; for (const k of Object.keys(_UAV_AIRFRAME)) delete _UAV_AIRFRAME[k]; }")
     assert not page_glb3d._errs, page_glb3d._errs
 
 
@@ -1592,6 +1611,7 @@ _GLB_STEP_JS = """([sid, k, vt, h, p, r, offs]) => {
     return [v.x, v.y, v.z];
   };
   return {uri: u ? String(u.url || u) : null, kind: e._uavKind, nOri: T_.oriTimes(sid).length,
+          scale: e.model ? e.model.scale.getValue(jd) : null,
           nose: ax(0, 1, 0), right: ax(1, 0, 0), up: ax(0, 0, 1)};
 }"""
 
@@ -1600,15 +1620,58 @@ def _glb_check(pg, got, vt, att):
     kind, _offs = _GLB_EXPECT[vt]
     assert got["uri"] == pg._uris[kind], f'{vt} 要載入 {kind} 的 GLB：{got["uri"]}'
     assert got["kind"] == kind
+    assert got["scale"] == pytest.approx(_GLB_SCALE[kind], rel=1e-12), f'{kind} 的實際尺寸（scale）：{got["scale"]}'
     for name, ref in zip(("nose", "right", "up"), _ref_axes_enu(*att)):
         assert got[name] == pytest.approx(list(ref), abs=1e-9), (vt, name, got[name], ref)
 
 
-@pytest.mark.parametrize("vt", ["VTOL", "PLANE", "COPTER"])
+def _hero_step(pg, sid, k, airframe, att, expect_vt, dflt=None):
+    """飛控回報 VTOL、這一架指定成 airframe（None ⇒ 不動逐架指定、看預設）；dflt 給了就換預設。
+    畫出來的模型與校正要是 expect_vt 那一種（回傳 _GLB_STEP_JS 的結果）。"""
+    pg.evaluate("([sid, a, d]) => setUavAirframes(a === null ? null : {[sid]: a}, d === null ? undefined : d)",
+                [sid, airframe, dflt])
+    return pg.evaluate(_GLB_STEP_JS, [sid, k, 'VTOL', *att, list(_GLB_EXPECT[expect_vt][1])])
+
+
+@pytest.mark.parametrize("vt", ["VTOL", "PLANE", "COPTER", "HERO", "PIONEER"])
 @pytest.mark.parametrize("att", [(137, 15, 30), (300, -20, -60)])
 def test_real_cesium_each_glb_is_drawn_with_its_own_calibration(page_glb, vt, att):
-    got = page_glb.evaluate(_GLB_STEP_JS, [81, 0, vt, *att, list(_GLB_EXPECT[vt][1])])
+    if vt in ('HERO', 'PIONEER'):
+        got = _hero_step(page_glb, 81, 0, vt.lower(), att, vt)
+    else:
+        got = page_glb.evaluate(_GLB_STEP_JS, [81, 0, vt, *att, list(_GLB_EXPECT[vt][1])])
     _glb_check(page_glb, got, vt, att)
+
+
+def test_real_cesium_hero_is_only_for_the_vtols_it_is_assigned_to(page_glb):
+    """逐架指定 ＞ 預設；'' ＝通用 vtol.glb；指定 hero／pioneer 但沒有那個 GLB ⇒ 通用 vtol.glb（不會拿機體模型的校正
+    去畫別的檔）；固定翼／多旋翼不管預設是什麼都不受影響。每一步模型檔、校正、姿態三者一致。"""
+    att = (45, 6, -25)
+    _glb_check(page_glb, _hero_step(page_glb, 83, 0, 'pioneer', att, 'PIONEER'), 'PIONEER', att)
+    _glb_check(page_glb, _hero_step(page_glb, 84, 0, None, att, 'VTOL'), 'VTOL', att)               # 預設 ''
+    _glb_check(page_glb, _hero_step(page_glb, 84, 1, None, att, 'HERO', dflt='hero'), 'HERO', att)  # 預設換成 hero
+    _glb_check(page_glb, _hero_step(page_glb, 83, 1, None, att, 'PIONEER'), 'PIONEER', att)         # 逐架 pioneer 優先
+    for sid, vt in ((85, 'PLANE'), (86, 'COPTER')):                                                 # 預設 hero 也不影響
+        got = page_glb.evaluate(_GLB_STEP_JS, [sid, 0, vt, *att, list(_GLB_EXPECT[vt][1])])
+        _glb_check(page_glb, got, vt, att)
+    st = page_glb.evaluate("() => setUavAirframes({83: null})")                                    # 取消逐架 ⇒ 用預設
+    assert st == {'dflt': 'hero', 'map': {}}, st
+    _glb_check(page_glb, _hero_step(page_glb, 83, 2, None, att, 'HERO'), 'HERO', att)
+    page_glb.evaluate("() => { _HERO_MODEL_URI = ''; _PIONEER_MODEL_URI = ''; }")                 # 沒有那兩個 GLB
+    _glb_check(page_glb, _hero_step(page_glb, 87, 0, 'hero', att, 'VTOL'), 'VTOL', att)
+    _glb_check(page_glb, _hero_step(page_glb, 89, 0, 'pioneer', att, 'VTOL'), 'VTOL', att)
+
+
+def test_real_cesium_switching_a_vtol_to_hero_mid_stream_rebuilds_model_and_calibration_together(page_glb):
+    """HARVEST 上傳後才知道是 Hero：同一架 VTOL 從通用 vtol.glb 換成 hero.glb（再換回去），模型、校正、姿態一起換，
+    舊校正的模型姿態樣本丟掉（和機型改變同一條路徑）。"""
+    steps = [(None, 'VTOL', (20, 4, 10)), ('hero', 'HERO', (110, -6, 30)), ('', 'VTOL', (250, 9, -35)),
+             ('pioneer', 'PIONEER', (300, 3, 12)), ('hero', 'HERO', (340, 2, 5))]
+    for k, (airframe, as_vt, att) in enumerate(steps):
+        got = _hero_step(page_glb, 88, k, airframe, att, as_vt)
+        if k:
+            assert got["nOri"] == 1, f'換了模型 ⇒ 舊校正的模型姿態樣本丟掉（{airframe}）'
+        _glb_check(page_glb, got, as_vt, att)
 
 
 def test_real_cesium_glb_and_calibration_change_together_when_the_vehicle_type_changes(page_glb):

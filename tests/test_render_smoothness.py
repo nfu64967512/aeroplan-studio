@@ -594,7 +594,8 @@ def test_widget_resolves_all_three_models_through_the_merge_cache(monkeypatch):
         def __del__(self):
             pass
     vals = _W.__new__(_W)._cesium_template_values()
-    present = {n for n in ("barracuda500.glb", "copter.glb", "vtol.glb") if (REPO / "ui" / "resources" / n).exists()}
+    present = {n for n in ("barracuda500.glb", "copter.glb", "vtol.glb", "hero.glb", "pioneer.glb")
+               if (REPO / "ui" / "resources" / n).exists()}
     assert {n for n, _ in seen} == present
     assert all(c == REPO / "data" / "cache" / "models" for _, c in seen)
     for key, n in (("__PLANE_MODEL_URI__", "barracuda500"), ("__COPTER_MODEL_URI__", "copter"), ("__VTOL_MODEL_URI__", "vtol")):
@@ -602,6 +603,12 @@ def test_widget_resolves_all_three_models_through_the_merge_cache(monkeypatch):
             assert vals[key].endswith(f"{n}.MERGED.glb"), (key, vals[key])
         else:
             assert vals[key] == ""
+    af = vals["/*__AIRFRAME_MODELS__*/"]                    # 機體模型換進的是一行 JS（各 URI＋機體預設＋逐架）
+    for name, var in (("hero", "_HERO_MODEL_URI"), ("pioneer", "_PIONEER_MODEL_URI")):
+        if f"{name}.glb" in present:
+            assert f'{var} = "' in af and f'{name}.MERGED.glb"' in af, af
+        else:
+            assert f'{var} = "";' in af, af
 
 
 def test_test_session_does_not_write_model_caches_by_default():

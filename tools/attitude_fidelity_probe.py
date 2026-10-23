@@ -263,11 +263,14 @@ SPEED_BANDS = ((3.0, 'lt3'), (6.0, '3to6'), (float('inf'), 'ge6'))    # 與 main
 #: |俯仰| 超過這個度數 ⇒ 偏航／滾轉的分軸統計不算（萬向鎖：分軸沒有意義），總旋轉角照算
 GIMBAL_PITCH_DEG = 85.0
 #: 有 GLB 的模型種類（探針用 entity 載入的 URI 認）
-GLB_KINDS = ('vtol', 'plane', 'copter')
+GLB_KINDS = ('hero', 'pioneer', 'vtol', 'plane', 'copter')
 #: 校正（航向／俯仰／滾轉偏移，度）**寫死在這裡**：使用者目視確認過，2026-10-22 GLB 幾何稽核（Cesium 1.115 的 glTF 軸修正
 #: × HPR(−90, 90, 180) 剛好是單位矩陣；vtol／copter 原始座標 x 右、y 機鼻、z 上；Barracuda 的 glTF +X 是機鼻）證實。
 #: 探針用這一組去掉校正、不用頁面常數 ⇒ 頁面常數被改錯會直接變成姿態誤差（也列在 summary.json 的 calibration）。
-PINNED_OFFSETS = {'vtol': (-90.0, 90.0, 180.0), 'plane': (0.0, 0.0, 0.0), 'copter': (-90.0, 90.0, 180.0)}
+#: hero／pioneer（2026-10-23）：tools/glb_kit.py 匯出時就是 Barracuda 慣例（glTF +X 機鼻、+Y 上、+Z 右翼）⇒ 0/0/0，
+#: 由匯出程式的座標轉換決定（不是目視），經真 Cesium 的軸向截圖確認。
+PINNED_OFFSETS = {'hero': (0.0, 0.0, 0.0), 'pioneer': (0.0, 0.0, 0.0), 'vtol': (-90.0, 90.0, 180.0),
+                  'plane': (0.0, 0.0, 0.0), 'copter': (-90.0, 90.0, 180.0)}
 
 
 def speed_band(v) -> str:
@@ -721,7 +724,13 @@ def evaluate_gate(s: dict, limit_deg: float, *, need_raw: bool = True, min_rows:
         frac = (n_ok / n_eval) if n_eval else 0.0
         add(f'coverage.{label}.n_ok', n_ok, f'≥ {min_rows}', n_ok >= min_rows)
         add(f'coverage.{label}.ok_frac', round(frac, 4), f'≥ {min_ok_frac}', frac >= min_ok_frac)
-    have_glb = any(((s.get('page') or {}).get('uris') or {}).values())
+    page = s.get('page') or {}
+    uris = dict(page.get('uris') or {})
+    af = (page.get('final') or {}).get('airframe') or page.get('airframe') or {}
+    for name in ('hero', 'pioneer'):     # 機體模型只畫給被指定的 VTOL：沒人被指定 ⇒ 它的 URI 不算「頁面有 GLB」（審查）
+        if uris.get(name) and not (af.get('dflt') == name or name in (af.get('map') or {}).values()):
+            uris.pop(name)
+    have_glb = any(uris.values())
     bad = [m for m in s.get('models', []) if m == 'unknown' or (m == 'none' and have_glb)]
     add('models', s.get('models'), '沒有 unknown；頁面有 GLB 時也沒有 none', not bad)
     mis = (s.get('calibration') or {}).get('mismatch')
@@ -877,7 +886,9 @@ INSTALL_JS_TEMPLATE = r"""
         uri = (u && u.url) ? String(u.url) : String(u || '');
       }
     } catch (_) {}
-    const K = [['vtol', _VTOL_MODEL_URI, [_VTOL_HEADING_OFFSET, _VTOL_PITCH_OFFSET, _VTOL_ROLL_OFFSET]],
+    const K = [['hero', _HERO_MODEL_URI, [_HERO_HEADING_OFFSET, _HERO_PITCH_OFFSET, _HERO_ROLL_OFFSET]],
+               ['pioneer', _PIONEER_MODEL_URI, [_PIONEER_HEADING_OFFSET, _PIONEER_PITCH_OFFSET, _PIONEER_ROLL_OFFSET]],
+               ['vtol', _VTOL_MODEL_URI, [_VTOL_HEADING_OFFSET, _VTOL_PITCH_OFFSET, _VTOL_ROLL_OFFSET]],
                ['plane', _PLANE_MODEL_URI, [_PLANE_HEADING_OFFSET, _PLANE_PITCH_OFFSET, _PLANE_ROLL_OFFSET]],
                ['copter', _COPTER_MODEL_URI, [_COPTER_HEADING_OFFSET, _COPTER_PITCH_OFFSET, _COPTER_ROLL_OFFSET]]];
     for (let i = 0; i < K.length; i++) {
@@ -1002,10 +1013,14 @@ READ_JS = r"""
 PAGE_INFO_JS = r"""
 JSON.stringify({cesium: Cesium.VERSION,
   flag: (typeof _UAV_NOSE_FOLLOWS_TRACK === 'undefined') ? null : _UAV_NOSE_FOLLOWS_TRACK,
-  offsets: {vtol: [_VTOL_HEADING_OFFSET, _VTOL_PITCH_OFFSET, _VTOL_ROLL_OFFSET],
+  offsets: {hero: [_HERO_HEADING_OFFSET, _HERO_PITCH_OFFSET, _HERO_ROLL_OFFSET],
+            pioneer: [_PIONEER_HEADING_OFFSET, _PIONEER_PITCH_OFFSET, _PIONEER_ROLL_OFFSET],
+            vtol: [_VTOL_HEADING_OFFSET, _VTOL_PITCH_OFFSET, _VTOL_ROLL_OFFSET],
             plane: [_PLANE_HEADING_OFFSET, _PLANE_PITCH_OFFSET, _PLANE_ROLL_OFFSET],
             copter: [_COPTER_HEADING_OFFSET, _COPTER_PITCH_OFFSET, _COPTER_ROLL_OFFSET]},
-  uris: {vtol: _VTOL_MODEL_URI, plane: _PLANE_MODEL_URI, copter: _COPTER_MODEL_URI},
+  uris: {hero: _HERO_MODEL_URI, pioneer: _PIONEER_MODEL_URI, vtol: _VTOL_MODEL_URI, plane: _PLANE_MODEL_URI,
+         copter: _COPTER_MODEL_URI},
+  airframe: {dflt: _UAV_AIRFRAME_DEFAULT, map: _UAV_AIRFRAME},
   blend: [_UAV_NOSE_BLEND_LO, _UAV_NOSE_BLEND_HI],
   nAtt: Object.fromEntries(Object.keys(_UAV_STATE).map(function (k) { return [k, _UAV_STATE[k].nAtt]; })),
   nPos: Object.fromEntries(Object.keys(_UAV_STATE).map(function (k) { return [k, _UAV_STATE[k].nPos]; })),
@@ -1569,6 +1584,9 @@ def main(argv=None) -> int:
             js(MUTATIONS[args.mutate], lambda v: log(f'突變 {args.mutate}：{v}'))
         if args.js:
             js(args.js + '\n;"ok";')
+            # --js 可能改了機體（setUavAirframes）⇒ 重讀，閘門與 summary 看的是這一趟實際用的（2026-10-23 審查）
+            js('JSON.stringify({dflt: _UAV_AIRFRAME_DEFAULT, map: _UAV_AIRFRAME})',
+               lambda v: page_info.update(airframe_initial=page_info.get('airframe'), airframe=json.loads(v)) if v else None)
         link.start()
         if raw is not None:
             raw.start()

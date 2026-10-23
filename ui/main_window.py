@@ -419,6 +419,8 @@ _WP_LIMIT = 655   # Mission Planner 單次最大匯入航點數
 
 # HARVEST 兩個構型的顯示名稱（數值以 docs/平台參數表.md 為準，這裡只給人看）
 HV_PLATFORM_NAMES = {'A': 'Pioneer PNP', 'B': 'HERO PNP'}
+# 構型 → 3D 圖的機體模型（CesiumMapWidget.AIRFRAMES；'pioneer' ＝ ui/resources/pioneer.glb，沒有該檔才畫通用 vtol.glb）
+HV_AIRFRAME_OF_CLASS = {'A': 'pioneer', 'B': 'hero'}
 
 # ── 關視窗時還在跑的 HARVEST 規劃執行緒（見 _hv_park_running_worker）────────
 #   放在模組層級是刻意的：這裡是唯一在視窗死後還握著它的地方。
@@ -1753,7 +1755,57 @@ def record_release_schedule(win, hv, pairs, *, mapping: bool):
         f'UAV-{e["sysid"]}（機 {e["uav"]} {e["callsign"]}）T+{e["offset_s"]:.1f} s'
         for e in sorted(entries.values(), key=lambda x: (x['offset_s'], x['sysid']))) + f'（來源：{source}）')
     _refresh_countdown_of(win)
+    _show_harvest_airframes(win, hv, pairs, new_result=not same)
     return entries, source
+
+
+def harvest_airframes(hv, pairs) -> dict:
+    """上傳的 ``[(sysid, drone_id), ...]`` → ``{sysid: 'pioneer'|'hero'}``。構型取自**這份計畫本身**
+    （``hv.last_plan.plans[id_map[drone_id]].cls``），不是面板現在的台數（上傳前可能已經改了面板）；查不到的不列。"""
+    plans = dict(getattr(getattr(hv, 'last_plan', None), 'plans', None) or {})
+    id_map = getattr(hv, 'id_map', None) or {}
+    out = {}
+    for sysid, did in pairs:
+        cls = str(getattr(plans.get(id_map.get(int(did))), 'cls', '') or '').upper()
+        if cls in HV_AIRFRAME_OF_CLASS:
+            out[int(sysid)] = HV_AIRFRAME_OF_CLASS[cls]
+    return out
+
+
+def _show_harvest_airframes(win, hv, pairs, *, new_result: bool = False) -> None:
+    """HARVEST 任務送上飛控 ⇒ 3D 圖上那幾架照構型畫（A＝Pioneer、B＝Hero）。只換外觀；失敗不影響上傳。
+
+    指定過的 sysid 記在 ``win._hv_airframe_sysids``：換了一份計畫（new_result）⇒ 新計畫沒有的那幾架取消指定
+    （回到設定檔）；同一份計畫分批上傳 ⇒ 累加。重開／停 SITL 時全部取消（clear_harvest_airframes）。
+    一般（非 HARVEST）任務上傳不動它：HIL 板的機體是那塊飛控的物理屬性，不隨任務換。"""
+    af = harvest_airframes(hv, pairs)
+    mw = _win_attr(win, 'map_widget')
+    if not hasattr(mw, 'set_uav_airframes'):
+        return
+    prev = set(_win_attr(win, '_hv_airframe_sysids', None) or ())
+    stale = (prev - set(af)) if new_result else set()
+    if not af and not stale:
+        return
+    try:
+        mw.set_uav_airframes({**{s: None for s in sorted(stale)}, **af})
+        win._hv_airframe_sysids = (set() if new_result else prev - stale) | set(af)
+        logger.info(f'[3D] HARVEST 構型 ⇒ 機體模型：{af}' + (f'；取消 {sorted(stale)}' if stale else ''))
+    except Exception as e:      # noqa: BLE001 — 外觀而已，不能讓上傳流程中斷
+        logger.warning(f'[3D] 套用 HARVEST 機體模型失敗：{e}')
+
+
+def clear_harvest_airframes(win, reason: str) -> None:
+    """取消 HARVEST 指定過的機體模型（回到設定檔）：重開／停 SITL 之後同一個 sysid 是另一架模擬機。"""
+    sids = set(_win_attr(win, '_hv_airframe_sysids', None) or ())
+    mw = _win_attr(win, 'map_widget')
+    if not sids or not hasattr(mw, 'set_uav_airframes'):
+        return
+    try:
+        mw.set_uav_airframes({s: None for s in sorted(sids)})
+        win._hv_airframe_sysids = set()
+        logger.info(f'[3D] {reason} ⇒ 取消 HARVEST 指定的機體模型 {sorted(sids)}')
+    except Exception as e:      # noqa: BLE001
+        logger.warning(f'[3D] 取消 HARVEST 機體模型失敗：{e}')
 
 
 def forget_release_schedule(win, sysids=None, reason: str = '') -> None:
@@ -13500,6 +13552,8 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
                 auto_firewall=auto_firewall,
                 sim_wind=sim_wind,
             )
+            # 真的重開了 ⇒ 同一個 sysid 之後是另一架模擬機：取消 HARVEST 指定的機體模型（取消對話框／啟動失敗都不動）
+            clear_harvest_airframes(self, '重新啟動 SITL')
             first_conn = results[0][1]
             self.sitl_hud.on_sitl_launched(f'{vehicle} x{count}', first_conn)
             logger.info(f'[SITL] 內建 {vehicle} x{count} 已啟動')
@@ -13541,6 +13595,7 @@ class MainWindow(QMainWindow, StrikeControllerMixin, StotRos2ControllerMixin,
 
     def on_sitl_stop_local(self):
         """停止本地 SITL（含所有實例與連線）"""
+        clear_harvest_airframes(self, '停止 SITL')
         if self._sitl_links:
             self.on_sitl_disconnect()
         if self._sitl_launcher is not None:

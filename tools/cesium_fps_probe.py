@@ -169,6 +169,9 @@ def build_page() -> pathlib.Path:
         '__VTOL_HEADING_OFFSET__': str(CesiumMapWidget.VTOL_HEADING_OFFSET),
         '__VTOL_PITCH_OFFSET__': str(CesiumMapWidget.VTOL_PITCH_OFFSET),
         '__VTOL_ROLL_OFFSET__': str(CesiumMapWidget.VTOL_ROLL_OFFSET),
+        # 機體模型：只帶 URI（預設機體留空 ＝ 通用 VTOL）；量 Hero 用 --js "setUavAirframes(null, 'hero')"（Pioneer 同理）
+        '/*__AIRFRAME_MODELS__*/': (f'_HERO_MODEL_URI = {json.dumps(uri(res / "hero.glb"))}; '
+                                    f'_PIONEER_MODEL_URI = {json.dumps(uri(res / "pioneer.glb"))};'),
         '__REQUEST_RENDER_MODE__': 'true' if rr_true else 'false',
         '__RENDER_MAX_DT__': ARGS.render_dt if rr_true else '0',
     }

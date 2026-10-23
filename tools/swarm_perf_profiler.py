@@ -316,6 +316,9 @@ def _in_view(app, page) -> dict:
 # ═══════════════════════════════════════════════════════════════════════════
 #  一次 ramp(指定 mode)
 # ═══════════════════════════════════════════════════════════════════════════
+AIRFRAME = ''          # --airframe（main 設定）：VTOL 畫哪個機體模型
+
+
 def run_ramp(app, mode, steps, dwell, rate, gui, settle, mon):
     from mission.fleet_registry import FleetRegistry
     from mission.sitl_link import SITLLink
@@ -357,6 +360,9 @@ def run_ramp(app, mode, steps, dwell, rate, gui, settle, mon):
             }
             'ok';
         """)
+        # VTOL 畫哪個機體模型由這裡明確決定（--airframe，預設 '' ＝ 通用 vtol.glb ＝ 歷來基準），不隨 settings.json
+        # 的 model3d 走（2026-10-23 審查：本機設了 hero ⇒ --vehicle vtol 會默默量成 hero.glb）
+        dualmap.set_uav_airframes({}, default=AIRFRAME)
         # (以前 optimized 會在這裡注入 requestRenderMode=true;頁面現在自己做自適應算圖,不再覆寫)
         # 等 3D 安定窗口結束(DualMapWidget 切 3D 後會丟棄更新一段時間)
         t0 = time.monotonic()
@@ -437,8 +443,12 @@ def main():
     ap.add_argument('--no-gui', action='store_true', help='不開地圖,只量 CPU(無頭驗證)')
     ap.add_argument('--vehicle', choices=['plane', 'vtol', 'copter'], default='plane',
                     help='樁機回報的機型（決定 3D 用哪個模型）')
+    ap.add_argument('--airframe', choices=['', 'hero', 'pioneer'], default='',
+                    help="--vehicle vtol 時 3D 畫哪個機體模型：''＝通用 vtol.glb（預設、歷來基準）／hero／pioneer")
     ap.add_argument('--csv', default='', help='CSV 輸出路徑(預設 tools/swarm_perf_result.csv,那是被追蹤的檔)')
     args = ap.parse_args()
+    global AIRFRAME
+    AIRFRAME = args.airframe
 
     try:
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
@@ -519,12 +529,12 @@ def main():
             swap = QSurfaceFormat.defaultFormat().swapInterval()
             merge = os.environ.get('AEROPLAN_GLB_MERGE', '1')
             fh.write("mode,n_vehicles,groups,fps,cpu_sum_pct,machine_pct,rss_mb,"
-                     "vehicle,swap_interval,glb_merge_env,in_view,models\n")
+                     "vehicle,airframe,swap_interval,glb_merge_env,in_view,models\n")
             for mode, rows in results.items():
                 for r in rows:
                     fh.write(f"{mode},{r['n']},{r['groups']},{r['fps']:.2f},"
                              f"{r['cpu']:.2f},{r['machine']:.2f},{r['rss']:.1f},"
-                             f"{args.vehicle},{swap},{merge},{r.get('inview', '')},{r.get('models', '')}\n")
+                             f"{args.vehicle},{args.airframe},{swap},{merge},{r.get('inview', '')},{r.get('models', '')}\n")
         print(f"\nCSV 已輸出: {out_csv}")
     except Exception as e:
         print(f"CSV 輸出失敗: {e}")

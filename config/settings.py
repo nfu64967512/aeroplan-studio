@@ -332,6 +332,56 @@ def _load_weather(raw) -> tuple:
 
 
 @dataclass
+class Model3DSettings:
+    """3D 圖上 VTOL 畫哪個機體模型（**只換外觀**：飛控、規劃、SITL 動力學都不看這個）。
+
+    vtol_model     沒逐架指定時的預設：'hero' ＝ ui/resources/hero.glb（MFE 逆行者，tools/build_hero_glb.py 建）；
+                   'pioneer' ＝ ui/resources/pioneer.glb（MFE 開拓者，tools/build_pioneer_glb.py 建）；'' ＝通用 vtol.glb。
+                   沒有那個 GLB ⇒ 記 warning、畫通用的。
+                   程式預設 ''（不改既有行為；姿態探針用預設設定隔離，它的閘門針對通用 vtol.glb 的校正）。
+    uav_airframes  逐架指定 {"sysid": "hero"|"pioneer"|""}，例如 HIL 三顆板 {"1": "pioneer", "2": "hero", "3": "hero"}。
+    HARVEST 任務上傳後，該計畫的構型 A／B 會把那幾架指定成 pioneer／hero（執行期，優先於這裡；重開／停 SITL 時取消）。
+    ⚠ 放在自己的頂層區塊、不放 map：舊版本只讀認得的區塊（看到 model3d 會跳過），但舊版 MapSettings(**...) 遇到
+      不認得的鍵會丟 TypeError ⇒ map 以後的區塊全部回預設（2026-10-23 審查實測）。
+    """
+    vtol_model: str = ''
+    uav_airframes: dict = field(default_factory=dict)
+
+
+# 2026-10-23 第一版把這兩個鍵放在 map 底下；讀到就搬到 model3d（存檔時只寫 model3d）
+_MODEL3D_KEYS_FORMERLY_IN_MAP = ('vtol_model', 'uav_airframes')
+
+
+def _known_fields_only(cls, raw, section: str) -> tuple:
+    """區塊裡只留 cls 認得的鍵；其餘只記鍵名（絕不記值）並忽略 —— 不讓一個新版本才有的鍵把整段（和後面每一段）歸零。
+    回傳 (kwargs, 警告文字)。"""
+    from dataclasses import fields as _fields
+    if not isinstance(raw, dict):
+        warn = f"settings.json 的 {section} 區塊不是物件（{type(raw).__name__}），整段忽略"
+        print(warn)
+        return {}, warn
+    known = {f.name for f in _fields(cls)}
+    unknown = sorted(set(raw) - known)
+    warn = f"settings.json 的 {section} 區塊有未知鍵 {unknown}（已忽略）" if unknown else ''
+    if warn:
+        print(warn)
+    return {k: v for k, v in raw.items() if k in known}, warn
+
+
+def _load_model3d(raw) -> tuple:
+    """model3d 區塊：未知鍵只警告；uav_airframes 不是物件 ⇒ 警告、當成空的。回傳 (Model3DSettings, 警告文字)。"""
+    kw, warn = _known_fields_only(Model3DSettings, raw, 'model3d')
+    if 'uav_airframes' in kw and not isinstance(kw['uav_airframes'], dict):
+        w = f"settings.json 的 model3d.uav_airframes 應為 {{sysid: 機體}}，得 {type(kw['uav_airframes']).__name__}（已忽略）"
+        print(w)
+        warn = (warn + '；' if warn else '') + w
+        kw.pop('uav_airframes')
+    if 'vtol_model' in kw and not isinstance(kw['vtol_model'], str):
+        kw['vtol_model'] = str(kw['vtol_model'])
+    return Model3DSettings(**kw), warn
+
+
+@dataclass
 class HILSettings:
     """HIL（Hardware-in-the-Loop）連線面板的持久化設定。
     用途：記住使用者上次填的每顆飛控連線埠 / 鮑率 / SYSID，
@@ -368,6 +418,9 @@ class GlobalSettings:
         self.embedded_swarm = EmbeddedSwarmSettings()
         self.hil = HILSettings()
         self.weather = WeatherSettings()
+        self.model3d = Model3DSettings()
+        self.model3d_load_warning = ''     # model3d 區塊讀取時的警告（未知鍵、型別不對）
+        self.map_load_warning = ''         # map 區塊的未知鍵（只記鍵名）
         self.weather_load_warning = ''      # weather 區塊讀取時的警告（未知鍵等），給 utils.cwa_opendata 回報
         self.map_default_site_warning = ''  # map.default_site 不認得時的警告
         self._map_default_latlon_raw = None # 檔案裡使用者自己填的 default_lat/lon（被 default_site 取代時保留，save 寫回原值）
@@ -397,9 +450,24 @@ class GlobalSettings:
                     # ⚠ 存檔路徑會蓋掉計算值 ⇒ 搬家後必須先校正，
                     #   否則八條路徑全部指向舊位置（見 _rebase_saved_paths）。
                     self.paths = PathSettings(**_rebase_saved_paths(config_data['paths']))
+                legacy = {}
                 if 'map' in config_data:
-                    self.map = MapSettings(**config_data['map'])
+                    raw_map = config_data['map']
+                    if isinstance(raw_map, dict):     # 第一版放在 map 底下的 3D 機體鍵 ⇒ 搬到 model3d
+                        raw_map = dict(raw_map)
+                        legacy = {k: raw_map.pop(k) for k in _MODEL3D_KEYS_FORMERLY_IN_MAP if k in raw_map}
+                    kw, self.map_load_warning = _known_fields_only(MapSettings, raw_map, 'map')
+                    self.map = MapSettings(**kw)
                     self._apply_default_site()
+                    if legacy and 'model3d' not in config_data:
+                        self.model3d, self.model3d_load_warning = _load_model3d(legacy)
+                if 'model3d' in config_data:
+                    self.model3d, self.model3d_load_warning = _load_model3d(config_data['model3d'])
+                    if legacy:          # 兩處都有 ⇒ 以 model3d 為準；只記鍵名
+                        w = (f"settings.json 的 map 區塊仍有舊鍵 {sorted(legacy)}，但已有 model3d 區塊 ⇒ 以 model3d 為準、"
+                             f"舊鍵已忽略（下次存檔會移除）")
+                        print(w)
+                        self.model3d_load_warning = (self.model3d_load_warning + '；' if self.model3d_load_warning else '') + w
                 if 'export' in config_data:
                     self.export = ExportSettings(**config_data['export'])
                 if 'performance' in config_data:
@@ -477,6 +545,7 @@ class GlobalSettings:
                 'embedded_swarm': asdict(self.embedded_swarm),
                 'hil': asdict(self.hil),
                 'weather': asdict(self.weather),
+                'model3d': asdict(self.model3d),
             }
 
             os.makedirs(os.path.dirname(self.config_file), exist_ok=True)
@@ -500,6 +569,7 @@ class GlobalSettings:
         self.sitl_launch = SITLLaunchSettings()
         self.embedded_swarm = EmbeddedSwarmSettings()
         self.hil = HILSettings()
+        self.model3d = Model3DSettings()
 
     def get_dict(self) -> Dict[str, Any]:
         """獲取配置字典"""
@@ -513,6 +583,7 @@ class GlobalSettings:
             'sitl_launch': asdict(self.sitl_launch),
             'embedded_swarm': asdict(self.embedded_swarm),
             'hil': asdict(self.hil),
+            'model3d': asdict(self.model3d),
         }
 
 

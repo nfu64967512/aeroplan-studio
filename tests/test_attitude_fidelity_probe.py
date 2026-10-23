@@ -539,19 +539,21 @@ def test_gimbal_lock_rows_are_left_out_of_the_yaw_and_roll_stats_only():
 
 
 def test_calibration_offsets_are_pinned_in_the_probe_and_a_changed_page_constant_is_reported():
-    assert afp.PINNED_OFFSETS == {'vtol': (-90.0, 90.0, 180.0), 'plane': (0.0, 0.0, 0.0),
-                                  'copter': (-90.0, 90.0, 180.0)}, '使用者目視確認、GLB 幾何稽核證實的那幾組'
+    assert afp.PINNED_OFFSETS == {'hero': (0.0, 0.0, 0.0), 'pioneer': (0.0, 0.0, 0.0), 'vtol': (-90.0, 90.0, 180.0),
+                                  'plane': (0.0, 0.0, 0.0), 'copter': (-90.0, 90.0, 180.0)}, '使用者目視確認、GLB 幾何稽核證實的那幾組'
     assert json.dumps({k: list(v) for k, v in afp.PINNED_OFFSETS.items()}) in afp.INSTALL_JS
     assert 'offs: A.pinned[K[i][0]]' in afp.INSTALL_JS, '去校正用寫死的，不用頁面常數（頁面常數只回報）'
-    ok = afp.calibration_check({'offsets': {'vtol': [-90, 90, 180], 'plane': [0, 0, 0], 'copter': [-90, 90, 180]}})
+    ok = afp.calibration_check({'offsets': {'hero': [0, 0, 0], 'pioneer': [0, 0, 0], 'vtol': [-90, 90, 180],
+                                            'plane': [0, 0, 0], 'copter': [-90, 90, 180]}})
     assert ok['mismatch'] == []
-    bad = afp.calibration_check({'offsets': {'vtol': [-90, 90, 0], 'plane': [0, 0, 0], 'copter': [-90, 90, 180]}})
+    bad = afp.calibration_check({'offsets': {'hero': [0, 0, 0], 'pioneer': [0, 0, 0], 'vtol': [-90, 90, 0],
+                                             'plane': [0, 0, 0], 'copter': [-90, 90, 180]}})
     assert bad['mismatch'] == [{'kind': 'vtol', 'page': [-90, 90, 0], 'pinned': [-90.0, 90.0, 180.0]}]
     assert afp.calibration_check({})['mismatch'] != [], '沒讀到頁面常數也算不過'
     # main.html 本身：VTOL 的偏移由 widget 常數填，固定翼／多旋翼是頁面常數 —— 兩邊都要等於寫死的
     from ui.widgets.cesium_map_widget import CesiumMapWidget as W
     assert (W.VTOL_HEADING_OFFSET, W.VTOL_PITCH_OFFSET, W.VTOL_ROLL_OFFSET) == afp.PINNED_OFFSETS['vtol']
-    for kind, name in (('plane', 'PLANE'), ('copter', 'COPTER')):
+    for kind, name in (('plane', 'PLANE'), ('copter', 'COPTER'), ('hero', 'HERO'), ('pioneer', 'PIONEER')):
         got = tuple(float(re.search(rf'const _{name}_{ax}_OFFSET\s*=\s*(-?\d+(?:\.\d+)?);', HTML).group(1))
                     for ax in ('HEADING', 'PITCH', 'ROLL'))
         assert got == afp.PINNED_OFFSETS[kind], (kind, got)
@@ -577,6 +579,23 @@ def _gate_summary(**over):
 
 def _failed(g):
     return sorted(c['name'] for c in g['checks'] if not c['ok'])
+
+
+def test_models_gate_counts_the_hero_glb_only_when_some_vtol_is_assigned_to_it():
+    """2026-10-23 審查：Hero 只畫給被指定的 VTOL。探針的頁面沒有人被指定 ⇒ 只有 hero.glb 時 VTOL 畫成方塊（none）是對的。"""
+    only_af = {'hero': 'file:///h.glb', 'pioneer': 'file:///p.glb', 'vtol': '', 'plane': '', 'copter': ''}
+    s = _gate_summary(models=['none'], page={'uris': only_af, 'airframe': {'dflt': '', 'map': {}}})
+    assert 'models' not in _failed(afp.evaluate_gate(s, 0.5))
+    for af in ({'dflt': 'hero', 'map': {}}, {'dflt': '', 'map': {'1': 'hero'}}, {'dflt': 'pioneer', 'map': {}},
+               {'dflt': '', 'map': {'2': 'pioneer'}}):
+        s = _gate_summary(models=['none'], page={'uris': only_af, 'airframe': af})
+        assert 'models' in _failed(afp.evaluate_gate(s, 0.5)), af
+    # 真的跑法：開頭讀到的是預設（沒人被指定），--js 才 setUavAirframes ⇒ 結尾那一次讀回才算數
+    s = _gate_summary(models=['none'], page={'uris': only_af, 'airframe': {'dflt': '', 'map': {}},
+                                            'final': {'airframe': {'dflt': 'pioneer', 'map': {}}}})
+    assert 'models' in _failed(afp.evaluate_gate(s, 0.5))
+    assert "page_info.update(airframe_initial=page_info.get('airframe'), airframe=json.loads(v))" in afp.__dict__.get(
+        '__source__', open(afp.__file__, encoding='utf-8').read()), '--js 之後重讀機體設定'
 
 
 def test_gate_is_a_conjunction_of_every_error_coverage_model_and_calibration_check():

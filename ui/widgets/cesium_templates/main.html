@@ -1567,6 +1567,16 @@ const _VTOL_MODEL_SCALE = __VTOL_MODEL_SCALE__;
 const _VTOL_HEADING_OFFSET = __VTOL_HEADING_OFFSET__;
 const _VTOL_PITCH_OFFSET = __VTOL_PITCH_OFFSET__;
 const _VTOL_ROLL_OFFSET = __VTOL_ROLL_OFFSET__;
+// 機體專用模型（實際尺寸）：Hero（MFE 逆行者）ui/resources/hero.glb、Pioneer（MFE 开拓者）ui/resources/pioneer.glb，
+// 由 tools/build_hero_glb.py／build_pioneer_glb.py 從原廠 STEP＋手冊／示意圖尺寸建。
+// **只換外觀**：每架畫哪個看 _UAV_AIRFRAME[sysid]（'hero'｜'pioneer'｜''），沒指定 ⇒ _UAV_AIRFRAME_DEFAULT；
+// 只對 VTOL 有效。'' ＝通用 vtol.glb；指定的機體沒有 GLB（URI 空）⇒ 也畫通用 vtol.glb。
+// 下一行的佔位註解由 Python 換成這幾個值的設定（CesiumMapWidget._airframe_models_js）；沒換到 ⇒ 維持空值＝舊行為。
+let _HERO_MODEL_URI = '';
+let _PIONEER_MODEL_URI = '';
+let _UAV_AIRFRAME_DEFAULT = '';
+const _UAV_AIRFRAME = {};
+/*__AIRFRAME_MODELS__*/
 
 // GLB 模型方向校正（單位：度）。MAVLink heading: 0=北, 90=東 (順時針)。
 // Cesium HPR heading 軸繞 -Z，若模型預設 forward 為 +X(東)，需 -90° 將其轉向北。
@@ -1593,6 +1603,17 @@ const _PLANE_ROLL_OFFSET     = 0;     // 同上，不需要翻正
 const _COPTER_HEADING_OFFSET = -90;   // 多旋翼 GLB yaw 逆時針 90°
 const _COPTER_PITCH_OFFSET   = 90;   // 多旋翼 GLB pitch +90° 校正
 const _COPTER_ROLL_OFFSET    = 180;   // GLB 機身上下倒置校正 (roll 翻正)
+// Hero：tools/build_hero_glb.py 匯出時就用 Barracuda 的慣例（公尺、glTF +X 機鼻、+Y 上、+Z 右翼、原點在重心）
+//   ⇒ 不需要任何校正。這組值是**匯出慣例**決定的（不是目視）：改匯出座標要一起改（tests K 節把它寫死）。
+const _HERO_MODEL_SCALE      = 1.0;
+const _HERO_HEADING_OFFSET   = 0;
+const _HERO_PITCH_OFFSET     = 0;
+const _HERO_ROLL_OFFSET      = 0;
+// Pioneer：tools/build_pioneer_glb.py 同一個匯出慣例（glb_kit）⇒ 一樣 0/0/0、scale 1。
+const _PIONEER_MODEL_SCALE    = 1.0;
+const _PIONEER_HEADING_OFFSET = 0;
+const _PIONEER_PITCH_OFFSET   = 0;
+const _PIONEER_ROLL_OFFSET    = 0;
 
 // 各機即時狀態（由 _updateUAVOne 填入），供跟隨相機/FOV 等使用。
 //   每架：{lat, lon, alt, heading(機鼻, 度), yaw(飛控 hdg), crs(航跡, 度或 null), pitch, roll, speed,
@@ -1630,6 +1651,28 @@ function _uavNoseHeading(hdgDeg, crsDeg, spdMs, vehicleType, mode) {
   const w = Math.max(0, Math.min(1, ((spdMs || 0) - _UAV_NOSE_BLEND_LO) / (_UAV_NOSE_BLEND_HI - _UAV_NOSE_BLEND_LO)));
   const d = ((crsDeg - hdg) % 360 + 540) % 360 - 180;        // 最短角差，[-180, 180)
   return ((hdg + w * d) % 360 + 360) % 360;
+}
+
+// ── 每架畫哪個機體模型（只換外觀：姿態、軌跡、相機都不受影響）。這一架指定過 ⇒ 用它，否則用預設。
+function _uavAirframeOf(sysid) {
+  const a = _UAV_AIRFRAME[sysid];
+  return (typeof a === 'string') ? a : _UAV_AIRFRAME_DEFAULT;
+}
+// 公開：map = {sysid: 'hero'|'pioneer'|''} 合併進去（值 null ⇒ 拿掉那一架的指定、回到預設）；dflt 是字串才換預設。
+// 下一筆遙測進來時 modelKind 變了 ⇒ 既有「機型變了就重建」的路徑連模型帶校正一起換（舊校正的姿態樣本丟掉）。
+// 回傳生效的 {dflt, map}。
+function setUavAirframes(map, dflt) {
+  if (map && typeof map === 'object') {
+    for (const k of Object.keys(map)) {
+      if (map[k] === null) delete _UAV_AIRFRAME[k]; else _UAV_AIRFRAME[k] = String(map[k]);
+    }
+  }
+  if (typeof dflt === 'string') _UAV_AIRFRAME_DEFAULT = dflt;
+  console.log('[3D] 機體模型：預設 ' + (_UAV_AIRFRAME_DEFAULT || '通用') + '，逐架 ' + JSON.stringify(_UAV_AIRFRAME)
+              + (_HERO_MODEL_URI ? '' : '（沒有 hero.glb ⇒ Hero 也畫通用 VTOL）')
+              + (_PIONEER_MODEL_URI ? '' : '（沒有 pioneer.glb ⇒ Pioneer 也畫通用 VTOL）'));
+  _requestRender();
+  return {dflt: _UAV_AIRFRAME_DEFAULT, map: Object.assign({}, _UAV_AIRFRAME)};
 }
 
 // ── 模型方向 = 飛機姿態（機鼻 heading、pitch、roll）× GLB 校正（模型自己座標系下的固定旋轉）。
@@ -2306,15 +2349,23 @@ function _updateUAVOne(lat, lon, alt, headingDeg, speedMs, sysid, mode, armed, v
   const labelTxt = icon + ' UAV' + sysid + (mode ? ' [' + mode + ']' : '') + (armed ? ' ●ARM' : '');
 
   // 計算 orientation（含姿態：heading + pitch + roll）
-  const isVtolGlb = isVtol && _VTOL_MODEL_URI && _VTOL_MODEL_URI.length > 0;
-  const isPlaneGlb = !isVtolGlb && isPlane && _PLANE_MODEL_URI && _PLANE_MODEL_URI.length > 0;
+  // ⚠ 旗標要互斥（下面的校正是依序 if 指定的；isPlane 包含 VTOL）⇒ 機體專用模型優先、再通用 VTOL、再固定翼
+  const airframe = isVtol ? _uavAirframeOf(sysid) : '';
+  const isHeroGlb = airframe === 'hero' && !!_HERO_MODEL_URI;
+  const isPioneerGlb = airframe === 'pioneer' && !!_PIONEER_MODEL_URI;
+  const isAirframeGlb = isHeroGlb || isPioneerGlb;
+  const isVtolGlb = !isAirframeGlb && isVtol && _VTOL_MODEL_URI && _VTOL_MODEL_URI.length > 0;
+  const isPlaneGlb = !isAirframeGlb && !isVtolGlb && isPlane && _PLANE_MODEL_URI && _PLANE_MODEL_URI.length > 0;
   const isCopterGlb = !isPlane && _COPTER_MODEL_URI && _COPTER_MODEL_URI.length > 0;
   let headingOffset = 0, pitchOffset = 0, rollOffset = 0;
+  if (isHeroGlb)   { headingOffset = _HERO_HEADING_OFFSET;   pitchOffset = _HERO_PITCH_OFFSET;   rollOffset = _HERO_ROLL_OFFSET; }
+  if (isPioneerGlb) { headingOffset = _PIONEER_HEADING_OFFSET; pitchOffset = _PIONEER_PITCH_OFFSET; rollOffset = _PIONEER_ROLL_OFFSET; }
   if (isVtolGlb)   { headingOffset = _VTOL_HEADING_OFFSET;   pitchOffset = _VTOL_PITCH_OFFSET;   rollOffset = _VTOL_ROLL_OFFSET; }
   if (isPlaneGlb)  { headingOffset = _PLANE_HEADING_OFFSET;  pitchOffset = _PLANE_PITCH_OFFSET;  rollOffset = _PLANE_ROLL_OFFSET; }
   if (isCopterGlb) { headingOffset = _COPTER_HEADING_OFFSET; pitchOffset = _COPTER_PITCH_OFFSET; rollOffset = _COPTER_ROLL_OFFSET; }
   // 這一架現在該畫哪一種模型（上面的校正屬於它）：建 entity 時記在 entity._uavKind，機型變了就連模型一起換（見下方 st.kind）
-  const modelKind = isVtolGlb ? 'vtol' : isPlaneGlb ? 'plane' : isCopterGlb ? 'copter' : (isPlane ? 'planeBox' : 'copterBall');
+  const modelKind = isHeroGlb ? 'hero' : isPioneerGlb ? 'pioneer' : isVtolGlb ? 'vtol' : isPlaneGlb ? 'plane' : isCopterGlb ? 'copter'
+                    : (isPlane ? 'planeBox' : 'copterBall');
   // 模型用（含 GLB 校正、固定座標系）：校正是模型自己座標系下的固定旋轉，**不能**加進姿態角（見 _uavModelOrientation）
   const orientation = _uavModelOrientation(pos, noseDeg, pitchDeg, rollDeg, headingOffset, pitchOffset, rollOffset);
   const attitude = Cesium.Quaternion.fromHeadingPitchRoll(new Cesium.HeadingPitchRoll(   // 相機用（原始、機體座標系）
@@ -2378,7 +2429,7 @@ function _updateUAVOne(lat, lon, alt, headingDeg, speedMs, sysid, mode, armed, v
     entity = undefined;
   }
   if (!entity) {
-    const useGlbModel = isVtolGlb
+    const useGlbModel = isAirframeGlb || isVtolGlb
                      || (isPlane && _PLANE_MODEL_URI && _PLANE_MODEL_URI.length > 0)
                      || (!isPlane && _COPTER_MODEL_URI && _COPTER_MODEL_URI.length > 0);
     // entity 綁薄的 CallbackProperty：**不看** Cesium 傳進來的時間，在這一架的顯示時間取插值（不靠 viewer.clock：
@@ -2422,7 +2473,25 @@ function _updateUAVOne(lat, lon, alt, headingDeg, speedMs, sysid, mode, armed, v
       },
     };
 
-    if (isVtolGlb) {
+    if (isHeroGlb) {
+      console.log('[3D] 載入 Hero GLB 模型:', _HERO_MODEL_URI);
+      entityOpts.model = {
+        uri: _HERO_MODEL_URI,
+        minimumPixelSize: 32,
+        maximumScale: 50,
+        scale: _HERO_MODEL_SCALE,     // 實尺寸（公尺，翼展 2.18 m）
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 1.0e8),
+      };
+    } else if (isPioneerGlb) {
+      console.log('[3D] 載入 Pioneer GLB 模型:', _PIONEER_MODEL_URI);
+      entityOpts.model = {
+        uri: _PIONEER_MODEL_URI,
+        minimumPixelSize: 32,
+        maximumScale: 50,
+        scale: _PIONEER_MODEL_SCALE,  // 實尺寸（公尺，翼展 3.2 m）
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 1.0e8),
+      };
+    } else if (isVtolGlb) {
       console.log('[3D] 載入 VTOL GLB 模型:', _VTOL_MODEL_URI);
       entityOpts.model = {
         uri: _VTOL_MODEL_URI,

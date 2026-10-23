@@ -1185,6 +1185,10 @@ class DualMapWidget(MapWidgetBase):
         """公開 API：歸零跟隨鏡頭視角回飛機正後方。"""
         self.map_3d.reset_chase_view()
 
+    def set_uav_airframes(self, mapping=None, default=None) -> dict:
+        """公開 API：3D 圖上每架畫哪個機體模型（{sysid: 'hero'|'pioneer'|''}；只換外觀，2D 圖示不變）。"""
+        return self.map_3d.set_uav_airframes(mapping, default)
+
     # ─────────────────────────────────────────────────────────────
     # 地形跟隨（Terrain-Following at constant AGL）
     # ─────────────────────────────────────────────────────────────

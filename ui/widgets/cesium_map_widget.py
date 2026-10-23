@@ -370,6 +370,11 @@ class CesiumMapWidget(MapWidgetBase):
     VTOL_HEADING_OFFSET = -90
     VTOL_PITCH_OFFSET = 90
     VTOL_ROLL_OFFSET = 180
+    # 機體專用模型（ui/resources/<名稱>.glb）的校正是 main.html 的頁面常數（_HERO_*／_PIONEER_*：0/0/0、scale 1），
+    # 綁定 tools/glb_kit.py 的匯出慣例；這裡只決定「哪幾架畫哪個機體」（main.html _uavAirframeOf）。
+    AIRFRAMES = ('', 'hero', 'pioneer')
+    AIRFRAME_MODELS = {'hero': ('hero.glb', '_HERO_MODEL_URI', 'build_hero_glb.py'),
+                       'pioneer': ('pioneer.glb', '_PIONEER_MODEL_URI', 'build_pioneer_glb.py')}
 
     """3D 地圖組件，介面與 MapWidget 相容"""
 
@@ -507,6 +512,100 @@ class CesiumMapWidget(MapWidgetBase):
             logger.info('[Cesium] 未設定 ion token（衛星影像照常；沒有 ion 資源）')
         return token
 
+    @classmethod
+    def _clean_airframe(cls, value, where: str) -> str:
+        """機體模型名稱 → AIRFRAMES 之一；不認得 ⇒ 記 warning、當成 ''（通用 VTOL），不靜默吃掉。"""
+        if value is None:
+            logger.warning(f'[Cesium] {where} 的機體模型是 null ⇒ 畫通用 VTOL')
+            return ''
+        a = str(value).strip().lower()
+        if a not in cls.AIRFRAMES:
+            logger.warning(f'[Cesium] {where} 的機體模型 {value!r} 不認得（可用 {cls.AIRFRAMES}）⇒ 畫通用 VTOL')
+            return ''
+        return a
+
+    def _airframe_settings(self) -> tuple:
+        """設定檔的 (model3d.vtol_model, {sysid: model3d.uav_airframes[sysid]})；讀不到設定（測試、探針）⇒ ('', {})。"""
+        try:
+            from config.settings import get_settings
+            m = getattr(get_settings(), 'model3d', None)
+            if m is None:
+                return '', {}
+            dflt, per = getattr(m, 'vtol_model', ''), getattr(m, 'uav_airframes', None) or {}
+        except Exception:
+            return '', {}
+        if not isinstance(per, dict):
+            logger.warning(f'[Cesium] model3d.uav_airframes 應為 {{sysid: 機體}}，得 {type(per).__name__} ⇒ 忽略')
+            per = {}
+        out = {}
+        for k, v in per.items():
+            if v is None:                                   # 和執行期一樣：null ＝ 沒指定、用預設（但要說）
+                logger.warning(f'[Cesium] model3d.uav_airframes[{k!r}] 是 null ⇒ 視為未指定、用預設')
+                continue
+            try:
+                out[int(k)] = self._clean_airframe(v, f'model3d.uav_airframes[{k!r}]')
+            except (TypeError, ValueError):
+                logger.warning(f'[Cesium] model3d.uav_airframes 的鍵 {k!r} 不是 sysid ⇒ 略過')
+        return self._clean_airframe(dflt, 'model3d.vtol_model'), out
+
+    def _airframe_models_js(self, uris: dict) -> str:
+        """範本佔位（main.html 機體模型那一行）換成：各機體模型 URI（uris {'hero': uri, 'pioneer': uri}，沒有的給 ''）、
+        預設機體、逐架指定。優先序：執行期 set_uav_airframes（頁面重載後由這裡套回去）＞ 設定檔 uav_airframes ＞ vtol_model。"""
+        dflt, per = self._airframe_settings()
+        if self.__dict__.get('_uav_airframe_default') is not None:
+            dflt = self.__dict__['_uav_airframe_default']
+        per.update(self.__dict__.get('_uav_airframes') or {})
+        uris = {name: str(uris.get(name) or '') for name in self.AIRFRAME_MODELS}
+        self.__dict__['_airframe_uris'] = uris              # set_uav_airframes 用：這份頁面有哪些機體模型
+        self._warn_missing_airframe_models({dflt, *per.values()})
+        logger.info(f'[Cesium] 機體模型: { {k: (v or "未找到") for k, v in uris.items()} }；'
+                    f'VTOL 機體預設 {dflt or "通用"}、逐架 {per}')
+        return (''.join(f'{self.AIRFRAME_MODELS[name][1]} = {json.dumps(uri)}; ' for name, uri in uris.items())
+                + '_UAV_AIRFRAME_DEFAULT = ' + json.dumps(dflt)
+                + '; Object.assign(_UAV_AIRFRAME, ' + json.dumps({str(k): per[k] for k in sorted(per)}) + ');')
+
+    def _warn_missing_airframe_models(self, requested) -> None:
+        """指定了某個機體、但這份頁面沒有它的 GLB ⇒ 只會畫通用 VTOL：說出來（還沒建頁面的裸實例不知道 ⇒ 不報）。"""
+        uris = self.__dict__.get('_airframe_uris')
+        if uris is None:
+            return
+        for name in sorted(a for a in requested if a in self.AIRFRAME_MODELS and not uris.get(a)):
+            glb, _, tool = self.AIRFRAME_MODELS[name]
+            logger.warning(f'[Cesium] 指定了 {name} 模型但沒有 ui/resources/{glb} ⇒ 畫通用 VTOL'
+                           f'（建模：python -I tools/{tool} fetch && python -I tools/{tool} build）')
+
+    def set_uav_airframes(self, mapping: Optional[dict] = None, default: Optional[str] = None) -> dict:
+        """執行期指定 3D 圖上每架畫哪個機體模型（只換外觀）。
+
+        mapping ``{sysid: 'hero'|'pioneer'|''}``（值 None ⇒ 取消執行期指定、回到設定檔的那一架或預設）；
+        default 給了就換預設。記在 widget 上（頁面重載時 _airframe_models_js 套回去）並送 ``setUavAirframes(...)``，
+        下一筆遙測進來那一架就換模型。回傳生效的執行期逐架指定。"""
+        per = dict(self.__dict__.get('_uav_airframes') or {})
+        from_settings = None
+        send = {}
+        for k, v in (mapping or {}).items():
+            try:
+                sid = int(k)
+            except (TypeError, ValueError):
+                logger.warning(f'[Cesium] set_uav_airframes：{k!r} 不是 sysid ⇒ 略過')
+                continue
+            if v is None:
+                per.pop(sid, None)
+                if from_settings is None:
+                    from_settings = self._airframe_settings()[1]
+                send[str(sid)] = from_settings.get(sid)          # 設定檔也沒有 ⇒ null ⇒ 頁面刪掉、用預設
+            else:
+                per[sid] = send[str(sid)] = self._clean_airframe(v, f'sysid {sid}')
+        self.__dict__['_uav_airframes'] = per
+        args = json.dumps(send)
+        if default is not None:
+            self.__dict__['_uav_airframe_default'] = self._clean_airframe(default, '預設')
+            args += ', ' + json.dumps(self.__dict__['_uav_airframe_default'])
+        self._warn_missing_airframe_models({*send.values(), self.__dict__.get('_uav_airframe_default')}
+                                           if default is not None else set(send.values()))
+        self._js(f'setUavAirframes({args})')
+        return per
+
     def _resolve_render_max_dt(self) -> float:
         """requestRenderMode 的 maximumRenderTimeChange（秒）：環境變數 RENDER_DT_ENV 優先，否則類別屬性 RENDER_MAX_DT。
         環境變數不是有限的非負數 ⇒ 記 warning、退回類別屬性（不靜默吃掉壞值）。"""
@@ -591,6 +690,11 @@ class CesiumMapWidget(MapWidgetBase):
         vtol_model_uri = _model_uri(vtol_glb)
         logger.info(f'[Cesium] VTOL GLB 模型: {vtol_model_uri or "未找到，VTOL 沿用固定翼模型"}')
 
+        # 機體專用模型（Hero、Pioneer）：哪幾架畫哪個看設定＋執行期指定（見 _airframe_models_js）；
+        # primitive 只有 5 個 ⇒ 合併快取直接回原檔
+        airframe_models_js = self._airframe_models_js(
+            {name: _model_uri(project_root / 'ui' / 'resources' / glb) for name, (glb, *_) in self.AIRFRAME_MODELS.items()})
+
         ion_token = self._resolve_token()
 
         # 風場圖層：引擎 <script>（缺檔 ⇒ 換成註解、記 error，其餘照常）＋ 膠水 ＋ 把 Python 端狀態套回去
@@ -635,6 +739,7 @@ class CesiumMapWidget(MapWidgetBase):
             '__VTOL_HEADING_OFFSET__': str(self.VTOL_HEADING_OFFSET),
             '__VTOL_PITCH_OFFSET__': str(self.VTOL_PITCH_OFFSET),
             '__VTOL_ROLL_OFFSET__': str(self.VTOL_ROLL_OFFSET),
+            '/*__AIRFRAME_MODELS__*/': airframe_models_js,
             '__REQUEST_RENDER_MODE__': rr['__REQUEST_RENDER_MODE__'],
             '__RENDER_MAX_DT__': rr['__RENDER_MAX_DT__'],
             # 預計成果放**最後**換：它帶著資料（標籤、影像），排在後面就不會被別的佔位字置換誤觸

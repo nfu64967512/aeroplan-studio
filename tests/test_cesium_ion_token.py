@@ -120,7 +120,10 @@ def fake(monkeypatch, tmp_path):
     self_._resolve_token = types.MethodType(CesiumMapWidget._resolve_token, self_)
     # 2026-10-17 起 _load_cesium 把置換拆成 _fill_cesium_template → _cesium_template_values → _render_mode_placeholders
     # （→ _resolve_render_max_dt）；假 self 要綁上同一串真方法，token 的路徑才是真的那條
-    for name in ('_fill_cesium_template', '_cesium_template_values', '_render_mode_placeholders', '_resolve_render_max_dt'):
+    # 2026-10-23 起還有機體模型那一行（_airframe_models_js → _airframe_settings → _clean_airframe；假設定沒有 model3d ⇒ 通用）
+    self_.AIRFRAMES, self_.AIRFRAME_MODELS = CesiumMapWidget.AIRFRAMES, CesiumMapWidget.AIRFRAME_MODELS
+    for name in ('_fill_cesium_template', '_cesium_template_values', '_render_mode_placeholders', '_resolve_render_max_dt',
+                 '_airframe_models_js', '_warn_missing_airframe_models', '_airframe_settings', '_clean_airframe'):
         fn = inspect.getattr_static(CesiumMapWidget, name)
         setattr(self_, name, fn.__get__(self_, type(self_)) if not isinstance(fn, (staticmethod, classmethod))
                 else getattr(CesiumMapWidget, name))

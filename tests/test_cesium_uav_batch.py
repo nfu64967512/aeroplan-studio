@@ -1610,8 +1610,10 @@ _GLB_STEP_JS = """([sid, k, vt, h, p, r, offs]) => {
     const v = Cesium.Matrix4.multiplyByPointAsVector(enuInv, w, new Cesium.Cartesian3());
     return [v.x, v.y, v.z];
   };
+  const cs = e.model && e.model.customShader ? e.model.customShader.getValue(jd) : null;
   return {uri: u ? String(u.url || u) : null, kind: e._uavKind, nOri: T_.oriTimes(sid).length,
           scale: e.model ? e.model.scale.getValue(jd) : null,
+          fixedLight: !!cs && cs.lightingModel === Cesium.LightingModel.UNLIT,
           nose: ax(0, 1, 0), right: ax(1, 0, 0), up: ax(0, 0, 1)};
 }"""
 
@@ -1621,6 +1623,8 @@ def _glb_check(pg, got, vt, att):
     assert got["uri"] == pg._uris[kind], f'{vt} 要載入 {kind} 的 GLB：{got["uri"]}'
     assert got["kind"] == kind
     assert got["scale"] == pytest.approx(_GLB_SCALE[kind], rel=1e-12), f'{kind} 的實際尺寸（scale）：{got["scale"]}'
+    # Hero／Pioneer 的白色不隨太陽（晚上也是白的）＝不看太陽的打光；其他機型照舊跟太陽（不能被連帶改掉）
+    assert got["fixedLight"] == (kind in ('hero', 'pioneer')), f'{kind} 的打光（fixedLight）：{got["fixedLight"]}'
     for name, ref in zip(("nose", "right", "up"), _ref_axes_enu(*att)):
         assert got[name] == pytest.approx(list(ref), abs=1e-9), (vt, name, got[name], ref)
 
@@ -1682,3 +1686,88 @@ def test_real_cesium_glb_and_calibration_change_together_when_the_vehicle_type_c
         got = page_glb.evaluate(_GLB_STEP_JS, [82, k, vt, *att, list(_GLB_EXPECT[as_vt][1])])
         assert got["nOri"] == 1, f'換了模型 ⇒ 舊校正的模型姿態樣本丟掉（{vt}）'
         _glb_check(page_glb, got, as_vt, att)
+
+
+# ── Hero／Pioneer 的白色不隨太陽（2026-10-24 使用者：晚上規劃也要白色）──────────────────────────────────
+# 真的 hero.glb／pioneer.glb（gitignored ⇒ 沒建過就 skip）、真的 Cesium：時鐘釘在凌晨 1 點、傍晚、正午各畫一張，
+# 機身要一樣白（逐像素相同）。沒有這個機制時晚上整架是深灰（太陽在地平線下）。
+_NIGHT_TIMES = {'night': '2026-10-23T17:00:00Z', 'dusk': '2026-10-23T10:30:00Z', 'noon': '2026-10-24T04:00:00Z'}   # UTC；台灣 UTC+8
+
+_NIGHT_SETUP_JS = """(iso) => {
+  const s = viewer.scene;
+  window.__nw = {globe: s.globe.show, sky: s.skyAtmosphere ? s.skyAtmosphere.show : null, bg: s.backgroundColor.clone()};
+  s.globe.show = false; if (s.skyAtmosphere) s.skyAtmosphere.show = false;
+  s.backgroundColor = Cesium.Color.fromCssColorString('#2b3340'); s.fog.enabled = false;
+  window.__fixedTime = Cesium.JulianDate.fromIso8601(iso);
+  const orig = viewer.clock.tick.bind(viewer.clock);
+  viewer.clock.tick = function () { orig(); this.currentTime = window.__fixedTime; return this.currentTime; };
+  viewer.clock.currentTime = window.__fixedTime;
+}"""
+_NIGHT_TEARDOWN_JS = """() => {
+  const s = viewer.scene, w = window.__nw;
+  delete viewer.clock.tick;                                   // 回到 prototype 的 tick
+  if (w) { s.globe.show = w.globe; if (s.skyAtmosphere && w.sky !== null) s.skyAtmosphere.show = w.sky; s.backgroundColor = w.bg; }
+}"""
+_NIGHT_PLACE_JS = """([sid, af, lat, lon, alt, iso]) => {
+  clearUAV(); window.__fixedTime = Cesium.JulianDate.fromIso8601(iso); viewer.clock.currentTime = window.__fixedTime;
+  const now = Date.now();
+  setUavAirframes({[sid]: af});
+  updateUAVPositions([{sysid: sid, lat: lat, lon: lon, alt: alt, hdg: 0, pitch: 5, roll: 30, vt: 'VTOL',
+                       spd: 0, mode: '', armed: false, pt: now, at: now}]);
+  const e = uavEntities[sid];
+  if (e.label) e.label.show = false;
+  if (e.billboard) e.billboard.show = false;
+  viewer.camera.lookAt(Cesium.Cartesian3.fromDegrees(lon, lat, alt),
+                       new Cesium.HeadingPitchRange(Cesium.Math.toRadians(35), Cesium.Math.toRadians(-28), 4.0));
+}"""
+_NIGHT_READY_JS = """(sid) => {
+  const e = uavEntities[sid];
+  const walk = (p, d) => {
+    if (!p || d > 6) return null;
+    if (p.id === e && p.modelMatrix) return p;
+    if (typeof p.length === 'number' && typeof p.get === 'function')
+      for (let i = 0; i < p.length; i++) { const r = walk(p.get(i), d + 1); if (r) return r; }
+    return null;
+  };
+  viewer.clock.tick(); viewer.render();
+  const m = walk(viewer.scene.primitives, 0);
+  return !!(m && m.ready);
+}"""
+
+
+@pytest.mark.parametrize("kind", ["hero", "pioneer"])
+def test_real_cesium_airframe_is_equally_white_at_night_dusk_and_noon(page_glb, kind):
+    import base64
+    import io
+    import time
+    np = pytest.importorskip("numpy")
+    Image = pytest.importorskip("PIL.Image")
+    glb = REPO / 'ui' / 'resources' / f'{kind}.glb'
+    if not glb.is_file():
+        pytest.skip(f'{glb.name} 沒建過（gitignored；tools/build_{kind}_glb.py）')
+    page_glb.evaluate("([h, p]) => { _HERO_MODEL_URI = h; _PIONEER_MODEL_URI = p; }",
+                      [(REPO / 'ui' / 'resources' / 'hero.glb').as_uri(), (REPO / 'ui' / 'resources' / 'pioneer.glb').as_uri()])
+    shots = {}
+    page_glb.evaluate(_NIGHT_SETUP_JS, _NIGHT_TIMES['night'])
+    try:
+        for tname, iso in _NIGHT_TIMES.items():
+            page_glb.evaluate(_NIGHT_PLACE_JS, [95, kind, LAT0, LON0, 120.0, iso])
+            t0 = time.time()
+            while not page_glb.evaluate(_NIGHT_READY_JS, 95):
+                assert time.time() - t0 < 90, f'{kind} 模型 90 秒內沒載好'
+                time.sleep(0.2)
+            for _ in range(4):
+                page_glb.evaluate(_NIGHT_READY_JS, 95)
+            assert page_glb.evaluate("() => Cesium.JulianDate.toIso8601(viewer.scene.frameState.time)") == iso
+            png = page_glb.evaluate('grabCanvas()')
+            shots[tname] = np.asarray(Image.open(io.BytesIO(base64.b64decode(png.split(',', 1)[1]))).convert('RGB')).astype(int)
+    finally:
+        page_glb.evaluate(_NIGHT_TEARDOWN_JS)
+    bg = shots['noon'][5, 5]
+    plane = np.abs(shots['noon'] - bg).sum(axis=2) > 30           # 機身像素
+    assert plane.sum() > 2000, f'{kind} 畫面上幾乎沒有機身（{int(plane.sum())} px）'
+    for tname in ('night', 'dusk'):
+        assert np.abs(shots[tname] - shots['noon']).max() <= 1, f'{kind} {tname} 和正午畫的不一樣（打光又跟太陽了）'
+    white = shots['night'][plane].max(axis=1)
+    assert np.percentile(white, 95) >= 235, f'{kind} 晚上機身不夠白：p95 亮度 {np.percentile(white, 95)}'
+    assert shots['night'][plane].mean() >= 180, f'{kind} 晚上機身平均亮度 {shots["night"][plane].mean():.0f}（深灰＝跟著太陽）'

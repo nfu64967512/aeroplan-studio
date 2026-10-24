@@ -1615,6 +1615,28 @@ const _PIONEER_HEADING_OFFSET = 0;
 const _PIONEER_PITCH_OFFSET   = 0;
 const _PIONEER_ROLL_OFFSET    = 0;
 
+// Hero／Pioneer 的白色機身**不隨時間變**：Cesium 用真實時間的太陽打光，晚上太陽在地平線下 ⇒ 模型只剩環境光、白色 EPO 變深灰
+//   （2026-10-24 使用者：晚上規劃也要白色）。只對這兩個機體模型換成「不看太陽」的打光（CustomShader＋LightingModel.UNLIT）：
+//   自己在眼睛座標算一盞固定在相機左上後方的柔光（Lambert＋半球），所以白天／晚上、什麼時鐘都長一樣，仍有明暗看得出機身形狀與姿態。
+//   ⚠ 不改 scene.light：那會連地形（globe.enableLighting）和其他模型一起換掉。其他機型（通用 VTOL／多旋翼／固定翼）照舊跟太陽。
+//   0.8 是 hero.glb／pioneer.glb 白色材質的 baseColor（glb_kit 的 epo_white）⇒ 白色剛好等於 shade；黑色件（腳架、槳、馬達）乘多少都還是黑。
+const _AIRFRAME_FIXED_LIGHT = true;
+function _airframeFixedLightShader() {
+  if (!_AIRFRAME_FIXED_LIGHT || typeof Cesium.CustomShader !== 'function') return undefined;
+  return new Cesium.CustomShader({
+    lightingModel: Cesium.LightingModel.UNLIT,
+    fragmentShaderText: `
+      void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material) {
+        vec3 n = normalize(fsInput.attributes.normalEC);
+        vec3 l = normalize(vec3(-0.30, 0.70, 0.65));
+        float d = max(dot(n, l), 0.0);
+        float hemi = 0.5 + 0.5 * n.y;
+        float shade = clamp(0.42 + 0.45 * d + 0.15 * hemi, 0.0, 0.97);
+        material.diffuse = material.diffuse * (shade / 0.8);
+      }`,
+  });
+}
+
 // 各機即時狀態（由 _updateUAVOne 填入），供跟隨相機/FOV 等使用。
 //   每架：{lat, lon, alt, heading(機鼻, 度), yaw(飛控 hdg), crs(航跡, 度或 null), pitch, roll, speed,
 //          props: {pos, ori, att}（取樣屬性）, lastPos/lastOri/lastAtt（最後一筆值）,
@@ -2480,6 +2502,7 @@ function _updateUAVOne(lat, lon, alt, headingDeg, speedMs, sysid, mode, armed, v
         minimumPixelSize: 32,
         maximumScale: 50,
         scale: _HERO_MODEL_SCALE,     // 實尺寸（公尺，翼展 2.18 m）
+        customShader: _airframeFixedLightShader(),   // 白色不隨太陽（晚上也是白的）
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 1.0e8),
       };
     } else if (isPioneerGlb) {
@@ -2489,6 +2512,7 @@ function _updateUAVOne(lat, lon, alt, headingDeg, speedMs, sysid, mode, armed, v
         minimumPixelSize: 32,
         maximumScale: 50,
         scale: _PIONEER_MODEL_SCALE,  // 實尺寸（公尺，翼展 3.2 m）
+        customShader: _airframeFixedLightShader(),   // 白色不隨太陽（晚上也是白的）
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 1.0e8),
       };
     } else if (isVtolGlb) {

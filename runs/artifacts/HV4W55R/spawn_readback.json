@@ -1,0 +1,197 @@
+{
+ "rows": [
+  {
+   "uav": "A1",
+   "takeoff_site": "TO_A1",
+   "want_lat": 23.949999999968718,
+   "want_lon": 120.89990170530359,
+   "got_lat": 23.9499998,
+   "got_lon": 120.899903,
+   "err_m": 0.13,
+   "ok": true,
+   "settle_s": 5.1,
+   "d_north_m": -0.022,
+   "d_east_m": 0.132,
+   "err_m_full": 0.1337,
+   "bearing_deg": 99.57,
+   "settle_trace": [
+    {
+     "dt_s": 1.02,
+     "d_north_m": -2661577.271,
+     "d_east_m": -12309957.002,
+     "heading_deg": 1.2,
+     "groundspeed_mps": 0.78,
+     "airspeed_mps": 0.78,
+     "wind_spd_est": 0.0,
+     "wind_dir_from_est": 180.0
+    },
+    {
+     "dt_s": 2.03,
+     "d_north_m": -0.033,
+     "d_east_m": 0.061,
+     "heading_deg": 352.2,
+     "groundspeed_mps": 0.012,
+     "airspeed_mps": 0.966,
+     "wind_spd_est": 0.48,
+     "wind_dir_from_est": 352.9
+    },
+    {
+     "dt_s": 3.04,
+     "d_north_m": -0.033,
+     "d_east_m": 0.091,
+     "heading_deg": 348.1,
+     "groundspeed_mps": 0.035,
+     "airspeed_mps": 0.345,
+     "wind_spd_est": 0.46,
+     "wind_dir_from_est": 350.8
+    },
+    {
+     "dt_s": 4.05,
+     "d_north_m": -0.033,
+     "d_east_m": 0.101,
+     "heading_deg": 344.1,
+     "groundspeed_mps": 0.005,
+     "airspeed_mps": 0.889,
+     "wind_spd_est": 0.0,
+     "wind_dir_from_est": 180.0
+    },
+    {
+     "dt_s": 5.07,
+     "d_north_m": -0.022,
+     "d_east_m": 0.132,
+     "heading_deg": 340.3,
+     "groundspeed_mps": 0.006,
+     "airspeed_mps": 1.739,
+     "wind_spd_est": 0.0,
+     "wind_dir_from_est": 180.0
+    }
+   ]
+  },
+  {
+   "uav": "B2",
+   "takeoff_site": "TO_B2",
+   "want_lat": 23.949999999999996,
+   "want_lon": 120.9,
+   "got_lat": 23.95,
+   "got_lon": 120.9000018,
+   "err_m": 0.18,
+   "ok": true,
+   "settle_s": 3.0,
+   "d_north_m": 0.0,
+   "d_east_m": 0.183,
+   "err_m_full": 0.1833,
+   "bearing_deg": 90.0,
+   "settle_trace": [
+    {
+     "dt_s": 1.01,
+     "d_north_m": -0.022,
+     "d_east_m": 0.143,
+     "heading_deg": 336.8,
+     "groundspeed_mps": 0.002,
+     "airspeed_mps": 2.238,
+     "wind_spd_est": 0.0,
+     "wind_dir_from_est": 180.0
+    },
+    {
+     "dt_s": 2.02,
+     "d_north_m": -0.022,
+     "d_east_m": 0.163,
+     "heading_deg": 333.4,
+     "groundspeed_mps": 0.005,
+     "airspeed_mps": 2.297,
+     "wind_spd_est": 0.0,
+     "wind_dir_from_est": 180.0
+    },
+    {
+     "dt_s": 3.04,
+     "d_north_m": 0.0,
+     "d_east_m": 0.183,
+     "heading_deg": 330.2,
+     "groundspeed_mps": 0.008,
+     "airspeed_mps": 2.47,
+     "wind_spd_est": 0.0,
+     "wind_dir_from_est": 180.0
+    }
+   ]
+  },
+  {
+   "uav": "B3",
+   "takeoff_site": "TO_B3",
+   "want_lat": 23.949999999968718,
+   "want_lon": 120.90009829469643,
+   "got_lat": 23.9500001,
+   "got_lon": 120.9001004,
+   "err_m": 0.21,
+   "ok": true,
+   "settle_s": 3.0,
+   "d_north_m": 0.011,
+   "d_east_m": 0.214,
+   "err_m_full": 0.2146,
+   "bearing_deg": 87.03,
+   "settle_trace": [
+    {
+     "dt_s": 1.01,
+     "d_north_m": 0.0,
+     "d_east_m": 0.184,
+     "heading_deg": 327.7,
+     "groundspeed_mps": 0.003,
+     "airspeed_mps": 3.109,
+     "wind_spd_est": 0.0,
+     "wind_dir_from_est": 180.0
+    },
+    {
+     "dt_s": 2.01,
+     "d_north_m": 0.011,
+     "d_east_m": 0.204,
+     "heading_deg": 324.8,
+     "groundspeed_mps": 0.003,
+     "airspeed_mps": 3.206,
+     "wind_spd_est": 0.0,
+     "wind_dir_from_est": 180.0
+    },
+    {
+     "dt_s": 3.03,
+     "d_north_m": 0.011,
+     "d_east_m": 0.214,
+     "heading_deg": 322.0,
+     "groundspeed_mps": 0.002,
+     "airspeed_mps": 3.679,
+     "wind_spd_est": 0.0,
+     "wind_dir_from_est": 180.0
+    }
+   ]
+  }
+ ],
+ "spawn_spread_m": 10.0,
+ "tol_m": 2.0,
+ "tol_default_m": 2.0,
+ "tol_overridden": false,
+ "tol_source": "default",
+ "pairwise": [
+  {
+   "pair": "A1-B2",
+   "planned_m": 10.0083,
+   "actual_m": 10.0598,
+   "delta_m": 0.0515
+  },
+  {
+   "pair": "A1-B3",
+   "planned_m": 20.0166,
+   "actual_m": 20.0992,
+   "delta_m": 0.0826
+  },
+  {
+   "pair": "B2-B3",
+   "planned_m": 10.0083,
+   "actual_m": 10.0394,
+   "delta_m": 0.0311
+  }
+ ],
+ "rigid_translation": {
+  "max_abs_delta_m": 0.0826,
+  "tol_m": 0.5,
+  "ok": true,
+  "enforced": false,
+  "note": "兩兩間距是否守住＝『規劃分站、SITL 沒分』有沒有發生。不吃 HV_SPAWN_TOL_M；容差被明示放寬時改由這一項把關"
+ }
+}

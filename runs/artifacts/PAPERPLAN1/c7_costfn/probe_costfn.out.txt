@@ -1,0 +1,86 @@
+== PlatformSpec objects found in hv_dccpp.platform ==
+  PLATFORM_HERO: cls='B' Va=19.0 R_theo=75.0 R_plan=120.0 phi_max=25.0 v_min_mission=16.000 v_max=None
+  PLATFORM_PIONEER: cls='A' Va=21.5 R_theo=130.0 R_plan=200.0 phi_max=20.0 v_min_mission=18.000 v_max=35.0
+
+== 1. R_eff(W) = max{R_plan, R_theo*(1+W/Va)^2}   (hv_dccpp/platform.py:296-300) ==
+ W[m/s] |   A R_eff     A raw  A bound |   B R_eff     B raw  B bound
+   0.00 |    200.00    130.00   R_plan |    120.00     75.00   R_plan
+   2.00 |    200.00    155.31   R_plan |    120.00     91.62   R_plan
+   4.00 |    200.00    182.87   R_plan |    120.00    109.90   R_plan
+   5.00 |    200.00    197.50   R_plan |    120.00    119.67   R_plan
+   5.03 |    200.00    197.94   R_plan |    120.00    119.97   R_plan
+   5.17 |    200.04    200.04     wind |    121.37    121.37     wind
+   6.00 |    212.68    212.68     wind |    129.85    129.85     wind
+   8.00 |    244.74    244.74     wind |    151.45    151.45     wind
+  10.00 |    279.05    279.05     wind |    174.72    174.72     wind
+  W* (wind absorbed by the R_plan margin, platform.py:302-304): A = 5.1675 m/s, B = 5.0333 m/s
+  => at the paper assumed W = 5 m/s BOTH configurations sit on the R_plan floor:
+     A: raw 197.50 m < R_plan 200.0 m
+     B: raw 119.67 m < R_plan 120.0 m
+     i.e. R_eff(5) == R_eff(0) == R_plan.  The wind term in R_eff is INERT at 5 m/s.
+
+== 2. span coefficient k = ceil(2 R_eff / s) at the paper s = 97.0 m ==
+  W= 0.0: A R_eff= 200.00 k=5   B R_eff= 120.00 k=3
+  W= 5.0: A R_eff= 200.00 k=5   B R_eff= 120.00 k=3
+  W= 8.0: A R_eff= 244.74 k=6   B R_eff= 151.45 k=4
+  W=10.0: A R_eff= 279.05 k=6   B R_eff= 174.72 k=4
+  W=12.0: A R_eff= 315.61 k=7   B R_eff= 199.65 k=5
+  paper claims Pioneer k=5, HERO k=3 -> reproduced, but only because R_eff == R_plan.
+
+== 3. time-cost ground speed  Vg = sqrt(Va^2 - Wperp^2) + Wpar   (hv_dccpp/wind.py:278-291) ==
+   theta = TRACK bearing, ENU, atan2(dx,dy) => 0 deg = north(+y), 90 deg = east(+x)
+   scenario wind = 5.0 m/s FROM 270.0 deg -> blowing-to vector (x_east, y_north) = (5.0000, 0.0000)
+
+  track          dirn |    Wpar   Wperp |    Vg A    Vg B |  t/1000m A   vs calm | crab A[deg]
+      0             N |   0.000   5.000 |  20.911  18.330 |     47.823    +2.82% |     -13.448
+     45            NE |   3.536   3.536 |  24.743  22.204 |     40.416   -13.11% |      -9.465
+     90    E downwind |   5.000  -0.000 |  26.500  24.000 |     37.736   -18.87% |      +0.000
+    135            SE |   3.536  -3.536 |  24.743  22.204 |     40.416   -13.11% |      +9.465
+    180             S |  -0.000  -5.000 |  20.911  18.330 |     47.823    +2.82% |     +13.448
+    225            SW |  -3.536  -3.536 |  17.672  15.133 |     56.587   +21.66% |      +9.465
+    270      W upwind |  -5.000   0.000 |  16.500  14.000 |     60.606   +30.30% |      +0.000
+    315            NW |  -3.536   3.536 |  17.672  15.133 |     56.587   +21.66% |      -9.465
+
+   -> BOTH components enter: Wpar shifts Vg linearly, Wperp costs sqrt(Va^2 - Wperp^2).
+      A pure-headwind model would give Vg = Va - W on every leg. That is NOT what runs.
+
+== 4. east-west cancellation (why a no-wind SITL still agreed with a 5 m/s plan) ==
+  A/Pioneer Va=21.5: E leg Vg=26.500  W leg Vg=16.500 | one E+W pair over L=1560 m: wind 153.413 s vs calm 145.116 s = +5.718%
+      single E leg alone: -18.87% , single W leg alone: +30.30%  (they nearly cancel in a pair)
+  B/HERO    Va=19.0: E leg Vg=24.000  W leg Vg=14.000 | one E+W pair over L=1560 m: wind 176.429 s vs calm 164.211 s = +7.440%
+      single E leg alone: -20.83% , single W leg alone: +35.71%  (they nearly cancel in a pair)
+  -> residual is second order: 1/(Va-W) + 1/(Va+W) = 2Va/(Va^2-W^2) > 2/Va
+
+   contrast: N-S strips under the same 5 m/s west wind (pure crosswind, no cancellation):
+     A: Vg=20.9105 vs Va=21.5 => every leg +2.819% slower
+     B: Vg=18.3303 vs Va=19.0 => every leg +3.653% slower
+
+   8 m/s west wind, same geometry (advisor Case 3):
+     A: E Vg=29.500 W Vg=13.500 N Vg=19.956 | E+W pair +16.070% vs calm | R_eff=244.74 (raw 244.74)
+     B: E Vg=27.000 W Vg=11.000 N Vg=17.234 | E+W pair +21.549% vs calm | R_eff=151.45 (raw 151.45)
+
+== 5. turn & orbit time factors (hv_dccpp/wind.py:424-449) ==
+  W= 0.0: circle_time_factor A=1.000000 B=1.000000 | proxy 1+(W/Va)^2 A=1.000000 B=1.000000
+  W= 5.0: circle_time_factor A=1.042733 B=1.055555 | proxy 1+(W/Va)^2 A=1.054083 B=1.069252
+  W= 8.0: circle_time_factor A=1.119419 B=1.159679 | proxy 1+(W/Va)^2 A=1.138453 B=1.177285
+
+== 6. what is actually commanded to the flight controller (DO_CHANGE_SPEED, cmd 178) ==
+  -- HV4SITL16 --
+     A1.waypoints     DO_CHANGE_SPEED x1: seq3 param1=0(0=AIRSPEED,1=GROUNDSPEED) param2=21.5
+     B2.waypoints     DO_CHANGE_SPEED x1: seq3 param1=0(0=AIRSPEED,1=GROUNDSPEED) param2=19
+     B3.waypoints     DO_CHANGE_SPEED x1: seq3 param1=0(0=AIRSPEED,1=GROUNDSPEED) param2=19
+  -- HV4SITL15 --
+     A1.waypoints     DO_CHANGE_SPEED x1: seq3 param1=0(0=AIRSPEED,1=GROUNDSPEED) param2=21.5
+     B2.waypoints     DO_CHANGE_SPEED x1: seq3 param1=0(0=AIRSPEED,1=GROUNDSPEED) param2=19
+     B3.waypoints     DO_CHANGE_SPEED x1: seq3 param1=0(0=AIRSPEED,1=GROUNDSPEED) param2=19
+  -- HV4SITL13 --
+     A1.waypoints     DO_CHANGE_SPEED x1: seq3 param1=0(0=AIRSPEED,1=GROUNDSPEED) param2=21.5
+     B2.waypoints     DO_CHANGE_SPEED x1: seq3 param1=0(0=AIRSPEED,1=GROUNDSPEED) param2=19
+     B3.waypoints     DO_CHANGE_SPEED x1: seq3 param1=0(0=AIRSPEED,1=GROUNDSPEED) param2=19
+     B4.waypoints     DO_CHANGE_SPEED x1: seq3 param1=0(0=AIRSPEED,1=GROUNDSPEED) param2=19
+  -- HV4SITL11 --
+     A1.waypoints     DO_CHANGE_SPEED x1: seq3 param1=0(0=AIRSPEED,1=GROUNDSPEED) param2=21.5
+     B2.waypoints     DO_CHANGE_SPEED x1: seq3 param1=0(0=AIRSPEED,1=GROUNDSPEED) param2=19
+     B3.waypoints     DO_CHANGE_SPEED x1: seq3 param1=0(0=AIRSPEED,1=GROUNDSPEED) param2=19
+     B4.waypoints     DO_CHANGE_SPEED x1: seq3 param1=0(0=AIRSPEED,1=GROUNDSPEED) param2=19
+

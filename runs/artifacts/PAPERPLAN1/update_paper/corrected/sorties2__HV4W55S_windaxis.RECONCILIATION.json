@@ -1,0 +1,68 @@
+{
+ "north_minus_south_mps": {
+  "sorties2_flightcsv_30m": {
+   "A1": 9.9,
+   "B2": 9.68,
+   "B3": 9.61
+  },
+  "update_paper_dataflash_100m": {
+   "A1": 9.8079,
+   "B2": null,
+   "B3": 9.3385
+  },
+  "update_paper_dataflash_30m": {
+   "A1": 9.8526,
+   "B2": 9.5115,
+   "B3": 9.5976
+  }
+ },
+ "not_a_correction": "both methods are valid; this records why the numbers differ",
+ "other_label_file": "runs/artifacts/PAPERPLAN1/sorties2/HV4W55S_windaxis.json",
+ "other_label_method": "~1 Hz flight.csv; track from consecutive lat/lon with a flat 111132 m/deg frame; rel-alt floor 30 m; steps >= 5 m",
+ "paper_uses": "update_paper 30 m floor values",
+ "sample_counts_dataflash": {
+  "100m": {
+   "A1": {
+    "E": 264,
+    "N": 216,
+    "S": 120,
+    "W": 213
+   },
+   "B2": {
+    "E": 107,
+    "N": 24,
+    "S": 1,
+    "W": 92
+   },
+   "B3": {
+    "E": 193,
+    "N": 32,
+    "S": 16,
+    "W": 175
+   }
+  },
+  "30m": {
+   "A1": {
+    "E": 264,
+    "N": 216,
+    "S": 177,
+    "W": 213
+   },
+   "B2": {
+    "E": 123,
+    "N": 24,
+    "S": 70,
+    "W": 144
+   },
+   "B3": {
+    "E": 208,
+    "N": 32,
+    "S": 79,
+    "W": 212
+   }
+  }
+ },
+ "the_point": "at a 100 m cruise floor B2's SOUTHBOUND bin keeps exactly 1 sample, so its north-minus-south is not quotable there; the paper therefore quotes the 30 m floor for the 180 deg cell and says so in the table note. Both methods agree on the verdict (+9.5..+9.9 vs an expected +10.0) and on the null axis (~0).",
+ "this_label_method": "native-rate dataflash GPS.Spd minus interpolated ARSP.Airspeed; heading from GPS.GCrs; rel-alt floor swept (100 m and 30 m); no median quoted from fewer than 10 samples",
+ "written_by_label": "update_paper"
+}

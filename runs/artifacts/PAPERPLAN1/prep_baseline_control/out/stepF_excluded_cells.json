@@ -1,0 +1,2314 @@
+{
+  "S1_n2": {
+    "scenario": "S1",
+    "n": 2,
+    "sec": 2.3,
+    "ruler_coverage": 0.5277,
+    "ruler_max_km": 59.06,
+    "ruler_total_km": 118.0,
+    "makespan_s": 3224.7568367011036,
+    "uncovered": [
+      [
+        "Z3_1",
+        "no_feasible_insertion"
+      ]
+    ],
+    "n_cells": 2,
+    "n_strips": 36,
+    "makespan_planner_s": 3224.7568367011036,
+    "feasibility": {
+      "status": "GO_WITH_WARNINGS",
+      "errors": [],
+      "warnings": [
+        "provisional_params",
+        "wind: wind_layer[0]: agl [0,3000] -> ENU z [0.0,3000.0] using home ground z=0.0 (assumption: AGL referenced to home ground)",
+        "wind: wind layer bounds converted MSL->ENU z at home only; the curvature term (~196 m at 50 km) is not applied per position (known approximation)",
+        "reference_battery_assumed(A1)",
+        "battery_temp_assumed(A1)",
+        "reference_battery_assumed(A2)",
+        "battery_temp_assumed(A2)",
+        "battery_nominal_example(A1)",
+        "battery_nominal_example(A2)",
+        "provisional_params(A: a_tr_mps2, battery_nominal_wh, c2_link_range_km, crosswind_site_max_mps, dv_tr_margin_mps, gamma_tr_max_deg, gust_site_max_mps, hover_power_ratio, idle_descent_ratio, k_gamma_auw, obstacle_horizontal_buffer_m, p_accel_ratio, prop_efficiency, reference_battery_wh, reference_test_depth_of_discharge, t_hold_s, t_hover_reserve_s, t_tr_in_s, t_tr_out_s, terrain_clearance_m, transition_complete_agl_m, transition_ground_run_m, transition_start_agl_m, vtol_climb_rate_mps, vtol_descent_rate_mps, vtol_site_clear_radius_m)",
+        "avionics_unvalidated(A: airspeed_sensor_validated=False, battery_monitor_validated=False → k_unc=1.2075, V_tr,cmd=18, H_tc,cmd=100, D_use=133 km)"
+      ],
+      "per_area": {
+        "Z2": {
+          "area_m2": 9964201.49796495,
+          "sensor_req": "any",
+          "payload_req_id": "default",
+          "priority": 1.0,
+          "time_window_s": null,
+          "dist_home_m": 0.0,
+          "in_dem": true,
+          "classes": {
+            "A": {
+              "n_uav": 2,
+              "sensor_ok": true,
+              "req_id_used": "default",
+              "sensor_kind": "rgb",
+              "band": {
+                "h_op_m": "140.0",
+                "h_lo_m": "120.0",
+                "h_hi_m": "147.0",
+                "dh_band_m": "78.87617660593241",
+                "feasible": "True",
+                "reason": ""
+              },
+              "h_op_m": 140.0,
+              "w_m": 161.65807537309522,
+              "s_m": 113.16065276116665,
+              "e_ext_m": 53.0,
+              "d_turn_m": 559.8656646065724,
+              "V_g_cap_mps": 34.79393923933999,
+              "clip_loss": {
+                "link": "0.0",
+                "radius": "0.0"
+              },
+              "coverable_fraction": 1.0,
+              "coverable_area_m2": 9964201.49796495,
+              "direction_ok": true,
+              "two_way_ok": true,
+              "n_directions_ok": 72,
+              "V_g_max_mps": 26.5,
+              "z_op_m": 139.99998962119832,
+              "one_way_only": false,
+              "feasible": true,
+              "reason": "",
+              "T_oper_lb_s": 3322.7769063013498
+            }
+          },
+          "feasible_classes": [
+            "A"
+          ],
+          "served_kinds": [
+            "rgb"
+          ],
+          "coverable": true,
+          "uncoverable_reason": null,
+          "T_oper_lb_s": 1661.3884531506749
+        },
+        "Z3": {
+          "area_m2": 9962842.5297018,
+          "sensor_req": "any",
+          "payload_req_id": "default",
+          "priority": 1.0,
+          "time_window_s": null,
+          "dist_home_m": 0.21738856320135916,
+          "in_dem": true,
+          "classes": {
+            "A": {
+              "n_uav": 2,
+              "sensor_ok": true,
+              "req_id_used": "default",
+              "sensor_kind": "rgb",
+              "band": {
+                "h_op_m": "140.0",
+                "h_lo_m": "120.0",
+                "h_hi_m": "147.0",
+                "dh_band_m": "78.88030386995524",
+                "feasible": "True",
+                "reason": ""
+              },
+              "h_op_m": 140.0,
+              "w_m": 161.65807537309522,
+              "s_m": 113.16065276116665,
+              "e_ext_m": 53.0,
+              "d_turn_m": 559.8656646065724,
+              "V_g_cap_mps": 34.79393923933999,
+              "clip_loss": {
+                "link": "0.0",
+                "radius": "0.0"
+              },
+              "coverable_fraction": 1.0,
+              "coverable_area_m2": 9962842.5297018,
+              "direction_ok": true,
+              "two_way_ok": true,
+              "n_directions_ok": 72,
+              "V_g_max_mps": 26.5,
+              "z_op_m": 139.9999961750582,
+              "one_way_only": false,
+              "feasible": true,
+              "reason": "",
+              "T_oper_lb_s": 3322.323729158945
+            }
+          },
+          "feasible_classes": [
+            "A"
+          ],
+          "served_kinds": [
+            "rgb"
+          ],
+          "coverable": true,
+          "uncoverable_reason": null,
+          "T_oper_lb_s": 1661.1618645794724
+        }
+      },
+      "per_uav": {
+        "A1": {
+          "cls": "A",
+          "auw_kg": 24.6,
+          "mtow_kg": 24.9,
+          "payload_kg": 5.0,
+          "payload_estimated": false,
+          "payload_max_kg": 5.0,
+          "sensor_kinds": [
+            "rgb"
+          ],
+          "base_minute_mode": false,
+          "E_nom_wh": 1500.0,
+          "E_avail_wh": 1350.0,
+          "E_use_wh": 779.62734375,
+          "e_TO_wh": 39.17514204545454,
+          "e_LDG_wh": 81.19751420454546,
+          "reserve_wh": 450.0,
+          "k_unc": 1.2075,
+          "eta_T": 1.0,
+          "battery_temp_c": 25.0,
+          "P_c_w": 511.3636363636364,
+          "P_h_w": 2045.4545454545455,
+          "cruise_minutes": 75.75674948240166,
+          "cruise_equiv_km": 97.72620683229815,
+          "D_use_km": 133.0,
+          "v_min_mps": 18.0,
+          "stall_speed_mps": 14.0,
+          "stall_margin_ok": true,
+          "lost_link_policy": "CONTINUE_THEN_RTB",
+          "issues": [],
+          "ok": true
+        },
+        "A2": {
+          "cls": "A",
+          "auw_kg": 24.6,
+          "mtow_kg": 24.9,
+          "payload_kg": 5.0,
+          "payload_estimated": false,
+          "payload_max_kg": 5.0,
+          "sensor_kinds": [
+            "rgb"
+          ],
+          "base_minute_mode": false,
+          "E_nom_wh": 1500.0,
+          "E_avail_wh": 1350.0,
+          "E_use_wh": 779.62734375,
+          "e_TO_wh": 39.17514204545454,
+          "e_LDG_wh": 81.19751420454546,
+          "reserve_wh": 450.0,
+          "k_unc": 1.2075,
+          "eta_T": 1.0,
+          "battery_temp_c": 25.0,
+          "P_c_w": 511.3636363636364,
+          "P_h_w": 2045.4545454545455,
+          "cruise_minutes": 75.75674948240166,
+          "cruise_equiv_km": 97.72620683229815,
+          "D_use_km": 133.0,
+          "v_min_mps": 18.0,
+          "stall_speed_mps": 14.0,
+          "stall_margin_ok": true,
+          "lost_link_policy": "CONTINUE_THEN_RTB",
+          "issues": [],
+          "ok": true
+        }
+      },
+      "derived": {
+        "A": {
+          "n_uav": 2,
+          "uav_ids": [
+            "A1",
+            "A2"
+          ],
+          "R_eff": 200.0,
+          "W_R": 5.0,
+          "R_plan": 200.0,
+          "R_theo": 130.0,
+          "W_star": 5.167467936679819,
+          "V_a": 21.5,
+          "V_a_min": 18.0,
+          "wind_speed_ref_mps": 5.0,
+          "wind_dir_from_ref_deg": 270.0,
+          "V_g_headwind": 16.5,
+          "V_g_tailwind": 26.5,
+          "V_g_crosswind": 20.910523666326483,
+          "V_g_cap": 34.79393923933999,
+          "h_op": 140.0,
+          "w": 161.65807537309522,
+          "s": 113.16065276116665,
+          "e_ext": 53.0,
+          "d_turn": 559.8656646065724,
+          "by_req": {
+            "default": {
+              "h_op_m": 140.0,
+              "w_m": 161.65807537309522,
+              "s_m": 113.16065276116665,
+              "e_ext_m": 53.0,
+              "d_turn_m": 559.8656646065724,
+              "V_g_cap_mps": 34.79393923933999
+            }
+          },
+          "h_minfw": 120.0,
+          "h_clr": 36.0,
+          "h_ceil": 200.0,
+          "h_ceil_source": "waiver_max_agl_m",
+          "A_needs_waiver": false,
+          "P_c_ref": 511.3636363636364,
+          "P_c_rep": 511.3636363636364,
+          "P_h_rep": 2045.4545454545455,
+          "k_bm": 1.15,
+          "k_as": 1.05,
+          "k_unc": 1.2075,
+          "eta_T_rep": 1.0,
+          "e_TO": 39.17514204545454,
+          "e_LDG": 81.19751420454546,
+          "reserve_wh": 450.0,
+          "E_use_rep": 779.62734375,
+          "base_minute_mode": false,
+          "endurance_range_dev": 0.06589147286821717,
+          "v_implied_mps": 22.916666666666668,
+          "D_use_km": 133.0,
+          "D_model_km": 97.72620683229815,
+          "rho_sym_km": 66.0,
+          "link_range_km": 25.0,
+          "v_tr_cmd": 18.0,
+          "h_tc_cmd": 100.0,
+          "h_tc_energy": 100.0,
+          "h_tc_clear": 80.0,
+          "d_tr": 468.0,
+          "d_acc": 138.25,
+          "t_acc": 7.0,
+          "slope_tr_deg": 4.8852025681173,
+          "gamma_tr_max_deg": 8.0,
+          "t_takeoff_s": 57.0,
+          "t_landing_s": 117.0,
+          "airspeed_sensor_validated": false,
+          "battery_monitor_validated": false,
+          "W_go": 8.0,
+          "beaufort_upper_mps": 10.7,
+          "crosswind_site_max_mps": 6.0,
+          "gust_site_max_mps": 8.0,
+          "usable_alternates": [
+            "ALT1"
+          ],
+          "provisional_params": [
+            "a_tr_mps2",
+            "battery_nominal_wh",
+            "c2_link_range_km",
+            "crosswind_site_max_mps",
+            "dv_tr_margin_mps",
+            "gamma_tr_max_deg",
+            "gust_site_max_mps",
+            "hover_power_ratio",
+            "idle_descent_ratio",
+            "k_gamma_auw",
+            "obstacle_horizontal_buffer_m",
+            "p_accel_ratio",
+            "prop_efficiency",
+            "reference_battery_wh",
+            "reference_test_depth_of_discharge",
+            "t_hold_s",
+            "t_hover_reserve_s",
+            "t_tr_in_s",
+            "t_tr_out_s",
+            "terrain_clearance_m",
+            "transition_complete_agl_m",
+            "transition_ground_run_m",
+            "transition_start_agl_m",
+            "vtol_climb_rate_mps",
+            "vtol_descent_rate_mps",
+            "vtol_site_clear_radius_m"
+          ],
+          "makespan_lb_s": 3496.550317730147
+        }
+      }
+    },
+    "per_uav": {
+      "A1": {
+        "cls": "A",
+        "n_strips": 9,
+        "cruise_equiv_km": 76.274,
+        "distance_m": 58857.8,
+        "energy_used_wh": 608.5,
+        "energy_margin_wh": 291.5,
+        "t_land_s": 3224.8,
+        "orbits": 0,
+        "warnings": [],
+        "usable_km_lo": 133.0,
+        "usable_km_hi": 145.0
+      },
+      "A2": {
+        "cls": "A",
+        "n_strips": 9,
+        "cruise_equiv_km": 76.397,
+        "distance_m": 58977.5,
+        "energy_used_wh": 609.5,
+        "energy_margin_wh": 290.5,
+        "t_land_s": 2994.5,
+        "orbits": 0,
+        "warnings": [],
+        "usable_km_lo": 133.0,
+        "usable_km_hi": 145.0
+      }
+    },
+    "cells": [
+      {
+        "cell_id": "Z2_1",
+        "n_strips": 18,
+        "strip_length_total_km": 92.27,
+        "area_km2": 10.126
+      },
+      {
+        "cell_id": "Z3_1",
+        "n_strips": 18,
+        "strip_length_total_km": 92.25,
+        "area_km2": 10.125
+      }
+    ],
+    "validate_passed": false,
+    "validate": {
+      "coverage": [
+        {
+          "area_id": "Z2",
+          "cls_required": [
+            "all"
+          ],
+          "coverage_by_cls": {
+            "A": 1.0,
+            "rgb": 1.0,
+            "all": 1.0
+          },
+          "uncovered_cells_xy": "[]",
+          "raster_m": 5.0
+        },
+        {
+          "area_id": "Z3",
+          "cls_required": [
+            "all"
+          ],
+          "coverage_by_cls": {
+            "all": 0.0
+          },
+          "uncovered_cells_xy": "[[-2496.80301462     2.71738856]\n [-2491.80301462     2.71738856]\n [-2486.80301462     2.71738856]\n ...\n [ 2488.19698538  1992.71738856]\n [ 2493.19698538  1992.71738856]\n [ 2498.19698538  1992.71738856]]",
+          "raster_m": 5.0
+        }
+      ],
+      "min_sep_h_m": 115.43298792189448,
+      "min_sep_v_m": Infinity,
+      "conflicts": [],
+      "slope_ok": true,
+      "agl_ok": true,
+      "curvature_ok": true,
+      "energy_ok": true,
+      "link_ok": true,
+      "airspace_ok": true,
+      "time_window_ok": true,
+      "makespan_s": 3224.7568367011036,
+      "total_distance_m": 117835.34210064841,
+      "compute_ms": 175.08379998616874,
+      "details": {
+        "A1": [],
+        "A2": [],
+        "separation": [
+          "min_sep_h=115.4 m at t=858.0 s pair=('A1', 'A2')",
+          "min_sep_v(d_h<d_sep)=inf m",
+          "conflicts=0"
+        ],
+        "coverage": [
+          "Z2: A=1.0000, all=1.0000, rgb=1.0000 required=['all'] PASS",
+          "Z3: all=0.0000 required=['all'] FAIL"
+        ],
+        "integrity": [
+          "strip_not_flown(Z3_1_A_1)",
+          "strip_not_flown(Z3_1_A_2)",
+          "strip_not_flown(Z3_1_A_3)",
+          "strip_not_flown(Z3_1_A_4)",
+          "strip_not_flown(Z3_1_A_5)",
+          "strip_not_flown(Z3_1_A_6)",
+          "strip_not_flown(Z3_1_A_7)",
+          "strip_not_flown(Z3_1_A_8)",
+          "strip_not_flown(Z3_1_A_9)",
+          "strip_not_flown(Z3_1_A_10)",
+          "strip_not_flown(Z3_1_A_11)",
+          "strip_not_flown(Z3_1_A_12)",
+          "strip_not_flown(Z3_1_A_13)",
+          "strip_not_flown(Z3_1_A_14)",
+          "strip_not_flown(Z3_1_A_15)",
+          "strip_not_flown(Z3_1_A_16)",
+          "strip_not_flown(Z3_1_A_17)",
+          "strip_not_flown(Z3_1_A_18)"
+        ]
+      },
+      "passed": false,
+      "integrity_ok": false,
+      "separation_ok": true
+    }
+  },
+  "S5_n8": {
+    "scenario": "S5",
+    "n": 8,
+    "sec": 52.4,
+    "ruler_coverage": 0.617,
+    "ruler_max_km": 67.01,
+    "ruler_total_km": 494.65,
+    "makespan_s": 4629.962021535312,
+    "uncovered": [
+      [
+        "Z4_1",
+        "no_feasible_insertion"
+      ],
+      [
+        "Z7_1",
+        "no_feasible_insertion"
+      ],
+      [
+        "Z5_1",
+        "no_feasible_insertion"
+      ],
+      [
+        "Z6_1",
+        "no_feasible_insertion"
+      ]
+    ],
+    "n_cells": 8,
+    "n_strips": 72,
+    "makespan_planner_s": 4629.962021535312,
+    "feasibility": {
+      "status": "GO_WITH_WARNINGS",
+      "errors": [],
+      "warnings": [
+        "provisional_params",
+        "wind: wind_layer[0]: agl [0,3000] -> ENU z [0.0,3000.0] using home ground z=0.0 (assumption: AGL referenced to home ground)",
+        "wind: wind layer bounds converted MSL->ENU z at home only; the curvature term (~196 m at 50 km) is not applied per position (known approximation)",
+        "reference_battery_assumed(A1)",
+        "battery_temp_assumed(A1)",
+        "reference_battery_assumed(A2)",
+        "battery_temp_assumed(A2)",
+        "reference_battery_assumed(A3)",
+        "battery_temp_assumed(A3)",
+        "reference_battery_assumed(A4)",
+        "battery_temp_assumed(A4)",
+        "reference_battery_assumed(A5)",
+        "battery_temp_assumed(A5)",
+        "reference_battery_assumed(A6)",
+        "battery_temp_assumed(A6)",
+        "reference_battery_assumed(A7)",
+        "battery_temp_assumed(A7)",
+        "reference_battery_assumed(A8)",
+        "battery_temp_assumed(A8)",
+        "battery_nominal_example(A1)",
+        "battery_nominal_example(A2)",
+        "battery_nominal_example(A3)",
+        "battery_nominal_example(A4)",
+        "battery_nominal_example(A5)",
+        "battery_nominal_example(A6)",
+        "battery_nominal_example(A7)",
+        "battery_nominal_example(A8)",
+        "provisional_params(A: a_tr_mps2, battery_nominal_wh, c2_link_range_km, crosswind_site_max_mps, dv_tr_margin_mps, gamma_tr_max_deg, gust_site_max_mps, hover_power_ratio, idle_descent_ratio, k_gamma_auw, obstacle_horizontal_buffer_m, p_accel_ratio, prop_efficiency, reference_battery_wh, reference_test_depth_of_discharge, t_hold_s, t_hover_reserve_s, t_tr_in_s, t_tr_out_s, terrain_clearance_m, transition_complete_agl_m, transition_ground_run_m, transition_start_agl_m, vtol_climb_rate_mps, vtol_descent_rate_mps, vtol_site_clear_radius_m)",
+        "avionics_unvalidated(A: airspeed_sensor_validated=False, battery_monitor_validated=False → k_unc=1.2075, V_tr,cmd=18, H_tc,cmd=100, D_use=133 km)"
+      ],
+      "per_area": {
+        "Z2": {
+          "area_m2": 9965896.211424675,
+          "sensor_req": "any",
+          "payload_req_id": "default",
+          "priority": 1.0,
+          "time_window_s": null,
+          "dist_home_m": 2989.015237825212,
+          "in_dem": true,
+          "classes": {
+            "A": {
+              "n_uav": 8,
+              "sensor_ok": true,
+              "req_id_used": "default",
+              "sensor_kind": "rgb",
+              "band": {
+                "h_op_m": "140.0",
+                "h_lo_m": "120.0",
+                "h_hi_m": "147.0",
+                "dh_band_m": "76.64200359582901",
+                "feasible": "True",
+                "reason": ""
+              },
+              "h_op_m": 140.0,
+              "w_m": 161.65807537309522,
+              "s_m": 113.16065276116665,
+              "e_ext_m": 53.0,
+              "d_turn_m": 559.8656646065724,
+              "V_g_cap_mps": 34.79393923933999,
+              "clip_loss": {
+                "link": "0.0",
+                "radius": "0.0"
+              },
+              "coverable_fraction": 1.0,
+              "coverable_area_m2": 9965896.211424675,
+              "direction_ok": true,
+              "two_way_ok": true,
+              "n_directions_ok": 72,
+              "V_g_max_mps": 26.5,
+              "z_op_m": 139.29606172180004,
+              "one_way_only": false,
+              "feasible": true,
+              "reason": "",
+              "T_oper_lb_s": 3323.3420448875095
+            }
+          },
+          "feasible_classes": [
+            "A"
+          ],
+          "served_kinds": [
+            "rgb"
+          ],
+          "coverable": true,
+          "uncoverable_reason": null,
+          "T_oper_lb_s": 415.4177556109387
+        },
+        "Z3": {
+          "area_m2": 9965218.195121726,
+          "sensor_req": "any",
+          "payload_req_id": "default",
+          "priority": 1.0,
+          "time_window_s": null,
+          "dist_home_m": 1992.3881816670864,
+          "in_dem": true,
+          "classes": {
+            "A": {
+              "n_uav": 8,
+              "sensor_ok": true,
+              "req_id_used": "default",
+              "sensor_kind": "rgb",
+              "band": {
+                "h_op_m": "140.0",
+                "h_lo_m": "120.0",
+                "h_hi_m": "147.0",
+                "dh_band_m": "76.9453494399786",
+                "feasible": "True",
+                "reason": ""
+              },
+              "h_op_m": 140.0,
+              "w_m": 161.65807537309522,
+              "s_m": 113.16065276116665,
+              "e_ext_m": 53.0,
+              "d_turn_m": 559.8656646065724,
+              "V_g_cap_mps": 34.79393923933999,
+              "clip_loss": {
+                "link": "0.0",
+                "radius": "0.0"
+              },
+              "coverable_fraction": 1.0000000000000002,
+              "coverable_area_m2": 9965218.195121728,
+              "direction_ok": true,
+              "two_way_ok": true,
+              "n_directions_ok": 72,
+              "V_g_max_mps": 26.5,
+              "z_op_m": 139.68722215745677,
+              "one_way_only": false,
+              "feasible": true,
+              "reason": "",
+              "T_oper_lb_s": 3323.1159457952754
+            }
+          },
+          "feasible_classes": [
+            "A"
+          ],
+          "served_kinds": [
+            "rgb"
+          ],
+          "coverable": true,
+          "uncoverable_reason": null,
+          "T_oper_lb_s": 415.3894932244094
+        },
+        "Z4": {
+          "area_m2": 9964539.68946817,
+          "sensor_req": "any",
+          "payload_req_id": "default",
+          "priority": 1.0,
+          "time_window_s": null,
+          "dist_home_m": 995.759909571603,
+          "in_dem": true,
+          "classes": {
+            "A": {
+              "n_uav": 8,
+              "sensor_ok": true,
+              "req_id_used": "default",
+              "sensor_kind": "rgb",
+              "band": {
+                "h_op_m": "140.0",
+                "h_lo_m": "120.0",
+                "h_hi_m": "147.0",
+                "dh_band_m": "77.23552294820547",
+                "feasible": "True",
+                "reason": ""
+              },
+              "h_op_m": 140.0,
+              "w_m": 161.65807537309522,
+              "s_m": 113.16065276116665,
+              "e_ext_m": 53.0,
+              "d_turn_m": 559.8656646065724,
+              "V_g_cap_mps": 34.79393923933999,
+              "clip_loss": {
+                "link": "0.0",
+                "radius": "0.0"
+              },
+              "coverable_fraction": 1.0,
+              "coverable_area_m2": 9964539.68946817,
+              "direction_ok": true,
+              "two_way_ok": true,
+              "n_directions_ok": 72,
+              "V_g_max_mps": 26.5,
+              "z_op_m": 139.9218642624885,
+              "one_way_only": false,
+              "feasible": true,
+              "reason": "",
+              "T_oper_lb_s": 3322.889683518574
+            }
+          },
+          "feasible_classes": [
+            "A"
+          ],
+          "served_kinds": [
+            "rgb"
+          ],
+          "coverable": true,
+          "uncoverable_reason": null,
+          "T_oper_lb_s": 415.3612104398218
+        },
+        "Z5": {
+          "area_m2": 9963860.694503982,
+          "sensor_req": "any",
+          "payload_req_id": "default",
+          "priority": 1.0,
+          "time_window_s": null,
+          "dist_home_m": 0.0,
+          "in_dem": true,
+          "classes": {
+            "A": {
+              "n_uav": 8,
+              "sensor_ok": true,
+              "req_id_used": "default",
+              "sensor_kind": "rgb",
+              "band": {
+                "h_op_m": "140.0",
+                "h_lo_m": "120.0",
+                "h_hi_m": "147.0",
+                "dh_band_m": "77.47621093317866",
+                "feasible": "True",
+                "reason": ""
+              },
+              "h_op_m": 140.0,
+              "w_m": 161.65807537309522,
+              "s_m": 113.16065276116665,
+              "e_ext_m": 53.0,
+              "d_turn_m": 559.8656646065724,
+              "V_g_cap_mps": 34.79393923933999,
+              "clip_loss": {
+                "link": "0.0",
+                "radius": "0.0"
+              },
+              "coverable_fraction": 1.0,
+              "coverable_area_m2": 9963860.694503982,
+              "direction_ok": true,
+              "two_way_ok": true,
+              "n_directions_ok": 72,
+              "V_g_max_mps": 26.5,
+              "z_op_m": 139.99999107792974,
+              "one_way_only": false,
+              "feasible": true,
+              "reason": "",
+              "T_oper_lb_s": 3322.6632580707387
+            }
+          },
+          "feasible_classes": [
+            "A"
+          ],
+          "served_kinds": [
+            "rgb"
+          ],
+          "coverable": true,
+          "uncoverable_reason": null,
+          "T_oper_lb_s": 415.33290725884234
+        },
+        "Z6": {
+          "area_m2": 9963181.210289188,
+          "sensor_req": "any",
+          "payload_req_id": "default",
+          "priority": 1.0,
+          "time_window_s": null,
+          "dist_home_m": 0.8695542133691962,
+          "in_dem": true,
+          "classes": {
+            "A": {
+              "n_uav": 8,
+              "sensor_ok": true,
+              "req_id_used": "default",
+              "sensor_kind": "rgb",
+              "band": {
+                "h_op_m": "140.0",
+                "h_lo_m": "120.0",
+                "h_hi_m": "147.0",
+                "dh_band_m": "77.47559056803584",
+                "feasible": "True",
+                "reason": ""
+              },
+              "h_op_m": 140.0,
+              "w_m": 161.65807537309522,
+              "s_m": 113.16065276116665,
+              "e_ext_m": 53.0,
+              "d_turn_m": 559.8656646065724,
+              "V_g_cap_mps": 34.79393923933999,
+              "clip_loss": {
+                "link": "0.0",
+                "radius": "0.0"
+              },
+              "coverable_fraction": 1.0000000000000002,
+              "coverable_area_m2": 9963181.21028919,
+              "direction_ok": true,
+              "two_way_ok": true,
+              "n_directions_ok": 72,
+              "V_g_max_mps": 26.5,
+              "z_op_m": 139.9999876897483,
+              "one_way_only": false,
+              "feasible": true,
+              "reason": "",
+              "T_oper_lb_s": 3322.436669471786
+            }
+          },
+          "feasible_classes": [
+            "A"
+          ],
+          "served_kinds": [
+            "rgb"
+          ],
+          "coverable": true,
+          "uncoverable_reason": null,
+          "T_oper_lb_s": 415.30458368397325
+        },
+        "Z7": {
+          "area_m2": 9962501.236893317,
+          "sensor_req": "any",
+          "payload_req_id": "default",
+          "priority": 1.0,
+          "time_window_s": null,
+          "dist_home_m": 997.5001854393413,
+          "in_dem": true,
+          "classes": {
+            "A": {
+              "n_uav": 8,
+              "sensor_ok": true,
+              "req_id_used": "default",
+              "sensor_kind": "rgb",
+              "band": {
+                "h_op_m": "140.0",
+                "h_lo_m": "120.0",
+                "h_hi_m": "147.0",
+                "dh_band_m": "77.23275160696357",
+                "feasible": "True",
+                "reason": ""
+              },
+              "h_op_m": 140.0,
+              "w_m": 161.65807537309522,
+              "s_m": 113.16065276116665,
+              "e_ext_m": 53.0,
+              "d_turn_m": 559.8656646065724,
+              "V_g_cap_mps": 34.79393923933999,
+              "clip_loss": {
+                "link": "0.0",
+                "radius": "0.0"
+              },
+              "coverable_fraction": 1.0,
+              "coverable_area_m2": 9962501.236893317,
+              "direction_ok": true,
+              "two_way_ok": true,
+              "n_directions_ok": 72,
+              "V_g_max_mps": 26.5,
+              "z_op_m": 139.92159206296367,
+              "one_way_only": false,
+              "feasible": true,
+              "reason": "",
+              "T_oper_lb_s": 3322.2099177449
+            }
+          },
+          "feasible_classes": [
+            "A"
+          ],
+          "served_kinds": [
+            "rgb"
+          ],
+          "coverable": true,
+          "uncoverable_reason": null,
+          "T_oper_lb_s": 415.2762397181125
+        },
+        "Z8": {
+          "area_m2": 9961820.774386957,
+          "sensor_req": "any",
+          "payload_req_id": "default",
+          "priority": 1.0,
+          "time_window_s": null,
+          "dist_home_m": 1994.1319598582786,
+          "in_dem": true,
+          "classes": {
+            "A": {
+              "n_uav": 8,
+              "sensor_ok": true,
+              "req_id_used": "default",
+              "sensor_kind": "rgb",
+              "band": {
+                "h_op_m": "140.0",
+                "h_lo_m": "120.0",
+                "h_hi_m": "147.0",
+                "dh_band_m": "76.94422997534275",
+                "feasible": "True",
+                "reason": ""
+              },
+              "h_op_m": 140.0,
+              "w_m": 161.65807537309522,
+              "s_m": 113.16065276116665,
+              "e_ext_m": 53.0,
+              "d_turn_m": 559.8656646065724,
+              "V_g_cap_mps": 34.79393923933999,
+              "clip_loss": {
+                "link": "0.0",
+                "radius": "0.0"
+              },
+              "coverable_fraction": 1.0,
+              "coverable_area_m2": 9961820.774386957,
+              "direction_ok": true,
+              "two_way_ok": true,
+              "n_directions_ok": 72,
+              "V_g_max_mps": 26.5,
+              "z_op_m": 139.68667702313184,
+              "one_way_only": false,
+              "feasible": true,
+              "reason": "",
+              "T_oper_lb_s": 3321.9830029136215
+            }
+          },
+          "feasible_classes": [
+            "A"
+          ],
+          "served_kinds": [
+            "rgb"
+          ],
+          "coverable": true,
+          "uncoverable_reason": null,
+          "T_oper_lb_s": 415.2478753642027
+        },
+        "Z9": {
+          "area_m2": 9961139.822810572,
+          "sensor_req": "any",
+          "payload_req_id": "default",
+          "priority": 1.0,
+          "time_window_s": null,
+          "dist_home_m": 2990.7648532225803,
+          "in_dem": true,
+          "classes": {
+            "A": {
+              "n_uav": 8,
+              "sensor_ok": true,
+              "req_id_used": "default",
+              "sensor_kind": "rgb",
+              "band": {
+                "h_op_m": "140.0",
+                "h_lo_m": "120.0",
+                "h_hi_m": "147.0",
+                "dh_band_m": "76.6408880352974",
+                "feasible": "True",
+                "reason": ""
+              },
+              "h_op_m": 140.0,
+              "w_m": 161.65807537309522,
+              "s_m": 113.16065276116665,
+              "e_ext_m": 53.0,
+              "d_turn_m": 559.8656646065724,
+              "V_g_cap_mps": 34.79393923933999,
+              "clip_loss": {
+                "link": "0.0",
+                "radius": "0.0"
+              },
+              "coverable_fraction": 1.0000000000000002,
+              "coverable_area_m2": 9961139.822810574,
+              "direction_ok": true,
+              "two_way_ok": true,
+              "n_directions_ok": 72,
+              "V_g_max_mps": 26.5,
+              "z_op_m": 139.29524219677657,
+              "one_way_only": false,
+              "feasible": true,
+              "reason": "",
+              "T_oper_lb_s": 3321.755924991444
+            }
+          },
+          "feasible_classes": [
+            "A"
+          ],
+          "served_kinds": [
+            "rgb"
+          ],
+          "coverable": true,
+          "uncoverable_reason": null,
+          "T_oper_lb_s": 415.2194906239305
+        }
+      },
+      "per_uav": {
+        "A1": {
+          "cls": "A",
+          "auw_kg": 24.6,
+          "mtow_kg": 24.9,
+          "payload_kg": 5.0,
+          "payload_estimated": false,
+          "payload_max_kg": 5.0,
+          "sensor_kinds": [
+            "rgb"
+          ],
+          "base_minute_mode": false,
+          "E_nom_wh": 1500.0,
+          "E_avail_wh": 1350.0,
+          "E_use_wh": 779.62734375,
+          "e_TO_wh": 39.17514204545454,
+          "e_LDG_wh": 81.19751420454546,
+          "reserve_wh": 450.0,
+          "k_unc": 1.2075,
+          "eta_T": 1.0,
+          "battery_temp_c": 25.0,
+          "P_c_w": 511.3636363636364,
+          "P_h_w": 2045.4545454545455,
+          "cruise_minutes": 75.75674948240166,
+          "cruise_equiv_km": 97.72620683229815,
+          "D_use_km": 133.0,
+          "v_min_mps": 18.0,
+          "stall_speed_mps": 14.0,
+          "stall_margin_ok": true,
+          "lost_link_policy": "CONTINUE_THEN_RTB",
+          "issues": [],
+          "ok": true
+        },
+        "A2": {
+          "cls": "A",
+          "auw_kg": 24.6,
+          "mtow_kg": 24.9,
+          "payload_kg": 5.0,
+          "payload_estimated": false,
+          "payload_max_kg": 5.0,
+          "sensor_kinds": [
+            "rgb"
+          ],
+          "base_minute_mode": false,
+          "E_nom_wh": 1500.0,
+          "E_avail_wh": 1350.0,
+          "E_use_wh": 779.62734375,
+          "e_TO_wh": 39.17514204545454,
+          "e_LDG_wh": 81.19751420454546,
+          "reserve_wh": 450.0,
+          "k_unc": 1.2075,
+          "eta_T": 1.0,
+          "battery_temp_c": 25.0,
+          "P_c_w": 511.3636363636364,
+          "P_h_w": 2045.4545454545455,
+          "cruise_minutes": 75.75674948240166,
+          "cruise_equiv_km": 97.72620683229815,
+          "D_use_km": 133.0,
+          "v_min_mps": 18.0,
+          "stall_speed_mps": 14.0,
+          "stall_margin_ok": true,
+          "lost_link_policy": "CONTINUE_THEN_RTB",
+          "issues": [],
+          "ok": true
+        },
+        "A3": {
+          "cls": "A",
+          "auw_kg": 24.6,
+          "mtow_kg": 24.9,
+          "payload_kg": 5.0,
+          "payload_estimated": false,
+          "payload_max_kg": 5.0,
+          "sensor_kinds": [
+            "rgb"
+          ],
+          "base_minute_mode": false,
+          "E_nom_wh": 1500.0,
+          "E_avail_wh": 1350.0,
+          "E_use_wh": 779.62734375,
+          "e_TO_wh": 39.17514204545454,
+          "e_LDG_wh": 81.19751420454546,
+          "reserve_wh": 450.0,
+          "k_unc": 1.2075,
+          "eta_T": 1.0,
+          "battery_temp_c": 25.0,
+          "P_c_w": 511.3636363636364,
+          "P_h_w": 2045.4545454545455,
+          "cruise_minutes": 75.75674948240166,
+          "cruise_equiv_km": 97.72620683229815,
+          "D_use_km": 133.0,
+          "v_min_mps": 18.0,
+          "stall_speed_mps": 14.0,
+          "stall_margin_ok": true,
+          "lost_link_policy": "CONTINUE_THEN_RTB",
+          "issues": [],
+          "ok": true
+        },
+        "A4": {
+          "cls": "A",
+          "auw_kg": 24.6,
+          "mtow_kg": 24.9,
+          "payload_kg": 5.0,
+          "payload_estimated": false,
+          "payload_max_kg": 5.0,
+          "sensor_kinds": [
+            "rgb"
+          ],
+          "base_minute_mode": false,
+          "E_nom_wh": 1500.0,
+          "E_avail_wh": 1350.0,
+          "E_use_wh": 779.62734375,
+          "e_TO_wh": 39.17514204545454,
+          "e_LDG_wh": 81.19751420454546,
+          "reserve_wh": 450.0,
+          "k_unc": 1.2075,
+          "eta_T": 1.0,
+          "battery_temp_c": 25.0,
+          "P_c_w": 511.3636363636364,
+          "P_h_w": 2045.4545454545455,
+          "cruise_minutes": 75.75674948240166,
+          "cruise_equiv_km": 97.72620683229815,
+          "D_use_km": 133.0,
+          "v_min_mps": 18.0,
+          "stall_speed_mps": 14.0,
+          "stall_margin_ok": true,
+          "lost_link_policy": "CONTINUE_THEN_RTB",
+          "issues": [],
+          "ok": true
+        },
+        "A5": {
+          "cls": "A",
+          "auw_kg": 24.6,
+          "mtow_kg": 24.9,
+          "payload_kg": 5.0,
+          "payload_estimated": false,
+          "payload_max_kg": 5.0,
+          "sensor_kinds": [
+            "rgb"
+          ],
+          "base_minute_mode": false,
+          "E_nom_wh": 1500.0,
+          "E_avail_wh": 1350.0,
+          "E_use_wh": 779.62734375,
+          "e_TO_wh": 39.17514204545454,
+          "e_LDG_wh": 81.19751420454546,
+          "reserve_wh": 450.0,
+          "k_unc": 1.2075,
+          "eta_T": 1.0,
+          "battery_temp_c": 25.0,
+          "P_c_w": 511.3636363636364,
+          "P_h_w": 2045.4545454545455,
+          "cruise_minutes": 75.75674948240166,
+          "cruise_equiv_km": 97.72620683229815,
+          "D_use_km": 133.0,
+          "v_min_mps": 18.0,
+          "stall_speed_mps": 14.0,
+          "stall_margin_ok": true,
+          "lost_link_policy": "CONTINUE_THEN_RTB",
+          "issues": [],
+          "ok": true
+        },
+        "A6": {
+          "cls": "A",
+          "auw_kg": 24.6,
+          "mtow_kg": 24.9,
+          "payload_kg": 5.0,
+          "payload_estimated": false,
+          "payload_max_kg": 5.0,
+          "sensor_kinds": [
+            "rgb"
+          ],
+          "base_minute_mode": false,
+          "E_nom_wh": 1500.0,
+          "E_avail_wh": 1350.0,
+          "E_use_wh": 779.62734375,
+          "e_TO_wh": 39.17514204545454,
+          "e_LDG_wh": 81.19751420454546,
+          "reserve_wh": 450.0,
+          "k_unc": 1.2075,
+          "eta_T": 1.0,
+          "battery_temp_c": 25.0,
+          "P_c_w": 511.3636363636364,
+          "P_h_w": 2045.4545454545455,
+          "cruise_minutes": 75.75674948240166,
+          "cruise_equiv_km": 97.72620683229815,
+          "D_use_km": 133.0,
+          "v_min_mps": 18.0,
+          "stall_speed_mps": 14.0,
+          "stall_margin_ok": true,
+          "lost_link_policy": "CONTINUE_THEN_RTB",
+          "issues": [],
+          "ok": true
+        },
+        "A7": {
+          "cls": "A",
+          "auw_kg": 24.6,
+          "mtow_kg": 24.9,
+          "payload_kg": 5.0,
+          "payload_estimated": false,
+          "payload_max_kg": 5.0,
+          "sensor_kinds": [
+            "rgb"
+          ],
+          "base_minute_mode": false,
+          "E_nom_wh": 1500.0,
+          "E_avail_wh": 1350.0,
+          "E_use_wh": 779.62734375,
+          "e_TO_wh": 39.17514204545454,
+          "e_LDG_wh": 81.19751420454546,
+          "reserve_wh": 450.0,
+          "k_unc": 1.2075,
+          "eta_T": 1.0,
+          "battery_temp_c": 25.0,
+          "P_c_w": 511.3636363636364,
+          "P_h_w": 2045.4545454545455,
+          "cruise_minutes": 75.75674948240166,
+          "cruise_equiv_km": 97.72620683229815,
+          "D_use_km": 133.0,
+          "v_min_mps": 18.0,
+          "stall_speed_mps": 14.0,
+          "stall_margin_ok": true,
+          "lost_link_policy": "CONTINUE_THEN_RTB",
+          "issues": [],
+          "ok": true
+        },
+        "A8": {
+          "cls": "A",
+          "auw_kg": 24.6,
+          "mtow_kg": 24.9,
+          "payload_kg": 5.0,
+          "payload_estimated": false,
+          "payload_max_kg": 5.0,
+          "sensor_kinds": [
+            "rgb"
+          ],
+          "base_minute_mode": false,
+          "E_nom_wh": 1500.0,
+          "E_avail_wh": 1350.0,
+          "E_use_wh": 779.62734375,
+          "e_TO_wh": 39.17514204545454,
+          "e_LDG_wh": 81.19751420454546,
+          "reserve_wh": 450.0,
+          "k_unc": 1.2075,
+          "eta_T": 1.0,
+          "battery_temp_c": 25.0,
+          "P_c_w": 511.3636363636364,
+          "P_h_w": 2045.4545454545455,
+          "cruise_minutes": 75.75674948240166,
+          "cruise_equiv_km": 97.72620683229815,
+          "D_use_km": 133.0,
+          "v_min_mps": 18.0,
+          "stall_speed_mps": 14.0,
+          "stall_margin_ok": true,
+          "lost_link_policy": "CONTINUE_THEN_RTB",
+          "issues": [],
+          "ok": true
+        }
+      },
+      "derived": {
+        "A": {
+          "n_uav": 8,
+          "uav_ids": [
+            "A1",
+            "A2",
+            "A3",
+            "A4",
+            "A5",
+            "A6",
+            "A7",
+            "A8"
+          ],
+          "R_eff": 200.0,
+          "W_R": 5.0,
+          "R_plan": 200.0,
+          "R_theo": 130.0,
+          "W_star": 5.167467936679819,
+          "V_a": 21.5,
+          "V_a_min": 18.0,
+          "wind_speed_ref_mps": 5.0,
+          "wind_dir_from_ref_deg": 270.0,
+          "V_g_headwind": 16.5,
+          "V_g_tailwind": 26.5,
+          "V_g_crosswind": 20.910523666326483,
+          "V_g_cap": 34.79393923933999,
+          "h_op": 140.0,
+          "w": 161.65807537309522,
+          "s": 113.16065276116665,
+          "e_ext": 53.0,
+          "d_turn": 559.8656646065724,
+          "by_req": {
+            "default": {
+              "h_op_m": 140.0,
+              "w_m": 161.65807537309522,
+              "s_m": 113.16065276116665,
+              "e_ext_m": 53.0,
+              "d_turn_m": 559.8656646065724,
+              "V_g_cap_mps": 34.79393923933999
+            }
+          },
+          "h_minfw": 120.0,
+          "h_clr": 36.0,
+          "h_ceil": 200.0,
+          "h_ceil_source": "waiver_max_agl_m",
+          "A_needs_waiver": false,
+          "P_c_ref": 511.3636363636364,
+          "P_c_rep": 511.3636363636364,
+          "P_h_rep": 2045.4545454545455,
+          "k_bm": 1.15,
+          "k_as": 1.05,
+          "k_unc": 1.2075,
+          "eta_T_rep": 1.0,
+          "e_TO": 39.17514204545454,
+          "e_LDG": 81.19751420454546,
+          "reserve_wh": 450.0,
+          "E_use_rep": 779.62734375,
+          "base_minute_mode": false,
+          "endurance_range_dev": 0.06589147286821717,
+          "v_implied_mps": 22.916666666666668,
+          "D_use_km": 133.0,
+          "D_model_km": 97.72620683229815,
+          "rho_sym_km": 66.0,
+          "link_range_km": 25.0,
+          "v_tr_cmd": 18.0,
+          "h_tc_cmd": 100.0,
+          "h_tc_energy": 100.0,
+          "h_tc_clear": 80.0,
+          "d_tr": 468.0,
+          "d_acc": 138.25,
+          "t_acc": 7.0,
+          "slope_tr_deg": 4.8852025681173,
+          "gamma_tr_max_deg": 8.0,
+          "t_takeoff_s": 57.0,
+          "t_landing_s": 117.0,
+          "airspeed_sensor_validated": false,
+          "battery_monitor_validated": false,
+          "W_go": 8.0,
+          "beaufort_upper_mps": 10.7,
+          "crosswind_site_max_mps": 6.0,
+          "gust_site_max_mps": 8.0,
+          "usable_alternates": [
+            "ALT1"
+          ],
+          "provisional_params": [
+            "a_tr_mps2",
+            "battery_nominal_wh",
+            "c2_link_range_km",
+            "crosswind_site_max_mps",
+            "dv_tr_margin_mps",
+            "gamma_tr_max_deg",
+            "gust_site_max_mps",
+            "hover_power_ratio",
+            "idle_descent_ratio",
+            "k_gamma_auw",
+            "obstacle_horizontal_buffer_m",
+            "p_accel_ratio",
+            "prop_efficiency",
+            "reference_battery_wh",
+            "reference_test_depth_of_discharge",
+            "t_hold_s",
+            "t_hover_reserve_s",
+            "t_tr_in_s",
+            "t_tr_out_s",
+            "terrain_clearance_m",
+            "transition_complete_agl_m",
+            "transition_ground_run_m",
+            "transition_start_agl_m",
+            "vtol_climb_rate_mps",
+            "vtol_descent_rate_mps",
+            "vtol_site_clear_radius_m"
+          ],
+          "makespan_lb_s": 3496.5495559242313
+        }
+      }
+    },
+    "per_uav": {
+      "A1": {
+        "cls": "A",
+        "n_strips": 5,
+        "cruise_equiv_km": 84.801,
+        "distance_m": 66950.0,
+        "energy_used_wh": 676.5,
+        "energy_margin_wh": 223.5,
+        "t_land_s": 3445.6,
+        "orbits": 0,
+        "warnings": [],
+        "usable_km_lo": 133.0,
+        "usable_km_hi": 145.0
+      },
+      "A2": {
+        "cls": "A",
+        "n_strips": 4,
+        "cruise_equiv_km": 74.789,
+        "distance_m": 57453.8,
+        "energy_used_wh": 596.6,
+        "energy_margin_wh": 303.4,
+        "t_land_s": 3149.6,
+        "orbits": 0,
+        "warnings": [],
+        "usable_km_lo": 133.0,
+        "usable_km_hi": 145.0
+      },
+      "A3": {
+        "cls": "A",
+        "n_strips": 5,
+        "cruise_equiv_km": 84.774,
+        "distance_m": 66924.2,
+        "energy_used_wh": 676.3,
+        "energy_margin_wh": 223.7,
+        "t_land_s": 3676.3,
+        "orbits": 0,
+        "warnings": [],
+        "usable_km_lo": 133.0,
+        "usable_km_hi": 145.0
+      },
+      "A4": {
+        "cls": "A",
+        "n_strips": 4,
+        "cruise_equiv_km": 74.766,
+        "distance_m": 57431.6,
+        "energy_used_wh": 596.5,
+        "energy_margin_wh": 303.5,
+        "t_land_s": 2918.5,
+        "orbits": 0,
+        "warnings": [],
+        "usable_km_lo": 133.0,
+        "usable_km_hi": 145.0
+      },
+      "A5": {
+        "cls": "A",
+        "n_strips": 5,
+        "cruise_equiv_km": 83.9,
+        "distance_m": 66052.6,
+        "energy_used_wh": 669.3,
+        "energy_margin_wh": 230.7,
+        "t_land_s": 3907.6,
+        "orbits": 0,
+        "warnings": [],
+        "usable_km_lo": 133.0,
+        "usable_km_hi": 145.0
+      },
+      "A6": {
+        "cls": "A",
+        "n_strips": 4,
+        "cruise_equiv_km": 73.98,
+        "distance_m": 56649.6,
+        "energy_used_wh": 590.2,
+        "energy_margin_wh": 309.8,
+        "t_land_s": 4630.0,
+        "orbits": 0,
+        "warnings": [],
+        "usable_km_lo": 133.0,
+        "usable_km_hi": 145.0
+      },
+      "A7": {
+        "cls": "A",
+        "n_strips": 5,
+        "cruise_equiv_km": 83.882,
+        "distance_m": 66034.0,
+        "energy_used_wh": 669.2,
+        "energy_margin_wh": 230.8,
+        "t_land_s": 4138.7,
+        "orbits": 0,
+        "warnings": [],
+        "usable_km_lo": 133.0,
+        "usable_km_hi": 145.0
+      },
+      "A8": {
+        "cls": "A",
+        "n_strips": 4,
+        "cruise_equiv_km": 73.963,
+        "distance_m": 56633.6,
+        "energy_used_wh": 590.1,
+        "energy_margin_wh": 309.9,
+        "t_land_s": 4375.2,
+        "orbits": 0,
+        "warnings": [],
+        "usable_km_lo": 133.0,
+        "usable_km_hi": 145.0
+      }
+    },
+    "cells": [
+      {
+        "cell_id": "Z2_1",
+        "n_strips": 9,
+        "strip_length_total_km": 91.22,
+        "area_km2": 10.296
+      },
+      {
+        "cell_id": "Z3_1",
+        "n_strips": 9,
+        "strip_length_total_km": 91.21,
+        "area_km2": 10.295
+      },
+      {
+        "cell_id": "Z4_1",
+        "n_strips": 9,
+        "strip_length_total_km": 91.21,
+        "area_km2": 10.294
+      },
+      {
+        "cell_id": "Z5_1",
+        "n_strips": 9,
+        "strip_length_total_km": 91.2,
+        "area_km2": 10.293
+      },
+      {
+        "cell_id": "Z6_1",
+        "n_strips": 9,
+        "strip_length_total_km": 91.2,
+        "area_km2": 10.293
+      },
+      {
+        "cell_id": "Z7_1",
+        "n_strips": 9,
+        "strip_length_total_km": 91.19,
+        "area_km2": 10.292
+      },
+      {
+        "cell_id": "Z8_1",
+        "n_strips": 9,
+        "strip_length_total_km": 91.18,
+        "area_km2": 10.291
+      },
+      {
+        "cell_id": "Z9_1",
+        "n_strips": 9,
+        "strip_length_total_km": 91.18,
+        "area_km2": 10.291
+      }
+    ],
+    "validate_passed": false,
+    "validate": {
+      "coverage": [
+        {
+          "area_id": "Z2",
+          "cls_required": [
+            "all"
+          ],
+          "coverage_by_cls": {
+            "A": 1.0,
+            "rgb": 1.0,
+            "all": 1.0
+          },
+          "uncovered_cells_xy": "[]",
+          "raster_m": 5.0
+        },
+        {
+          "area_id": "Z3",
+          "cls_required": [
+            "all"
+          ],
+          "coverage_by_cls": {
+            "A": 1.0,
+            "rgb": 1.0,
+            "all": 1.0
+          },
+          "uncovered_cells_xy": "[]",
+          "raster_m": 5.0
+        },
+        {
+          "area_id": "Z4",
+          "cls_required": [
+            "all"
+          ],
+          "coverage_by_cls": {
+            "all": 0.0
+          },
+          "uncovered_cells_xy": "[[-4996.79881665 -1989.88818167]\n [-4991.79881665 -1989.88818167]\n [-4986.79881665 -1989.88818167]\n ...\n [ 4988.20118335  -999.88818167]\n [ 4993.20118335  -999.88818167]\n [ 4998.20118335  -999.88818167]]",
+          "raster_m": 5.0
+        },
+        {
+          "area_id": "Z5",
+          "cls_required": [
+            "all"
+          ],
+          "coverage_by_cls": {
+            "all": 0.0
+          },
+          "uncovered_cells_xy": "[[-4.99645225e+03 -9.93259910e+02]\n [-4.99145225e+03 -9.93259910e+02]\n [-4.98645225e+03 -9.93259910e+02]\n ...\n [ 4.98854775e+03 -3.25990957e+00]\n [ 4.99354775e+03 -3.25990957e+00]\n [ 4.99854775e+03 -3.25990957e+00]]",
+          "raster_m": 5.0
+        },
+        {
+          "area_id": "Z6",
+          "cls_required": [
+            "all"
+          ],
+          "coverage_by_cls": {
+            "all": 0.0
+          },
+          "uncovered_cells_xy": "[[-4.99610557e+03  3.36955421e+00]\n [-4.99110557e+03  3.36955421e+00]\n [-4.98610557e+03  3.36955421e+00]\n ...\n [ 4.98389443e+03  9.93369554e+02]\n [ 4.98889443e+03  9.93369554e+02]\n [ 4.99389443e+03  9.93369554e+02]]",
+          "raster_m": 5.0
+        },
+        {
+          "area_id": "Z7",
+          "cls_required": [
+            "all"
+          ],
+          "coverage_by_cls": {
+            "all": 0.0
+          },
+          "uncovered_cells_xy": "[[-4995.75876255  1000.00018544]\n [-4990.75876255  1000.00018544]\n [-4985.75876255  1000.00018544]\n ...\n [ 4984.24123745  1990.00018544]\n [ 4989.24123745  1990.00018544]\n [ 4994.24123745  1990.00018544]]",
+          "raster_m": 5.0
+        },
+        {
+          "area_id": "Z8",
+          "cls_required": [
+            "all"
+          ],
+          "coverage_by_cls": {
+            "A": 1.0,
+            "rgb": 1.0,
+            "all": 1.0
+          },
+          "uncovered_cells_xy": "[]",
+          "raster_m": 5.0
+        },
+        {
+          "area_id": "Z9",
+          "cls_required": [
+            "all"
+          ],
+          "coverage_by_cls": {
+            "A": 1.0,
+            "rgb": 1.0,
+            "all": 1.0
+          },
+          "uncovered_cells_xy": "[]",
+          "raster_m": 5.0
+        }
+      ],
+      "min_sep_h_m": 113.21090868187241,
+      "min_sep_v_m": Infinity,
+      "conflicts": [],
+      "slope_ok": true,
+      "agl_ok": true,
+      "curvature_ok": true,
+      "energy_ok": true,
+      "link_ok": true,
+      "airspace_ok": true,
+      "time_window_ok": true,
+      "makespan_s": 4629.962021535312,
+      "total_distance_m": 494129.3077309328,
+      "compute_ms": 802.3506999597885,
+      "details": {
+        "A1": [],
+        "A2": [],
+        "A3": [],
+        "A4": [],
+        "A5": [],
+        "A6": [],
+        "A7": [],
+        "A8": [],
+        "separation": [
+          "min_sep_h=113.2 m at t=2046.0 s pair=('A3', 'A4')",
+          "min_sep_v(d_h<d_sep)=inf m",
+          "conflicts=0"
+        ],
+        "coverage": [
+          "Z2: A=1.0000, all=1.0000, rgb=1.0000 required=['all'] PASS",
+          "Z3: A=1.0000, all=1.0000, rgb=1.0000 required=['all'] PASS",
+          "Z4: all=0.0000 required=['all'] FAIL",
+          "Z5: all=0.0000 required=['all'] FAIL",
+          "Z6: all=0.0000 required=['all'] FAIL",
+          "Z7: all=0.0000 required=['all'] FAIL",
+          "Z8: A=1.0000, all=1.0000, rgb=1.0000 required=['all'] PASS",
+          "Z9: A=1.0000, all=1.0000, rgb=1.0000 required=['all'] PASS"
+        ],
+        "integrity": [
+          "strip_not_flown(Z4_1_A_1)",
+          "strip_not_flown(Z4_1_A_2)",
+          "strip_not_flown(Z4_1_A_3)",
+          "strip_not_flown(Z4_1_A_4)",
+          "strip_not_flown(Z4_1_A_5)",
+          "strip_not_flown(Z4_1_A_6)",
+          "strip_not_flown(Z4_1_A_7)",
+          "strip_not_flown(Z4_1_A_8)",
+          "strip_not_flown(Z4_1_A_9)",
+          "strip_not_flown(Z5_1_A_1)",
+          "strip_not_flown(Z5_1_A_2)",
+          "strip_not_flown(Z5_1_A_3)",
+          "strip_not_flown(Z5_1_A_4)",
+          "strip_not_flown(Z5_1_A_5)",
+          "strip_not_flown(Z5_1_A_6)",
+          "strip_not_flown(Z5_1_A_7)",
+          "strip_not_flown(Z5_1_A_8)",
+          "strip_not_flown(Z5_1_A_9)",
+          "strip_not_flown(Z6_1_A_1)",
+          "strip_not_flown(Z6_1_A_2)",
+          "... (+16 more)"
+        ]
+      },
+      "passed": false,
+      "integrity_ok": false,
+      "separation_ok": true
+    }
+  },
+  "S1_n4": {
+    "scenario": "S1",
+    "n": 4,
+    "sec": 36.4,
+    "ruler_coverage": 1.0,
+    "ruler_max_km": 58.92,
+    "ruler_total_km": 234.92,
+    "makespan_s": 3661.3108981645332,
+    "uncovered": [],
+    "n_cells": 4,
+    "n_strips": 36,
+    "makespan_planner_s": 3661.3108981645332,
+    "feasibility": {
+      "status": "GO_WITH_WARNINGS",
+      "errors": [],
+      "warnings": [
+        "provisional_params",
+        "wind: wind_layer[0]: agl [0,3000] -> ENU z [0.0,3000.0] using home ground z=0.0 (assumption: AGL referenced to home ground)",
+        "wind: wind layer bounds converted MSL->ENU z at home only; the curvature term (~196 m at 50 km) is not applied per position (known approximation)",
+        "reference_battery_assumed(A1)",
+        "battery_temp_assumed(A1)",
+        "reference_battery_assumed(A2)",
+        "battery_temp_assumed(A2)",
+        "reference_battery_assumed(A3)",
+        "battery_temp_assumed(A3)",
+        "reference_battery_assumed(A4)",
+        "battery_temp_assumed(A4)",
+        "battery_nominal_example(A1)",
+        "battery_nominal_example(A2)",
+        "battery_nominal_example(A3)",
+        "battery_nominal_example(A4)",
+        "provisional_params(A: a_tr_mps2, battery_nominal_wh, c2_link_range_km, crosswind_site_max_mps, dv_tr_margin_mps, gamma_tr_max_deg, gust_site_max_mps, hover_power_ratio, idle_descent_ratio, k_gamma_auw, obstacle_horizontal_buffer_m, p_accel_ratio, prop_efficiency, reference_battery_wh, reference_test_depth_of_discharge, t_hold_s, t_hover_reserve_s, t_tr_in_s, t_tr_out_s, terrain_clearance_m, transition_complete_agl_m, transition_ground_run_m, transition_start_agl_m, vtol_climb_rate_mps, vtol_descent_rate_mps, vtol_site_clear_radius_m)",
+        "avionics_unvalidated(A: airspeed_sensor_validated=False, battery_monitor_validated=False → k_unc=1.2075, V_tr,cmd=18, H_tc,cmd=100, D_use=133 km)"
+      ],
+      "per_area": {
+        "Z2": {
+          "area_m2": 4982270.528253568,
+          "sensor_req": "any",
+          "payload_req_id": "default",
+          "priority": 1.0,
+          "time_window_s": null,
+          "dist_home_m": 996.4121204535561,
+          "in_dem": true,
+          "classes": {
+            "A": {
+              "n_uav": 4,
+              "sensor_ok": true,
+              "req_id_used": "default",
+              "sensor_kind": "rgb",
+              "band": {
+                "h_op_m": "140.0",
+                "h_lo_m": "120.0",
+                "h_hi_m": "147.0",
+                "dh_band_m": "78.89163818676025",
+                "feasible": "True",
+                "reason": ""
+              },
+              "h_op_m": 140.0,
+              "w_m": 161.65807537309522,
+              "s_m": 113.16065276116665,
+              "e_ext_m": 53.0,
+              "d_turn_m": 559.8656646065724,
+              "V_g_cap_mps": 34.79393923933999,
+              "clip_loss": {
+                "link": "0.0",
+                "radius": "0.0"
+              },
+              "coverable_fraction": 1.0,
+              "coverable_area_m2": 4982270.528253568,
+              "direction_ok": true,
+              "two_way_ok": true,
+              "n_directions_ok": 72,
+              "V_g_max_mps": 26.5,
+              "z_op_m": 139.92176734422085,
+              "one_way_only": false,
+              "feasible": true,
+              "reason": "",
+              "T_oper_lb_s": 1661.445069693533
+            }
+          },
+          "feasible_classes": [
+            "A"
+          ],
+          "served_kinds": [
+            "rgb"
+          ],
+          "coverable": true,
+          "uncoverable_reason": null,
+          "T_oper_lb_s": 415.36126742338325
+        },
+        "Z3": {
+          "area_m2": 4981931.030804587,
+          "sensor_req": "any",
+          "payload_req_id": "default",
+          "priority": 1.0,
+          "time_window_s": null,
+          "dist_home_m": 0.0,
+          "in_dem": true,
+          "classes": {
+            "A": {
+              "n_uav": 4,
+              "sensor_ok": true,
+              "req_id_used": "default",
+              "sensor_kind": "rgb",
+              "band": {
+                "h_op_m": "140.0",
+                "h_lo_m": "120.0",
+                "h_hi_m": "147.0",
+                "dh_band_m": "79.16349382232875",
+                "feasible": "True",
+                "reason": ""
+              },
+              "h_op_m": 140.0,
+              "w_m": 161.65807537309522,
+              "s_m": 113.16065276116665,
+              "e_ext_m": 53.0,
+              "d_turn_m": 559.8656646065724,
+              "V_g_cap_mps": 34.79393923933999,
+              "clip_loss": {
+                "link": "0.0",
+                "radius": "0.0"
+              },
+              "coverable_fraction": 0.9999999999999998,
+              "coverable_area_m2": 4981931.030804586,
+              "direction_ok": true,
+              "two_way_ok": true,
+              "n_directions_ok": 72,
+              "V_g_max_mps": 26.5,
+              "z_op_m": 139.99998962119832,
+              "one_way_only": false,
+              "feasible": true,
+              "reason": "",
+              "T_oper_lb_s": 1661.331856980657
+            }
+          },
+          "feasible_classes": [
+            "A"
+          ],
+          "served_kinds": [
+            "rgb"
+          ],
+          "coverable": true,
+          "uncoverable_reason": null,
+          "T_oper_lb_s": 415.33296424516425
+        },
+        "Z4": {
+          "area_m2": 4981591.288730335,
+          "sensor_req": "any",
+          "payload_req_id": "default",
+          "priority": 1.0,
+          "time_window_s": null,
+          "dist_home_m": 0.21738856320135916,
+          "in_dem": true,
+          "classes": {
+            "A": {
+              "n_uav": 4,
+              "sensor_ok": true,
+              "req_id_used": "default",
+              "sensor_kind": "rgb",
+              "band": {
+                "h_op_m": "140.0",
+                "h_lo_m": "120.0",
+                "h_hi_m": "147.0",
+                "dh_band_m": "79.16091741155833",
+                "feasible": "True",
+                "reason": ""
+              },
+              "h_op_m": 140.0,
+              "w_m": 161.65807537309522,
+              "s_m": 113.16065276116665,
+              "e_ext_m": 53.0,
+              "d_turn_m": 559.8656646065724,
+              "V_g_cap_mps": 34.79393923933999,
+              "clip_loss": {
+                "link": "0.0",
+                "radius": "0.0"
+              },
+              "coverable_fraction": 1.0000000000000002,
+              "coverable_area_m2": 4981591.288730336,
+              "direction_ok": true,
+              "two_way_ok": true,
+              "n_directions_ok": 72,
+              "V_g_max_mps": 26.5,
+              "z_op_m": 139.9999961750582,
+              "one_way_only": false,
+              "feasible": true,
+              "reason": "",
+              "T_oper_lb_s": 1661.2185626922342
+            }
+          },
+          "feasible_classes": [
+            "A"
+          ],
+          "served_kinds": [
+            "rgb"
+          ],
+          "coverable": true,
+          "uncoverable_reason": null,
+          "T_oper_lb_s": 415.30464067305854
+        },
+        "Z5": {
+          "area_m2": 4981251.302065432,
+          "sensor_req": "any",
+          "payload_req_id": "default",
+          "priority": 1.0,
+          "time_window_s": null,
+          "dist_home_m": 996.8480650369901,
+          "in_dem": true,
+          "classes": {
+            "A": {
+              "n_uav": 4,
+              "sensor_ok": true,
+              "req_id_used": "default",
+              "sensor_kind": "rgb",
+              "band": {
+                "h_op_m": "140.0",
+                "h_lo_m": "120.0",
+                "h_hi_m": "147.0",
+                "dh_band_m": "78.89675247296691",
+                "feasible": "True",
+                "reason": ""
+              },
+              "h_op_m": 140.0,
+              "w_m": 161.65807537309522,
+              "s_m": 113.16065276116665,
+              "e_ext_m": 53.0,
+              "d_turn_m": 559.8656646065724,
+              "V_g_cap_mps": 34.79393923933999,
+              "clip_loss": {
+                "link": "0.0",
+                "radius": "0.0"
+              },
+              "coverable_fraction": 1.0000000000000002,
+              "coverable_area_m2": 4981251.302065433,
+              "direction_ok": true,
+              "two_way_ok": true,
+              "n_directions_ok": 72,
+              "V_g_max_mps": 26.5,
+              "z_op_m": 139.92169282284402,
+              "one_way_only": false,
+              "feasible": true,
+              "reason": "",
+              "T_oper_lb_s": 1661.1051868398067
+            }
+          },
+          "feasible_classes": [
+            "A"
+          ],
+          "served_kinds": [
+            "rgb"
+          ],
+          "coverable": true,
+          "uncoverable_reason": null,
+          "T_oper_lb_s": 415.2762967099517
+        }
+      },
+      "per_uav": {
+        "A1": {
+          "cls": "A",
+          "auw_kg": 24.6,
+          "mtow_kg": 24.9,
+          "payload_kg": 5.0,
+          "payload_estimated": false,
+          "payload_max_kg": 5.0,
+          "sensor_kinds": [
+            "rgb"
+          ],
+          "base_minute_mode": false,
+          "E_nom_wh": 1500.0,
+          "E_avail_wh": 1350.0,
+          "E_use_wh": 779.62734375,
+          "e_TO_wh": 39.17514204545454,
+          "e_LDG_wh": 81.19751420454546,
+          "reserve_wh": 450.0,
+          "k_unc": 1.2075,
+          "eta_T": 1.0,
+          "battery_temp_c": 25.0,
+          "P_c_w": 511.3636363636364,
+          "P_h_w": 2045.4545454545455,
+          "cruise_minutes": 75.75674948240166,
+          "cruise_equiv_km": 97.72620683229815,
+          "D_use_km": 133.0,
+          "v_min_mps": 18.0,
+          "stall_speed_mps": 14.0,
+          "stall_margin_ok": true,
+          "lost_link_policy": "CONTINUE_THEN_RTB",
+          "issues": [],
+          "ok": true
+        },
+        "A2": {
+          "cls": "A",
+          "auw_kg": 24.6,
+          "mtow_kg": 24.9,
+          "payload_kg": 5.0,
+          "payload_estimated": false,
+          "payload_max_kg": 5.0,
+          "sensor_kinds": [
+            "rgb"
+          ],
+          "base_minute_mode": false,
+          "E_nom_wh": 1500.0,
+          "E_avail_wh": 1350.0,
+          "E_use_wh": 779.62734375,
+          "e_TO_wh": 39.17514204545454,
+          "e_LDG_wh": 81.19751420454546,
+          "reserve_wh": 450.0,
+          "k_unc": 1.2075,
+          "eta_T": 1.0,
+          "battery_temp_c": 25.0,
+          "P_c_w": 511.3636363636364,
+          "P_h_w": 2045.4545454545455,
+          "cruise_minutes": 75.75674948240166,
+          "cruise_equiv_km": 97.72620683229815,
+          "D_use_km": 133.0,
+          "v_min_mps": 18.0,
+          "stall_speed_mps": 14.0,
+          "stall_margin_ok": true,
+          "lost_link_policy": "CONTINUE_THEN_RTB",
+          "issues": [],
+          "ok": true
+        },
+        "A3": {
+          "cls": "A",
+          "auw_kg": 24.6,
+          "mtow_kg": 24.9,
+          "payload_kg": 5.0,
+          "payload_estimated": false,
+          "payload_max_kg": 5.0,
+          "sensor_kinds": [
+            "rgb"
+          ],
+          "base_minute_mode": false,
+          "E_nom_wh": 1500.0,
+          "E_avail_wh": 1350.0,
+          "E_use_wh": 779.62734375,
+          "e_TO_wh": 39.17514204545454,
+          "e_LDG_wh": 81.19751420454546,
+          "reserve_wh": 450.0,
+          "k_unc": 1.2075,
+          "eta_T": 1.0,
+          "battery_temp_c": 25.0,
+          "P_c_w": 511.3636363636364,
+          "P_h_w": 2045.4545454545455,
+          "cruise_minutes": 75.75674948240166,
+          "cruise_equiv_km": 97.72620683229815,
+          "D_use_km": 133.0,
+          "v_min_mps": 18.0,
+          "stall_speed_mps": 14.0,
+          "stall_margin_ok": true,
+          "lost_link_policy": "CONTINUE_THEN_RTB",
+          "issues": [],
+          "ok": true
+        },
+        "A4": {
+          "cls": "A",
+          "auw_kg": 24.6,
+          "mtow_kg": 24.9,
+          "payload_kg": 5.0,
+          "payload_estimated": false,
+          "payload_max_kg": 5.0,
+          "sensor_kinds": [
+            "rgb"
+          ],
+          "base_minute_mode": false,
+          "E_nom_wh": 1500.0,
+          "E_avail_wh": 1350.0,
+          "E_use_wh": 779.62734375,
+          "e_TO_wh": 39.17514204545454,
+          "e_LDG_wh": 81.19751420454546,
+          "reserve_wh": 450.0,
+          "k_unc": 1.2075,
+          "eta_T": 1.0,
+          "battery_temp_c": 25.0,
+          "P_c_w": 511.3636363636364,
+          "P_h_w": 2045.4545454545455,
+          "cruise_minutes": 75.75674948240166,
+          "cruise_equiv_km": 97.72620683229815,
+          "D_use_km": 133.0,
+          "v_min_mps": 18.0,
+          "stall_speed_mps": 14.0,
+          "stall_margin_ok": true,
+          "lost_link_policy": "CONTINUE_THEN_RTB",
+          "issues": [],
+          "ok": true
+        }
+      },
+      "derived": {
+        "A": {
+          "n_uav": 4,
+          "uav_ids": [
+            "A1",
+            "A2",
+            "A3",
+            "A4"
+          ],
+          "R_eff": 200.0,
+          "W_R": 5.0,
+          "R_plan": 200.0,
+          "R_theo": 130.0,
+          "W_star": 5.167467936679819,
+          "V_a": 21.5,
+          "V_a_min": 18.0,
+          "wind_speed_ref_mps": 5.0,
+          "wind_dir_from_ref_deg": 270.0,
+          "V_g_headwind": 16.5,
+          "V_g_tailwind": 26.5,
+          "V_g_crosswind": 20.910523666326483,
+          "V_g_cap": 34.79393923933999,
+          "h_op": 140.0,
+          "w": 161.65807537309522,
+          "s": 113.16065276116665,
+          "e_ext": 53.0,
+          "d_turn": 559.8656646065724,
+          "by_req": {
+            "default": {
+              "h_op_m": 140.0,
+              "w_m": 161.65807537309522,
+              "s_m": 113.16065276116665,
+              "e_ext_m": 53.0,
+              "d_turn_m": 559.8656646065724,
+              "V_g_cap_mps": 34.79393923933999
+            }
+          },
+          "h_minfw": 120.0,
+          "h_clr": 36.0,
+          "h_ceil": 200.0,
+          "h_ceil_source": "waiver_max_agl_m",
+          "A_needs_waiver": false,
+          "P_c_ref": 511.3636363636364,
+          "P_c_rep": 511.3636363636364,
+          "P_h_rep": 2045.4545454545455,
+          "k_bm": 1.15,
+          "k_as": 1.05,
+          "k_unc": 1.2075,
+          "eta_T_rep": 1.0,
+          "e_TO": 39.17514204545454,
+          "e_LDG": 81.19751420454546,
+          "reserve_wh": 450.0,
+          "E_use_rep": 779.62734375,
+          "base_minute_mode": false,
+          "endurance_range_dev": 0.06589147286821717,
+          "v_implied_mps": 22.916666666666668,
+          "D_use_km": 133.0,
+          "D_model_km": 97.72620683229815,
+          "rho_sym_km": 66.0,
+          "link_range_km": 25.0,
+          "v_tr_cmd": 18.0,
+          "h_tc_cmd": 100.0,
+          "h_tc_energy": 100.0,
+          "h_tc_clear": 80.0,
+          "d_tr": 468.0,
+          "d_acc": 138.25,
+          "t_acc": 7.0,
+          "slope_tr_deg": 4.8852025681173,
+          "gamma_tr_max_deg": 8.0,
+          "t_takeoff_s": 57.0,
+          "t_landing_s": 117.0,
+          "airspeed_sensor_validated": false,
+          "battery_monitor_validated": false,
+          "W_go": 8.0,
+          "beaufort_upper_mps": 10.7,
+          "crosswind_site_max_mps": 6.0,
+          "gust_site_max_mps": 8.0,
+          "usable_alternates": [
+            "ALT1"
+          ],
+          "provisional_params": [
+            "a_tr_mps2",
+            "battery_nominal_wh",
+            "c2_link_range_km",
+            "crosswind_site_max_mps",
+            "dv_tr_margin_mps",
+            "gamma_tr_max_deg",
+            "gust_site_max_mps",
+            "hover_power_ratio",
+            "idle_descent_ratio",
+            "k_gamma_auw",
+            "obstacle_horizontal_buffer_m",
+            "p_accel_ratio",
+            "prop_efficiency",
+            "reference_battery_wh",
+            "reference_test_depth_of_discharge",
+            "t_hold_s",
+            "t_hover_reserve_s",
+            "t_tr_in_s",
+            "t_tr_out_s",
+            "terrain_clearance_m",
+            "transition_complete_agl_m",
+            "transition_ground_run_m",
+            "transition_start_agl_m",
+            "vtol_climb_rate_mps",
+            "vtol_descent_rate_mps",
+            "vtol_site_clear_radius_m"
+          ],
+          "makespan_lb_s": 1835.2751690515574
+        }
+      }
+    },
+    "per_uav": {
+      "A1": {
+        "cls": "A",
+        "n_strips": 9,
+        "cruise_equiv_km": 76.242,
+        "distance_m": 58834.8,
+        "energy_used_wh": 608.2,
+        "energy_margin_wh": 291.8,
+        "t_land_s": 3661.3,
+        "orbits": 0,
+        "warnings": [],
+        "usable_km_lo": 133.0,
+        "usable_km_hi": 145.0
+      },
+      "A2": {
+        "cls": "A",
+        "n_strips": 9,
+        "cruise_equiv_km": 76.231,
+        "distance_m": 58825.1,
+        "energy_used_wh": 608.1,
+        "energy_margin_wh": 291.9,
+        "t_land_s": 3430.8,
+        "orbits": 0,
+        "warnings": [],
+        "usable_km_lo": 133.0,
+        "usable_km_hi": 145.0
+      },
+      "A3": {
+        "cls": "A",
+        "n_strips": 9,
+        "cruise_equiv_km": 75.866,
+        "distance_m": 58462.8,
+        "energy_used_wh": 605.2,
+        "energy_margin_wh": 294.8,
+        "t_land_s": 3199.9,
+        "orbits": 0,
+        "warnings": [],
+        "usable_km_lo": 133.0,
+        "usable_km_hi": 145.0
+      },
+      "A4": {
+        "cls": "A",
+        "n_strips": 9,
+        "cruise_equiv_km": 75.862,
+        "distance_m": 58459.4,
+        "energy_used_wh": 605.2,
+        "energy_margin_wh": 294.8,
+        "t_land_s": 2969.8,
+        "orbits": 0,
+        "warnings": [],
+        "usable_km_lo": 133.0,
+        "usable_km_hi": 145.0
+      }
+    },
+    "cells": [
+      {
+        "cell_id": "Z2_1",
+        "n_strips": 9,
+        "strip_length_total_km": 46.22,
+        "area_km2": 5.161
+      },
+      {
+        "cell_id": "Z3_1",
+        "n_strips": 9,
+        "strip_length_total_km": 46.21,
+        "area_km2": 5.161
+      },
+      {
+        "cell_id": "Z4_1",
+        "n_strips": 9,
+        "strip_length_total_km": 46.21,
+        "area_km2": 5.16
+      },
+      {
+        "cell_id": "Z5_1",
+        "n_strips": 9,
+        "strip_length_total_km": 46.21,
+        "area_km2": 5.16
+      }
+    ],
+    "validate_passed": true,
+    "validate": {
+      "coverage": [
+        {
+          "area_id": "Z2",
+          "cls_required": [
+            "all"
+          ],
+          "coverage_by_cls": {
+            "A": 1.0,
+            "rgb": 1.0,
+            "all": 1.0
+          },
+          "uncovered_cells_xy": "[]",
+          "raster_m": 5.0
+        },
+        {
+          "area_id": "Z3",
+          "cls_required": [
+            "all"
+          ],
+          "coverage_by_cls": {
+            "A": 1.0,
+            "rgb": 1.0,
+            "all": 1.0
+          },
+          "uncovered_cells_xy": "[]",
+          "raster_m": 5.0
+        },
+        {
+          "area_id": "Z4",
+          "cls_required": [
+            "all"
+          ],
+          "coverage_by_cls": {
+            "A": 1.0,
+            "rgb": 1.0,
+            "all": 1.0
+          },
+          "uncovered_cells_xy": "[]",
+          "raster_m": 5.0
+        },
+        {
+          "area_id": "Z5",
+          "cls_required": [
+            "all"
+          ],
+          "coverage_by_cls": {
+            "A": 1.0,
+            "rgb": 1.0,
+            "all": 1.0
+          },
+          "uncovered_cells_xy": "[]",
+          "raster_m": 5.0
+        }
+      ],
+      "min_sep_h_m": 204.52343446101878,
+      "min_sep_v_m": Infinity,
+      "conflicts": [],
+      "slope_ok": true,
+      "agl_ok": true,
+      "curvature_ok": true,
+      "energy_ok": true,
+      "link_ok": true,
+      "airspace_ok": true,
+      "time_window_ok": true,
+      "makespan_s": 3661.3108981645332,
+      "total_distance_m": 234582.02565633366,
+      "compute_ms": 259.56709997262806,
+      "details": {
+        "A1": [],
+        "A2": [],
+        "A3": [],
+        "A4": [],
+        "separation": [
+          "min_sep_h=204.5 m at t=2896.0 s pair=('A1', 'A3')",
+          "min_sep_v(d_h<d_sep)=inf m",
+          "conflicts=0"
+        ],
+        "coverage": [
+          "Z2: A=1.0000, all=1.0000, rgb=1.0000 required=['all'] PASS",
+          "Z3: A=1.0000, all=1.0000, rgb=1.0000 required=['all'] PASS",
+          "Z4: A=1.0000, all=1.0000, rgb=1.0000 required=['all'] PASS",
+          "Z5: A=1.0000, all=1.0000, rgb=1.0000 required=['all'] PASS"
+        ]
+      },
+      "passed": true,
+      "integrity_ok": true,
+      "separation_ok": true
+    }
+  }
+}

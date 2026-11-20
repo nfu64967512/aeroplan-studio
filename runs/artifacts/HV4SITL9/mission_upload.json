@@ -1,0 +1,46 @@
+[
+ {
+  "uav": "A1",
+  "sent": 60,
+  "read_back": 60,
+  "ok": true,
+  "first_cmds": [
+   16,
+   84,
+   16
+  ]
+ },
+ {
+  "uav": "B2",
+  "sent": 46,
+  "read_back": 46,
+  "ok": true,
+  "first_cmds": [
+   16,
+   84,
+   16
+  ]
+ },
+ {
+  "uav": "B3",
+  "sent": 54,
+  "read_back": 54,
+  "ok": true,
+  "first_cmds": [
+   16,
+   84,
+   16
+  ]
+ },
+ {
+  "uav": "B4",
+  "sent": 55,
+  "read_back": 55,
+  "ok": true,
+  "first_cmds": [
+   16,
+   84,
+   16
+  ]
+ }
+]

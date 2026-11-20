@@ -96,3 +96,60 @@ sitl/plane/terrain/
 # Local web assets (downloaded by setup)
 assets/cesium/
 assets/leaflet/
+
+# stray SITL artifact if arduplane ever run from repo root
+/eeprom.bin
+
+# ── 2026-08-19 首次把 8 月的工作納管時新增 ──────────────────────────
+# 航次產物:每趟數十 MB 的逐拍 CSV/log,可由 SITL 重生,不進版控
+# ⚠ git **不會進入被排除的目錄**,所以不能寫 `runs/` 再用 `!` 撈回子項 ——
+#   必須逐層排除「內容」(`dir/*`)並逐層放行父目錄,否則 negation 無效。
+runs/*
+!runs/artifacts/
+runs/artifacts/*
+# ⚠ 例外:HV4SITL* 是 VTOL 偵查那條論文線的**證據**,不是可重生的中間產物 ——
+#   規劃與實飛的對照、參數/任務讀回、覆蓋率與間距回算都在裡面,而且下一趟會覆寫。
+#   全部是 txt/json/csv/waypoints/png,11 趟合計約 6 MB。
+#   (runs/artifacts 全目錄 1.9 GB,其餘航次仍然排除。)
+!runs/artifacts/HV4SITL*
+# ── 2026-09-21 AASRC2026 投稿證據：風場對照、Beam-IDP 實飛與準備討論 ──
+!runs/artifacts/HV4W*
+!runs/artifacts/BEAMIDP*
+!runs/artifacts/PAPERPLAN1*
+
+# 文獻 PDF(56 MB)。⚠️ docs/lit/*.md 與 docs/lit/ardupilot/ 的參考原始碼**要**進版控
+docs/lit/pdf/
+
+# 動畫產物(53 MB),可由 stot_make_anim.sh 重生
+docs/images/anim/
+
+# 研究用的二進位中間產物,可重生
+*.npz
+*.pkl
+
+# Windows/shell 意外產生的殘留檔(不是專案檔案)
+nul
+追趕
+; else echo REAL
+
+# ── 2026-10-15：公開 repo 不放的 MATLAB 內容 ──
+# Zarchan 原書全文（matlab/zarchan/README.md 註明「不散布」）與逐字抄錄的書中程式清單
+matlab/zarchan/_source/
+matlab/zarchan/_listings/
+# Simulink 建置快取與 MATLAB 執行輸出（可重生）
+slprj/
+matlab/out/
+
+# SITL 實例工作目錄與日誌（每趟實飛幾 GB，不進版控）
+sitl/vtol/
+sitl/copter/
+# 離屏截圖／產物與雜項暫存
+exports/
+runs_gz/
+scratchpad/
+research/cpp_benchmark/*.log
+research/cpp_benchmark/*.prof
+bite_result.txt
+cwt_cache.bin
+hal.html
+x.json

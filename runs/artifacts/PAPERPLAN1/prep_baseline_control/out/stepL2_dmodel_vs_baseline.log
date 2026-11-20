@@ -1,0 +1,22 @@
+Two rulers from the SAME library, class A:
+  R1 allocator / energy model : cruise-equivalent D_ceq  <=  D_model = 97.726 km
+  R2 sim.py Table-1 cap       : D_plan = D_ceq + 15.089    <=  D_use  = 133.0 km
+
+    cell    D_ceq  vs D_model   D_plan  vs D_use  R1 over/N  R2 over/N
+----------------------------------------------------------------------
+    S1/2   109.92       1.125   125.01     0.940        2/2        0/2
+    S1/4    58.10       0.595    73.19     0.550        0/4        0/4
+    S1/8    34.01       0.348    49.09     0.369        0/8        0/8
+   S1/16    22.63       0.232    37.72     0.284       0/16       0/16
+    S2/4    64.77       0.663    79.86     0.600        0/4        0/4
+    S2/8    36.18       0.370    51.27     0.386        0/8        0/8
+    S3/4    34.20       0.350    49.29     0.371        0/4        0/4
+    S3/8    25.53       0.261    40.62     0.305        0/8        0/8
+    S4/4    47.19       0.483    62.28     0.468        0/4        0/4
+    S4/8    27.86       0.285    42.95     0.323        0/8        0/8
+    S5/8   111.83       1.144   126.91     0.954        8/8        0/8
+   S5/16    67.12       0.687    82.21     0.618       0/16       0/16
+----------------------------------------------------------------------
+cells where the DCCPP baseline BUSTS the energy-model budget (R1): 2/12
+cells where the DCCPP baseline BUSTS the Table-1 cap        (R2): 0/12
+wrote out\stepL2_dmodel_vs_baseline.json

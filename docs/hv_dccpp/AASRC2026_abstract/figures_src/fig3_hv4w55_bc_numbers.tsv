@@ -1,0 +1,31 @@
+格	圖上項目	圖上數字	檔案	欄位	JSON 值	一致	備註
+b	作業上限線 (m)	120.000	NUMBERS.json	trials.HV4W55.altitude.flown_max_agl_m + margin_to_120_m	120.0	OK	＝ up_lib.CEIL_OPS_M（已斷言相等）
+b	規劃天花板線 (m)	119.5	NUMBERS.json	trials.HV4W55.ceiling_m	119.5	OK	
+b	HV4W55R 天花板 (m)	120.0	NUMBERS.json	trials.HV4W55R.ceiling_m	120.0	OK	
+b	本架次逾越 120.000 m 累計 (s)	0.00	NUMBERS.json	trials.HV4W55.altitude.t_above_120_s	0.0	OK	
+b	HV4W55R 逾越 120.000 m 累計 (s)	354.93	NUMBERS.json	trials.HV4W55R.altitude.t_above_120_s	354.925	OK	JSON 值恰為 .5，依原始值 354.9251434323077（up_lib.time_above 逐機未捨入加總（BIN 重抽，與 up_metrics.altitude 同一函式））判定
+b	A1 實飛最高 (m)	119.622	NUMBERS.json	trials.HV4W55.altitude.flown_max_agl_per_uav.A1	119.6221	OK	
+b	A1 匯出最高 (m)	119.553	metrics.json	HV4W55.altitude.per_uav.A1.exported_max_rel_m	119.5526	OK	
+b	A1 放行時刻 (s)	656	metrics.json	HV4W55.timing.per_uav.A1.plan_t_takeoff_s	656.0	OK	
+b	HV4W55R A1 實飛最高 (m)	120.107	NUMBERS.json	trials.HV4W55R.altitude.flown_max_agl_per_uav.A1	120.1066	OK	
+b	B2 實飛最高 (m)	119.636	NUMBERS.json	trials.HV4W55.altitude.flown_max_agl_per_uav.B2	119.6356	OK	
+b	B2 匯出最高 (m)	119.533	metrics.json	HV4W55.altitude.per_uav.B2.exported_max_rel_m	119.5332	OK	
+b	B2 放行時刻 (s)	0	metrics.json	HV4W55.timing.per_uav.B2.plan_t_takeoff_s	0.0	OK	
+b	HV4W55R B2 實飛最高 (m)	120.142	NUMBERS.json	trials.HV4W55R.altitude.flown_max_agl_per_uav.B2	120.1422	OK	
+b	B3 實飛最高 (m)	119.675	NUMBERS.json	trials.HV4W55.altitude.flown_max_agl_per_uav.B3	119.6752	OK	
+b	B3 匯出最高 (m)	119.533	metrics.json	HV4W55.altitude.per_uav.B3.exported_max_rel_m	119.5331	OK	
+b	B3 放行時刻 (s)	106	metrics.json	HV4W55.timing.per_uav.B3.plan_t_takeoff_s	106.0	OK	
+b	HV4W55R B3 實飛最高 (m)	120.174	NUMBERS.json	trials.HV4W55R.altitude.flown_max_agl_per_uav.B3	120.1742	OK	
+c	違規門檻 水平 (m)	100	metrics.json	HV4W55.separation.reporter_raw.thresholds.d_sep_m	100.0	OK	
+c	違規門檻 垂直 (m)	50	metrics.json	HV4W55.separation.reporter_raw.thresholds.dh_sep_m	50.0	OK	
+c	實飛最小水平間距 (m)	100.426	NUMBERS.json	trials.HV4W55.separation.flown_exact_m	100.4256	OK	
+c	最小間距機對	B2–B3	NUMBERS.json	trials.HV4W55.separation.binding_pair	B2-B3	OK	
+c	最小點垂直差 (m)	28.394	NUMBERS.json	trials.HV4W55.separation.vert_at_min_m	28.3942	OK	
+c	B2–B3 違規數	0	metrics.json	HV4W55.separation.frames.ecef.pairs.B2-B3.n_violation_intervals	0	OK	
+c	B2–B3 對取樣數	4714	metrics.json	HV4W55.separation.frames.ecef.pairs.B2-B3.n_samples	4714	OK	
+圖說	模擬風速 (m/s)	5	NUMBERS.json	trials.HV4W55.sim_wind.spd_mps	5.0	OK	
+圖說	模擬風向（來向，°）	270	NUMBERS.json	trials.HV4W55.sim_wind.dir_from_deg	270.0	OK	
+圖說	規劃風速 (m/s)	5	NUMBERS.json	trials.HV4W55.plan_wind.0	5.0	OK	
+圖說	規劃風向（來向，°）	270	NUMBERS.json	trials.HV4W55.plan_wind.1	270.0	OK	
+圖說	規劃天花板 (m)	119.5	NUMBERS.json	trials.HV4W55.ceiling_m	119.5	OK	
+圖說	HV4W55R 天花板 (m)	120.0	NUMBERS.json	trials.HV4W55R.ceiling_m	120.0	OK	

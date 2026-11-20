@@ -1,0 +1,102 @@
+[
+ {
+  "trial": "HV4SITL16",
+  "clock_offset_s": 72.0,
+  "planned_makespan_s": 1260.4,
+  "flown_makespan_s": 1268.0,
+  "makespan_err_s": 7.6,
+  "makespan_err_pct": 0.6,
+  "planned_total_km": 30.658,
+  "flown_total_km": 31.358,
+  "total_km_err_pct": 2.28,
+  "peak_alt_max_m": 120.16,
+  "per_uav": [
+   {
+    "uav": "A1",
+    "plan_t_takeoff_s": 656.0,
+    "flown_t_takeoff_s": 660.0,
+    "plan_t_land_s": 1260.4,
+    "flown_t_land_s": 1268.0,
+    "land_err_s": 7.6,
+    "plan_km": 10.293,
+    "flown_km": 10.523,
+    "km_err_pct": 2.24,
+    "peak_alt_m": 120.1
+   },
+   {
+    "uav": "B2",
+    "plan_t_takeoff_s": 0.0,
+    "flown_t_takeoff_s": 6.0,
+    "plan_t_land_s": 533.9,
+    "flown_t_land_s": 533.0,
+    "land_err_s": -0.9,
+    "plan_km": 7.926,
+    "flown_km": 8.126,
+    "km_err_pct": 2.52,
+    "peak_alt_m": 120.12
+   },
+   {
+    "uav": "B3",
+    "plan_t_takeoff_s": 106.0,
+    "flown_t_takeoff_s": 109.0,
+    "plan_t_land_s": 894.4,
+    "flown_t_land_s": 876.0,
+    "land_err_s": -18.4,
+    "plan_km": 12.439,
+    "flown_km": 12.709,
+    "km_err_pct": 2.16,
+    "peak_alt_m": 120.16
+   }
+  ]
+ },
+ {
+  "trial": "HV4SITL15",
+  "clock_offset_s": 67.5,
+  "planned_makespan_s": 1260.4,
+  "flown_makespan_s": 1267.5,
+  "makespan_err_s": 7.1,
+  "makespan_err_pct": 0.56,
+  "planned_total_km": 30.658,
+  "flown_total_km": 31.366,
+  "total_km_err_pct": 2.31,
+  "peak_alt_max_m": 120.15,
+  "per_uav": [
+   {
+    "uav": "A1",
+    "plan_t_takeoff_s": 656.0,
+    "flown_t_takeoff_s": 659.5,
+    "plan_t_land_s": 1260.4,
+    "flown_t_land_s": 1267.5,
+    "land_err_s": 7.1,
+    "plan_km": 10.293,
+    "flown_km": 10.527,
+    "km_err_pct": 2.27,
+    "peak_alt_m": 120.11
+   },
+   {
+    "uav": "B2",
+    "plan_t_takeoff_s": 0.0,
+    "flown_t_takeoff_s": 6.5,
+    "plan_t_land_s": 533.9,
+    "flown_t_land_s": 534.5,
+    "land_err_s": 0.6,
+    "plan_km": 7.926,
+    "flown_km": 8.126,
+    "km_err_pct": 2.53,
+    "peak_alt_m": 120.14
+   },
+   {
+    "uav": "B3",
+    "plan_t_takeoff_s": 106.0,
+    "flown_t_takeoff_s": 109.5,
+    "plan_t_land_s": 894.4,
+    "flown_t_land_s": 877.5,
+    "land_err_s": -16.9,
+    "plan_km": 12.439,
+    "flown_km": 12.713,
+    "km_err_pct": 2.2,
+    "peak_alt_m": 120.15
+   }
+  ]
+ }
+]

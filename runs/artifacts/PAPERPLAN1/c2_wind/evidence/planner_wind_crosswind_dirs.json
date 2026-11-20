@@ -1,0 +1,128 @@
+{
+ "scenario": "gui_legal_120_1a2b",
+ "trial_of_record": "HV4SITL15",
+ "scenario_default_wind": [
+  5.0,
+  270.0
+ ],
+ "rows": [
+  {
+   "wind_mps": 5.0,
+   "wind_dir_from_deg": 180.0,
+   "plan_wall_s": 6.42,
+   "status": "GO_WITH_WARNINGS",
+   "makespan_s": 966.2,
+   "total_distance_km": 33.509,
+   "per_uav": {
+    "A1": {
+     "cls": "A",
+     "strips": 3,
+     "wp": 241,
+     "distance_km": 13.603,
+     "t_takeoff_s": 210.0,
+     "t_land_s": 940.4,
+     "flight_time_s": 730.4,
+     "energy_used_wh": 216.8,
+     "energy_margin_wh": 683.2
+    },
+    "B2": {
+     "cls": "B",
+     "strips": 2,
+     "wp": 171,
+     "distance_km": 7.922,
+     "t_takeoff_s": 442.2,
+     "t_land_s": 966.2,
+     "flight_time_s": 524.0,
+     "energy_used_wh": 62.6,
+     "energy_margin_wh": 191.4
+    },
+    "B3": {
+     "cls": "B",
+     "strips": 4,
+     "wp": 207,
+     "distance_km": 11.984,
+     "t_takeoff_s": 0.0,
+     "t_land_s": 746.2,
+     "flight_time_s": 746.2,
+     "energy_used_wh": 76.5,
+     "energy_margin_wh": 177.5
+    }
+   },
+   "r_eff_m": {
+    "A": 200.0,
+    "B": 120.0
+   },
+   "r_plan_m": {
+    "A": 200.0,
+    "B": 120.0
+   },
+   "validate": {
+    "passed": true,
+    "conflicts": 0,
+    "min_sep_h_m": 322.22,
+    "min_sep_v_m": null,
+    "coverage_ok": true,
+    "energy_ok": true
+   }
+  },
+  {
+   "wind_mps": 5.0,
+   "wind_dir_from_deg": 0.0,
+   "plan_wall_s": 10.78,
+   "status": "GO_WITH_WARNINGS",
+   "makespan_s": 1221.0,
+   "total_distance_km": 31.697,
+   "per_uav": {
+    "A1": {
+     "cls": "A",
+     "strips": 3,
+     "wp": 232,
+     "distance_km": 11.499,
+     "t_takeoff_s": 566.0,
+     "t_land_s": 1221.0,
+     "flight_time_s": 655.0,
+     "energy_used_wh": 203.9,
+     "energy_margin_wh": 696.1
+    },
+    "B2": {
+     "cls": "B",
+     "strips": 2,
+     "wp": 153,
+     "distance_km": 7.922,
+     "t_takeoff_s": 0.0,
+     "t_land_s": 523.9,
+     "flight_time_s": 523.9,
+     "energy_used_wh": 62.6,
+     "energy_margin_wh": 191.4
+    },
+    "B3": {
+     "cls": "B",
+     "strips": 4,
+     "wp": 219,
+     "distance_km": 12.275,
+     "t_takeoff_s": 30.0,
+     "t_land_s": 792.0,
+     "flight_time_s": 762.0,
+     "energy_used_wh": 77.4,
+     "energy_margin_wh": 176.6
+    }
+   },
+   "r_eff_m": {
+    "A": 200.0,
+    "B": 120.0
+   },
+   "r_plan_m": {
+    "A": 200.0,
+    "B": 120.0
+   },
+   "validate": {
+    "passed": true,
+    "conflicts": 0,
+    "min_sep_h_m": 96.52,
+    "min_sep_v_m": 60.0,
+    "coverage_ok": true,
+    "energy_ok": true
+   }
+  }
+ ]
+}

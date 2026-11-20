@@ -1,0 +1,105 @@
+{
+ "corrected_by_label": "update_paper",
+ "corrections": {
+  "K2": {
+   "recomputed": {
+    "float32_roundtrip_rows": [
+     {
+      "exported": "1.13",
+      "param": "TECS_CLMB_MAX",
+      "readback": "1.1299999952316284",
+      "uav": "A1"
+     },
+     {
+      "exported": "1.35",
+      "param": "TECS_SINK_MIN",
+      "readback": "1.350000023841858",
+      "uav": "A1"
+     },
+     {
+      "exported": "1.33",
+      "param": "TECS_SINK_MAX",
+      "readback": "1.3300000429153442",
+      "uav": "B2"
+     },
+     {
+      "exported": "1.19",
+      "param": "TECS_SINK_MIN",
+      "readback": "1.190000057220459",
+      "uav": "B2"
+     },
+     {
+      "exported": "1.33",
+      "param": "TECS_SINK_MAX",
+      "readback": "1.3300000429153442",
+      "uav": "B3"
+     },
+     {
+      "exported": "1.19",
+      "param": "TECS_SINK_MIN",
+      "readback": "1.190000057220459",
+      "uav": "B3"
+     }
+    ],
+    "genuinely_different_rows": [
+     {
+      "exported": "1",
+      "ok": "True",
+      "param": "Q_RTL_MODE",
+      "readback": "0.0",
+      "source": "FIRMWARE_OVERRIDE",
+      "uav": "A1"
+     },
+     {
+      "exported": "26.6",
+      "ok": "True",
+      "param": "AIRSPEED_MAX",
+      "readback": "26.0",
+      "source": "匯出檔",
+      "uav": "B2"
+     },
+     {
+      "exported": "1",
+      "ok": "True",
+      "param": "Q_RTL_MODE",
+      "readback": "0.0",
+      "source": "FIRMWARE_OVERRIDE",
+      "uav": "B2"
+     },
+     {
+      "exported": "26.6",
+      "ok": "True",
+      "param": "AIRSPEED_MAX",
+      "readback": "26.0",
+      "source": "匯出檔",
+      "uav": "B3"
+     },
+     {
+      "exported": "1",
+      "ok": "True",
+      "param": "Q_RTL_MODE",
+      "readback": "0.0",
+      "source": "FIRMWARE_OVERRIDE",
+      "uav": "B3"
+     }
+    ],
+    "identical_on_all_eight_trials": true,
+    "strict_exact": "85/96",
+    "strict_float32": "91/96"
+   },
+   "replacement": "「**到 float32 精度**之原始值比對為 91／96；逐位元為 85／96。」",
+   "why_wrong": "「嚴格」若照字面做逐位元比較會得到 85/96；91/96 只在 float32 精度下成立。",
+   "wrong": "「原始值嚴格比對 91／96」"
+  }
+ },
+ "final_text_lives_in": [
+  "runs/artifacts/PAPERPLAN1/update_paper/TABLES_ZH.md",
+  "runs/artifacts/PAPERPLAN1/update_paper/PAPER_TEXT_ZH.md"
+ ],
+ "original": "runs/artifacts/PAPERPLAN1/prep_text/Table2_skeleton.md",
+ "original_bytes": 8485,
+ "original_is_unmodified": true,
+ "original_sha256_at_correction_time": "3a773fd8a2610aebe8fdce50683529a42bd168ac761252259633d505e28ad962",
+ "recomputation_scripts": "runs/artifacts/PAPERPLAN1/update_paper/scripts/up_*.py",
+ "what_in_this_file_is_wrong": "表 2 骨架中的 91/96"
+}

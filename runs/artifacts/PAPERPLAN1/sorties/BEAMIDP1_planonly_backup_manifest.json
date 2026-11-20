@@ -1,0 +1,78 @@
+{
+ "plan/A1.param": [
+  4715,
+  "4be20445ec2254964ac4c52f96056ac6045ff26494ac9c966955695513c79888"
+ ],
+ "plan/A1.plan": [
+  114994,
+  "beaa2cde3c1cbc0e939c1db44af1a7ab83444c00ca8593a67a4e1d854582c608"
+ ],
+ "plan/A1.waypoints": [
+  14877,
+  "7945525f827796d9690605bc82b658f917e6ee27147b7dca29986ce30fe198af"
+ ],
+ "plan/A1_fence.txt": [
+  2256,
+  "cd569ad190d6cc775d210b7c49c7e2b4a72faa5eefcfeef91be6d057ddcaf89e"
+ ],
+ "plan/A1_rally.txt": [
+  287,
+  "8d8fba5dfe3a389bf4bcb8efe41f9e629638b790f053d6f2a75ea222ddc26fd1"
+ ],
+ "plan/B2.param": [
+  4713,
+  "59f379483b4815b4ff3a41a7641a8baa8e8461d3b2465577455d36a7182ef07e"
+ ],
+ "plan/B2.plan": [
+  72822,
+  "39802d976450afd8eff9d5269043bf693f77240015e5ad5b0d0e26f37caf9274"
+ ],
+ "plan/B2.waypoints": [
+  9395,
+  "11a9f2c943a06304d6624e933c333d9a38a12df3620717648c7bb47c7997a34f"
+ ],
+ "plan/B2_fence.txt": [
+  2146,
+  "14c92742066bdbefb3217a77e22d963e9b22fa9a1eff1198a23f295d984d07dd"
+ ],
+ "plan/B2_rally.txt": [
+  287,
+  "8d8fba5dfe3a389bf4bcb8efe41f9e629638b790f053d6f2a75ea222ddc26fd1"
+ ],
+ "plan/B3.param": [
+  4713,
+  "e5253ceaa911fe75128397542f61407aaa8f45a0318d6598638e561cedcd27ea"
+ ],
+ "plan/B3.plan": [
+  77098,
+  "684ef7aef35b26016efefb456edb9539b8d0a689b28d67c7bea4100031ac8ea2"
+ ],
+ "plan/B3.waypoints": [
+  9935,
+  "2022e3550495aa4b3ca10cdbdced4b0bb2597e95f003c5274f0927d8ca94cb0e"
+ ],
+ "plan/B3_fence.txt": [
+  2146,
+  "14c92742066bdbefb3217a77e22d963e9b22fa9a1eff1198a23f295d984d07dd"
+ ],
+ "plan/B3_rally.txt": [
+  287,
+  "8d8fba5dfe3a389bf4bcb8efe41f9e629638b790f053d6f2a75ea222ddc26fd1"
+ ],
+ "plan/mission_summary.json": [
+  10495,
+  "3578507e229cd1a8fda9c3405015214e5a5e56abee3cc47b8865de6129eee832"
+ ],
+ "report.json": [
+  5411,
+  "bac45863cfca2854a31ec9604b62b662348c37bf2b2ffe6d63646acbab781e70"
+ ],
+ "scenario.json": [
+  1857,
+  "5c26c7fec32472177d7ab3a1f733b9aa79f6c30dec43cb949890b939bac44554"
+ ],
+ "validation.json": [
+  146,
+  "68e750a092e8bfa80846634fa1bb712bf5ccbaf09b11a1a99cc872178561a162"
+ ]
+}

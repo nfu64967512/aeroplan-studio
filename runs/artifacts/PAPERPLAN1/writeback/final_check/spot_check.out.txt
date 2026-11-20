@@ -1,0 +1,51 @@
+OK  area km2                   brief: 1.2434 km²                         JSON: 1.2434
+OK  swath/spacing @119.5       brief: 刈幅 137.99 m、間距 96.59 m             JSON: 137.99/96.59
+OK  coverage                   brief: 99.97%（上界）                         JSON: 99.97
+OK  max AGL per uav            brief: 119.622／119.636／119.675            JSON: 119.622/119.636/119.675
+OK  abstract max AGL           brief: 119.68 m AGL                       JSON: 119.68
+OK  exported max               brief: ≤119.553                           JSON: 119.553
+OK  flown km                   brief: 10.69／8.30／12.91                   JSON: 10.69/8.30/12.91
+OK  total dist err             brief: （+4.0%）                            JSON: 4.0
+OK  per-uav dist err range     brief: 3.7%–4.7%                          JSON: 3.74–4.67
+OK  makespan                   brief: 1281.9（+1.70%）                     JSON: 1260.5→1281.9 1.70
+OK  planned sep                brief: | 105.70 |                         JSON: 105.70
+OK  flown sep/vert/samples     brief: 100.43（垂直 28.4；違規 0/7309）          JSON: 100.43/28.4/0/7309
+OK  params                     brief: 91／96、逐位元為 85／96                   JSON: 91/96 85/96 102/102
+OK  mission items              brief: 82／53／84                           JSON: 82/53/84
+OK  exported >120 @120.0       brief: 匯出 88 個航點                          JSON: 88
+OK  HV4W55R max                brief: 120.174 m                          JSON: 120.174
+OK  HV4W55R t>120              brief: 354.93 s                           JSON: 354.93
+OK  ceiling cost               brief: +0.0279 s                          JSON: 0.0279
+OK  EKF wind                   brief: 4.93–4.97 m/s                      JSON: 270deg trials 4.93–4.97 ; HV4W55S 4.89–4.97
+OK  W05-W00 flown              brief: 26.90 s                            JSON: 26.90
+OK  pred err W55 vs W05        brief: +1.70% 對 +2.43%                    JSON: 1.70 / 2.43
+OK  W55-W05 flown              brief: 47.13 s                            JSON: 47.13
+OK  A1 release delay           brief: 44.0 s                             JSON: 44.0
+OK  crosswind residual max     brief: ≤ 0.041 m/s                        JSON: 0.041
+OK  T3 SITL16 t>120            brief: | 330.14 |                         JSON: 330.13
+OK  T3 W00 makespan            brief: 1205.5→1207.9                      JSON: 1205.5→1207.9
+OK  T3 W05 makespan            brief: 1205.5→1234.8                      JSON: 1205.5→1234.8
+OK  T3 W55R makespan           brief: 1260.4→1282.2                      JSON: 1260.4→1282.2
+OK  T3 W55S makespan           brief: 966.2→996.9                        JSON: 966.2→996.9
+OK  T3 SITL16 makespan         brief: 1260.4→1255.9                      JSON: 1260.4→1255.9
+OK  T3 sep SITL16              brief: | 100.685 |                        JSON: 100.685
+OK  T3 sep W00                 brief: | 100.435 |                        JSON: 100.435
+OK  T3 sep W05                 brief: | 100.291 |                        JSON: 100.291
+OK  T3 sep W55R                brief: | 100.579 |                        JSON: 100.579
+OK  T3 sep W55S                brief: | 266.177 |                        JSON: 266.177
+OK  T3 E-W SITL16              brief: −0.019 至 +0.005                    JSON: -0.0192..0.0053
+OK  T3 E-W W00                 brief: −0.009 至 +0.009                    JSON: -0.0085..0.0086
+OK  T3 E-W W05                 brief: +9.915 至 +9.969                    JSON: 9.9149..9.9686
+OK  T3 E-W W55                 brief: +9.931 至 +9.958                    JSON: 9.9314..9.9575
+OK  T3 E-W W55R                brief: +9.934 至 +9.960                    JSON: 9.9342..9.9603
+OK  T3 N-S W55S (30 m floor)   brief: +9.512 至 +9.853                    JSON: 9.5115..9.8526
+OK  note (a) W55S E-W          brief: −0.046 至 +0.014                    JSON: -0.0460..0.0139
+OK  note (b) spawn             brief: 5.0–5.1 m                          JSON: 5.006/5.061/5.108 ; spacing delta 0.0218
+OK  note (d) SITL15 vs 16      brief: 0.025 s                            JSON: 0.025
+OK  note (e) plan-flown        brief: 4.20–5.27 m                        JSON: HV4W00 4.20, HV4W05 4.35, HV4W55 5.27, HV4W55R 4.89, HV4SITL16 4.78, HV4SITL15 4.77, HV4W55S 56.20
+OK  limit (2) margins          brief: 間距餘裕僅 0.426 m（八趟最緊 0.291 m）        JSON: 0.426 / min 0.291
+OK  limit (7) export dev       brief: +0.014 至 +0.170                    JSON: trial max range 0.0521..0.1703
+OK  limit (7) tracking         brief: +0.027 至 +0.148                    JSON: 0.0265..0.1475
+OK  limit (7) worst margin     brief: 最壞餘裕 0.303 m                       JSON: 0.3031
+OK  BEAMIDP1 sep               brief: 180.77 m                           JSON: 180.77
+50/50 brief strings located verbatim

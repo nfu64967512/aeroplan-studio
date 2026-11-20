@@ -1,0 +1,41 @@
+--- a/scripts/hv_sitl_scenarios.py
++++ b/scripts/hv_sitl_scenarios.py
+@@ -338,3 +338,38 @@
+     spawn_spread_m=10.0,
+     note="Beam-IDP 跳帶排序觸發情境：三塊 1600x1200 m（5.76 km²）、1 Pioneer + 2 HERO、"
+          "上限 119.5 m。每胞 n > k（A 6/7 > 5、B 6/7/13 > 3）⇒ 跳帶排序真的作用"))
++
++
++# ── D3：beam-IDP 的 skip-k 交錯真的會觸發的幾何（3000 × 3000 m = 9.00 km²）──
++#   與 gui_legal_120_1a2b（HV4SITL15）**逐欄相同**，只把作業區換成 3 km 見方。
++#
++#   ⚠⚠⚠ 為什麼非得另開一個情境：**gui_legal_120_1a2b 的計畫裡沒有交錯**。
++#     split_area_for_fleet 把 1560×800 m 切成 3 塊（三台 ⇒ 三塊），每塊再按 1A:2B
++#     分給兩個構型 ⇒ 每個胞只有 n=1（A）或 n=2（B）條帶；而
++#     skip_k(96.99, 200) = 5、skip_k(96.99, 120) = 3
++#     （hv_dccpp/dubins.py:619-623），且 `_skip_sequence(n, k)` 在 k ≥ n 時
++#     **等於 range(n)，也就是順序掃描**（hv_dccpp/decompose.py:689-693）
++#     ⇒ 六個胞一個都不觸發。逐胞普查見
++#     runs/artifacts/PAPERPLAN1/c3_beamidp/plan_strips_gui_legal_120_1a2b.json。
++#     3 km 見方時每架 11 條帶，六個胞有五個 n > k。
++#
++#   規劃層實測（2026-09-21，純 Python，無 SITL）：
++#     天花板 119.5 ⇒ GO_WITH_WARNINGS、makespan 3013.9 s、總航程 142.4 km、
++#                     最小水平間距 136.5 m、能量餘裕 A1 352 / B2 67.5 / B3 66.6 Wh
++#     天花板 120.0 ⇒ makespan 3842.6 s、145.3 km、190.6 m、370 / 62.3 / 53.7 Wh
++#   ⚠⚠ 同一份幾何、天花板只差 0.5 m，makespan 卻差 −21.6 % ⇒ 「壓天花板幾乎不花錢」
++#     那句話**只對 1560×800 那個胞成立**，這裡不成立。別的幾何一律重新量。
++#   ⚠ 兩架 HERO 的能量餘裕只剩 66.6 / 67.5 Wh，是目前所有情境裡最接近能量邊界的
++#     一組 ⇒ 起飛前先看 report.json 的 energy_ok，落地後比對實際用量。
++#   ⚠ speedup 5 ⇒ 牆鐘約 10 分鐘（120.0 天花板時 12.8 分），是既有情境的兩倍半。
++_add(Scenario(
++    key="gui_legal_120_1a2b_9km2", trial="HV4WIDP", path="gui", n_a=1, n_b=2,
++    areas=[{"area_id": 1, "priority": 1.0, "polygon": rect(0, 0, 1500, 1500)}],
++    coverage_altitude_m=120.0, coverage_width_m=150.0, overlap_rate=0.30,
++    waiver_max_agl_m=None,
++    min_fw_agl_m={"A": 100.0, "B": 100.0},
++    dh_band_min_m=15.0,
++    target_gsd=0.05,
++    spawn_spread_m=10.0,
++    note="D3：3000×3000 m = 9.00 km²，beam-IDP 的 skip-k 交錯真的會觸發的幾何；"
++         "與 gui_legal_120_1a2b 只差作業區大小 ⇒ 乾淨對照"))

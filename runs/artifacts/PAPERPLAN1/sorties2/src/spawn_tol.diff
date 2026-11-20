@@ -1,0 +1,139 @@
+--- runs/artifacts/PAPERPLAN1/sorties2/src/hv_sitl_run.py.before	2026-09-21 11:26:40.198163100 +0800
++++ runs/artifacts/PAPERPLAN1/sorties2/src/hv_sitl_run.py.after	2026-09-21 11:27:59.922370200 +0800
+@@ -63,6 +63,26 @@
+ SIM_WIND_DIR = float(os.environ.get("HV_SIM_WIND_DIR", "270"))
+ SIM_WIND_TURB = float(os.environ.get("HV_SIM_WIND_TURB", "0"))
+ SIM_WIND_T = float(os.environ.get("HV_SIM_WIND_T", "1"))
++# ── 生成點容差（HV_SPAWN_TOL_M）──────────────────────────────────────
++#   ⚠⚠⚠ 這道閘門要抓的是「規劃分了逐機起降站、SITL 卻全部生在 HOME」。那種不一致
++#   是 **10–20 m 級、而且會破壞兩兩間距**的（間距直接塌成 0）。2.0 m 是它的預設值，
++#   **不可以為了讓某一趟過關而改掉預設**（RUNBOOK §8 明列為禁止事項）。
++#   `HV_SPAWN_TOL_M` 是一個**必須明寫在指令列上**的覆寫，不是新的預設：
++#     不給 ⇒ 2.0 m，行為與覆寫前逐位元相同；
++#     給了 ⇒ 終端印大聲警告，且 `spawn_readback.json` 留下
++#            `tol_m` / `tol_default_m` / `tol_overridden` / `tol_source` 四欄，
++#            事後看產物就知道這一趟是放寬過的，不會靜靜地過。
++#   ⚠ 覆寫容差**不會**放掉閘門真正的功能：逐機位移向量、兩兩間距（規劃 vs 實得）
++#     與剛體平移判定是**另一組、與容差無關**的量，永遠會被計算並寫進產物；
++#     「規劃分站、SITL 沒分」會讓間距誤差爆掉，放寬容差擋不住它。
++SPAWN_TOL_DEFAULT_M = 2.0
++_SPAWN_TOL_ENV = os.environ.get("HV_SPAWN_TOL_M")
++SPAWN_TOL_M = float(_SPAWN_TOL_ENV) if _SPAWN_TOL_ENV else SPAWN_TOL_DEFAULT_M
++if not (SPAWN_TOL_M > 0.0):
++    raise SystemExit(f"HV_SPAWN_TOL_M 必須 > 0，收到 {_SPAWN_TOL_ENV!r}")
++#: 剛體平移判定：兩兩間距（實得）與規劃間距的最大差。**與 `HV_SPAWN_TOL_M` 無關**，
++#: 不提供環境變數覆寫 —— 這一項才是閘門存在的理由。
++SPAWN_RIGID_TOL_M = 0.5
+ # ── SITL 起始埠 ──────────────────────────────────────────────────────
+ #   ⚠⚠⚠ ArduPlane 的 `--instance N` 是「所有埠都加 10·N」，起始 5760。
+ #   這台機器上另一個 session 會跑 WSL 的 SITL 群，`wslrelay.exe` 把
+@@ -541,12 +561,29 @@
+             #   ⇒ 改成等**連續兩筆相隔 ≥1.5 s 且相距 ≤0.5 m**，收斂了才比對。
+             #     真正的不一致是**穩定**的，照樣會被抓出來。
+             got, keep, t0_wait, t_end = None, None, time.time(), time.time() + 90.0
++            trace: list[dict] = []
+             while got is None and time.time() < t_end:
+                 tel = lk.read_telemetry(timeout_s=1.0, require_new_position=False)
+                 la, lo = getattr(tel, "lat_deg", None), getattr(tel, "lon_deg", None)
+                 if la is None or lo is None:
+                     continue
+                 cur = (float(la), float(lo), time.time())
++                # ★ 收斂過程的原始軌跡：**只記錄、不參與判定**。用來分辨
++                #   「機體真的在地面上移動」與「只是狀態估計在漂」——前者地速會
++                #   不為零、機首可能轉，後者兩者都會是 0。位移調查需要這個。
++                def _r(v, n=3):
++                    return None if v is None else round(float(v), n)
++                trace.append({
++                    "dt_s": round(cur[2] - t0_wait, 2),
++                    "d_north_m": round((cur[0] - want[0]) * 111132.0, 3),
++                    "d_east_m": round((cur[1] - want[1]) * 111412.0
++                                      * math.cos(math.radians(want[0])), 3),
++                    "heading_deg": _r(getattr(tel, "heading_deg", None), 1),
++                    "groundspeed_mps": _r(getattr(tel, "groundspeed_mps", None)),
++                    "airspeed_mps": _r(getattr(tel, "airspeed_mps", None)),
++                    "wind_spd_est": _r(getattr(tel, "wind_speed_mps", None), 2),
++                    "wind_dir_from_est": _r(getattr(tel, "wind_dir_from_deg", None), 1),
++                })
+                 if keep is not None and cur[2] - keep[2] >= 1.5:
+                     dd = math.hypot((cur[0] - keep[0]) * 111132.0,
+                                     (cur[1] - keep[1]) * 111412.0
+@@ -566,24 +603,67 @@
+             home_rows.append({"uav": uav, "takeoff_site": site,
+                               "want_lat": want[0], "want_lon": want[1],
+                               "got_lat": got[0], "got_lon": got[1],
+-                              "err_m": round(err, 2), "ok": err <= 2.0,
+-                              "settle_s": settle_s})
++                              "err_m": round(err, 2), "ok": err <= SPAWN_TOL_M,
++                              "settle_s": settle_s,
++                              # ★ 把 err_m 拆成可檢驗的兩軸 + 方位角：一個純量擋不住
++                              #   「量值對、機制錯」的解釋（180° 順風只能解釋北向分量）。
++                              "d_north_m": round(dy, 3), "d_east_m": round(dx, 3),
++                              "err_m_full": round(err, 4),
++                              "bearing_deg": round(math.degrees(math.atan2(dx, dy)) % 360.0, 2),
++                              "settle_trace": trace})
+             print(f"  {uav} 生成點 {site or '(home)'} 誤差 {err:5.2f} m "
+-                  f"{'OK' if err <= 2.0 else '✗'}（收斂等了 {settle_s}s）")
+-            if err > 2.0:
++                  f"{'OK' if err <= SPAWN_TOL_M else '✗'}（收斂等了 {settle_s}s；"
++                  f"dN {dy:+.2f} dE {dx:+.2f} m）")
++            if err > SPAWN_TOL_M:
+                 home_bad.append(f"{uav} 差 {err:.2f} m（站 {site!r}）")
++
++        # ── 剛體平移檢查：閘門真正的理由 ──────────────────────────
++        #   「規劃分了站、SITL 沒分」會讓**兩兩間距塌掉**（10 m → 0 m）。逐機位移
++        #   容差可以被 HV_SPAWN_TOL_M 明示放寬，但這一項不行：它是這道閘門存在的
++        #   目的本身。整隊一起平移（間距守住）⇒ 閘門要抓的事沒有發生。
++        def _pair_m(alat, alon, blat, blon):
++            return math.hypot((alat - blat) * 111132.0,
++                              (alon - blon) * 111412.0 * math.cos(math.radians(alat)))
++
++        pairs = []
++        for _i, _a in enumerate(home_rows):
++            for _b in home_rows[_i + 1:]:
++                _pw = _pair_m(_a["want_lat"], _a["want_lon"], _b["want_lat"], _b["want_lon"])
++                _pg = _pair_m(_a["got_lat"], _a["got_lon"], _b["got_lat"], _b["got_lon"])
++                pairs.append({"pair": f'{_a["uav"]}-{_b["uav"]}',
++                              "planned_m": round(_pw, 4), "actual_m": round(_pg, 4),
++                              "delta_m": round(_pg - _pw, 4)})
++        rigid_max = max((abs(p["delta_m"]) for p in pairs), default=0.0)
++        rigid_ok = rigid_max <= SPAWN_RIGID_TOL_M
+         (out / "spawn_readback.json").write_text(
+             json.dumps({"rows": home_rows, "spawn_spread_m": sc.spawn_spread_m,
+-                        "tol_m": 2.0}, ensure_ascii=False, indent=1), encoding="utf-8")
++                        "tol_m": SPAWN_TOL_M,
++                        "tol_default_m": SPAWN_TOL_DEFAULT_M,
++                        "tol_overridden": bool(_SPAWN_TOL_ENV),
++                        "tol_source": "HV_SPAWN_TOL_M" if _SPAWN_TOL_ENV else "default",
++                        "pairwise": pairs,
++                        "rigid_translation": {
++                            "max_abs_delta_m": round(rigid_max, 4),
++                            "tol_m": SPAWN_RIGID_TOL_M, "ok": bool(rigid_ok),
++                            "enforced": bool(_SPAWN_TOL_ENV),
++                            "note": "兩兩間距是否守住＝『規劃分站、SITL 沒分』有沒有發生。"
++                                    "不吃 HV_SPAWN_TOL_M；容差被明示放寬時改由這一項把關"}},
++                       ensure_ascii=False, indent=1), encoding="utf-8")
++        if pairs:
++            print(f"  生成點兩兩最小間距 {min(p['actual_m'] for p in pairs):.2f} m"
++                  f"（情境設定 {sc.spawn_spread_m:.1f} m）；"
++                  f"與規劃間距最大差 {rigid_max:.3f} m "
++                  f"{'（剛體平移）' if rigid_ok else '✗ 間距沒守住'}")
++        if _SPAWN_TOL_ENV:
++            print(f"⚠⚠⚠ HV_SPAWN_TOL_M={_SPAWN_TOL_ENV}：生成點容差已由預設 "
++                  f"{SPAWN_TOL_DEFAULT_M:g} m 明示放寬為 {SPAWN_TOL_M:g} m。"
++                  f"這一趟的 spawn_readback.json 會標記 tol_overridden=true。")
++            if not rigid_ok:
++                raise SystemExit(
++                    f"生成點兩兩間距與規劃差 {rigid_max:.3f} m > {SPAWN_RIGID_TOL_M:g} m"
++                    f"⇒ 不是整隊平移，放寬容差不適用（這正是本閘門要抓的不一致）")
+         if home_bad:
+             raise SystemExit("生成點與規劃的起飛站不一致：" + "；".join(home_bad))
+-        _gaps = [math.hypot((a["got_lat"] - b["got_lat"]) * 111132.0,
+-                            (a["got_lon"] - b["got_lon"]) * 111412.0
+-                            * math.cos(math.radians(a["got_lat"])))
+-                 for i, a in enumerate(home_rows) for b in home_rows[i + 1:]]
+-        if _gaps:
+-            print(f"  生成點兩兩最小間距 {min(_gaps):.2f} m"
+-                  f"（情境設定 {sc.spawn_spread_m:.1f} m）")
+ 
+         # ── 參數讀回 ───────────────────────────────────────────────
+         rows, bad = [], []

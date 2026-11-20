@@ -1,0 +1,1041 @@
+{
+ "meta": {
+  "source": "scripts/wsl/sar_swarm_patches/contract_table.py",
+  "source_sha1": "e4c949d4413fd95f3eb48df4c62bfc4afa69acab",
+  "n_contracts": 79,
+  "n_invariants": 26,
+  "generator": "matlab/mgs/bridge/export_contract_table.py",
+  "note": "GENERATED FILE. Edit contract_table.py and re-run the generator; do not hand-edit this JSON."
+ },
+ "table": [
+  {
+   "name": "tgo_from_predictor",
+   "source": "node",
+   "lo": 0.0,
+   "hi": 1.0,
+   "foam": null,
+   "why": "0 = 靜態幾何配速 d/pace;1 = 點質量積分器正向積分。它決定放行時刻表、v_req 與 miss 出口的共同上游。",
+   "evidence": "RPY3:開著它跑,而 _tgo_of 的快取被牆鐘/開機時鐘混寫 ⇒ 共同命中時刻被排到 56 年後 ⇒ 時刻表放行永不成立、俯衝段零時間權限;散布 78.5 s,同組態另一趟 12.1 s(重現性全失)"
+  },
+  {
+   "name": "tgo_ring_transit",
+   "source": "node",
+   "lo": 0.5,
+   "hi": 1.0,
+   "foam": null,
+   "why": "把「還要多久才進得了 pushover 環」併入 t_go。放行是**先空間閘門、後時間時刻表**,而 t_go 若只算直飛紅心的時間,共同命中時刻就會低估受空間限制那一架真正需要的時間。",
+   "evidence": "RPZ1(2026-08-15):UAV2 在環外 851 m,時刻表早已輪到卻不能放行、等了 37 s ⇒ 放行時刻差 +37.2 s ⇒ 散布 36.2 s,而同趟俯衝耗時差只有 −1.0 s(下游已修好,問題整個搬到上游)。文獻依據:Bin et al. 式 49 —— 可行命中時刻下界由**當下可飛的最短幾何航程**決定,不是直線距離"
+  },
+  {
+   "name": "state_max_age",
+   "source": "node",
+   "lo": 0.2,
+   "hi": 2.5,
+   "foam": 0.0,
+   "why": "位置新鮮度看門狗(s)。過期就**主動停發**姿態,讓 GUIDED_TIMEOUT 觸發。",
+   "evidence": "⚠️⚠️ 它防的**不是**節點停擺 —— 那種情況本來就已經逾時:32/32 趟俯衝段的最大取樣間隔都恰好 3.700 s > GUIDED_TIMEOUT 3.0 s。它防的是leader-state-freeze 那一種:節點還在跑、位置凍住,20 Hz 照送 ⇒ 逾時**永遠不會到** ⇒ 飛機用一個固定姿態飛進地面,全程零告警。上界 2.5 綁在 GUIDED_TIMEOUT 3.0 之下:設得比它高,停發之後飛控早就自己逾時了,這道閘門等於不存在。"
+  },
+  {
+   "name": "att_eas_floor",
+   "source": "node",
+   "lo": 28.0,
+   "hi": 39.0,
+   "foam": 0.0,
+   "why": "姿態通道的 EAS 地板(m/s)。低於它就停發姿態、交還 TECS。⚠️ 是 EAS 不是地速 —— 另有不變式檢查量綱。原廠 plane-jet 組態 32。",
+   "evidence": "**DERIVED**:下界 28 高於飛控 AIRSPEED_MIN=25(低於它的速度指令被 MAV_RESULT=4 整發拒收,地板來不及作用);上界 39 低於新的 vmin=40(地板 ≥ 導引自己的速度下限 ⇒ 守環時就一直低於地板 ⇒ 姿態通道全程被擋)。兩側各由 `_inv_eas_floor_above_airspeed_min` 獨立再擋一次。**MEASURED**(2026-08-27,油門釘死、60 s 穩態、sd 0.013):原廠 plane-jet 的最小可維持平飛 EAS 是 **25.6** ⇒ 採用值 32 有 25% 餘裕;同機體的俯衝 EAS 物理上限是 105.5×1.30 = 137(T/W=1.4286 的垂直俯衝)。⚠️ 舊 evidence 寫的「32 趟俯衝段 EAS 最小 114.6」是**低阻機體**的數字,整段不可延用 —— 那個值本身就高於原廠機的俯衝上限。"
+  },
+  {
+   "name": "release_at_ring",
+   "source": "node",
+   "lo": 0.0,
+   "hi": 1.0,
+   "foam": null,
+   "why": "1 = 飛機 d ≤ ring_of(i) 當拍就放行,完全不讀 dive_T;0 = 舊的時刻表放行。",
+   "evidence": "RRB(2026-08-16,7 趟 14 架次):抵環到放行隔了中位 32.1 s,期間往內漂到中位 3417 m、掉高度中位 970 m。放行前置角 σ 中位 130.2°、最小 73.7°,而抵環當拍 σ 是 0.1°(14/14 落在 0.0–0.3°)⇒ **σ≈0 的放行從未被取樣過**。純 PN 幾何:σ=0 時 2 s 耗時預算容許 σ 擺動 ±125°,σ=125° 只剩 ±1.1°"
+  },
+  {
+   "name": "dive_from_runup",
+   "source": "node",
+   "lo": 0.0,
+   "hi": 1.0,
+   "foam": null,
+   "why": "1 = 內切(runup)一開始就開始 DIVE 倒數,不在環上等 ⇒ hold_ring 整段消失。",
+   "evidence": "RRB:hold_ring 段指令 vmin=95 但實飛地速中位 142(EAS 換算後仍差 +23,是 straight 段的 10 倍);段長只有 25 s,而該機體從 EAS 138 減到 95 需要約 100–140 s(THR_MIN=0、無擾流板,實測減速率 −0.12 m/s²)⇒ **守環在物理上不可能完成它的任務**,只是把飛機往環內送 3.1 km"
+  },
+  {
+   "name": "perch_settle",
+   "source": "node",
+   "lo": 1.0,
+   "hi": 200.0,
+   "foam": null,
+   "why": "抵環後等高度收斂的逾時秒數。dive_from_runup 開著時它同時是**陡俯角參數的重送視窗長度**(視窗 × 20 Hz = 重送次數)。",
+   "evidence": "這一列以前不在契約表、也不在生效值 log(對過 RRB1 的 tot_standby.log)。而 PTCH_LIM_MIN_DEG=-80 / TECS_SPDWEIGHT / THR_MAX 就跑在這個視窗裡,原始碼註解自己寫著「送出去了沒吃進去是已知會發生的」⇒ 視窗一塌就是靜默失效,而那組開關是 0/6 變 4/6 的關鍵"
+  },
+  {
+   "name": "perch_band",
+   "source": "node",
+   "lo": 0.0,
+   "hi": 500.0,
+   "foam": null,
+   "why": "高度收斂帶(m)。⚠️ 它量的是 |z − perch_of(i)|,但飛機被指到的是 hold_alt_of(i) —— HOLD_ALT>0 時這個閘門**永遠不成立且完全靜默**。",
+   "evidence": "RRB 的 hold_alt=0 所以現在看不出來;登記進契約表是為了讓下一個人改 HOLD_ALT 時至少看得到這一列"
+  },
+  {
+   "name": "wait_goto_radius",
+   "source": "node",
+   "lo": 0.0,
+   "hi": 1.0,
+   "foam": null,
+   "why": "1 = wait 段也用 goto_radius(飛過去);0 = 用 hold_radius(繞圈)。",
+   "evidence": "RRD(2026-08-18,16 架次)的真根因是**指令從未送達**:runin→wait 切換時`_goto` 的 lat/lon/alt 逐位元相同、只有 radius 變,而變更偵測器不看 radius ⇒ moved=False ⇒ DO_REPOSITION 沒送出。hold_radius 要等 30 s keepalive 才生效,⇒ 起不起彎由相位隨機決定。實測兩個母體:沒吃到補發 11 架直線、命中 10/11;吃到補發 5 架硬彎、命中 0/5"
+  },
+  {
+   "name": "weave_aim_min_m",
+   "source": "node",
+   "lo": 100.0,
+   "hi": 20000.0,
+   "foam": 0.0,
+   "why": "ALIGN 蛇形瞄準點的**最小**距離(m)。0 = 逐位元舊行為(寫死 120 m)。實際距離 = max(weave_aim_min_m, weave_aim_frac × d)。",
+   "evidence": "寫死的 120 m 落在物理最小轉彎半徑之內:110 m/s + 80° ⇒ V²/(g·tanφ) = 218 m(157 m/s 是 443 m)⇒ 飛機到不了那個點,L1 就拿 goto_radius=30(×eas2tas² 1.365 ⇒ ~41 m)去繞圈,而 41 m 的圈需要 atan(V²/gR)=88.1° 坡度 ⇒ 被 ROLL_LIMIT_DEG=80 夾住。實測 FORMD1/FORME1 去重後:weave 段 p50 60.8-61.1°、p90 78.9-79.2°、38-39% 超過 71.6°;同一架在 straight 段只有 p50 0.1°。同檔 hold_ring 段(已在飛)用的就是 max(300.0, 0.5*d)"
+  },
+  {
+   "name": "weave_aim_frac",
+   "source": "node",
+   "lo": 0.05,
+   "hi": 0.9,
+   "foam": 0.0,
+   "why": "瞄準點距離佔「到 slot 距離 d」的比例。節點內夾在 [0.05, 0.9]。",
+   "evidence": "⚠️ 不可以 ≥1:ALIGN 末段 d 變小時,瞄準點會落到 slot **後方**,而 bearing(pos→slot) + sign*θ 這個構造會把飛機往**離開** slot 的方向送,距離越遠偏得越多 ⇒ 無界發散,且完全靜默(mode 欄照樣寫 weave)。上界 0.9 是為了讓瞄準點始終落在自己與 slot 之間"
+  },
+  {
+   "name": "auto_mission",
+   "source": "node",
+   "lo": 0.0,
+   "hi": 1.0,
+   "foam": null,
+   "why": "1 = ALIGN 段改由**事前規劃的 AUTO 任務航線**驅動,飛控自己飛到攻擊發起點盤旋,全員到齊後才交回 GUIDED 做實時 PN 導引;0 = 逐位元舊行為(GUIDED 逐點下令 + 守環)。⚠️ 這一顆決定「這一趟是哪一個架構飛的」,兩個架構的資料**不可混在一起分析** —— R0 的來源完全不同(設計量 vs 湧現量)。⚠️ 餵值路徑斷掉會靜默退回舊架構(退回值合法),擋它的是`requested_vs_effective`(ENV_FOR 的 AUTO_MISSION),不是這一列。",
+   "evidence": "R0 分箱(98 架次 / 49 趟 n=2):R0 0–4000 殘餘中位 167.4 m、71.4% 超標;R0 7000+ 殘餘中位 17.2 m、**0.0%** 超標,而且分箱是單調的。現行 R0 是湧現量:守環從來沒守過(指令 95 m/s / 1300 m 圈,實飛 124–186 m/s / 5867 m ⇒ 直穿 3.2 km),GMODE1 抽到 3447/3797 m = 全母體第 2.0/5.1 百分位 ⇒ 殘餘 174/167 m"
+  },
+  {
+   "name": "auto_ip_r",
+   "source": "node",
+   "lo": 0.0,
+   "hi": 30000.0,
+   "foam": null,
+   "why": "攻擊發起點距紅心的距離(m)。**0 = 用本機自己的 pushover 環半徑** `ring_of(i)`(現行 auto_ring 之下 ≈ perch_alt/tan(dive_angle) = 3100/tan27° ≈ 6084 m)。⚠️ 保留 0 的語意是因為環半徑**逐機不同**(perch_step > 0 時),一個純量表達不了它。",
+   "evidence": "這一顆就是 R0 分箱表的自變數 —— 要買到「0% 超標」那一格就設 ≥7000,或把 dive_angle 放緩讓 auto_ring 自己算到那裡(24° ⇒ 6960、23° ⇒ 7302)"
+  },
+  {
+   "name": "auto_ip_alt",
+   "source": "node",
+   "lo": 0.0,
+   "hi": 12000.0,
+   "foam": null,
+   "why": "攻擊發起點的盤旋高度(m,相對 HOME)。0 = 用 `perch_of(i)`(既有的 perch_alt 高度階梯)。",
+   "evidence": "與 hold_alt 同一個作用點:交接高度 γ = atan(h/gate) 是命中與否的直接上游。0 保留既有行為,要動交接高度改這一顆而不是動環幾何"
+  },
+  {
+   "name": "auto_ip_reach",
+   "source": "node",
+   "lo": 200.0,
+   "hi": 20000.0,
+   "foam": 0.0,
+   "why": "判定「已抵達攻擊發起點」的半徑(m)。⚠️⚠️ **必須 > auto_loiter_r**,見不變式 `_inv_auto_reach_above_loiter`。",
+   "evidence": "飛機在攻擊發起點**盤旋**,離圓心的距離恆等於盤旋半徑 ⇒ reach ≤ loiter_r 時 `d < reach` **數學上永遠不成立** ⇒ all-n 閘門等到逾時。這與 [[kill-deadlocks-the-sortie]] 是同一類失效:ALIGNW1 因為 killed 沒人讀,四道 all-n 閘門變成不可能成立,等了 1551 s"
+  },
+  {
+   "name": "auto_loiter_r",
+   "source": "node",
+   "lo": 1500.0,
+   "hi": 12000.0,
+   "foam": 0.0,
+   "why": "任務 NAV_LOITER_UNLIM 的盤旋半徑(m)。⚠️⚠️ **不要沿用 hold_radius(1300)** —— 那個值從來沒有被飛出來過。",
+   "evidence": "V²/(g·tanφ):157 m/s + 45° ⇒ 2513 m,而 hold_radius=1300 的指令實測飛成 5867 m 的圈([[hold-ring-is-unflyable]])—— 我們**以為**自己指定了半徑,實際上飛機用它做得到的半徑在繞,而放行 R 因此散到 3140 m。同一個病也在 `_reposition` 的 param3=0 那條路徑上發作過(退回 WP_LOITER_RAD 再乘 eas2tas² ⇒ 實際 2030 m)"
+  },
+  {
+   "name": "auto_transit_r",
+   "source": "node",
+   "lo": 0.0,
+   "hi": 60000.0,
+   "foam": null,
+   "why": "選配的進場航點距紅心多遠(m)。0 = 不放,直接飛攻擊發起點。",
+   "evidence": "用途是「從外側進入盤旋」:從內側進入時飛控會先外飛再回頭,而那一段的高度/航向都不受控。要用就設成明顯大於 auto_ip_r 的值"
+  },
+  {
+   "name": "auto_upload_timeout",
+   "source": "node",
+   "lo": 5.0,
+   "hi": 300.0,
+   "foam": null,
+   "why": "單機任務上傳的總時限(s)。逾時 = 大聲失敗,不靜默退回。",
+   "evidence": "MISSION 協商經過 MAVProxy 分流鏈路,而該鏈路的既有病史是「送出去了沒吃進去是已知會發生的」(swarm_sitl_up.sh 自己記著)。逾時要能被觀測,不能無限等"
+  },
+  {
+   "name": "auto_mode_timeout",
+   "source": "node",
+   "lo": 3.0,
+   "hi": 120.0,
+   "foam": null,
+   "why": "送出模式切換後,等 HEARTBEAT 回報該模式的時限(s)。逾時會重送並印 ERROR。",
+   "evidence": "「送出去 ≠ 生效」在本專案是有前科的:DO_CHANGE_SPEED 被整發拒收 49 次而沒有任何一行 log。HEARTBEAT.custom_mode 是唯一的讀回管道"
+  },
+  {
+   "name": "auto_fallback_guided",
+   "source": "node",
+   "lo": 0.0,
+   "hi": 1.0,
+   "foam": null,
+   "why": "任務上傳失敗時是否退回 GUIDED 逐點下令。⚠️⚠️ 預設 0 = **大聲中止**。",
+   "evidence": "退回看起來比較穩健,但它把「新架構沒生效」變成一趟看起來正常的航次 —— [[two-launcher-paths-differ]] 白跑 2.5 小時、[[jet-conversion-never-applied]] 幾十趟跑原廠阻力,都是這個形狀"
+  },
+  {
+   "name": "nz_closed_loop",
+   "source": "node",
+   "lo": 0.0,
+   "hi": 1.0,
+   "foam": null,
+   "why": "1 = 縱向送「會產生所要 n_z 的姿態角」;0 = 現行的「γ 指令 + 當下 α 的低通估計」。⚠️ 0 是逐位元同 RRE 的組態。",
+   "evidence": "RRE 全批 dataflash(14 架次、俯衝 10155 拍):後段實得 n_z 中位 0.94、夾制天花板 3.0 ⇒ 約 2 g 的權限從未被要求過;實得 |γ̇| 中位 0.56 °/s 而 3 g 只需要 6.37 °/s(差 10.6 倍)。而下游沒有一段飽和:升降舵 max 26.8% 行程、碰軌 0.0000%、PIDP.Dmod 全 1.000 ⇒ 瓶頸不在內迴路"
+  },
+  {
+   "name": "nz_clamp_after_floor",
+   "source": "node",
+   "lo": 0.0,
+   "hi": 1.0,
+   "foam": null,
+   "why": "1 = LOS 地板之後**再夾一次** n_z;0 = 現行順序(地板繞過夾制)。⚠️ 與 nz_closed_loop **互相獨立**,才能做單變數對照。",
+   "evidence": "現行是「nz 夾制 → LOS 地板取 min」⇒ 地板輸出完全繞過 [nz_min, nz_max]。實得 n_z 在 14/14 架次都跌破 −1.0 下限(每趟 1.8–3.5 s、合計 35.15 s、最低 −3.12 g),而 +3.0 那一側只有 1/14 越界 —— min() 只會把指令推得更負,這個不對稱正是「地板排在夾制之後」的指紋"
+  },
+  {
+   "name": "nz_max_g",
+   "source": "node",
+   "lo": 0.5,
+   "hi": 6.0,
+   "foam": null,
+   "why": "PN 縱向過載的權限上界(g)。⚠️ 先前是**寫死在式子裡的 3.0**,沒有任何一層看得見它,契約表也管不到。",
+   "evidence": "m1_ticks.csv(RRE 11549 拍)未夾制需求:中位 0.76、≥3.0 只 2.20%、≤−1.0 佔 2.25% ⇒ 夾制只在 4.45% 的拍上生效,限制的是需求本身。姿態介面實得 |θ̇| p99 = 11.0 °/s ⇒ 10 °/s @ V=192、γ=−35° give n_z 4.24 g ⇒ 介面約能給 4 g,上界開到 6 之外沒有物理依據"
+  },
+  {
+   "name": "aero_cl_alpha",
+   "source": "node",
+   "lo": 3.0,
+   "hi": 12.0,
+   "foam": null,
+   "why": "升力線斜率(1/rad)。n_z → α 換算的分母,直接放大/縮小送出去的姿態角。",
+   "evidence": "RRE 14 個 dataflash、n=38566(巡航 28411 + 俯衝 10155)以體軸比力 C_N = −IMU.AccZ·m/(q·S) 辨識:C_Lα = 6.9503、R² = 0.999965、殘差 sd 0.00046;對照 SIM_Plane.h 源碼真值 c_lift_a = 6.9 ⇒ 誤差 +0.73%。逐架次散布 6.932–7.005,巡航/俯衝差 0.2%(無 Mach 依賴)"
+  },
+  {
+   "name": "aero_cl_zero",
+   "source": "node",
+   "lo": 0.2,
+   "hi": 1.2,
+   "foam": null,
+   "why": "零攻角升力係數。⚠️⚠️ **不可省**:它是常數偏移、與 q 無關、不會自己消掉。",
+   "evidence": "逐拍實測(10155 拍俯衝):含 C_L0 反解 vs 實飛 α 的 |誤差| 中位 0.011°;漏掉 C_L0 是 +4.639°(= C_L0/C_Lα = 4.650°),換算成指令 n_z 是 +20.7 g ⇒ 送出去就是整發被拒或把飛機撕了。源碼真值 c_lift_0 = 0.56,辨識 0.56381"
+  },
+  {
+   "name": "aero_cl_max",
+   "source": "node",
+   "lo": 1.0,
+   "hi": 5.0,
+   "foam": null,
+   "why": "失速升力係數。**只用來算 nz_max_true 這一欄**,不進指令鏈(閉迴路開啟時另作為物理硬停)。",
+   "evidence": "SITL liftCoeff() 的 C_Lmax = 3.2503 @ α=+23.49°;偏離線性支 1% 要到 α = +21.83°/−18.97°,而實際走過的 α 是 −11.62…+0.36 ⇒ 線性度有 4 倍餘裕。由它算出的俯衝段 nz_max_true 中位 120.4 g ⇒ 寫死的 3.0 只是 2.49%"
+  },
+  {
+   "name": "aero_q_sigma_exp",
+   "source": "node",
+   "lo": 1.0,
+   "hi": 2.0,
+   "foam": null,
+   "why": "動壓 q = ½·ρ0·σ^k·V² 的密度比次方 k。**2 = SITL 本體**(qbar 用 ρ(h)×EAS²);1 = 教科書 qbar,接 Gazebo/實機時要改。",
+   "evidence": "SIM_Aircraft.cpp:1417 把 airspeed 存成 EAS,SIM_Plane.cpp:384 卻拿它配 ρ(h) ⇒ 實得 q_eff = q_true×σ。證據:k = C_L_meas/C_L_sitl,median(k/σ) = 1.0078、corr(k,σ) = +0.9974、corr(k,alt) = −0.9970。用錯的代價(n_z=3.0 @ V=192):3400 m 少指令 0.86 g、地面歸零 —— 一條隨高度的系統性梯度,剛好吃掉要買的 2 g 的 43%,而且全程無告警"
+  },
+  {
+   "name": "itcg_on",
+   "source": "node",
+   "lo": 0.0,
+   "hi": 1.0,
+   "foam": null,
+   "why": "命中時間控制的總開關。純 PN 的式子裡沒有時間這個量 ⇒ 保證撞到、不保證何時撞到。",
+   "evidence": "RQA2:兩架放行幾何幾乎相同(5120m/31° 與 5590m/29°、放行差 −2.5s),PN 仍自己散開成 γ −27.1° vs −32.4°、耗時 55s vs 33s(差 21.2s)"
+  },
+  {
+   "name": "itcg_gain",
+   "source": "node",
+   "lo": 0.2,
+   "hi": 5.0,
+   "foam": 0.0,
+   "why": "ITCG 橫向偏置增益 K(無因次,純修整係數):反解 σ_need 後抵銷 a_PN = N·vh·V·sin σ_need / R;1.0 = 正好抵銷。",
+   "evidence": "⚠️ 泡棉禁區 0.0 = 「開了但沒效果」—— 這是最難查的一種失效:契約顯示 itcg_on=1、log 一切正常、飛出來只是沒改善"
+  },
+  {
+   "name": "itcg_a_max_g",
+   "source": "node",
+   "lo": 0.1,
+   "hi": 1.0,
+   "foam": 0.0,
+   "why": "ITCG 橫向偏置上限(g)。避免時間項壓過 PN 的命中通道。⭐⭐ 這是時間權限的**唯一**硬上界:n=32 幾何重放給出 0.4 ⇒ +1.45 s、1.0 ⇒ +10.59 s,而 n=8 的需求是 7.3–9.0 s。",
+   "evidence": "同上:0.0 等於把偏置整個夾成 0,開關開著也不會有任何效果"
+  },
+  {
+   "name": "mpng_on",
+   "source": "node",
+   "lo": 0.0,
+   "hi": 1.0,
+   "foam": null,
+   "why": "1 = 時間項改走 Jiang 2021 MPNG 的 Eq.(41)(a_ε + a_s);0 = 現行的 surplus/σ_need 反解。⚠️ 只換**橫向時間項**,a_PNG 與整個縱向通道一行都沒動。",
+   "evidence": "⚠️⚠️ ITCG 那條通道 80,760 個樣本 itcg_accel **全零** —— 從來沒承載過訊號。列進表是為了讓「這一輪到底跑的是哪一條律」在事後看得見;擋值的是不變式,不是這個區間"
+  },
+  {
+   "name": "mpng_k_eps",
+   "source": "node",
+   "lo": 0.0,
+   "hi": 0.01,
+   "foam": null,
+   "why": "MPNG Eq.(41) 的 K_ε(1/(m·s)):a_ε = K_ε·N·V²·sin(σ)·ε_T。0 = 走論文建議式 40/(r₀·tgo₀)(放行當拍鎖存)。",
+   "evidence": "⚠️ 論文的建議值是他們 330 m/s **等速**、r₀=10 km、tgo₀≈30 s 的算例值;代進我們的工作點 K≈1.41e−4 ⇒ ε_T 只要 0.27 s 就撞上 0.4 g 夾制 ⇒ 這條律整段貼在夾制上、退化成 bang-bang。真正的自變數是 itcg_a_max_g,不是這兩個增益 —— 但那個結論只有在增益**真的餵進去**時才有意義。"
+  },
+  {
+   "name": "mpng_k_s",
+   "source": "node",
+   "lo": 0.0,
+   "hi": 0.01,
+   "foam": null,
+   "why": "MPNG Eq.(41) 的 K_s(1/(m·s)):a_s = K_s·N·V²·sign(σ)·ε_T。0 = 同上走建議式。",
+   "evidence": "⚠️ a_s 是**不連續**項,大小與 σ 無關 —— 原文行 843-844 讓它存在的唯一理由是解 σ₀=0 的啟動問題。我們俯衝段 σ 中位只有 0.2° ⇒ 幾乎整段貼在零附近,正是它抖振最兇的區(側向鎖存 itcg_side 就是對策)。設成 0 以外的值等於改抖振量級,必須看得見。"
+  },
+  {
+   "name": "tgo_predict_dt",
+   "source": "node",
+   "lo": 0.05,
+   "hi": 2.0,
+   "foam": null,
+   "why": "積分節流(秒)。太大 ⇒ t_go 走階梯;太小 ⇒ 每 tick 跑 500 步積分。",
+   "evidence": "節流靠快取,而快取正是 RPY3 時基污染的載體 —— 這一欄必須看得見"
+  },
+  {
+   "name": "predict_hz",
+   "source": "node",
+   "lo": 1.0,
+   "hi": 20.0,
+   "foam": null,
+   "why": "影子預測頻率。⚠️ 下界刻意訂在 1.0 而不是 0.0:節點端 0.0 是合法的「關閉」語意,但**量測航次不准關**——RPY3 證明了「拿預測器致動卻不觀測它」會讓時刻表壞掉整整一批而無人察覺。要真的關就得顯式改契約。",
+   "evidence": "S9 做好後從沒接線 ⇒ 一路吃預設 0.0 ⇒ _predict_tick 第一行就 return、pred_* 五欄整批空白,而 early-return **不發任何告警**;校準過的預測器到 RPY3 為止一趟都沒真的跑過"
+  },
+  {
+   "name": "dive_angle_max",
+   "source": "node",
+   "lo": null,
+   "hi": 38.0,
+   "foam": null,
+   "why": "放行的幾何守門員:所需俯角 atan(h/d) 一到這個上限就立刻放行,不等時刻表。⚠️ 0.0 = 關閉,**目前刻意維持關閉**:它掛在 phase==DIVE 分支裡、不在 PERCH 段跑,而 RPY3 的 UAV1 在 phase 翻 DIVE 時 γ_req 已經 41.5°、接下來在 wait 模式外飛到 33.5° 才放行 ⇒ 設 34 會在 41.5° 立刻觸發,把它放進比等待更差的幾何。正確修法是把 γ_req 檢查前移到 PERCH。上界 38 擋的是「設得比機體天花板還高」= 等於沒設。",
+   "evidence": "RPY3:預設 0.0(關閉)⇒ 放行只剩 perch_settle 25 s 逾時、完全不看幾何 ⇒ UAV1 在所需俯角 41.5°(> 實測天花板 37–40°)時被放行 ⇒ 外飛 7024 m、洩掉 1900 m 高度、淺滑翔 90 s ⇒ 俯衝 137.8 s vs 同趟另一架 59.4 s;四架次 (γ_req, 耗時) = (23.0,59.4)(23.2,49.4)(28.4,61.5)(41.5,137.8)"
+  },
+  {
+   "name": "pn_vmax",
+   "source": "node",
+   "lo": 90.0,
+   "hi": 130.0,
+   "foam": 80.0,
+   "why": "PN 油門律的速度上限(EAS)。`v_req = max(45, min(pn_vmax, R/t_rem))`。原廠 plane-jet 組態 105。",
+   "evidence": "⭐ 2026-08-28 隨機體重訂(舊區間 [150,260] 綁的是低阻機體的 210)。**MEASURED**:原廠 plane-jet 平飛天花板 105.5 EAS(油門釘死、60 s 穩態、sd 0.013、與高度無關)⇒ 採用值 105 就**貼在**天花板上,再往上只是把指令送進一個拿不到的區間。**前科**:低阻機體 pn_vmax=210 在 THR_MAX=100 之下只給到地速 193.4([[terminal-204-is-groundspeed]]),而那一整批沒有任何一層會告訴你指令沒被跟隨。**DERIVED**:上界 130 之上改由`_inv_speeds_within_aero_ceiling` 按剖面接手 —— 區間刻意留在天花板上面,好讓那條不變式**證明得了自己會開火**"
+  },
+  {
+   "name": "SCALING_SPEED",
+   "source": "fc",
+   "lo": 25.0,
+   "hi": 45.0,
+   "foam": null,
+   "why": "舵面速度縮放的基準速度。Attitude.cpp::calc_speed_scaler():`speed_scaler = SCALING_SPEED / aspeed` ⇒ 所有俯仰/滾轉 PID 的**有效增益 ∝ SCALING_SPEED/空速**。plane-jet.parm 出廠值 40,而 plane-jet 的 PTCH_RATE/RLL_RATE 就是在該值下調出來的。",
+   "evidence": "⭐⭐⭐ 2026-08-29 **MEASURED**:15 是巡航高度振盪的**唯一**原因。充分 —— 原廠(安靜,俯仰 sd 0.55)只加 SCALING_SPEED 15 ⇒ 11.07;必要 —— 原廠 + jet_fast 其餘 18 項全加、只留 40 ⇒ 0.59(仍安靜);劑量 —— 15→11.07 / 20→1.17 / 25→0.29 / 30→0.40 / 35→0.50 / 40→0.55,單調;交付 —— 完整組態 + 40,v52/v60/v70 全部 0.37–0.73,高度 sd 由 21 m 降到 0.06–0.11 m。機制:內迴路 NavPitch→Pitch 在振盪頻率上,15 給 −58.5°(落後 1.75 s)、40 給 −24.9°(0.73 s),多 33.6° 相位落後 餵給交越頻率 0.2 rad/s 的 TECS 外迴路。⚠️⚠️ 這條**取代** 2026-08-28 的 DECISION(上界 20、理由「40 沒有人飛過、一次只動一個變數」)。那條裁決的前提已不成立:40 現在有 10 輪 × 8 格的拋棄式 SITL 資料,而它引用的『升降舵只用 ±12% 行程 ⇒ 增益不缺權限』**把權限當成了穩定裕度** —— 飛機正是在只用 ±12% 行程時振盪 ±8°。⚠️ **下界 25 是新的鎖**:它擋的是「有人把它改回 15」,而那是這條值層級鎖真正要防的方向(舊的上界 20 反而把正確值鎖在外面)。⚠️ 未涵蓋:俯衝段走 SET_ATTITUDE_TARGET 也吃這個乘子,歸因實驗只覆蓋巡航/盤旋,終端命中與散布必須用完整 STOT 航次驗證"
+  },
+  {
+   "name": "SWARM_AIRFRAME",
+   "source": "shell",
+   "lo": 1.0,
+   "hi": 2.0,
+   "foam": null,
+   "why": "這一趟飛的是哪一具機體:stockjet(1.0)= 原廠 plane-jet、無低阻改裝(沒有 JET_CDP ⇒ 沒有 jet_model.json、model 字串是裸的 plane-jet;沒有 JET_THRMAX ⇒ THR_MAX 留在 100、TRIM_THROTTLE 36);lowdrag(2.0)= JET_CDP/JET_THRMAX 改裝機體。⚠️ 它決定 `AIRFRAME_CEILING_EAS`,而那是`_inv_speeds_within_aero_ceiling` 唯一的判準。",
+   "evidence": "先前**全表 78 列沒有任何一列描述機體**,唯一的 SOURCE_SHELL 列是 READY_AGL;配對只靠 swarm_ros2_up.sh:696-746 去 grep `pgrep -a arduplane` 的 --model 參數裡有沒有 `:...json` 子字串。量到的後果三條:① JET=1 而 JET_CDP 為空時 jet_fast.parm 仍**無條件**寫出 AIRSPEED_MAX 230 / AIRSPEED_CRUISE 135 ⇒ 飛控讀回與改裝機**逐位元相同** ⇒ evaluate() 零違規,而機體物理頂速只有 ~98.5;② 該檢查只讀**第一個** arduplane 行程 ⇒ 混編機隊照樣過;③ AIRFRAME_FORCE=1 連成功那一行也跳過 ⇒ log 裡零機體證據,而 rep_interactive.sh:466 沒有守衛地 grep 它"
+  },
+  {
+   "name": "vmin",
+   "source": "node",
+   "lo": 30.0,
+   "hi": 60.0,
+   "foam": 14.0,
+   "why": "同步迴路的速度下限(EAS)。原廠 plane-jet 組態 40。",
+   "evidence": "⭐ 2026-08-28 重訂(舊區間 [80,120] 綁的是低阻機體的 vmin=95)。**MEASURED**(2026-08-27,真 SITL、油門釘死、60 s 穩態、sd 0.013):原廠 plane-jet 的最小可維持平飛 EAS 是 **25.6**。**DERIVED**:下界 30 同時高於飛控 AIRSPEED_MIN=25 與那個實測邊界;上界 60 低於自動配速 0.8×dive_speed = 80(vmin 爬過配速 ⇒ 同步迴路整段飽和在下限,見 `_inv_dive_pace_above_vmin`)。泡棉值 14 遠低於飛控 AIRSPEED_MIN=25 ⇒ 每一發 DO_CHANGE_SPEED 被 MAV_RESULT=4 整發拒收(catch-speed-rejected-by-fc)"
+  },
+  {
+   "name": "vmax",
+   "source": "node",
+   "lo": 60.0,
+   "hi": 110.0,
+   "foam": 30.0,
+   "why": "同步迴路的速度上限(EAS)。原廠 plane-jet 組態 89 (⇒ v_plan = plan_frac 0.9 × 89 = 80.1 = 設計巡航 EAS 80)。",
+   "evidence": "⭐ 2026-08-28 重訂(舊區間 [130,230] 綁的是低阻機體的 150)。**MEASURED**:原廠 plane-jet 最大平飛 EAS **105.5**,而且**與高度無關** (SIM_Plane 推力無密度項,阻力 ~ rho·V_TAS² = rho0·V_EAS²);同一條件換算地速 107.1 @182 m / 116.4 @1032 m / 143.1 @3155 m。**DERIVED**:上界 110 = 新的 AIRSPEED_MAX(超出即被飛控整發拒收,見 `_inv_vmax_below_airspeed_max`);真正咬住 vmax 的是`_inv_speeds_within_aero_ceiling`(105.5),區間刻意留在它上面,好讓那條不變式**證明得了自己會開火**。泡棉值 30 會讓全機隊被夾在設計巡航的 1/3"
+  },
+  {
+   "name": "dive_speed",
+   "source": "node",
+   "lo": 70.0,
+   "hi": 130.0,
+   "foam": 42.0,
+   "why": "俯衝指令空速(EAS)。原廠 plane-jet 組態 100。",
+   "evidence": "⭐ 2026-08-28 重訂(舊值 210 / 舊區間 [180,240] 綁的是低阻機體加上「終端 204 m/s」那條 KPI,而該 KPI 已由使用者撤銷)。**DERIVED**:100 = 1.25 × 設計巡航 80,落在 T/W=1.4286 給的物理上限之內 —— (V_term/V_cruise)² = 1 + (W/T)·sin γ ⇒ 垂直俯衝也只有 1.30 倍= 104;同時 ≤ AIRSPEED_MAX 110、> vmax 89(TECS 才會壓機頭追速)。下界 70 排掉泡棉值 42(它的自動配速 0.8×42 = 33.6 < vmin 40 ⇒ 同步迴路整段飽和);區間邊角的組合由 `_inv_dive_pace_above_vmin` 獨立再擋一次。上界 130 之上由氣動天花板不變式按剖面接手。前科 dive-pace-saturates-vmin:配速 46 ≪ vmin 95 讓 dive_speed=210 從未生效"
+  },
+  {
+   "name": "dive_pace",
+   "source": "node",
+   "lo": null,
+   "hi": null,
+   "foam": 50.0,
+   "why": "俯衝配速。0 = 自動取 0.8×dive_speed(目前組態 ⇒ 0.8×100 = 80);非 0 時受不變式管。",
+   "evidence": "handoff 缺陷#5:泡棉常數 50.0 ≪ vmin 95 ⇒ 同步迴路全程飽和,散布 25.00 → 0.78/2.40 s(dive-pace-saturates-vmin)。⚠️⚠️ 2026-08-28 **這一列的守備範圍縮小了,而且是靜悄悄縮的**:新的 vmin 是 40,而 50 > 40 ⇒ `_inv_dive_pace_above_vmin` **不再攔得住 50**,現在只剩泡棉禁區欄擋得住它。換工作點會讓舊守衛失效而沒有人會收到通知,所以寫在這裡 —— 不要以為兩道網都還在"
+  },
+  {
+   "name": "gate_r",
+   "source": "node",
+   "lo": 2500.0,
+   "hi": 6000.0,
+   "foam": 1200.0,
+   "why": "PN 交接水平距。噴射組態 4800,且受 gate_r_min/gate_r_max 夾。",
+   "evidence": "u1-descent-authority:成敗看 gate_r/環半徑 比(n=17 零重疊),≥0.566 殘餘 44–343 m、≤0.446 殘餘 506–2499 m"
+  },
+  {
+   "name": "perch_alt",
+   "source": "node",
+   "lo": 2500.0,
+   "hi": 3600.0,
+   "foam": 280.0,
+   "why": "高點佔位高度。3100 **維持不變**。",
+   "evidence": "⚠️ 2026-08-28 **設計點的來源換了,高度沒換**:舊註解寫的「3100 = EAS 135 / 地速 157 的設計點」是低阻機體的。原廠 plane-jet 在 3100 m 的巡航是 EAS 80 / 地速 ~107(MEASURED 的同一個平飛 EAS 105.5 換算:107.1 @182 m、116.4 @1032 m、143.1 @3155 m)。幾何刻意不跟著速度縮 —— 迴轉半徑 ~ V²,vmin 95→40 讓需求半徑掉到 17.7%,所有幾何列的餘裕只會變大。eas-vs-groundspeed-157 記的是反方向的坑:157 是 3100 m 的**地速**,當成 EAS 會超天花板 17% 而讓整條速度契約靜默失效"
+  },
+  {
+   "name": "r_fan",
+   "source": "node",
+   "lo": 20000.0,
+   "hi": 45000.0,
+   "foam": 2000.0,
+   "why": "扇形半徑。噴射組態 35000。",
+   "evidence": "泡棉值 2000 對 100 m/s 級機體只有 20 s 航程,扇形收不完"
+  },
+  {
+   "name": "dive_angle",
+   "source": "node",
+   "lo": 20.0,
+   "hi": 60.0,
+   "foam": 25.0,
+   "why": "設計俯衝角。噴射組態 27。",
+   "evidence": "dive-angle-ceiling:硬上限 ~60°(驗收用地速),90° 不可行;⚠️ 泡棉值 25 與噴射值 27 只差 2,單值檢查抓不到,靠禁區欄位"
+  },
+  {
+   "name": "reach",
+   "source": "node",
+   "lo": 1500.0,
+   "hi": 3500.0,
+   "foam": 120.0,
+   "why": "扇形抵達判定半徑。噴射組態 2400。",
+   "evidence": "preflight_check 的 ALIGN 死結檢查:WP_LOITER_RAD×eas2tas² 必須 < reach"
+  },
+  {
+   "name": "perch_reach",
+   "source": "node",
+   "lo": 150.0,
+   "hi": 400.0,
+   "foam": 70.0,
+   "why": "認定已就位 pushover 環的半徑。噴射組態 260。",
+   "evidence": "泡棉值 70 小於噴射機一個取樣步的位移,環永遠判不到"
+  },
+  {
+   "name": "impact_reach",
+   "source": "node",
+   "lo": 10.0,
+   "hi": 60.0,
+   "foam": 40.0,
+   "why": "認定已穿越紅心的水平半徑。噴射組態 25。",
+   "evidence": "⚠️ 泡棉值 40 落在噴射區間內 —— 單值檢查抓不到,只有禁區欄位擋得住"
+  },
+  {
+   "name": "half_angle",
+   "source": "node",
+   "lo": 15.0,
+   "hi": 40.0,
+   "foam": 30.0,
+   "why": "扇形半頂角。噴射組態 25。",
+   "evidence": "b500-wide-spacing-status:扇形收太小 ALIGN 收不完(UAV4 卡死)"
+  },
+  {
+   "name": "formation_alt",
+   "source": "node",
+   "lo": 2500.0,
+   "hi": 3600.0,
+   "foam": 50.0,
+   "why": "編隊層高度。必須落在噴射巡航帶,否則編隊層會把飛機往地面錨。",
+   "evidence": "formation-layer-cannot-fly-the-jet:編隊層速度低於 AIRSPEED_MIN 全被拒收 + 1Hz 重錨高度;n3-wingman-and-sea-datum:僚機爬升被拖回地面(288s→59s)。⚠️ swarm_ros2_up.sh:545 目前預設 50.0 —— **現行組態就是違規的**"
+  },
+  {
+   "name": "patrol_alt",
+   "source": "node",
+   "lo": 2500.0,
+   "hi": 3600.0,
+   "foam": 80.0,
+   "why": "長機巡邏高度。同上,必須在噴射巡航帶。",
+   "evidence": "⚠️ swarm_ros2_up.sh:546 目前預設 80.0(退回 FORM_ALT)—— **現行組態違規**"
+  },
+  {
+   "name": "cruise_alt_threshold",
+   "source": "node",
+   "lo": 2500.0,
+   "hi": 3600.0,
+   "foam": null,
+   "why": "編隊層判定「已進巡航」的高度。與彈射端交棒高度有死區關係。",
+   "evidence": "preflight_check 的高度閘門死區檢查:必須 ≤ CLIMB_TO_ALT − CLIMB_TO_TOL"
+  },
+  {
+   "name": "pn_los_floor",
+   "source": "node",
+   "lo": 0.8,
+   "hi": 1.2,
+   "foam": 0.0,
+   "why": "幾何前饋:指令俯角不准比「直指紅心的視線」更淺。1.0 = 完全對著紅心。",
+   "evidence": "tot_node.py 自述『這是陡俯角**唯一有效的開關**』。⚠️⚠️ 路徑不一致:run_west.sh:238 給 1.0(TWO1 唯一達標航次走這條),swarm_ros2_up.sh **當時** :316 給 **0.0** ⇒ RPK/RPL/RPO/RPQ 二十四架次全部在關閉狀態下飛。⚠️ 該路徑差異**已於 2026-08-22 查證消失**:現行 swarm_ros2_up.sh:365 預設 1.0 ⇒ 互動路徑不再是例外。因此『TWO1 與 RPK/RPL 同組態卻結果不同』的比較是無效的"
+  },
+  {
+   "name": "pn_nz_min",
+   "source": "node",
+   "lo": -2.0,
+   "hi": 0.0,
+   "foam": 0.05,
+   "why": "PN 法向過載下限。要陡俯角必須放到負值(允許小負 g 推頭)。",
+   "evidence": "tot_node.py:464『0.05 ⇒ 俯角上限被它鎖死:推到 −80° 需要 9259 m 高度,我們只有 3148』。⚠️ 路徑不一致:run_west.sh:240 給 −1.0,swarm_ros2_up.sh:317 給 **0.05**"
+  },
+  {
+   "name": "expend_on_impact",
+   "source": "node",
+   "lo": 0.0,
+   "hi": 1.0,
+   "foam": null,
+   "why": "1 = 命中即視為消耗:不再下令、不脫離。",
+   "evidence": "LAT1/RA1 實測:四架全部進 mode=expended 且停在水下,無第二趟。關掉它就回到 SW1 那一批的污染形狀。"
+  },
+  {
+   "name": "kill_agl_m",
+   "source": "node",
+   "lo": -100.0,
+   "hi": 5.0,
+   "foam": null,
+   "why": "AGL ≤ 此值視為觸水並終結(m,離紅心地表)。**驗屍用,不是保護。**",
+   "evidence": "[[agl-datum-false-kill]]:agl 兩個量基準不同步,飛控重設 HOME 就平移 32 m ⇒ 它誤殺過巡航中的飛機。保護是 att_agl_floor,不是這一條。納管的直接效果:`_inv_agl_floor_above_kill` 先前因為取不到值而**一次都沒跑過**,現在才會生效。"
+  },
+  {
+   "name": "kill_confirm_n",
+   "source": "node",
+   "lo": 1.0,
+   "hi": 40.0,
+   "foam": null,
+   "why": "連續幾筆 AGL ≤ kill_agl_m 才動手(20 Hz)。防單筆跳點。",
+   "evidence": "tot_node.py:3620 自述 `kill_confirm_n=2` 在 20 Hz 只有 0.1 秒,而基準漂移是**持續偏移** ⇒ 2 筆擋不住 [[agl-datum-false-kill]] 那一類。上界 40 = 2 秒,足以跨過一次 HOME 重設。"
+  },
+  {
+   "name": "gate_arm",
+   "source": "node",
+   "lo": 0.0,
+   "hi": 1.0,
+   "foam": null,
+   "why": "1 = 讓 /swarm/handover_gate 的判定**真的致動**放行;0 = 只觀測。",
+   "evidence": "規格要的判準是「全隊抵達時間差壓進 1 s」,而實測放行時刻差是 2.4 / 7.6 / 15.2 s(WX1-3,n=2),ring_pace 那一組也還有 5.6 s ⇒ 1 s 的硬閘門在今天的數字下**一次都不會觸發**,而一個從不觸發的閘門與一個運作中的閘門長得一模一樣。RRB 整批 8 趟就是死在這個形狀。⇒ 先發布「它會怎麼判」與當下實測散布,量幾趟再決定門檻。"
+  },
+  {
+   "name": "gate_spread_s",
+   "source": "node",
+   "lo": 0.2,
+   "hi": 30.0,
+   "foam": null,
+   "why": "放行閘門的**時間差**門檻(秒):全隊抵達閘門的 eta 極差要小於它。",
+   "evidence": "eta 用**實測**地速算(r_to_gate / gs),不用預測器 —— 預測器低估俯衝耗時中位 +18.7 s、27/27 單邊,而 Zarchan 附錄 A.1 逐字:tgo 尺度誤差 0.9 就讓 optimal guidance 在飛行時間 >8 s 時輸給普通 PN;我們是 1.4–1.5。上界 30:比它大就不再是「同時到達」的門檻,而是形同虛設。"
+  },
+  {
+   "name": "gate_alt_band_m",
+   "source": "node",
+   "lo": 10.0,
+   "hi": 1000.0,
+   "foam": null,
+   "why": "放行閘門的**高度帶**門檻(m):全隊 AGL 的極差要小於它。",
+   "evidence": "用極差不是標準差 —— n=2 時標準差沒有意義。實測放行高度差:LAT1 788 m、RB1 306 m、RD1 0 m ⇒ 這一項的鑑別力視組態差很多,門檻要照量到的來訂,不要照直覺。"
+  },
+  {
+   "name": "gate_range_err_m",
+   "source": "node",
+   "lo": 0.0,
+   "hi": 20000.0,
+   "foam": null,
+   "why": "放行閘門的**距離離散**門檻(m)。0 = 停用(只觀測不判定)。",
+   "evidence": "形式取自 Zhu/Wang/Lin《Consensus-Based Impact-Time-Control Guidance Law》Eq.(11):共識階段切進純 PN 的判準是 |R_i − r_i| 這個**距離誤差**,不是時間誤差。⭐ 對我們特別合適 —— 距離量得準,而時間誤差要過預測器,而預測器低估中位 +18.7 s、27/27 單邊。⚠️ 數字**不照抄**論文的 30:我們手上的抽取文字裡那個 30 單位不明。只採用形式,門檻用實測訂 ⇒ 在量出來之前一律 0(停用)。"
+  },
+  {
+   "name": "weave_time_sync",
+   "source": "node",
+   "lo": 0.0,
+   "hi": 1.0,
+   "foam": null,
+   "why": "1 = 啟用 S 型機動,用**路徑長度**把抵達時刻對齊(不動速度)。",
+   "evidence": "與 ring_pace 是兩條互斥的通道:ring_pace 動油門,而油門會激發 TECS 長週期振盪(RB1/RC1/RD1/RE21 的散布 1.74/8.98/7.60/3.08 s 重現不了就是這個耦合);蛇形只動航向,不碰速度環。"
+  },
+  {
+   "name": "weave_relative",
+   "source": "node",
+   "lo": 0.0,
+   "hi": 1.0,
+   "foam": null,
+   "why": "1 = 蛇形的時間誤差改跟**全隊最晚抵達者**比,不看絕對時刻表 dive_T。",
+   "evidence": "原式 e_t = (dive_T − now) − tgo 的**量級**由 dive_T 談得準不準決定,而不是由機間差決定。實測(runs/artifacts 143 架次 / 70441 個 wait 拍):42 架次(29%)的中位 |e_t| > 60 s ⇒ cos θ = tgo/(tgo+e_t) 把指令推到夾限,RA1 u2 與 SB3 u2 **整段 100% 飽和**、LAT1 u1 91% ⇒ 全隊一起釘在 45°,每架拉長同樣倍率、**同步不到任何東西**,而 log 一切正常。相對式的量級由機間差決定,沒有這個污染源。⚠️ 訂正:本欄第一版寫「e_t 恆為負 ⇒ 一次都不會擺」,實測 44.41% 的拍超過死區、兩架差值相關 r=0.942 ⇒ 那個說法錯了,失效是飽和不是不執行。"
+  },
+  {
+   "name": "ring_pace",
+   "source": "node",
+   "lo": 0.0,
+   "hi": 1.0,
+   "foam": null,
+   "why": "1 = 用**速度**把抵環時刻對齊全隊最晚者,取代盤旋等待。",
+   "evidence": "tot_node.py:5005。盤旋實測代價:同一段 3.24 km,直線 21-25 s / 迂迴 0.99x,盤旋 114-200 s / 迂迴 3.0-4.7x,而兩架的時刻差在這 3 公里裡由 4.4 s 放大到 40.2 s ⇒ 盤旋是用 100+ 秒的機制去吸收 4.4 秒的誤差,而吸收過程本身製造了 40 秒的新誤差。"
+  },
+  {
+   "name": "ring_pace_far",
+   "source": "node",
+   "lo": 0.0,
+   "hi": 4.0,
+   "foam": null,
+   "why": "ring_pace 的**獨立**介入門檻(環半徑倍率)。0 = 停用。",
+   "evidence": "RA1 實測放行時刻差 33.9 s,而現行介入帶 ring x1.50 -> x1.10 = 3407 m 只吸收得了 3407*(1/vmin-1/vmax) = 13.2 s。要 33.9 s 需 ~8782 m ⇒ 倍率約 2.13。上界 4.0:扇形 35 km / 環 8517 m = 4.1,再大沒有幾何空間。"
+  },
+  {
+   "name": "ring_pace_settle",
+   "source": "node",
+   "lo": 0.0,
+   "hi": 4.0,
+   "foam": null,
+   "why": "配速的**收斂帶**:進到 ring×此倍率就凍結速度指令,讓高度迴路穩下來。",
+   "evidence": "RB1 實測:配速的速度斜坡一路持續到抵環(v_cmd 150→132→130→126→111→98),長週期高度振盪被持續重新激發 ⇒ 全程震盪 2536..3302 m、放行落在波峰 3435,比僚機高 306 m。對照 RA1(未開配速)v_cmd 恆 150,放行前有 59 s 穩定飛行 ⇒ 兩機放行高度只差 7 m。差別不是「有沒有減速」,是「減速有沒有在抵環前結束」。"
+  },
+  {
+   "name": "ring_pace_tol",
+   "source": "node",
+   "lo": 0.0,
+   "hi": 5.0,
+   "foam": null,
+   "why": "收斂帶的**條件**觸發門檻(s):實測抵達時刻差小於它就凍結速度。0 = 只用距離。",
+   "evidence": "RC1 實測:純距離觸發把配速砍斷在做到一半(UAV2 凍結 106.2 / UAV1 150.0,相隔 25.6 s 才通過同一距離)⇒ 抵環時刻差由 5.6 退回 14.4 s。⚠️ 判準用**實測地速**不是指令速度 —— 指令根本沒被跟隨(v_cmd 95 實飛 157、v_cmd 150 實飛 192),而且用指令算的預測抵達時刻由 v = d_go/t_ring 的定義恆等於相同,第一拍就成立 = 沒有判準。上界 5.0:大於驗收門檻 3 s 的判準沒有意義。"
+  },
+  {
+   "name": "ring_pace_hold_n",
+   "source": "node",
+   "lo": 1.0,
+   "hi": 200.0,
+   "foam": null,
+   "why": "條件觸發要**連續**滿足幾拍(20 Hz)。1 = 單拍即觸發。",
+   "evidence": "RD1 實測:Δeta 正以**每秒約 10 秒**的速率下降(uav2 加速 125→151 m/s),它只是**穿過** 2.0 s 的門檻而不是收斂到門檻內,而鎖存是單向的 ⇒ 剛進配速帶 1.5 km 就永久凍結、配速幾乎沒做(散布 7.60 s)。⚠️ 以 10 s/s 的漂移,穿越 2 s 帶只需 4 拍 ⇒ 40 拍(2 s)擋得掉。先例:gate_hold_n=3、kill_confirm_n=2,同一類防單筆跳點。"
+  },
+  {
+   "name": "pn_enable",
+   "source": "node",
+   "lo": 0.0,
+   "hi": 1.0,
+   "foam": 0.0,
+   "why": "終端 PN 的總開關。False = 俯衝段完全不跑 PN(退回航點導引)。",
+   "evidence": "tot_node.py:520 的宣告預設是 **False**,而 shell 生產值是 True (swarm_ros2_up.sh:380)—— 這是全表唯一宣告值與生產值不同的 PN 參數。⚠️ 該註解記的停用理由(「PN 版本三軸全面變差」)是**泡棉時代**的實測,早於噴射轉換;現行 32 架次真值集全部是 PN 在飛。⇒ 讀回 0 代表那一趟根本沒有導引律可談,所有 PN 分析都不適用。"
+  },
+  {
+   "name": "pn_n_vert",
+   "source": "node",
+   "lo": 3.0,
+   "hi": 6.0,
+   "foam": null,
+   "why": "縱向導航常數 N。`gdot = -n_vert * sig_dot`,決定俯衝段的縱向權限。",
+   "evidence": "tot_node.py:820 記 3→5 為 2026-07-27 實測(各 5 趟):n_vert=3 殘餘 AGL 0.96-1.75 m / 誤差 2.64-5.35 m / 2-3 過;n_vert=5 殘餘 0.35-0.95 m / 誤差 0.84-2.64 m / 5-5 過。⚠️ 該 A-B **沒有契約快照**且早於噴射轉換與 pn_vmax=210 ⇒ 方向可信、數字不可延用。下界 3.0:純 PN 要 N>2 視線角速率才收斂(sin σ = sin σ0 ·(R/R0)^(N-1));上界 6.0 擋雜訊放大。"
+  },
+  {
+   "name": "pn_n_lat",
+   "source": "node",
+   "lo": 3.0,
+   "hi": 6.0,
+   "foam": null,
+   "why": "橫向導航常數 N。`a_h = n_lat * vh * lam_dot`。",
+   "evidence": "tot_node.py:819 只寫「掃描 3~4 平坦,取 4 留延遲餘裕」—— **沒有數據**。⭐ 2026-08-22 實測 23954 個俯衝拍:實效值 = n_lat·cosγ/cosσ,中位 4.08(vh 的虧損被 1/d² 分母的 1/cosσ 抵銷,比值中位 1.010)⇒ 與正典 3D PPN 差 +1%,不是先前推估的 -18%。"
+  },
+  {
+   "name": "pn_lead",
+   "source": "node",
+   "lo": 0.5,
+   "hi": 1.5,
+   "foam": null,
+   "why": "縱向 γ 指令前導時間(s)。律從這一行起由角速率律變成**角度**律。",
+   "evidence": "tot_node.py:3066 `gam_cmd = gam + gdot*pn_lead`。⭐ 2026-08-22 實測:1.0→0.5 讓 gam_cmd 動 **中位 +0.0000°**(地板咬住 100/88.6/72.3/92.5%)⇒ 它在現行組態幾乎惰性。⚠️ **但那是量在 nz_clamp_after_floor=0 之下的**。該旗標開著時 :3108-3109 會把夾制後的 cmd_nz 寫回 gam_cmd,composing 之後 max|gam_cmd−gam| = |(nz_bound−cosγ)·g/V|·pn_lead —— **與 pn_lead 成正比**⇒ 那時 [0.5, 1.5] 是夾制角度權限的 3 倍擺幅,它不再是前導時間而是增益。⚠️ 但 `(gam_cmd-gam)/pn_lead` 被當成「速率需求」記帳,正是「γ 追蹤增益 0.063」那個假象的來源(tot_node.py:3095-3102 自述)。"
+  },
+  {
+   "name": "pn_alpha_tau",
+   "source": "node",
+   "lo": 0.5,
+   "hi": 3.0,
+   "foam": null,
+   "why": "α 前饋低通的時間常數(s)。`k = min(1, tick_dt/pn_alpha_tau)`。",
+   "evidence": "tot_node.py:538-540:1.75 是為了讓 k=(1/20)/1.75 逐位元等於舊式 (1/50)/0.7 = 0.0285714。⚠️ 它濾的是**當下的** α 而不是「要達成 cmd_nz 所需的 α」(tot_node.py:3118 自述「問題的本質」)⇒ 俯衝段 AOA 中位 -3.2°、實得 nz 停在 0.6-0.9 而與需求無關。區間擋的是量級寫錯:tau≤tick_dt(0.05)等於完全不濾。"
+  },
+  {
+   "name": "READY_AGL",
+   "source": "shell",
+   "lo": 20.0,
+   "hi": 300.0,
+   "foam": null,
+   "why": "批次就緒閘門的離地高門檻。",
+   "evidence": "handoff 缺陷#4:舊閘門只看 AMSL 穩定 ⇒ 飛機停在跑道上永遠成立、4 秒放行。⚠️ 門檻不可達同樣致命(RPB1/RPC1 整趟逾時)—— 見不變式"
+  },
+  {
+   "name": "AIRSPEED_MIN",
+   "source": "fc",
+   "lo": 20.0,
+   "hi": 30.0,
+   "foam": null,
+   "why": "飛控空速下限。原廠 plane-jet 25 —— 改裝前後都是 25(低阻改裝只動阻力與推力,升力係數沒變 ⇒ 失速速度不變)。",
+   "evidence": "任何低於它的速度指令被**整發拒收**,不是夾住。⭐ 2026-08-28 **MEASURED**(油門釘死、60 s 穩態、sd 0.013):原廠 plane-jet 的最小可維持平飛 EAS 是 **25.6** —— 飛控下限 25 其實**低於**機體做得到的最慢平飛 0.6 m/s。區間不動,但這個數字要留著:任何把 AIRSPEED_MIN 再往下調的提案都會落進飛不出來的區間"
+  },
+  {
+   "name": "AIRSPEED_MAX",
+   "source": "fc",
+   "lo": 106.0,
+   "hi": 130.0,
+   "foam": null,
+   "why": "飛控空速上限。原廠 plane-jet 組態 110。",
+   "evidence": "⭐ 2026-08-28 重訂(舊區間 [150,240] 綁的是低阻機體的 230)。**DERIVED**:下界 106 必須高於 MEASURED 的平飛天花板 105.5 —— 設在它以下時決定頂速的是**參數**而不是機體,`_inv_speeds_within_aero_ceiling` 就再也證明不了任何事。上界 130 排掉低阻時代的 230:一個 2.2 倍天花板的上限與「沒有上限」在行為上無法分辨,而那正是原廠機體被指令 135 EAS 卻回報**零違規**的機制(jet_fast.parm 無條件寫 AIRSPEED_MAX 230 / AIRSPEED_CRUISE 135,飛控讀回與改裝機逐位元相同)。catch-speed-rejected-by-fc:catch_speed 157 > 150 ⇒ 追趕通道從未生效"
+  },
+  {
+   "name": "THR_MAX",
+   "source": "fc",
+   "lo": 20.0,
+   "hi": 100.0,
+   "foam": null,
+   "why": "飛控推力上限。原廠 plane-jet 剖面下就是 **100**(stock),TRIM_THROTTLE 36。",
+   "evidence": "⭐ 2026-08-28:改回原廠機體之後 swarm_sitl_up.sh 的 JET_THRMAX 區塊整段被跳過(JET_THRMAX 為空)⇒ THR_MAX 留在原廠 100。也就是說 100 從「互動路徑的例外」變成**剖面本身的值**,而 T/W = 1.4286 這個比值也是由它定出來的。thrmax-needs-climb-boost:JET_THRMAX=25 是**低阻機體**的巡航值,互動路徑沒有爬升提升就飛不起來;AP3/AP5 其實跑 100。**所有低阻時代的互動路徑 KPI 都帶著這個前提**"
+  }
+ ],
+ "env_for": {
+  "state_max_age": "STATE_MAX_AGE",
+  "att_eas_floor": "ATT_EAS_FLOOR",
+  "att_agl_floor": "ATT_AGL_FLOOR",
+  "vmin": "VMIN",
+  "vmax": "VMAX",
+  "dive_speed": "DIVE_SPEED",
+  "dive_pace": "DIVE_PACE",
+  "gate_r": "GATE_R",
+  "perch_alt": "PERCH_ALT",
+  "r_fan": "R_FAN",
+  "dive_angle": "DIVE_ANGLE",
+  "reach": "REACH",
+  "perch_reach": "PERCH_REACH",
+  "impact_reach": "IMPACT_REACH",
+  "half_angle": "HALF_ANGLE",
+  "formation_alt": "FORM_ALT",
+  "pn_los_floor": "PN_LOS_FLOOR",
+  "pn_nz_min": "PN_NZ_MIN",
+  "pn_enable": "PN",
+  "pn_n_lat": "N_LAT",
+  "pn_n_vert": "N_VERT",
+  "pn_lead": "PN_LEAD",
+  "pn_alpha_tau": "PN_ALPHA_TAU",
+  "patrol_alt": "PATROL_ALT",
+  "cruise_alt_threshold": "CRUISE_ALT_THRESHOLD",
+  "READY_AGL": "READY_AGL",
+  "THR_MAX": "JET_THRMAX",
+  "AIRSPEED_MAX": "AIRSPEED_MAX_CAP",
+  "pn_vmax": "PN_VMAX",
+  "SCALING_SPEED": "SCALING_SPEED",
+  "SWARM_AIRFRAME": "SWARM_AIRFRAME",
+  "tgo_from_predictor": "TGO_FROM_PREDICTOR",
+  "tgo_ring_transit": "TGO_RING_TRANSIT",
+  "itcg_on": "ITCG_ON",
+  "itcg_gain": "ITCG_GAIN",
+  "itcg_a_max_g": "ITCG_A_MAX_G",
+  "mpng_on": "MPNG_ON",
+  "weave_time_sync": "WEAVE_TIME_SYNC",
+  "weave_relative": "WEAVE_RELATIVE",
+  "gate_arm": "GATE_ARM",
+  "gate_spread_s": "GATE_SPREAD_S",
+  "gate_alt_band_m": "GATE_ALT_BAND_M",
+  "gate_range_err_m": "GATE_RANGE_ERR_M",
+  "ring_pace": "RING_PACE",
+  "ring_pace_far": "RING_PACE_FAR",
+  "ring_pace_settle": "RING_PACE_SETTLE",
+  "ring_pace_tol": "RING_PACE_TOL",
+  "ring_pace_hold_n": "RING_PACE_HOLD_N",
+  "expend_on_impact": "EXPEND_ON_IMPACT",
+  "kill_agl_m": "KILL_AGL_M",
+  "kill_confirm_n": "KILL_CONFIRM_N",
+  "mpng_k_eps": "MPNG_K_EPS",
+  "mpng_k_s": "MPNG_K_S",
+  "tgo_predict_dt": "TGO_PREDICT_DT",
+  "predict_hz": "PREDICT_HZ",
+  "dive_angle_max": "DIVE_ANGLE_MAX",
+  "release_at_ring": "RELEASE_AT_RING",
+  "dive_from_runup": "DIVE_FROM_RUNUP",
+  "wait_goto_radius": "WAIT_GOTO_RADIUS",
+  "weave_aim_min_m": "WEAVE_AIM_MIN_M",
+  "weave_aim_frac": "WEAVE_AIM_FRAC",
+  "perch_settle": "PERCH_SETTLE",
+  "perch_band": "PERCH_BAND",
+  "nz_closed_loop": "NZ_CLOSED_LOOP",
+  "nz_clamp_after_floor": "NZ_CLAMP_AFTER_FLOOR",
+  "nz_max_g": "NZ_MAX_G",
+  "aero_cl_alpha": "AERO_CL_ALPHA",
+  "aero_cl_zero": "AERO_CL_ZERO",
+  "aero_cl_max": "AERO_CL_MAX",
+  "aero_q_sigma_exp": "AERO_Q_SIGMA_EXP",
+  "auto_mission": "AUTO_MISSION",
+  "auto_ip_r": "AUTO_IP_R",
+  "auto_ip_alt": "AUTO_IP_ALT",
+  "auto_ip_reach": "AUTO_IP_REACH",
+  "auto_loiter_r": "AUTO_LOITER_R",
+  "auto_transit_r": "AUTO_TRANSIT_R",
+  "auto_upload_timeout": "AUTO_UPLOAD_TIMEOUT",
+  "auto_mode_timeout": "AUTO_MODE_TIMEOUT",
+  "auto_fallback_guided": "AUTO_FALLBACK_GUIDED"
+ },
+ "jet_reference": {
+  "SWARM_AIRFRAME": 1.0,
+  "state_max_age": 1.0,
+  "att_eas_floor": 32.0,
+  "vmin": 40.0,
+  "vmax": 89.0,
+  "dive_speed": 100.0,
+  "dive_pace": 0.0,
+  "gate_r": 4700.0,
+  "perch_alt": 3100.0,
+  "r_fan": 35000.0,
+  "dive_angle": 27.0,
+  "reach": 2400.0,
+  "perch_reach": 260.0,
+  "impact_reach": 25.0,
+  "half_angle": 25.0,
+  "cruise_alt_threshold": 3000.0,
+  "READY_AGL": 30.0,
+  "pn_los_floor": 1.0,
+  "pn_nz_min": -1.0,
+  "pn_enable": 1.0,
+  "pn_n_lat": 4.0,
+  "pn_n_vert": 5.0,
+  "pn_lead": 1.0,
+  "pn_alpha_tau": 1.75,
+  "formation_alt": 3100.0,
+  "patrol_alt": 3100.0,
+  "tgo_from_predictor": 1.0,
+  "tgo_predict_dt": 0.5,
+  "predict_hz": 2.0,
+  "tgo_ring_transit": 1.0,
+  "itcg_on": 0.0,
+  "itcg_gain": 1.0,
+  "itcg_a_max_g": 0.4,
+  "weave_time_sync": 0.0,
+  "weave_relative": 0.0,
+  "gate_arm": 0.0,
+  "gate_spread_s": 1.0,
+  "gate_alt_band_m": 100.0,
+  "gate_range_err_m": 0.0,
+  "ring_pace": 0.0,
+  "ring_pace_far": 0.0,
+  "ring_pace_settle": 0.0,
+  "ring_pace_tol": 0.0,
+  "ring_pace_hold_n": 1.0,
+  "expend_on_impact": 1.0,
+  "kill_agl_m": 0.0,
+  "kill_confirm_n": 2.0,
+  "mpng_on": 0.0,
+  "mpng_k_eps": 0.0,
+  "mpng_k_s": 0.0,
+  "pn_vmax": 105.0,
+  "AIRSPEED_MAX": 110.0,
+  "SCALING_SPEED": 40.0,
+  "dive_angle_max": 0.0,
+  "release_at_ring": 0.0,
+  "dive_from_runup": 0.0,
+  "wait_goto_radius": 0.0,
+  "weave_aim_min_m": 300.0,
+  "weave_aim_frac": 0.5,
+  "perch_settle": 25.0,
+  "perch_band": 40.0,
+  "auto_mission": 0.0,
+  "auto_ip_r": 0.0,
+  "auto_ip_alt": 0.0,
+  "auto_ip_reach": 5000.0,
+  "auto_loiter_r": 3300.0,
+  "auto_transit_r": 0.0,
+  "auto_upload_timeout": 30.0,
+  "auto_mode_timeout": 20.0,
+  "auto_fallback_guided": 0.0,
+  "nz_closed_loop": 0.0,
+  "nz_clamp_after_floor": 0.0,
+  "nz_max_g": 3.0,
+  "aero_cl_alpha": 6.9503,
+  "aero_cl_zero": 0.56381,
+  "aero_cl_max": 3.2503,
+  "aero_q_sigma_exp": 2.0
+ },
+ "bool_params": [
+  "att_require_guided",
+  "auto_fallback_guided",
+  "auto_mission",
+  "dive_from_runup",
+  "dive_ring_gate",
+  "expend_on_impact",
+  "gate_arm",
+  "itcg_on",
+  "mpng_on",
+  "nz_clamp_after_floor",
+  "nz_closed_loop",
+  "pn_enable",
+  "release_at_ring",
+  "ring_pace",
+  "tgo_from_predictor",
+  "tgo_ring_transit",
+  "wait_goto_radius",
+  "weave_relative",
+  "weave_time_sync"
+ ],
+ "int_params": [
+  "gate_hold_n",
+  "kill_confirm_n",
+  "n",
+  "param_verify",
+  "ring_pace_hold_n",
+  "stall_prevention_glide",
+  "tel_us"
+ ],
+ "unproven": [
+  "AIRSPEED_MAX",
+  "SWARM_AIRFRAME",
+  "att_eas_floor",
+  "auto_ip_alt",
+  "auto_ip_r",
+  "auto_ip_reach",
+  "auto_loiter_r",
+  "auto_mode_timeout",
+  "auto_transit_r",
+  "auto_upload_timeout",
+  "dive_speed",
+  "formation_alt",
+  "itcg_a_max_g",
+  "itcg_gain",
+  "kill_confirm_n",
+  "patrol_alt",
+  "pn_vmax",
+  "state_max_age",
+  "vmax",
+  "vmin"
+ ],
+ "invariants": [
+  {
+   "name": "_inv_weave_needs_relative_reference",
+   "doc": "開了時間同步蛇形卻用**絕對**參考量 = 指令量級被時刻表誤差主導。"
+  },
+  {
+   "name": "_inv_ring_pace_settle_between_gate_and_far",
+   "doc": "收斂帶必須夾在「放行閘門」與「配速介入門檻」之間,否則接了等於沒接。"
+  },
+  {
+   "name": "_inv_ring_pace_far_must_beat_the_runin_line",
+   "doc": "`ring_pace_far` 沒超過 runin/wait 的 far 線,這顆旋鈕接了等於沒接。"
+  },
+  {
+   "name": "_inv_itcg_enabled_needs_real_gains",
+   "doc": "ITCG 開著就必須有**非零**的增益與上限。"
+  },
+  {
+   "name": "_inv_mpng_needs_itcg_on",
+   "doc": "MPNG 開著就必須 `itcg_on=1`,否則整條律**一次都不會被呼叫到**。"
+  },
+  {
+   "name": "_inv_predictor_actuation_needs_shadow_observation",
+   "doc": "拿預測器當**致動**來源(tgo_from_predictor=1),就必須同時開影子觀測。"
+  },
+  {
+   "name": "_inv_gate_r_below_ring",
+   "doc": "⚠️ gate_r 不可以碰到放行距離(環半徑)。"
+  },
+  {
+   "name": "_inv_gate_clears_the_loiter_swing",
+   "doc": "⚠️⚠️ RPO 實測(2026-08-13)當場燒出來的一條:**gate 必須在守環擺盪之外**。"
+  },
+  {
+   "name": "_inv_weave_period_can_actually_absorb_time",
+   "doc": "⭐⭐ 蛇形到底吸不吸得到時間 —— 用**秒**判,不用週期判。"
+  },
+  {
+   "name": "_inv_hold_alt_leaves_enough_homing_time",
+   "doc": "⭐ Zarchan 伴隨法的下界:交接高度太低 ⇒ 終端脫靶是**物理必然**。"
+  },
+  {
+   "name": "_inv_agl_floor_above_kill",
+   "doc": "⚠️⚠️ AGL 地板必須高於觸水終結線,否則它永遠來不及作用。"
+  },
+  {
+   "name": "_inv_agl_floor_needs_glide_coverage",
+   "doc": "⚠️⚠️ AGL 地板只有在姿態通道**涵蓋滑翔段**時才是保護,否則是傷害。"
+  },
+  {
+   "name": "_inv_eas_floor_above_airspeed_min",
+   "doc": "⚠️ EAS 地板低於飛控空速下限 = 沒有保護。"
+  },
+  {
+   "name": "_inv_att_handback_makes_alt_cmd_a_mirror",
+   "doc": "⭐⭐⭐ 開了姿態交棒重錨,`alt_cmd` 就不再是「我們要的高度」。"
+  },
+  {
+   "name": "_inv_descending_wait_needs_throttle_off_the_floor",
+   "doc": "⭐⭐ 開了下降式等待就必須同時把守環速度提起來,否則它做不到。"
+  },
+  {
+   "name": "_inv_dive_pace_above_vmin",
+   "doc": ""
+  },
+  {
+   "name": "_inv_dive_pace_has_headroom",
+   "doc": "⚠️ 兩側都要有餘裕。貼上限與貼下限一樣是失去權限。"
+  },
+  {
+   "name": "_inv_vmin_above_airspeed_min",
+   "doc": ""
+  },
+  {
+   "name": "_inv_vmax_below_airspeed_max",
+   "doc": ""
+  },
+  {
+   "name": "_inv_speeds_within_aero_ceiling",
+   "doc": "⭐⭐⭐ 指令速度不得高於**這具機體的**氣動天花板(2026-08-28 新增)。"
+  },
+  {
+   "name": "_inv_hold_radius_flyable",
+   "doc": "⚠️⚠️ RPL3 的 log 印了這條的 ERROR **然後照跑**——正是契約層要治的病。"
+  },
+  {
+   "name": "_inv_ready_agl_reachable",
+   "doc": "⚠️ 兩側都會殺:太低 ⇒ 停在跑道上就放行;太高 ⇒ 永遠到不了、整趟逾時。"
+  },
+  {
+   "name": "_inv_gate_r_within_bounds",
+   "doc": ""
+  },
+  {
+   "name": "_inv_auto_reach_above_loiter",
+   "doc": "⚠️⚠️ 抵達判定半徑必須**大於**盤旋半徑,否則閘門數學上不可能成立。"
+  },
+  {
+   "name": "_inv_auto_loiter_flyable",
+   "doc": "⚠️⚠️ 盤旋半徑要飛得出來,否則我們指定的半徑根本不是實際的半徑。"
+  },
+  {
+   "name": "_inv_auto_needs_release_at_ring",
+   "doc": "⚠️⚠️⚠️ AUTO 預規劃航線**必須**配 `release_at_ring`,否則整個架構白做。"
+  }
+ ]
+}

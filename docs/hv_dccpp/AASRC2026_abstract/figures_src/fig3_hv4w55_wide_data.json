@@ -1,0 +1,355 @@
+{
+ "caption": "圖3　HV4W55（1 Pioneer＋2 HERO，規劃上限 119.5 m）SITL 實飛：(a) 高度剖面，放大框為 119.4–120.3 m，灰線為對照架次（規劃上限 120.0 m，單變因對照）；(b) 同時在空中的機間水平×垂直間距，斜線區為違規區（水平 < 100 m 且垂直 < 50 m）；A1–B2 從未同時在空中。規劃風＝模擬風＝5 m/s／270°（規劃 5 m/s、自 270°；模擬 5 m/s、自 270°）。",
+ "control_trial": "HV4W55R",
+ "figure": {
+  "dpi": 300,
+  "height_cm": 6.15,
+  "layout": "wide",
+  "min_font_pt": 9.0,
+  "png": "docs/hv_dccpp/AASRC2026_abstract/fig3_results_hv4w55_wide.png",
+  "script": "docs/hv_dccpp/AASRC2026_abstract/figures_src/make_fig3_hv4w55.py",
+  "svg": "docs/hv_dccpp/AASRC2026_abstract/fig3_results_hv4w55_wide.svg",
+  "width_cm": 17.0
+ },
+ "geometry_sources": {
+  "altitude": "POS.RelHomeAlt 原生取樣（airborne_window 內），x = 任務時間（同 up_metrics.timing 的 t0）",
+  "bins": {
+   "HV4W55R_A1": "sitl/vtol/i100/logs/00000020.BIN",
+   "HV4W55R_B2": "sitl/vtol/i101/logs/00000020.BIN",
+   "HV4W55R_B3": "sitl/vtol/i102/logs/00000020.BIN",
+   "HV4W55_A1": "sitl/vtol/i100/logs/00000015.BIN",
+   "HV4W55_B2": "sitl/vtol/i101/logs/00000015.BIN",
+   "HV4W55_B3": "sitl/vtol/i102/logs/00000015.BIN"
+  },
+  "frame": "update_paper/scripts/up_lib.py enu()（WGS84 geodetic→ECEF→ENU，原點 plan/mission_summary.json home）",
+  "reader": "update_paper/scripts/up_extract.py extract()",
+  "separation": "update_paper/scripts/up_metrics.py _track(frame='ecef') + _pair_min()（原生 POS 時刻聯集、連續時間最小值）"
+ },
+ "inputs_sha256": {
+  "runs/artifacts/HV4W55/plan/A1.waypoints": "fcd88e5ae0678410e7e85b1ce9153bd9b4bb0d2063ffbb8049e25a1eea3886f6",
+  "runs/artifacts/HV4W55/plan/B2.waypoints": "95ca03d7eb7003e162b266534cd6d0d325037031c09e12dece0de3a27251cf12",
+  "runs/artifacts/HV4W55/plan/B3.waypoints": "8cad287659a7d07e53b3a2279c007033705f630b00d3c8711e1d6c7972eaced8",
+  "runs/artifacts/HV4W55/plan/mission_summary.json": "e40aa39d0a43eee79ee88a6bd75a8a6a4ae5a5f3e3c9e3131918ea94d77cb0ad",
+  "runs/artifacts/HV4W55/scenario.json": "8782be707baa5bf997207d3d6179d7c94f3827291f9149b34e426510d2de533c",
+  "runs/artifacts/PAPERPLAN1/update_paper/out/NUMBERS.json": "0c1a6f47aaf05f6c65613d02e70dd93550ae74d92bbd15150883bf62d47676ed",
+  "runs/artifacts/PAPERPLAN1/update_paper/out/metrics.json": "9ec87ece600e3884d5d9d212228ab00c02b094ada8fc085766f345c61d6fdc87",
+  "runs/artifacts/PAPERPLAN1/update_paper/scripts/up_extract.py": "9c3cb04a7c82f2c160349d53472bb8459dff02dce99ecbde68ba404d4da02685",
+  "runs/artifacts/PAPERPLAN1/update_paper/scripts/up_lib.py": "1e0fe7c32fec401794c5d75059a89adc24baaa150b24e526d1135995e477ea04",
+  "runs/artifacts/PAPERPLAN1/update_paper/scripts/up_metrics.py": "04fbad3b40900c7a7c0250cb9056bd3ab549354e91e13b8e8f1a6ea034d50565",
+  "sitl/vtol/i100/logs/00000015.BIN": "6e0a747b086221cc00c5531318e030b7fcd42e689181d5455ba41d913ab4091f",
+  "sitl/vtol/i100/logs/00000020.BIN": "600183ba25305611645d69d89891198bdde074cb503567bbabdfa0003f618dfd",
+  "sitl/vtol/i101/logs/00000015.BIN": "e14ee57ad58135bc31a1b154f9ab1d1b955980d93bba01b4efeb405180d3da8e",
+  "sitl/vtol/i101/logs/00000020.BIN": "de50258b12765bff8d2e5a3304e2b2a48209b18b6ccc6a401b2eae380220683e",
+  "sitl/vtol/i102/logs/00000015.BIN": "20f2915b251c5f0ee47ba09e09b0b0d6771fcb093ab1394696d861d4c296c708",
+  "sitl/vtol/i102/logs/00000020.BIN": "377986fa96c596f254be6603b673a21d4bd905084b38c312781c443edac67a59"
+ },
+ "pipeline_check": {
+  "bin_vs_cache": {
+   "HV4W55R_A1": "identical",
+   "HV4W55R_B2": "identical",
+   "HV4W55R_B3": "identical",
+   "HV4W55_A1": "identical",
+   "HV4W55_B2": "identical",
+   "HV4W55_B3": "identical"
+  },
+  "recomputed_vs_metrics": {
+   "HV4W55.altitude": "identical",
+   "HV4W55.timing": "identical",
+   "HV4W55R.altitude": "identical",
+   "HV4W55R.timing": "identical",
+   "separation.ecef.A1-B2": "identical",
+   "separation.ecef.A1-B3": "identical",
+   "separation.ecef.B2-B3": "identical"
+  }
+ },
+ "shown_numbers": [
+  {
+   "field": "trials.HV4W55.altitude.flown_max_agl_m + margin_to_120_m",
+   "file": "NUMBERS.json",
+   "json_value": 120.0,
+   "label": "作業上限線 (m)",
+   "note": "＝ up_lib.CEIL_OPS_M（已斷言相等）",
+   "panel": "a",
+   "shown": "120.000"
+  },
+  {
+   "field": "trials.HV4W55.ceiling_m",
+   "file": "NUMBERS.json",
+   "json_value": 119.5,
+   "label": "規劃上限線 (m)",
+   "note": "",
+   "panel": "a",
+   "shown": "119.5"
+  },
+  {
+   "field": "trials.HV4W55R.ceiling_m",
+   "file": "NUMBERS.json",
+   "json_value": 120.0,
+   "label": "對照架次規劃上限 (m)",
+   "note": "",
+   "panel": "a",
+   "shown": "120.0"
+  },
+  {
+   "field": "trials.HV4W55.altitude.t_above_120_s",
+   "file": "NUMBERS.json",
+   "json_value": 0.0,
+   "label": "本架次逾越 120.000 m 累計 (s)",
+   "note": "",
+   "panel": "a",
+   "shown": "0.00"
+  },
+  {
+   "field": "trials.HV4W55R.altitude.t_above_120_s",
+   "file": "NUMBERS.json",
+   "json_value": 354.925,
+   "label": "對照架次逾越 120.000 m 累計 (s)",
+   "note": "JSON 值恰為 .5，依原始值 354.9251434323077（up_lib.time_above 逐機未捨入加總（BIN 重抽，與 up_metrics.altitude 同一函式））判定",
+   "panel": "a",
+   "shown": "354.93"
+  },
+  {
+   "field": "trials.HV4W55.altitude.flown_max_agl_per_uav.A1",
+   "file": "NUMBERS.json",
+   "json_value": 119.6221,
+   "label": "A1 實飛最高 (m)",
+   "note": "",
+   "panel": "a",
+   "shown": "119.622"
+  },
+  {
+   "field": "HV4W55.altitude.per_uav.A1.exported_max_rel_m",
+   "file": "metrics.json",
+   "json_value": 119.5526,
+   "label": "A1 匯出最高 (m)",
+   "note": "",
+   "panel": "a",
+   "shown": "119.553"
+  },
+  {
+   "field": "trials.HV4W55R.altitude.flown_max_agl_per_uav.A1",
+   "file": "NUMBERS.json",
+   "json_value": 120.1066,
+   "label": "對照架次 A1 實飛最高 (m)",
+   "note": "",
+   "panel": "a",
+   "shown": "120.107"
+  },
+  {
+   "field": "HV4W55.timing.per_uav.A1.plan_t_takeoff_s",
+   "file": "metrics.json",
+   "json_value": 656.0,
+   "label": "A1 規劃放行時刻 (s)",
+   "note": "",
+   "panel": "a",
+   "shown": "656"
+  },
+  {
+   "field": "trials.HV4W55.altitude.flown_max_agl_per_uav.B2",
+   "file": "NUMBERS.json",
+   "json_value": 119.6356,
+   "label": "B2 實飛最高 (m)",
+   "note": "",
+   "panel": "a",
+   "shown": "119.636"
+  },
+  {
+   "field": "HV4W55.altitude.per_uav.B2.exported_max_rel_m",
+   "file": "metrics.json",
+   "json_value": 119.5332,
+   "label": "B2 匯出最高 (m)",
+   "note": "",
+   "panel": "a",
+   "shown": "119.533"
+  },
+  {
+   "field": "trials.HV4W55R.altitude.flown_max_agl_per_uav.B2",
+   "file": "NUMBERS.json",
+   "json_value": 120.1422,
+   "label": "對照架次 B2 實飛最高 (m)",
+   "note": "",
+   "panel": "a",
+   "shown": "120.142"
+  },
+  {
+   "field": "HV4W55.timing.per_uav.B2.plan_t_takeoff_s",
+   "file": "metrics.json",
+   "json_value": 0.0,
+   "label": "B2 規劃放行時刻 (s)",
+   "note": "",
+   "panel": "a",
+   "shown": "0"
+  },
+  {
+   "field": "trials.HV4W55.altitude.flown_max_agl_per_uav.B3",
+   "file": "NUMBERS.json",
+   "json_value": 119.6752,
+   "label": "B3 實飛最高 (m)",
+   "note": "",
+   "panel": "a",
+   "shown": "119.675"
+  },
+  {
+   "field": "HV4W55.altitude.per_uav.B3.exported_max_rel_m",
+   "file": "metrics.json",
+   "json_value": 119.5331,
+   "label": "B3 匯出最高 (m)",
+   "note": "",
+   "panel": "a",
+   "shown": "119.533"
+  },
+  {
+   "field": "trials.HV4W55R.altitude.flown_max_agl_per_uav.B3",
+   "file": "NUMBERS.json",
+   "json_value": 120.1742,
+   "label": "對照架次 B3 實飛最高 (m)",
+   "note": "",
+   "panel": "a",
+   "shown": "120.174"
+  },
+  {
+   "field": "HV4W55.timing.per_uav.B3.plan_t_takeoff_s",
+   "file": "metrics.json",
+   "json_value": 106.0,
+   "label": "B3 規劃放行時刻 (s)",
+   "note": "",
+   "panel": "a",
+   "shown": "106"
+  },
+  {
+   "field": "HV4W55.separation.reporter_raw.thresholds.d_sep_m",
+   "file": "metrics.json",
+   "json_value": 100.0,
+   "label": "違規門檻 水平 (m)",
+   "note": "",
+   "panel": "b",
+   "shown": "100"
+  },
+  {
+   "field": "HV4W55.separation.reporter_raw.thresholds.dh_sep_m",
+   "file": "metrics.json",
+   "json_value": 50.0,
+   "label": "違規門檻 垂直 (m)",
+   "note": "",
+   "panel": "b",
+   "shown": "50"
+  },
+  {
+   "field": "trials.HV4W55.separation.flown_exact_m",
+   "file": "NUMBERS.json",
+   "json_value": 100.4256,
+   "label": "實飛最小水平間距 (m)",
+   "note": "",
+   "panel": "b",
+   "shown": "100.426"
+  },
+  {
+   "field": "trials.HV4W55.separation.binding_pair",
+   "file": "NUMBERS.json",
+   "json_value": "B2-B3",
+   "label": "最小間距機對",
+   "panel": "b",
+   "shown": "B2–B3"
+  },
+  {
+   "field": "trials.HV4W55.separation.vert_at_min_m",
+   "file": "NUMBERS.json",
+   "json_value": 28.3942,
+   "label": "最小點垂直差 (m)",
+   "note": "",
+   "panel": "b",
+   "shown": "28.394"
+  },
+  {
+   "field": "HV4W55.separation.frames.ecef.pairs.B2-B3.n_violation_intervals",
+   "file": "metrics.json",
+   "json_value": 0,
+   "label": "B2–B3 違規數",
+   "note": "",
+   "panel": "b",
+   "shown": "0"
+  },
+  {
+   "field": "HV4W55.separation.frames.ecef.pairs.B2-B3.n_samples",
+   "file": "metrics.json",
+   "json_value": 4714,
+   "label": "B2–B3 對取樣數",
+   "note": "",
+   "panel": "b",
+   "shown": "4714"
+  },
+  {
+   "field": "trials.HV4W55.sim_wind.spd_mps",
+   "file": "NUMBERS.json",
+   "json_value": 5.0,
+   "label": "模擬風速 (m/s)",
+   "note": "",
+   "panel": "圖說",
+   "shown": "5"
+  },
+  {
+   "field": "trials.HV4W55.sim_wind.dir_from_deg",
+   "file": "NUMBERS.json",
+   "json_value": 270.0,
+   "label": "模擬風向（來向，°）",
+   "note": "",
+   "panel": "圖說",
+   "shown": "270"
+  },
+  {
+   "field": "trials.HV4W55.plan_wind.0",
+   "file": "NUMBERS.json",
+   "json_value": 5.0,
+   "label": "規劃風速 (m/s)",
+   "note": "",
+   "panel": "圖說",
+   "shown": "5"
+  },
+  {
+   "field": "trials.HV4W55.plan_wind.1",
+   "file": "NUMBERS.json",
+   "json_value": 270.0,
+   "label": "規劃風向（來向，°）",
+   "note": "",
+   "panel": "圖說",
+   "shown": "270"
+  },
+  {
+   "field": "trials.HV4W55.ceiling_m",
+   "file": "NUMBERS.json",
+   "json_value": 119.5,
+   "label": "規劃上限 (m)",
+   "note": "",
+   "panel": "圖說",
+   "shown": "119.5"
+  },
+  {
+   "field": "trials.HV4W55R.ceiling_m",
+   "file": "NUMBERS.json",
+   "json_value": 120.0,
+   "label": "對照架次規劃上限 (m)",
+   "note": "",
+   "panel": "圖說",
+   "shown": "120.0"
+  },
+  {
+   "field": "HV4W55.separation.reporter_raw.thresholds.d_sep_m",
+   "file": "metrics.json",
+   "json_value": 100.0,
+   "label": "違規門檻 水平 (m)",
+   "note": "",
+   "panel": "圖說",
+   "shown": "100"
+  },
+  {
+   "field": "HV4W55.separation.reporter_raw.thresholds.dh_sep_m",
+   "file": "metrics.json",
+   "json_value": 50.0,
+   "label": "違規門檻 垂直 (m)",
+   "note": "",
+   "panel": "圖說",
+   "shown": "50"
+  }
+ ],
+ "trial": "HV4W55"
+}

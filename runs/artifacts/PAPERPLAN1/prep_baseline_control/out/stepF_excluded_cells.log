@@ -1,0 +1,22 @@
+--- HARVEST S1 n=2 ---
+   coverage=0.5277 max_km=59.06 uncovered=[['Z3_1', 'no_feasible_insertion']] validate_passed=False
+   A1 cls=A strips=9 cruise_equiv=76.274 km / usable 133.0-145.0 km margin=291.5 Wh warn=[]
+   A2 cls=A strips=9 cruise_equiv=76.397 km / usable 133.0-145.0 km margin=290.5 Wh warn=[]
+--- HARVEST S5 n=8 ---
+   coverage=0.617 max_km=67.01 uncovered=[['Z4_1', 'no_feasible_insertion'], ['Z7_1', 'no_feasible_insertion'], ['Z5_1', 'no_feasible_insertion'], ['Z6_1', 'no_feasible_insertion']] validate_passed=False
+   A1 cls=A strips=5 cruise_equiv=84.801 km / usable 133.0-145.0 km margin=223.5 Wh warn=[]
+   A2 cls=A strips=4 cruise_equiv=74.789 km / usable 133.0-145.0 km margin=303.4 Wh warn=[]
+   A3 cls=A strips=5 cruise_equiv=84.774 km / usable 133.0-145.0 km margin=223.7 Wh warn=[]
+   A4 cls=A strips=4 cruise_equiv=74.766 km / usable 133.0-145.0 km margin=303.5 Wh warn=[]
+   A5 cls=A strips=5 cruise_equiv=83.9 km / usable 133.0-145.0 km margin=230.7 Wh warn=[]
+   A6 cls=A strips=4 cruise_equiv=73.98 km / usable 133.0-145.0 km margin=309.8 Wh warn=[]
+   A7 cls=A strips=5 cruise_equiv=83.882 km / usable 133.0-145.0 km margin=230.8 Wh warn=[]
+   A8 cls=A strips=4 cruise_equiv=73.963 km / usable 133.0-145.0 km margin=309.9 Wh warn=[]
+--- HARVEST S1 n=4 ---
+   coverage=1.0 max_km=58.92 uncovered=[] validate_passed=True
+   A1 cls=A strips=9 cruise_equiv=76.242 km / usable 133.0-145.0 km margin=291.8 Wh warn=[]
+   A2 cls=A strips=9 cruise_equiv=76.231 km / usable 133.0-145.0 km margin=291.9 Wh warn=[]
+   A3 cls=A strips=9 cruise_equiv=75.866 km / usable 133.0-145.0 km margin=294.8 Wh warn=[]
+   A4 cls=A strips=9 cruise_equiv=75.862 km / usable 133.0-145.0 km margin=294.8 Wh warn=[]
+
+wrote C:\Users\joy46\Documents\Projects\aeroplan-studio\runs\artifacts\PAPERPLAN1\prep_baseline_control\out\stepF_excluded_cells.json

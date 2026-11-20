@@ -17,7 +17,13 @@ nb_{k,min} (指向 v_{k,min}) 即決定最佳掃描方向 α_k。
 掃描線層 L_{k,l} (Eq. 6/7)
 --------------------------
     ΔwT_l = (l-1)·(w_i - w_ovl)
-    ΔwB_l = l·w_i + (l-1)·w_ovl
+    ΔwB_l = ΔwT_l + w_i
+
+⚠ 論文 Eq.(7) 印的是 ``ΔwB_l = l·w_i + (l-1)·w_ovl``，**不可照抄**：那個 '+'
+  與「條帶寬度恆為 w_i」自相矛盾，且會讓 w_ovl 在中線 (ΔwT+ΔwB)/2 上剛好對消，
+  使重疊率完全失效（UI 調了等於沒調）。這裡採用與 ΔwT_l 一致的 pitch = w_i - w_ovl。
+  值層級鎖見 tests/test_dccpp_strip_pitch.py。
+
     L^T_{k,l}(q) = v_{k,2} + q·ub_min + ΔwT_l·nb_min   (條帶上邊界)
     L^B_{k,l}(q) = v_{k,2} + q·ub_min + ΔwB_l·nb_min   (條帶下邊界)
     L_{k,l} (中線) = v_{k,2} + q·ub_min + (ΔwT_l+ΔwB_l)/2·nb_min
@@ -225,6 +231,61 @@ def find_min_width(hull_xy: Sequence[Tuple[float, float]]) -> MinWidthResult:
     )
 
 
+def width_along_direction(
+    hull_xy: Sequence[Tuple[float, float]],
+    angle_deg: float,
+) -> MinWidthResult:
+    """指定掃描方向時的「寬度」—— 手動掃描角走的那條路。
+
+    ⚠ 這裡的寬度是多邊形在**該方向法向上的投影跨距**，不是
+    :func:`find_min_width` 的最小值。用最小值會讓條帶數恆等於自動模式，
+    也就是角度靜默失效（見 tests/test_dccpp_scan_angle.py 的說明）。
+
+    Args:
+        hull_xy   : 凸包頂點（local ENU meters，x=East, y=North）
+        angle_deg : 掃描線飛行方位角（compass，0=北，順時針為正）。
+                    可為任意實數，內部取 mod 360。
+
+    Returns:
+        與 :func:`find_min_width` 同型的 :class:`MinWidthResult`，
+        可直接餵給 :func:`generate_paper_scan_lines`。
+
+    設計筆記
+    --------
+    ``nb_min`` 取 ``ub_min`` 的**左法向**，與 :func:`find_min_width` 在逆時針
+    凸包上得到的法向同一個慣例；``v2`` 取投影最小的頂點。兩者合起來保證
+    「把自動算出來的 ``alpha_k_deg`` 當手動角送回來」會**逐點**重現自動的
+    掃描線（否則條帶順序會整組反過來）。
+    """
+    pts = np.asarray(hull_xy, dtype=np.float64)
+    if len(pts) < 3:
+        raise ValueError(f"凸包至少需 3 頂點，實際 {len(pts)}")
+
+    compass = float(angle_deg) % 360.0
+    math_deg = (90.0 - compass) % 360.0
+    rad = math.radians(math_deg)
+    ub = np.array([math.cos(rad), math.sin(rad)])       # 單位切向（飛行方向）
+    nb = np.array([-ub[1], ub[0]])                      # 左法向（條帶推進方向）
+
+    proj = pts @ nb
+    i_min = int(np.argmin(proj))
+    i_max = int(np.argmax(proj))
+    width = float(proj[i_max] - proj[i_min])
+
+    anchor = pts[i_min]
+    return MinWidthResult(
+        min_width=width,
+        edge_index=-1,                       # 手動角不對應任何一條凸包邊
+        v2=(float(anchor[0]), float(anchor[1])),
+        v1=(float(anchor[0]), float(anchor[1])),
+        v_furthest=(float(pts[i_max][0]), float(pts[i_max][1])),
+        ub_min=(float(ub[0]), float(ub[1])),
+        nb_min=(float(nb[0]), float(nb[1])),
+        alpha_k_deg=compass,
+        edge_angle_math_deg=math_deg,
+    )
+
+
 # ============================================================
 # 線段求交：水平掃描線 ↔ 凸多邊形邊
 # ============================================================
@@ -263,6 +324,10 @@ def _seg_polygon_intersections(
 # 掃描線生成 (論文 Eq. 6/7 嚴格)
 # ============================================================
 
+#: 單一區域的掃描線數硬上限（防止病態參數炸掉規劃）。超過即拒收，不截斷。
+_MAX_SCAN_LINES = 4096
+
+
 def generate_paper_scan_lines(
     hull_xy: Sequence[Tuple[float, float]],
     mwr: MinWidthResult,
@@ -291,21 +356,45 @@ def generate_paper_scan_lines(
     if W <= 0:
         return []
 
-    # 按論文 ΔwB_l = l·w_i + (l-1)·w_ovl，l 從 1 起
-    # 條帶總數：找到第一個使 ΔwB_l ≥ W 的 l
-    step = w_i + w_ovl
-    n_layers = max(1, int(math.ceil((W - w_i) / step)) + 1)
-    # 安全上限
-    n_layers = min(n_layers, 4096)
+    # 條帶排布：寬度恆為 w_i，相鄰條帶中線間距（pitch）= w_i - w_ovl。
+    #
+    # ⚠ 不可照抄論文 Eq.(7) 印出的 ΔwB_l = l·w_i + (l-1)·w_ovl：那個 '+' 與
+    #   「條帶寬度恆為 w_i」自相矛盾，會讓 w_ovl 在中線 (ΔwT+ΔwB)/2 上剛好
+    #   對消 ⇒ 使用者在 UI 調重疊率，規劃結果一個字都不會變。同理條帶數的
+    #   級距必須是 w_i - w_ovl，用 w_i + w_ovl 會讓重疊率**反向**（越重疊
+    #   越稀疏）。值層級鎖見 tests/test_dccpp_strip_pitch.py。
+    pitch = w_i - w_ovl                       # 上面已保證 0 < pitch <= w_i
+    # 條帶總數：第一條蓋住 [0, w_i]，其後每條推進一個 pitch，直到蓋滿 W。
+    # 減 1e-9 吸收浮點誤差，避免 (W - w_i) 剛好是 pitch 整數倍時多出一條重複線。
+    n_layers = max(1, int(math.ceil((W - w_i) / pitch - 1e-9)) + 1)
+    # 安全上限。⚠ 不可靜默截斷：pitch 修正後（見上）高重疊率真的會撞到這個上限，
+    #   而截斷等於交出一份「蓋不滿區域」的規劃且完全沒有告警 —— 正是本專案要
+    #   避免的那類失效。撞到就大聲拒收。
+    if n_layers > _MAX_SCAN_LINES:
+        raise ValueError(
+            f"需要 {n_layers} 條掃描線（上限 {_MAX_SCAN_LINES}）："
+            f"W={W:.1f} m, w_i={w_i} m, w_ovl={w_ovl} m -> pitch={pitch:.3f} m。"
+            "重疊率過高，請調低 w_ovl 或增大 w_i。"
+        )
 
     scan_lines: List[ScanLine] = []
     for li in range(1, n_layers + 1):
-        dw_top = (li - 1) * (w_i - w_ovl)
-        dw_bot = li * w_i + (li - 1) * w_ovl
+        dw_top = (li - 1) * pitch
+        dw_bot = dw_top + w_i                 # 寬度恆為 w_i，不隨 l 變寬
         if dw_top > W and li > 1:
             break
         # 中線 = 條帶幾何中心
-        dw_mid = 0.5 * (dw_top + min(dw_bot, W + w_i))  # 讓最後一條條帶仍位於區域內
+        dw_mid = 0.5 * (dw_top + dw_bot)
+        # 最後一條通常會超出遠緣；若中線落到區域外，_seg_polygon_intersections
+        # 會找不到交點而把整條**靜默丟掉**，遠緣留下最寬達 w_i/2 的漏掃帶。
+        # 此時把整條條帶往內拉到貼齊遠緣（中線 W - w_i/2），仍然蓋滿邊界。
+        if dw_mid > W:
+            if W >= w_i:
+                dw_top = W - w_i              # 貼齊遠緣
+            else:
+                dw_top = 0.5 * (W - w_i)      # 區域比一條條帶還窄 ⇒ 置中（dw_top < 0）
+            dw_bot = dw_top + w_i
+            dw_mid = 0.5 * (dw_top + dw_bot)  # 回報值與實際中線永遠一致
         # 中線一點 + 切向，做無限長直線
         p0 = v2 + dw_mid * nb
         ints = _seg_polygon_intersections(p0, ub, hull)
@@ -363,7 +452,16 @@ class AreaProcessor:
         polygon_latlon: Sequence[Tuple[float, float]],
         w_i: float,
         w_ovl: float = 0.0,
+        scan_angle_deg: Optional[float] = None,
     ) -> AreaProcessingResult:
+        """多邊形 → 凸包 → 掃描線。
+
+        Args:
+            scan_angle_deg: 手動掃描方位角（compass，0=北）。``None``（預設）
+                代表自動模式，方向由 :func:`find_min_width` 的幾何最小寬度決定。
+                ⚠ 這個參數必須一路送到這裡才算生效 —— 只送到上游而不改
+                方向，log 會照印角度但飛出來的航點完全不變。
+        """
         if len(polygon_latlon) < 3:
             raise ValueError(f"多邊形至少 3 點，實際 {len(polygon_latlon)}")
 
@@ -389,8 +487,11 @@ class AreaProcessor:
         if len(hull) < 3:
             hull = convex_hull(xy_pts)
 
-        # 最小寬度
-        mwr = find_min_width(hull)
+        # 掃描方向：手動角優先，否則用幾何最小寬度
+        if scan_angle_deg is None:
+            mwr = find_min_width(hull)
+        else:
+            mwr = width_along_direction(hull, float(scan_angle_deg))
 
         # 掃描線
         scan_lines = generate_paper_scan_lines(hull, mwr, w_i, w_ovl)

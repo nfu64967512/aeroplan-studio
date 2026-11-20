@@ -1,0 +1,193 @@
+{
+  "planner_config_defaults": {
+    "multi_sortie": false,
+    "kappa_load": 0.85,
+    "t_swap_s": 600.0
+  },
+  "runs": [
+    {
+      "scenario": "S1",
+      "n": 2,
+      "multi_sortie": false,
+      "sec": 2.2,
+      "coverage": 0.5277,
+      "max_km": 59.06,
+      "total_km": 118.0,
+      "n_tracks": 2,
+      "uncovered": [
+        [
+          "Z3_1",
+          "no_feasible_insertion"
+        ]
+      ],
+      "n_uncovered": 1,
+      "plan_ids": [
+        "A1",
+        "A2"
+      ],
+      "per_uav_cruise_equiv_km": {
+        "A1": 76.27,
+        "A2": 76.4
+      },
+      "per_uav_strips": {
+        "A1": 9,
+        "A2": 9
+      },
+      "makespan_planner_s": 3224.8,
+      "validate_passed": false
+    },
+    {
+      "scenario": "S1",
+      "n": 2,
+      "multi_sortie": true,
+      "sec": 2.2,
+      "coverage": 0.5277,
+      "max_km": 59.06,
+      "total_km": 118.0,
+      "n_tracks": 2,
+      "uncovered": [
+        [
+          "Z3_1",
+          "no_feasible_insertion"
+        ]
+      ],
+      "n_uncovered": 1,
+      "plan_ids": [
+        "A1",
+        "A2"
+      ],
+      "per_uav_cruise_equiv_km": {
+        "A1": 76.27,
+        "A2": 76.4
+      },
+      "per_uav_strips": {
+        "A1": 9,
+        "A2": 9
+      },
+      "makespan_planner_s": 3224.8,
+      "validate_passed": false
+    },
+    {
+      "scenario": "S5",
+      "n": 8,
+      "multi_sortie": false,
+      "sec": 49.8,
+      "coverage": 0.617,
+      "max_km": 67.01,
+      "total_km": 494.65,
+      "n_tracks": 8,
+      "uncovered": [
+        [
+          "Z4_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z7_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z5_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z6_1",
+          "no_feasible_insertion"
+        ]
+      ],
+      "n_uncovered": 4,
+      "plan_ids": [
+        "A1",
+        "A2",
+        "A3",
+        "A4",
+        "A5",
+        "A6",
+        "A7",
+        "A8"
+      ],
+      "per_uav_cruise_equiv_km": {
+        "A1": 84.8,
+        "A2": 74.79,
+        "A3": 84.77,
+        "A4": 74.77,
+        "A5": 83.9,
+        "A6": 73.98,
+        "A7": 83.88,
+        "A8": 73.96
+      },
+      "per_uav_strips": {
+        "A1": 5,
+        "A2": 4,
+        "A3": 5,
+        "A4": 4,
+        "A5": 5,
+        "A6": 4,
+        "A7": 5,
+        "A8": 4
+      },
+      "makespan_planner_s": 4630.0,
+      "validate_passed": false
+    },
+    {
+      "scenario": "S5",
+      "n": 8,
+      "multi_sortie": true,
+      "sec": 50.3,
+      "coverage": 0.617,
+      "max_km": 67.01,
+      "total_km": 494.65,
+      "n_tracks": 8,
+      "uncovered": [
+        [
+          "Z4_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z7_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z5_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z6_1",
+          "no_feasible_insertion"
+        ]
+      ],
+      "n_uncovered": 4,
+      "plan_ids": [
+        "A1",
+        "A2",
+        "A3",
+        "A4",
+        "A5",
+        "A6",
+        "A7",
+        "A8"
+      ],
+      "per_uav_cruise_equiv_km": {
+        "A1": 84.8,
+        "A2": 74.79,
+        "A3": 84.77,
+        "A4": 74.77,
+        "A5": 83.9,
+        "A6": 73.98,
+        "A7": 83.88,
+        "A8": 73.96
+      },
+      "per_uav_strips": {
+        "A1": 5,
+        "A2": 4,
+        "A3": 5,
+        "A4": 4,
+        "A5": 5,
+        "A6": 4,
+        "A7": 5,
+        "A8": 4
+      },
+      "makespan_planner_s": 4630.0,
+      "validate_passed": false
+    }
+  ]
+}

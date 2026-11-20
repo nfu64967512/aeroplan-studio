@@ -1,0 +1,69 @@
+WARNING mission.swarm_coordinator: HARVEST: min_fw_lowered(Pioneer PNP（構型 A）120 → 100 m)。表 1 的值是規劃值不是機體極限（使用方式欄：「任務前需依地形、感測器與法規調整」），但它會寫進飛控的 Q_RTL_ALT（匯出的 .param，每條路徑都生效）⇒ QRTL 進場高度跟著降；另外 FENCE_ALT_MIN 也綁著它，但只在走 mavlink_link.upload_plan 寫參數那條路時才會送出。
+WARNING mission.swarm_coordinator: HARVEST: dh_band_min_relaxed(15 m，預設 20)。這同時放寬了 GSD 可達性判準（h_max ≥ 最低作業高度 + 15）與相機預設目標高。
+WARNING mission.swarm_coordinator: HARVEST: recovery_auto_applied({'A1': 'ALT1'}；makespan 3432.7 → 2348.0 s、最小間距 178.2 → 180.6 m)
+情境 beamidp_1a2b_1195（路徑 gui）：規劃 12.65s  makespan 2348.0s  status GO_WITH_WARNINGS
+validate passed=True conflicts=0 uncovered=0
+感測器 {'A': 'rgb', 'B': 'rgb'}   酬載需求 {'default': 'rgb'}
+  A1 A strips=13 wp=811 41.74km  t_off=74s t_land=2218s  E=459/441Wh
+  B2 B strips=13 wp=415 37.17km  t_off=172s t_land=2348s  E=165/89Wh
+  B3 B strips=13 wp=499 33.81km  t_off=0s t_land=1993s  E=154/100Wh
+匯出: {'A1': 263, 'B2': 165, 'B3': 175}
+
+機隊 ['A1', 'B2', 'B3']  makespan 2348s  speedup 5.0  → 牆鐘約 7.8 分鐘
+
+已終止 0 個本次的 ArduPlane 行程
+SITL 已啟動: [('A1', 6760, 19672), ('B2', 6770, 41564), ('B3', 6780, 17728)]
+  A1 心跳 OK (sysid 1, port 6760)
+  B2 心跳 OK (sysid 2, port 6770)
+  B3 心跳 OK (sysid 3, port 6780)
+
+位置串流速率讀回: {'A1': 10.0, 'B2': 10.0, 'B3': 10.0}（要求 10.0 Hz）
+
+SITL 風場讀回：15/15 相符（SIM_WIND_SPD=0 DIR=270）；規劃假設風 (5.0, 270.0)
+  A1 生成點 TO_A1 誤差  0.02 m OK（收斂等了 5.1s）
+  B2 生成點 TO_B2 誤差  0.02 m OK（收斂等了 3.0s）
+  B3 生成點 TO_B3 誤差  0.03 m OK（收斂等了 3.1s）
+  生成點兩兩最小間距 9.99 m（情境設定 10.0 m）
+
+參數讀回：102/102 相符（34 個參數 × 3 台；匯出檔 32 個全部涵蓋）
+  A1 上傳 263 → 讀回 263 OK
+  B2 上傳 165 → 讀回 165 OK
+  B3 上傳 175 → 讀回 175 OK
+  A1 armed（等 0s）
+  B2 armed（等 0s）
+  B3 armed（等 0s）
+
+放行時刻（牆鐘秒）: {'B3': 0.0, 'A1': 14.8, 'B2': 34.4}
+  > B3 放行切 AUTO（牆鐘 0.0s，規劃 t_off=0s）
+    [    0s] A1:  0.1m  B2:  0.0m  B3:  0.0m
+  > A1 放行切 AUTO（牆鐘 14.9s，規劃 t_off=74s）
+    [   20s] A1: 60.3m  B2:  0.0m  B3:116.0m
+  > B2 放行切 AUTO（牆鐘 34.5s，規劃 t_off=172s）
+    [   40s] A1:119.6m  B2: 53.0m  B3:119.7m
+    [   60s] A1:119.6m  B2:119.6m  B3:119.7m
+    [   80s] A1:119.6m  B2:119.6m  B3:119.7m
+    [  100s] A1:119.6m  B2:119.6m  B3:119.7m
+    [  120s] A1:119.6m  B2:119.6m  B3:119.7m
+    [  140s] A1:119.6m  B2:119.6m  B3:119.7m
+    [  160s] A1:119.6m  B2:119.6m  B3:119.7m
+    [  180s] A1:119.6m  B2:119.6m  B3:119.7m
+    [  200s] A1:119.6m  B2:119.6m  B3:119.7m
+    [  220s] A1:119.6m  B2:119.6m  B3:119.7m
+    [  240s] A1:119.6m  B2:119.7m  B3:119.7m
+    [  260s] A1:119.6m  B2:119.7m  B3:119.7m
+    [  280s] A1:119.6m  B2:119.7m  B3:119.7m
+    [  300s] A1:119.6m  B2:119.7m  B3:119.7m
+    [  320s] A1:119.7m  B2:119.7m  B3:119.7m
+    [  340s] A1:119.7m  B2:119.7m  B3:119.7m
+    [  360s] A1:119.7m  B2:119.7m  B3:119.7m
+  B3 已降落 (sim t=1960s)
+    [  380s] A1:119.7m  B2:119.7m  B3:119.7m
+    [  400s] A1:119.7m  B2:119.7m  B3:119.7m
+    [  420s] A1:119.7m  B2:119.7m  B3:119.7m
+  A1 已降落 (sim t=2215s)
+    [  440s] A1:119.7m  B2:119.7m  B3:119.7m
+  B2 已降落 (sim t=2363s)
+
+落地 3/3：['A1', 'B2', 'B3']
+最高高度: {'A1': 119.7, 'B2': 119.7, 'B3': 119.7}
+已終止 0 個本次的 ArduPlane 行程

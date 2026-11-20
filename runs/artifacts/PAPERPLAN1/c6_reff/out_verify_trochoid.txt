@@ -1,0 +1,16 @@
+=== numeric check: max radius of curvature of the wind-blown ground track ===
+ (air circle radius R = R_theo; wind direction swept; analytic claim = R*(1+W/Va)^2)
+  [A] Va=21.5 R_theo=130.0  W= 5.0: numeric max rho= 197.496 m (min rho= 76.566) vs analytic R(1+W/Va)^2= 197.496 m  rel.err=+0.0000%
+  [A] Va=21.5 R_theo=130.0  W= 8.0: numeric max rho= 244.743 m (min rho= 51.255) vs analytic R(1+W/Va)^2= 244.743 m  rel.err=+0.0000%
+  [A] Va=21.5 R_theo=130.0  W=12.0: numeric max rho= 315.614 m (min rho= 25.381) vs analytic R(1+W/Va)^2= 315.614 m  rel.err=+0.0000%
+  [B] Va=19.0 R_theo=75.0  W= 5.0: numeric max rho= 119.668 m (min rho= 40.720) vs analytic R(1+W/Va)^2= 119.668 m  rel.err=+0.0000%
+  [B] Va=19.0 R_theo=75.0  W= 8.0: numeric max rho= 151.454 m (min rho= 25.139) vs analytic R(1+W/Va)^2= 151.454 m  rel.err=+0.0000%
+  [B] Va=19.0 R_theo=75.0  W=12.0: numeric max rho= 199.654 m (min rho= 10.180) vs analytic R(1+W/Va)^2= 199.654 m  rel.err=+0.0000%
+
+=== W=8 m/s consequences (this is where R_eff stops being R_plan) ===
+  [A] W=5 -> R_eff= 200.00 m  skip_k(s=97.0)=5  d_turn(e_ext=0)=  513.44 m  lateral(R-s/2)= 151.50 m
+  [A] W=8 -> R_eff= 244.74 m  skip_k(s=97.0)=6  d_turn(e_ext=0)=  636.67 m  lateral(R-s/2)= 196.24 m
+  [B] W=5 -> R_eff= 120.00 m  skip_k(s=97.0)=3  d_turn(e_ext=0)=  290.90 m  lateral(R-s/2)=  71.50 m
+  [B] W=8 -> R_eff= 151.45 m  skip_k(s=97.0)=4  d_turn(e_ext=0)=  378.99 m  lateral(R-s/2)= 102.95 m
+
+wrote trochoid_check.json

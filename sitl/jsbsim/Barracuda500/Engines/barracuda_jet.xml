@@ -1,0 +1,64 @@
+<?xml version="1.0"?>
+<!--
+  Barracuda-500 的推進系統(簡化渦噴)。
+
+  ⚠️⚠️ **`<milthrust>` 不可以帶 unit 屬性。** JSBSim 的 turbine_engine
+     只吃裸的**磅力**(對照 jsbsim/engine/J85-GE-5.xml)。第一版寫成
+     `<milthrust unit="N">150</milthrust>`,結果 **N1/N2 一直停在 0.003、
+     推力恆 0**,飛機在跑道上加速到 61 m/s 之後一路減速回 1.8 m/s ——
+     而 ArduPilot 那一側**沒有任何錯誤訊息**,油門照樣顯示 100%。
+     這是典型的靜默失效:單位寫錯不會當掉,只會讓引擎不存在。
+
+  ⚠️⚠️ 密度高度表必須涵蓋**負值**。海平面的 density-altitude 可能略小於 0,
+     落在表外時查表結果不可靠。J85 的表從 -10000 起,這裡照做。
+
+  ⚠️ 推力值**待校準**。我們自己的資料互相矛盾:
+        predictor.py:45  THRUST_FULL_N = m*g/0.7  ⇒ 308 N ⇒ T/W 1.43
+        分析文件          T/W 0.274                 ⇒  59 N   ⇒ 差 5 倍
+     用飛行資料反算(3100 m、ρ≈0.9、CD0 0.01642、S 0.45 m²):
+        巡航 157 m/s 需 ~82 N   |   193 m/s 需 ~124 N
+     ⇒ 0.274 飛不到巡航速、1.43 過大。取海平面靜推力 150 N = 33.72 lbf。
+     ⇒ 校準方法:在 JSBSim 上重跑水平加速,把最大平飛速度對到實測 193 m/s。
+-->
+<turbine_engine name="barracuda_jet">
+  <milthrust>      33.72 </milthrust>
+  <bypassratio>     0.0  </bypassratio>
+  <tsfc>            1.20 </tsfc>
+  <bleed>           0.02 </bleed>
+  <idlen1>          0.0  </idlen1>
+  <idlen2>         53.0  </idlen2>
+  <maxn1>         100.0  </maxn1>
+  <maxn2>         100.0  </maxn2>
+  <augmented>         0  </augmented>
+  <injected>          0  </injected>
+
+  <function name="IdleThrust">
+   <table>
+    <independentVar lookup="row">velocities/mach</independentVar>
+    <independentVar lookup="column">atmosphere/density-altitude</independentVar>
+    <tableData>
+         -10000      0    10000   20000   30000
+     0.0  0.0500  0.0480  0.0390  0.0300  0.0220
+     0.2  0.0470  0.0450  0.0365  0.0280  0.0210
+     0.4  0.0450  0.0430  0.0350  0.0270  0.0200
+     0.6  0.0470  0.0450  0.0365  0.0280  0.0210
+     0.8  0.0500  0.0480  0.0390  0.0300  0.0220
+    </tableData>
+   </table>
+  </function>
+
+  <function name="MilThrust">
+   <table>
+    <independentVar lookup="row">velocities/mach</independentVar>
+    <independentVar lookup="column">atmosphere/density-altitude</independentVar>
+    <tableData>
+         -10000      0    10000   20000   30000
+     0.0  1.0500  1.0000  0.7300  0.5100  0.3400
+     0.2  1.0300  0.9800  0.7150  0.5000  0.3350
+     0.4  1.0100  0.9600  0.7000  0.4900  0.3300
+     0.6  1.0200  0.9700  0.7100  0.4950  0.3320
+     0.8  1.0500  1.0000  0.7300  0.5100  0.3400
+    </tableData>
+   </table>
+  </function>
+</turbine_engine>

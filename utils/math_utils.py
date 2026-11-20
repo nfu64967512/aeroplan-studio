@@ -566,3 +566,33 @@ def polygon_centroid(polygon: list) -> Tuple[float, float]:
     cy = sum(p[1] for p in polygon) / n
     
     return (cx, cy)
+
+
+# ==========================================
+# 生成點排列（SITL / 多起降點）
+# ==========================================
+def spawn_positions(base_lat: float, base_lon: float, num_drones: int,
+                    takeoff_bearing_deg: float, spacing_m: float) -> list:
+    """沿起飛方向的垂直方向、以起飛點為中心對稱排開 N 個生成點。
+
+    ⚠ 一定要用 ``point_at_distance_bearing``（它用 ``EARTH_RADIUS_M``），
+    不可再用手刻的 111320.0 m/deg：避撞偵測的 ``_haversine`` 用的是
+    ``EARTH_RADIUS_M``（2πR/360 = 111319.4908 m/deg），兩個常數差 0.51 m/deg，
+    會讓「排好 50 m」量起來只有 49.999771 m，剛好掉到 50 m 門檻底下，
+    於是 t=0 每一組相鄰機都被誤判成衝突（cos φ 會約掉 ⇒ 與緯度無關）。
+
+    ⚠⚠ 這支原本住在 ``ui/main_window.py``，2026-09-09 搬到這裡：SITL 情境
+    （``scripts/hv_sitl_scenarios.py``）也要排生成點，而那條路徑**完全不碰 Qt**
+    （實測載入後 PyQt 模組數 0），為了一個純幾何函式把 PyQt 拉進 20 分鐘的
+    航次腳本不划算。``ui.main_window`` 仍再匯出同一個名字 ⇒ 呼叫端不用改。
+    """
+    if num_drones <= 1:
+        return [(base_lat, base_lon)]
+    out = []
+    for i in range(num_drones):
+        offset_m = (i - (num_drones - 1) / 2.0) * spacing_m
+        brg = (takeoff_bearing_deg + 90.0) % 360.0
+        if offset_m < 0.0:
+            brg = (brg + 180.0) % 360.0
+        out.append(point_at_distance_bearing(base_lat, base_lon, abs(offset_m), brg))
+    return out

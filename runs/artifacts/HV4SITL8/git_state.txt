@@ -1,0 +1,132 @@
+c56531996f3d4e28bb00112fae242468fb5d95f9
+ M aeroplan_studio.spec
+ M core/dccpp/area_processor.py
+ M core/dccpp/collision_avoidance.py
+ M core/dccpp/dccpp_path_builder.py
+ M core/geometry/polygon.py
+ M docs/PROJECT_STATUS.md
+ M docs/adr/README.md
+ M mission/geofence_manager.py
+ M mission/sitl_launcher.py
+ M mission/swarm_coordinator.py
+ M mission/vtol_mission_exporter.py
+ M requirements.txt
+ M sensors/dem_terrain.py
+ M tests/test_dccpp_pipeline.py
+ M ui/main_window.py
+ M ui/resources/aeroplan_theme/aeroplan_theme.qss
+ M ui/widgets/cesium_map_widget.py
+ M ui/widgets/dual_map_widget.py
+ M ui/widgets/map_widget.py
+ M ui/widgets/parameter_panel.py
+?? cad/
+?? core/base/airframe.py
+?? core/dccpp/vtol_profile.py
+?? core/recon/
+?? docs/adr/0007-hv-dccpp-planner.md
+?? docs/adr/0008-planning-in-worker-thread.md
+?? docs/adr/0009-uniform-single-lens-camera.md
+?? docs/adr/0010-harvest-naming.md
+?? docs/adr/0011-caa-120m-ceiling.md
+?? docs/adr/0012-min-fw-altitude-is-adjustable.md
+?? docs/design_2026-09-05_heterogeneous_vtol_planning.md
+?? docs/handoff_2026-08-21.md
+?? docs/handoff_2026-08-25.md
+?? docs/handoff_2026-08-25_auto_mission.md
+?? docs/handoff_2026-09-03_fence_scan_angle.md
+?? docs/handoff_2026-09-04_fence_scan_angle_done.md
+?? docs/hv_dccpp/
+?? docs/lit/removed_thin_sources_2026-08-21.md
+?? docs/nzc_decision_rule.md
+?? docs/requirements_2026-09-04_heterogeneous_vtol_recon.md
+?? docs/vtol_form_research_2026-09-03.md
+?? exports/
+?? hv_dccpp/
+?? matlab/
+?? mission/mission_view.py
+?? oos.json
+?? runs_gz/
+?? scratchpad/
+?? scripts/_capture_probe.py
+?? scripts/_encode_frames.py
+?? scripts/_fence_angle_probe.py
+?? scripts/_full_flow_capture.py
+?? scripts/harvest_nfz_strategies_figure.py
+?? scripts/harvest_vs_dccpp_figure.py
+?? scripts/harvest_vs_dccpp_nfz_overlap.py
+?? scripts/hv_sitl_artifacts.py
+?? scripts/hv_sitl_compare.py
+?? scripts/hv_sitl_flight.py
+?? scripts/hv_sitl_fly.py
+?? scripts/hv_sitl_report.py
+?? scripts/hv_sitl_run.py
+?? scripts/hv_sitl_scenarios.py
+?? scripts/hv_sitl_scout.py
+?? scripts/wsl/formation_config.sh
+?? scripts/wsl/formation_readout.py
+?? scripts/wsl/nzc_readout.py
+?? scripts/wsl/run_nzclamp.sh
+?? scripts/wsl/sar_swarm_patches/formation_log.py
+?? scripts/wsl/sar_swarm_patches/mission_plan.py
+?? scripts/wsl/weave_readout.py
+?? sitl/copter/
+?? sitl/default_params/firmware_param_names.json
+?? sitl/flightgear/
+?? sitl/jsbsim/
+?? sitl/vtol/
+?? tests/hv_dccpp/
+?? tests/test_airframe.py
+?? tests/test_align_weave_instrument.py
+?? tests/test_auto_mission.py
+?? tests/test_clear_all_wipes_map.py
+?? tests/test_collision_alt_cap.py
+?? tests/test_collision_avoidance_rounds.py
+?? tests/test_contract_verify_imports.py
+?? tests/test_coop_homing_topics.py
+?? tests/test_dccpp_scan_angle.py
+?? tests/test_dccpp_strip_pitch.py
+?? tests/test_fence_scan_angle.py
+?? tests/test_formation_echelon.py
+?? tests/test_formation_guided_and_altcmd.py
+?? tests/test_formation_log.py
+?? tests/test_heatmap_true_cone_only.py
+?? tests/test_hv_dccpp_adapter.py
+?? tests/test_hv_uniform_sensor.py
+?? tests/test_idp_load_balance.py
+?? tests/test_kill_deadlock.py
+?? tests/test_lateral_tracking_instrument.py
+?? tests/test_launcher_param_coverage.py
+?? tests/test_map_background.py
+?? tests/test_min_fw_altitude.py
+?? tests/test_mission_download.py
+?? tests/test_multi_survey_areas.py
+?? tests/test_nz_closed_loop.py
+?? tests/test_parameter_panel_unknown_keys.py
+?? tests/test_per_aircraft_turn_radius.py
+?? tests/test_recon_coverage.py
+?? tests/test_requested_vs_effective.py
+?? tests/test_sar_heatmap_resolution.py
+?? tests/test_sitl_airframe_params.py
+?? tests/test_sitl_param_names.py
+?? tests/test_solver_wallclock_independence.py
+?? tests/test_tot_energy_cols.py
+?? tests/test_turn_feasibility.py
+?? tests/test_vtol_fov_cone.py
+?? tests/test_vtol_mission_export_commands.py
+?? tests/test_vtol_prearm_real.py
+?? tests/test_vtol_profile.py
+?? tests/test_vtol_recon_fixes.py
+?? tests/test_vtol_recon_panel.py
+?? tests/test_vtol_sitl_enforced.py
+?? tests/test_weave_absorption_invariant.py
+?? tests/test_weave_aim.py
+?? tests/test_weave_relative.py
+?? tests/test_zarchan_citations.py
+?? tests/test_zarchan_decode.py
+?? tests/test_zarchan_extract.py
+?? tests/test_zarchan_port_lint.py
+?? tools/hv_dccpp/
+?? tools/mock_autopilot.py
+?? ui/resources/images/
+?? ui/widgets/vtol_recon_panel.py
+?? ui/workers/

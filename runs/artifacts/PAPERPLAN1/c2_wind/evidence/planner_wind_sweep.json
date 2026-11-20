@@ -1,0 +1,132 @@
+{
+ "scenario": "gui_legal_120_1a2b",
+ "trial_of_record": "HV4SITL15",
+ "scenario_default_wind": [
+  5.0,
+  270.0
+ ],
+ "rows": [
+  {
+   "wind_mps": 0.0,
+   "wind_dir_from_deg": 270.0,
+   "plan_wall_s": 14.42,
+   "status": "GO_WITH_WARNINGS",
+   "makespan_s": 1205.5,
+   "total_distance_km": 30.435,
+   "per_uav": {
+    "A1": {
+     "cls": "A",
+     "strips": 3,
+     "wp": 230,
+     "distance_km": 10.229,
+     "t_takeoff_s": 612.0,
+     "t_land_s": 1205.5,
+     "flight_time_s": 593.5,
+     "energy_used_wh": 193.4,
+     "energy_margin_wh": 706.6
+    },
+    "B2": {
+     "cls": "B",
+     "strips": 2,
+     "wp": 151,
+     "distance_km": 7.866,
+     "t_takeoff_s": 0.0,
+     "t_land_s": 519.7,
+     "flight_time_s": 519.7,
+     "energy_used_wh": 62.4,
+     "energy_margin_wh": 191.6
+    },
+    "B3": {
+     "cls": "B",
+     "strips": 4,
+     "wp": 223,
+     "distance_km": 12.339,
+     "t_takeoff_s": 100.0,
+     "t_land_s": 855.2,
+     "flight_time_s": 755.2,
+     "energy_used_wh": 77.0,
+     "energy_margin_wh": 177.0
+    }
+   },
+   "r_eff_m": {
+    "A": 200.0,
+    "B": 120.0
+   },
+   "r_plan_m": {
+    "A": 200.0,
+    "B": 120.0
+   },
+   "validate": {
+    "passed": true,
+    "conflicts": 0,
+    "min_sep_h_m": 105.06,
+    "min_sep_v_m": null,
+    "coverage_ok": true,
+    "energy_ok": true
+   }
+  },
+  {
+   "wind_mps": 5.0,
+   "wind_dir_from_deg": 270.0,
+   "plan_wall_s": 15.5,
+   "status": "GO_WITH_WARNINGS",
+   "makespan_s": 1260.4,
+   "total_distance_km": 30.658,
+   "per_uav": {
+    "A1": {
+     "cls": "A",
+     "strips": 3,
+     "wp": 229,
+     "distance_km": 10.293,
+     "t_takeoff_s": 656.0,
+     "t_land_s": 1260.4,
+     "flight_time_s": 604.4,
+     "energy_used_wh": 195.2,
+     "energy_margin_wh": 704.8
+    },
+    "B2": {
+     "cls": "B",
+     "strips": 2,
+     "wp": 167,
+     "distance_km": 7.926,
+     "t_takeoff_s": 0.0,
+     "t_land_s": 533.9,
+     "flight_time_s": 533.9,
+     "energy_used_wh": 63.3,
+     "energy_margin_wh": 190.7
+    },
+    "B3": {
+     "cls": "B",
+     "strips": 4,
+     "wp": 221,
+     "distance_km": 12.439,
+     "t_takeoff_s": 106.0,
+     "t_land_s": 894.4,
+     "flight_time_s": 788.4,
+     "energy_used_wh": 79.1,
+     "energy_margin_wh": 174.9
+    }
+   },
+   "r_eff_m": {
+    "A": 200.0,
+    "B": 120.0
+   },
+   "r_plan_m": {
+    "A": 200.0,
+    "B": 120.0
+   },
+   "validate": {
+    "passed": true,
+    "conflicts": 0,
+    "min_sep_h_m": 105.46,
+    "min_sep_v_m": null,
+    "coverage_ok": true,
+    "energy_ok": true
+   }
+  },
+  {
+   "wind_mps": 8.0,
+   "error": "AeroPlanAdapterError: HV-DCCPP preflight NO_GO：site_check(H, A): gust_exceeds(H: 10.4 > 8.0 m/s); site_check(H, B): gust_exceeds(H: 10.4 > 8.0 m/s); site_check(TO_A1, A): gust_exceeds(TO_A1: 10.4 > 8.0 m/s); site_check(TO_B2, B): gust_exceeds(TO_B2: 10.4 > 8.0 m/s); site_check(TO_B3, B): gust_exceeds(TO_B3: 10.4 > 8.0 m/s); no_usable_alternate(A): 所有備降點皆未通過站點檢查; no_usable_alternate(B): 所有備降點皆未通過站點檢查"
+  }
+ ]
+}

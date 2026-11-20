@@ -1,0 +1,9 @@
+# 由 scripts/hv_sitl_flight.py 產生。排在 --defaults 的最後之一。
+Q_ENABLE         1
+Q_FRAME_CLASS    1
+Q_FRAME_TYPE     1
+SERVO5_FUNCTION  33
+SERVO6_FUNCTION  34
+SERVO7_FUNCTION  35
+SERVO8_FUNCTION  36
+ARMING_REQUIRE   1

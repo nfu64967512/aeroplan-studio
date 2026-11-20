@@ -1,0 +1,15 @@
+telemetry 時基偏移 0.0 s（已從所有實飛時刻扣掉）
+Traceback (most recent call last):
+  File "C:\Users\joy46\Documents\Projects\aeroplan-studio\scripts\hv_sitl_report.py", line 404, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "C:\Users\joy46\Documents\Projects\aeroplan-studio\scripts\hv_sitl_report.py", line 294, in main
+    lon, lat, t, alt, armed = _track(out, uav)
+                              ~~~~~~^^^^^^^^^^
+  File "C:\Users\joy46\Documents\Projects\aeroplan-studio\scripts\hv_sitl_report.py", line 59, in _track
+    rows = [r for r in csv.DictReader((out / uav / "flight.csv").open(encoding="utf-8"))
+                                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python314\Lib\pathlib\__init__.py", line 771, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\HV4W55S\\A1\\flight.csv'

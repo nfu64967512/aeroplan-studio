@@ -1,0 +1,330 @@
+                                                                                                        Autonomous Robots 9, 247­253, 2000
+                                                               c 2000 Kluwer Academic Publishers. Manufactured in The Netherlands.
+
+Coverage of Known Spaces: The Boustrophedon Cellular Decomposition
+
+                                                      HOWIE CHOSET
+      Department of Mechanical Engineering, Carnegie Mellon University, Pittsburgh, PA 15213, USA
+
+Abstract. Coverage path planning is the determination of a path that a robot must take in order to pass over
+each point in an environment. Applications include de-mining, floor scrubbing, and inspection. We developed the
+boustrophedon cellular decomposition, which is an exact cellular decomposition approach, for the purposes of
+coverage. Essentially, the boustrophedon decomposition is a generalization of the trapezoidal decomposition that
+could allow for non-polygonal obstacles, but also has the side effect of having more "efficient" coverage paths than
+the trapezoidal decomposition. Each cell in the boustrophedon decomposition is covered with simple back and
+forth motions. Once each cell is covered, then the entire environment is covered. Therefore, coverage is reduced
+to finding an exhaustive path through a graph which represents the adjacency relationships of the cells in the
+boustrophedon decomposition. This approach is provably complete and experiments on a mobile robot validate this
+approach.
+
+Keywords: vacuum cleaning, coverage, floor coverage, boustrophedon, cellular decomposition, motion plann-
+ing, complete, algorithm, mobile robot
+
+1. Introduction                                                of the cells fills the environment. In each cell, a cov-
+                                                               erage path can be readily determined, such as simple
+Coverage path planning determines a path that guar-            back-and-forth motions; thus coverage path planning
+antees that an agent will pass over every point in             reduces to planning motions from one cell to another.
+a given environment. This procedure allows for a               This work will develop a new cellular decomposition,
+variety of applications. Naval applications include            termed the boustrophedon decomposition and apply it
+mine-countermeasure missions and continental shelf             to coverage path planning. We use the term boustro-
+oceanographic mapping. Commercial applications in-             phedon, which was first used in the English language
+clude contamination cleanup, floor scrubbing, crop             in 1699, because it literally means, "the way of the ox."
+plowing, and bridge inspection. Without a coverage             Typically, when an ox drags a plow in a field, it crosses
+algorithm, these applications cannot be handled. Most          the full length of the field in a straight line, turns around,
+current coverage path planners are rudimentary at best         and then traces a new straight line path adjacent to the
+because they are based on heuristics. Using such ap-           previous one. By repeating this procedure, the ox is
+proaches for mine sweeping is akin to performing this          guaranteed to cover (and thereby to plow) the entire
+operation with a faulty mine detector. Therefore, the          field. See Fig. 1.
+coverage path planning alogirithm described in this pa-
+per is complete; that is, in finite time, it will find a cov-     The boustrophedon cellular decomposition is a new
+erage path in a connected component of the robot's free        type of decomposition where the robot's free space is
+space.                                                         broken down into cells such that the robot can cover
+                                                               each cell with back-and-forth boustrophedon motions.
+   Our approach exploits a geometric structure termed          Once a robot covers each cell, it has covered the entire
+an exact cellular decomposition, which is the union            free region of an environment. This approach has been
+of non-intersecting regions composing the target envi-         validated with simulations and a Nomadic 200 mobile
+ronment. Each region is termed a cell, and the union           robot base.
+248 Choset
+
+                                                            same path as Lumelsky' group's in the planar case, the
+                                                            approach described in this paper is easier to implement
+                                                            because it has two cases whereas their approach con-
+                                                            tains a series of special cases. Finally, the approach in
+                                                            Hert et al. (1996) is not complete. The primary contri-
+                                                            bution of the algorithm supplied by Hert et al. (1996)
+                                                            is that it is incremental, and thus may lead to a sensor
+                                                            based implementation on a mobile robot.
+
+Figure 1. Boustrophedon path.                               2.2. Exact Cellular Decomposition
+
+2. Background Work                                          The approach to coverage used in this paper is an adap-
+                                                            tation of an existing complete motion planning scheme,
+2.1. Prior Work in Coverage                                 termed an exact cellular decomposition. Cellular de-
+                                                            composition is a motion planning technique in which
+Previous work in coverage include applications such         the free configuration space (set of all robot configu-
+as floor maintenance (Colegrave and Branch, 1994).          rations where the robot does not overlap an obstacle)
+In these approaches, the path must be explicitly            is decomposed into cells such that the union of the
+programmed into the robot; i.e., they do not use an         cells is the original free space. Each cell can be repre-
+algorithm to generate the coverage path, but instead        sented as a node in a graph, where adjacent cells have
+prescribe one "by hand." Furthermore, these algorithms      an edge connecting their corresponding nodes. This
+rely on landmarks deployed in the environment. Some         graph is called an adjacency graph. If each cell can be
+modern agricultural operations represent a significant      covered by the robot, then the floor coverage problem
+opportunity for coverage applications whose coverage        reduces to determining a walk through the adjacency
+path is easy to automatically generate. The Demeter         graph that visits each node at least once, i.e., the trav-
+project (Ollis and Stentz, 1996) is used to harvest large   eling salesman problem, for which a solution (possibly
+fields; in this approach the robot simply uses vision to    sub-optimal) always exists.
+guide its path alongside the previous cut crop line and
+can only cover rectangular fields.                             One popular cellur decomposition technique, which
+                                                            can yield a complete coverage path solution, is
+   A floor coverage approach that considers non-            the trapezoidal decomposition (Latombe, 1991) (also
+holonomic constraints is described in Hofner and            known as the slab method (Preparata and Shamos,
+Schmidt (1995). In this work, a set of templates is used    1985)) in which the robot's free space is decomposed
+to cover only a bounded region that is free of obsta-       into trapezoidal cells. Since each cell is a trapezoid,
+cles. These templates are used to accommodate the           coverage in each cell can easily be achieved with sim-
+non-holonomic constraints of the robot, and thus may        ple back and forth motions (See Fig. 1). Coverage of
+be useful for planning back and forth motions within        the environment is achieved by visiting each cell in the
+each cell of the proposed approach. However, its lim-       adjacency graph.
+itation is that it cannot plan paths when obstacles are
+present.                                                       The trapezoidal decomposition approach assumes
+                                                            that a vertical line, termed a slice, sweeps left to
+   The coverage algorithm described in Zelinsky et al.      right through a bounded environment which is pop-
+(1993) is well suited to unstructured environments.         ulated with polygonal obstacles. Cells are formed via
+Although it is complete, it achieves floor coverage in a    a sequence of open and close operations which oc-
+discretized environment (i.e., it is resolution complete).  cur when the slice encounters an event, an instance in
+A similar approach, without proof, with cooperating         which a slice intersects a vertex of a polygon. There
+robots was mentioned in Kurabayashi et al. (1996).          are three types of events: IN, OUT, and MIDDLE.
+Finally, Hert et al. (1996) produced an algorithm that      Loosely speaking, at an IN event the current cell is
+is similar to the proposed approach in the planar case.     closed (thereby completing its construction) and two
+Although the proposed algorithm produces nearly the         new cells are opened (thereby initiating their construc-
+                                                            tion) See Fig. 2. An OUT event is the reverse: two cells
+                                                            are closed, and a new one is opened. See Fig. 3. The
+                                                            Coverage of Known Spaces 249
+
+Figure 2. In event.                                         Figure 4. Fewer cells is better.
+
+                                                            3. Contributions
+
+                                                            The boustrophedon cellular decomposition, introduced
+                                                            in this paper, is an enhancement of the trapezoidal de-
+                                                            composition and is designed to minimize the number of
+                                                            excess lengthwise motions, as described in the previous
+                                                            paragraph. In essence, all cells between IN and OUT
+                                                            events are merged into one cell. Compare the trape-
+                                                            zoidal decomposition in Fig. 5 with the boustrophedon
+                                                            decomposition in Fig. 6. Note that the boustrophedon
+                                                            decomposition has a fewer number of cells.
+
+Figure 3. Out event.                                        Figure 5. Trapezoidal decomposition.
+                                                            Figure 6. Boustrophedon decomposition.
+IN event can be viewed as one cell breaking up into two
+cells, whereas the OUT event is when two cells merge
+into one. At a MIDDLE event, the current cell is closed,
+and a new one is formed. The result of these operations
+is a freespace that is broken down into trapezoidal cells.
+
+   The terrain coverage system of VanderHeide and
+Rao (1995) is based on a trapezoidal decomposition
+of a planar environment populated with one or two
+well-separated obstacles. The advantage of this system
+is that it is sensor based because it uses line of sight
+information.
+
+   Unfortunately, the trapezoidal approach requires too
+many redundant back and forth motions to guarantee
+completeness. In the left hand side of Fig. 4 the robot
+needs to make on additional lengthwise motion to cover
+the remaining portion of the trapezoidal cell. This can
+be viewed as part of the cost in guaranteeing the robot
+exhaustively covers the entire environment. Another
+drawback of the trapezoidal approach is that it requires
+the environment to be polygonal.
+250 Choset
+
+Figure 7. Critical points are points where the connectivity of a slice  Figure 8. In event.
+changes, i.e., they are events.
+
+   The advantage of having a fewer number of cells is                   Figure 9. Out event.
+that the number of back-and-forth boustrophedon mo-
+tions can be minimized. For example, consider two                       decomposition, at an IN event, where the connectivity
+adjacent trapezoidal cells whose widths are each two                    of the lice increases, the current cell is closed and two
+and a half times the width of the robot. In order to cover              new cells are opened (Fig. 8). Conversely, at an OUT
+each trapezoid, the robot must make three passes, for a                 event, where the connectivity of the slice decreases, the
+total of six lengthwise motions. With the boustrophe-                   two current cells are closed and one new cell is opened
+don decomposition approach, the two cells are merged                    (Fig. 9). Finally, this procedure terminates when the
+into one cell which is a monotone polygon and requires                  slice leaves the bounded free space. The difference be-
+five passes to cover. See Fig. 4.                                       tween the trapezoidal decomposition and boustrophe-
+                                                                        don decomposition approach is with the middle events:
+   Instead of exploiting the structure of polygons to de-               at the MIDDLE events, do not open nor close a cell, but
+termine IN and OUT events, this approach will rely on                   rather simply update the current cell. Essentially, cells
+changes in connectivity of a slice to determine the ex-                 are opened and closed when there is a change in con-
+istence of an event. Typically, this is called a critical               nectivity of slice. See Fig. 6.
+point, which is used in roadmap motion planning tech-
+niques such as Canny and Lin's "Opportunistic Path                         As the decomposition is computed, the adjacency
+Planner" (OPP) (Canny and Lin, 1990, 1993), which is                    graph is also determined. Again, each cell is a node
+itself based on Canny's Roadmap Algorithm (Canny,                       in the graph and an edge connects the nodes of adja-
+1988). Now, the robot can perform coverage in curved,                   cent cells. A depth-first-like graph search algorithm
+or even sampled, environments. See Fig. 7.                              outputs a path list that represents an exhaustive walk
+                                                                        through the adjacency graph. A walk through the path
+4. Algorithm Overview
+
+The goal here is to determine a path that covers a
+bounded and connected component of the robot's free
+space. Without loss of generality, assume there is
+only one bounded and connected component of free
+space for the sake of explanation. Just like the trape-
+zoidal method, a slice is swept through the bounded
+free space. Starting from "negative infinity," the first
+event occurs when the slice initially encounters the
+free space. This instantiates the formation of the first
+cell of the decomposition. The slice then continues to
+sweep throught the free space. Just like the trapezoidal
+                                                                 Coverage of Known Spaces 251
+
+list constitutes an exhaustive walk through the adja-
+cency graph.
+
+   Finally, the actual path for the robot to take is com-
+puted using the above described path list. When the
+robot enters an "uncleaned" cell, the boustrophedon
+motion is planned, and then a path to the next cell in the
+path list in planned. When the robot enters a "cleaned"
+cell, it simply plans a path through that cell to the next
+cell in the path list. These two actions are repeated
+until the end of the path list is reached, i.e., until each
+cell has been cleaned.
+
+5. Experiments                                                   Figure 11. Two cells have been covered.
+
+We performed experiments on a Nomad base in a                    Figure 12. Coverage almost complete.
+300 square foot environment and then in a 800 square
+foot environment. Figure 10 contains a floor plan of                We then performed an experiment in a larger envi-
+the 300 square foot environment that has two obsta-              ronment, 800 square feet, as depicted in Fig. 14. The
+cles. The obstacles are made out of cardboard but are            light grey trace represents the path that the robot was
+drawn as black polygons in the Nomad display soft-               commanded to follow, whereas the dark trace repre-
+ware. Figures 11 and 12 contains intermediate results            sents the actual path that the robot followed; the grey
+of the floor coverage algorithm. In Fig. 11, two cells           trace (command path) is drawn on top of the actual path.
+are already covered and in Fig. 12, all but two cells            As can be seen in Fig. 14, the first cell (left-most cell)
+are covered. The final coverage result can be seen in            was covered fairly accurately, but by the time the robot
+Fig. 13.                                                         starts to cover the third cell, it has accrued substantial
+                                                                 dead-reckoning. In the fourth cell, the robot crashes
+   It can be seen in Fig. 13 that this approach has some         into an obstacle because of dead-reckoning error.
+problems near obstacle edges that form acute angles
+with the boustrophedon back and forth paths. To par-                This experiment indicates that even if full knowledge
+tially alleviate this problem, when the robot travels            of the environment were available, the robot still must
+through a cleaned cell, it travels near the boundary of
+an obstacle. Future implementation will include one
+additional pass where each obstacle is specially cir-
+cumnavigated. For applications such as floor cleaning,
+this additional approach is reasonable because most
+floor cleaning applications require a different mecha-
+nism near the boundary of the environment.
+
+Figure 10. Floor plan bounded above and below by line segments.
+Black polygons are obstacles.
+252 Choset
+
+Figure 13. Complete coverage.                            cellular decomposition. Boustrophedon means the way
+                                                         of the ox; boustrophedon motion is back and forth
+Figure 14. Localization error while covering.            ox-like motions. A robot can easily plan a boustro-
+                                                         phedon motion in each cell of the boustrophedon de-
+use sensor information to guide the coverage operation.  composition. Once each cell is covered, the entire en-
+For example, this approach can benefit from the vision   vironment is covered.
+based techniques used in the Demeter project (Ollis and
+Stentz, 1996). Demeter can use the crop-line from the       Experimental results on a mobile robot has validated
+previous pass to guide is coverage path.                 this approach and pointed out some avenues of fu-
+6. Conclusion and Future Work                            ture work. This approach sometimes skips portions
+This paper describes a new type of coverage algorithm    of the environment near the boundaries of obstacles
+that is complete. The term complete is used in the mo-   because of the discretization of the side step. If the
+tion planning sense (Latombe, 1991), not in the oper-    robot has a shorter side step, these uncovered areas are
+ating research field sense. In other words, a robot, in  reduced. There is a tradeoff time/coverage here. Nev-
+theory, is guaranteed to follow a path such that every   ertheless, a simple obstacle following algorithm, after
+point in the environment is passed over by the robot.    the main coverage is completed, will alleviate this prob-
+The algorithm is based on a new type of exact cellu-     lem. Such a solution is consistent with normal floor
+lar decomposition approach termed the boustrophedon      cleaning where the portion of the floor near the walls
+                                                         requires an additional pass.
+
+                                                            An open issue in coverage path planning in general
+                                                         is determining an "optimal" path. At the very least, de-
+                                                         termining an optimal path is an NP-complete problem
+                                                         and may very well prove to be intractable even when
+                                                         restrictive assumptions are put in place. This is why we
+                                                         were relegated to a depth-first search of the adjacency
+                                                         graph. However, the path planning algorithm described
+                                                         in this paper can be employed to determine a "user-
+                                                         guided near-optimal path." We can vary parameters,
+                                                         such a sweep direction, and then apply a metric, such
+                                                         as path length, to each path produced by the boustro-
+                                                         phedon decomposition. Using the algorithm described
+                                                         in this paper, the user can "try" different paths with
+                                                         little time and effort. By tuning parameters, the user
+                                                         can converge on a near-optimal path.
+
+                                                            Near-term research also includes improving the
+                                                         boustrophedon cellular decomposition by allowing for
+                                                         the definition of bigger (and thus fewer) cells. For
+                                                         example, in Fig. 6 the bottom three cells can be merged
+                                                         into one cell in which boustrophedon motion can be
+                                                         planned. Furthermore, since a cell is open or closed
+                                                         when there is a change in the connectivity of the sweep
+                                                         line, this algorithm can be easily modified to environ-
+                                                         ments with curved obstacles.
+
+                                                            Also, there are issues in optimization that need to be
+                                                         considered. The first issue deals with the development
+                                                         of metrics which gauge heuristic graph searches of the
+                                                         adjacency graph. Such metrics include: path length,
+                                                         area of re-covered floor space, time, etc. Another opti-
+                                                         mization issue deals with determining the angle for the
+                                                         sweep-line; some environments may be better suited to
+                                                         a horizontal sweep line.
+                                                                       Coverage of Known Spaces 253
+
+   Another issue deals with material removal. In the                   Hofner, C. and Schmidt, G. 1995. Path planning and guidance tech-
+case of the de-mining, this point is not important. How-                  niques for an autonomous mobile cleaning robot. Robotics and
+ever, in the case of snow removal, a snow removing                        Autonomous Systems, 14:199­212.
+robot may have to plan optimal paths to transfer the
+snow from the coverage site. This suggests the use of                  Kurabayashi, D., Ota, J., Arai, T., and Yoshida, E. 1996. Cooperative
+multiple robots: one robot to remove the snow from                        sweeping by multiple mobile robots. In Int. Conf. on Robotics and
+the ground, and another robot to transfer the snow to a                   Automation.
+central dumping zone.
+                                                                       Latombe, J.C. 1991. Robot Motion Planning, Kluwer Academic Pub-
+   The long-term goal of this work is in sensor based                     lishers: Boston, MA.
+floor coverage, which is the determination of a cover-
+age path from solely line of sight sensor information.                 Ollis, M. and Stentz, A. 1996. First results in vision-based crop
+Sensor based floor coverage is useful even when full                      line tracking. In IEEE International Conference on Robotics and
+knowledge of the worlds is available to the robot, but is                 Automation.
+too cumbersome to input into the robot. For example,
+an automatic de-mining robot would not be useful if                    Preparata, F.P. and Shamos, M.I. 1985. Computational Geometry:
+each user had to program a model (if it existed) into                     An Introduction, Springer-Verlag, pp. 198­257.
+the robot. The sensor based approach will be based on
+Rimon and Canny's roadmap work which uses critical                     VanderHeide, J. and Rao, N.S.V. 1995. Terrain coverage of an un-
+points to guarantee the connectivity of a roadmap.                        known room by an autonomous mobile robot. Technical Report
+                                                                          ORNL/TM-13117, Oak Ridge National Laboratory, Oak Ridge,
+Acknowledgments                                                           Tennessee.
+
+The author gratefully acknowledges the support of                      Zelinsky, A., Jarvis, R.A., Byrne, J.C., and Yuta, S. 1993. Planning
+ONR Grant # N00014-98-1-0661 on this project, which                       paths of complete coverage of an unstructured environment by
+originally began at Nomadic Technologies in Mountain                      a mobile robot. In Proceedings of International Conference on
+View, CA. The author thanks Jim Slater for giving him                     Advanced Robotics, Tokyo, Japan, November 1993, pp. 533­538.
+the opportunity to work at Nomadic Technologies and
+Philippe Pignon and Alex Zelinsky for their input into                 Howie Choset is an Assistant Professor of Mechanical Engineer-
+this work.                                                             ing and Robotics at Carnegie Mellon University where he conducts
+                                                                       research in motion planning and design of serpentine mechanisms,
+References                                                             coverage path planning for de-mining and painting, mobile robot
+                                                                       sensor based exploration of unknown spaces, distributed manipu-
+Canny, J.F. 1988. Constructing roadmaps of semi-algebraic sets i:      lation with macroscopic arrays, and education with robotics. In
+   Completeness. Artificial Intelligence, 37:203­222.                  1997, the National Science Foundation awarded Professor Choset
+                                                                       its Career Award to continue the work in the underlying funda-
+Canny, J.F. and Lin, M.C. 1990. An opportunistic global path planner.  mentals of roadmaps for arbitrarily shaped objects; the long-term
+   In Proc. IEEE Int. Conf. on Robotics and Automation, Cincinnati,    goal of this work is to define roadmaps for highly articulated robots.
+   Ohio, pp. 1554­1559.                                                Recently, the Office of Naval Research started supporting Professor
+                                                                       Choset through its Young Investigator Program to develop strategies
+Canny, J.F. and Lin, M.C. 1993. An opportunistic global path planner.  to search for land and sea mines and to construct a land-mine-search
+   Algorithmica, 10:102­120.                                           robot.
+
+Colegrave, J. and Branch, A. 1994. A case study of autonomous
+   household vacuum cleaner. In AIAA/NASA CIRFFSS.
+
+Hert, S., Tiwari, S., and Lumelsky, V. 1996. A terrain-covering al-
+   gorithm for an AUV. Autonomous Robots, 3:91­119.
+

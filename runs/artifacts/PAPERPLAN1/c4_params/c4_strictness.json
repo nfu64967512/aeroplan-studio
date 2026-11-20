@@ -1,0 +1,28 @@
+{
+ "trial": "HV4SITL16",
+ "D1_raw_planned_strict": {
+  "n": 96,
+  "ok": 91,
+  "fail": [
+   "A1.Q_RTL_MODE planned=1 read=0.0",
+   "B2.AIRSPEED_MAX planned=26.6 read=26.0",
+   "B2.Q_RTL_MODE planned=1 read=0.0",
+   "B3.AIRSPEED_MAX planned=26.6 read=26.0",
+   "B3.Q_RTL_MODE planned=1 read=0.0"
+  ]
+ },
+ "D2_firmware_normalised_current_gate": {
+  "n": 102,
+  "ok": 102
+ },
+ "D3_normalised_without_int_rescue": {
+  "n": 102,
+  "ok": 100,
+  "rescued": [
+   "B2.AIRSPEED_MAX expect=26.6 read=26 rel_err=2.26%",
+   "B3.AIRSPEED_MAX expect=26.6 read=26 rel_err=2.26%"
+  ]
+ },
+ "tolerance_formula": "abs(got-exp) <= max(0.01, abs(exp)*0.001)  [scripts/hv_sitl_run.py:527-528]",
+ "int_rescue_formula": "got in (float(int(exp)), float(round(exp)))  [scripts/hv_sitl_run.py:530-532]"
+}

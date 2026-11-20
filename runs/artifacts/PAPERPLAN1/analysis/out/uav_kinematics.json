@@ -1,0 +1,1630 @@
+{
+ "BEAMIDP1": {
+  "home_lat_deg": 23.95,
+  "per_uav": {
+   "A1": {
+    "airborne_duration_s": 2047.928,
+    "alt_peak_missed_by_1hz_m": 0.0069,
+    "amsl_at_max_rel_alt_m": 219.83,
+    "csv_max_dt_s": 6.0,
+    "csv_median_dt_s": 1.0,
+    "disarm_touchdown_is_last_csv_row": false,
+    "flown_km_csv_1hz_repo_frame": 42.34,
+    "flown_km_dataflash_planner_frame": 42.3285,
+    "flown_km_dataflash_repo_frame": 42.3636,
+    "gps_offset_s": 1473967028.8934,
+    "gps_offset_spread_s": 0.12,
+    "home_amsl_implied_m": 100.1331,
+    "log": "sitl/vtol/i100/logs/00000018.BIN",
+    "margin_to_120_000_m": 0.3031,
+    "margin_to_121_92_m": 2.2231,
+    "max_amsl_m": 219.83,
+    "max_rel_alt_m": 119.6969,
+    "max_rel_alt_m_csv_1hz": 119.69,
+    "n_gps": 2878,
+    "n_pos": 12668,
+    "p999_rel_alt_m": 119.6886,
+    "p99_rel_alt_m": 119.6285,
+    "pos_max_dt_s": 1.04,
+    "pos_median_dt_s": 0.16,
+    "pos_rate_hz": 5.89,
+    "t_at_max_rel_alt_boot_s": 1648.47,
+    "t_auto_boot_s": 154.111578,
+    "t_first_airborne_boot_s": 156.505,
+    "t_touchdown_2m_boot_s": 2204.433,
+    "t_touchdown_disarm_csv_boot_s": 2215.17,
+    "time_above_120_000_s": 0.0,
+    "time_above_121_92_s": 0.0,
+    "wind": {
+     "L1_kinematic_dataflash": {
+      "by_sector_median_gs_minus_as_mps": {
+       "east": 0.449,
+       "north": 0.435,
+       "south": 0.454,
+       "west": 0.44
+      },
+      "east_minus_west_mps": 0.009,
+      "implied_W_along_EW_mps": 0.004,
+      "implied_W_along_NS_mps": -0.01,
+      "median_airspeed_mps": 21.499,
+      "median_groundspeed_mps": 21.944,
+      "median_gs_minus_as_all_mps": 0.444,
+      "n_by_sector": {
+       "east": 1070,
+       "north": 306,
+       "south": 135,
+       "west": 1023
+      },
+      "n_cruise_gps_samples": 2534,
+      "north_minus_south_mps": -0.019,
+      "note": "east-minus-west cancels any heading-independent groundspeed/airspeed scale offset exactly; the half-sum is that offset",
+      "scale_offset_removed_mps": 0.444
+     },
+     "L2_ekf_state_dataflash": {
+      "EKF2": {
+       "from_deg": 180.0,
+       "median_VWE_mps": 0.0,
+       "median_VWN_mps": 0.03,
+       "n": 12701,
+       "source": "dataflash NKF2 core 0, cruise band only",
+       "speed_mps": 0.03
+      },
+      "EKF3": {
+       "from_deg": 180.0,
+       "median_VWE_mps": 0.0,
+       "median_VWN_mps": 0.01,
+       "n": 12647,
+       "source": "dataflash XKF2 core 0, cruise band only",
+       "speed_mps": 0.01
+      }
+     },
+     "L3_telemetry_flight_csv": {
+      "arithmetic_mean_from_deg": 184.9,
+      "available": true,
+      "circular_median_from_deg": 162.7,
+      "median_speed_mps": 0.166,
+      "n": 1969,
+      "note": "independent transport (telemetry), same estimator as L2; the arithmetic mean is shown only to expose the angle-wrap artefact",
+      "source": "runs/artifacts/BEAMIDP1/A1/flight.csv MAVLink WIND, ~1 Hz"
+     }
+    }
+   },
+   "B2": {
+    "airborne_duration_s": 2097.886,
+    "alt_peak_missed_by_1hz_m": 0.0011,
+    "amsl_at_max_rel_alt_m": 219.8,
+    "csv_max_dt_s": 6.0,
+    "csv_median_dt_s": 1.0,
+    "disarm_touchdown_is_last_csv_row": true,
+    "flown_km_csv_1hz_repo_frame": 38.6604,
+    "flown_km_dataflash_planner_frame": 38.6619,
+    "flown_km_dataflash_repo_frame": 38.6959,
+    "gps_offset_s": 1473967029.8884,
+    "gps_offset_spread_s": 0.14,
+    "home_amsl_implied_m": 100.1389,
+    "log": "sitl/vtol/i101/logs/00000018.BIN",
+    "margin_to_120_000_m": 0.3389,
+    "margin_to_121_92_m": 2.2589,
+    "max_amsl_m": 219.8,
+    "max_rel_alt_m": 119.6611,
+    "max_rel_alt_m_csv_1hz": 119.66,
+    "n_gps": 1916,
+    "n_pos": 12703,
+    "p999_rel_alt_m": 119.6515,
+    "p99_rel_alt_m": 119.6065,
+    "pos_max_dt_s": 1.04,
+    "pos_median_dt_s": 0.16,
+    "pos_rate_hz": 5.58,
+    "t_at_max_rel_alt_boot_s": 1455.97,
+    "t_auto_boot_s": 251.651578,
+    "t_first_airborne_boot_s": 254.138,
+    "t_touchdown_2m_boot_s": 2352.024,
+    "t_touchdown_disarm_csv_boot_s": 2363.04,
+    "time_above_120_000_s": 0.0,
+    "time_above_121_92_s": 0.0,
+    "wind": {
+     "L1_kinematic_dataflash": {
+      "by_sector_median_gs_minus_as_mps": {
+       "east": 0.401,
+       "north": 0.406,
+       "south": 0.39,
+       "west": 0.396
+      },
+      "east_minus_west_mps": 0.004,
+      "implied_W_along_EW_mps": 0.002,
+      "implied_W_along_NS_mps": 0.008,
+      "median_airspeed_mps": 19.004,
+      "median_groundspeed_mps": 19.401,
+      "median_gs_minus_as_all_mps": 0.398,
+      "n_by_sector": {
+       "east": 673,
+       "north": 148,
+       "south": 161,
+       "west": 586
+      },
+      "n_cruise_gps_samples": 1568,
+      "north_minus_south_mps": 0.015,
+      "note": "east-minus-west cancels any heading-independent groundspeed/airspeed scale offset exactly; the half-sum is that offset",
+      "scale_offset_removed_mps": 0.399
+     },
+     "L2_ekf_state_dataflash": {
+      "EKF2": {
+       "from_deg": 341.6,
+       "median_VWE_mps": 0.01,
+       "median_VWN_mps": -0.03,
+       "n": 12682,
+       "source": "dataflash NKF2 core 0, cruise band only",
+       "speed_mps": 0.032
+      },
+      "EKF3": {
+       "from_deg": 333.4,
+       "median_VWE_mps": 0.01,
+       "median_VWN_mps": -0.02,
+       "n": 12556,
+       "source": "dataflash XKF2 core 0, cruise band only",
+       "speed_mps": 0.022
+      }
+     },
+     "L3_telemetry_flight_csv": {
+      "arithmetic_mean_from_deg": 186.1,
+      "available": true,
+      "circular_median_from_deg": 292.0,
+      "median_speed_mps": 0.129,
+      "n": 1967,
+      "note": "independent transport (telemetry), same estimator as L2; the arithmetic mean is shown only to expose the angle-wrap artefact",
+      "source": "runs/artifacts/BEAMIDP1/B2/flight.csv MAVLink WIND, ~1 Hz"
+     }
+    }
+   },
+   "B3": {
+    "airborne_duration_s": 1868.349,
+    "alt_peak_missed_by_1hz_m": 0.0137,
+    "amsl_at_max_rel_alt_m": 219.82,
+    "csv_max_dt_s": 7.0,
+    "csv_median_dt_s": 1.0,
+    "disarm_touchdown_is_last_csv_row": false,
+    "flown_km_csv_1hz_repo_frame": 34.2655,
+    "flown_km_dataflash_planner_frame": 34.2618,
+    "flown_km_dataflash_repo_frame": 34.2828,
+    "gps_offset_s": 1473967030.8884,
+    "gps_offset_spread_s": 0.0,
+    "home_amsl_implied_m": 100.1263,
+    "log": "sitl/vtol/i102/logs/00000018.BIN",
+    "margin_to_120_000_m": 0.3063,
+    "margin_to_121_92_m": 2.2263,
+    "max_amsl_m": 219.82,
+    "max_rel_alt_m": 119.6937,
+    "max_rel_alt_m_csv_1hz": 119.68,
+    "n_gps": 2243,
+    "n_pos": 11209,
+    "p999_rel_alt_m": 119.6544,
+    "p99_rel_alt_m": 119.6139,
+    "pos_max_dt_s": 1.2,
+    "pos_median_dt_s": 0.16,
+    "pos_rate_hz": 5.91,
+    "t_at_max_rel_alt_boot_s": 1626.36,
+    "t_auto_boot_s": 78.681578,
+    "t_first_airborne_boot_s": 81.125,
+    "t_touchdown_2m_boot_s": 1949.474,
+    "t_touchdown_disarm_csv_boot_s": 1960.04,
+    "time_above_120_000_s": 0.0,
+    "time_above_121_92_s": 0.0,
+    "wind": {
+     "L1_kinematic_dataflash": {
+      "by_sector_median_gs_minus_as_mps": {
+       "east": 0.405,
+       "north": 0.406,
+       "south": 0.399,
+       "west": 0.401
+      },
+      "east_minus_west_mps": 0.004,
+      "implied_W_along_EW_mps": 0.002,
+      "implied_W_along_NS_mps": 0.003,
+      "median_airspeed_mps": 19.0,
+      "median_groundspeed_mps": 19.401,
+      "median_gs_minus_as_all_mps": 0.403,
+      "n_by_sector": {
+       "east": 840,
+       "north": 105,
+       "south": 102,
+       "west": 836
+      },
+      "n_cruise_gps_samples": 1883,
+      "north_minus_south_mps": 0.006,
+      "note": "east-minus-west cancels any heading-independent groundspeed/airspeed scale offset exactly; the half-sum is that offset",
+      "scale_offset_removed_mps": 0.403
+     },
+     "L2_ekf_state_dataflash": {
+      "EKF2": {
+       "from_deg": 180.0,
+       "median_VWE_mps": 0.0,
+       "median_VWN_mps": 0.07,
+       "n": 10682,
+       "source": "dataflash NKF2 core 0, cruise band only",
+       "speed_mps": 0.07
+      },
+      "EKF3": {
+       "from_deg": 0.0,
+       "median_VWE_mps": 0.0,
+       "median_VWN_mps": -0.01,
+       "n": 10649,
+       "source": "dataflash XKF2 core 0, cruise band only",
+       "speed_mps": 0.01
+      }
+     },
+     "L3_telemetry_flight_csv": {
+      "arithmetic_mean_from_deg": 176.1,
+      "available": true,
+      "circular_median_from_deg": 56.0,
+      "median_speed_mps": 0.144,
+      "n": 1644,
+      "note": "independent transport (telemetry), same estimator as L2; the arithmetic mean is shown only to expose the angle-wrap artefact",
+      "source": "runs/artifacts/BEAMIDP1/B3/flight.csv MAVLink WIND, ~1 Hz"
+     }
+    }
+   }
+  },
+  "scenario_altitude_m": 119.5,
+  "scenario_key": "beamidp_1a2b_1195",
+  "scenario_plan_wind": [
+   5.0,
+   270.0
+  ],
+  "scenario_sim_wind": {
+   "dir_from_deg": 270.0,
+   "profile_type": 1.0,
+   "spd_mps": 0.0,
+   "turb": 0.0
+  }
+ },
+ "HV4SITL15": {
+  "home_lat_deg": 23.95,
+  "per_uav": {
+   "A1": {
+    "airborne_duration_s": 597.643,
+    "alt_peak_missed_by_1hz_m": 0.005,
+    "amsl_at_max_rel_alt_m": 220.28,
+    "csv_max_dt_s": 6.0,
+    "csv_median_dt_s": 1.0,
+    "disarm_touchdown_is_last_csv_row": true,
+    "flown_km_csv_1hz_repo_frame": 10.5264,
+    "flown_km_dataflash_planner_frame": 10.5225,
+    "flown_km_dataflash_repo_frame": 10.5311,
+    "gps_offset_s": 1473384199.8784,
+    "gps_offset_spread_s": 0.1,
+    "home_amsl_implied_m": 100.165,
+    "log": "sitl/vtol/i100/logs/00000013.BIN",
+    "margin_to_120_000_m": -0.115,
+    "margin_to_121_92_m": 1.805,
+    "max_amsl_m": 220.28,
+    "max_rel_alt_m": 120.115,
+    "max_rel_alt_m_csv_1hz": 120.11,
+    "n_gps": 1782,
+    "n_pos": 8054,
+    "p999_rel_alt_m": 120.1031,
+    "p99_rel_alt_m": 120.084,
+    "pos_max_dt_s": 1.88,
+    "pos_median_dt_s": 0.16,
+    "pos_rate_hz": 6.39,
+    "t_at_max_rel_alt_boot_s": 1165.72,
+    "t_auto_boot_s": 724.311578,
+    "t_first_airborne_boot_s": 726.756,
+    "t_touchdown_2m_boot_s": 1324.399,
+    "t_touchdown_disarm_csv_boot_s": 1335.04,
+    "time_above_120_000_s": 147.527,
+    "time_above_121_92_s": 0.0,
+    "wind": {
+     "L1_kinematic_dataflash": {
+      "by_sector_median_gs_minus_as_mps": {
+       "east": 0.443,
+       "north": 0.44,
+       "south": 0.446,
+       "west": 0.444
+      },
+      "east_minus_west_mps": -0.001,
+      "implied_W_along_EW_mps": -0.0,
+      "implied_W_along_NS_mps": -0.003,
+      "median_airspeed_mps": 21.499,
+      "median_groundspeed_mps": 21.945,
+      "median_gs_minus_as_all_mps": 0.444,
+      "n_by_sector": {
+       "east": 292,
+       "north": 62,
+       "south": 41,
+       "west": 224
+      },
+      "n_cruise_gps_samples": 619,
+      "north_minus_south_mps": -0.005,
+      "note": "east-minus-west cancels any heading-independent groundspeed/airspeed scale offset exactly; the half-sum is that offset",
+      "scale_offset_removed_mps": 0.444
+     },
+     "L2_ekf_state_dataflash": {
+      "EKF2": {
+       "from_deg": 216.9,
+       "median_VWE_mps": 0.03,
+       "median_VWN_mps": 0.04,
+       "n": 3203,
+       "source": "dataflash NKF2 core 0, cruise band only",
+       "speed_mps": 0.05
+      },
+      "EKF3": {
+       "from_deg": 251.6,
+       "median_VWE_mps": 0.03,
+       "median_VWN_mps": 0.01,
+       "n": 3129,
+       "source": "dataflash XKF2 core 0, cruise band only",
+       "speed_mps": 0.032
+      }
+     },
+     "L3_telemetry_flight_csv": {
+      "available": false,
+      "note": "flight.csv has no wind_spd_est column (pre-patch run)"
+     }
+    }
+   },
+   "B2": {
+    "airborne_duration_s": 520.702,
+    "alt_peak_missed_by_1hz_m": 0.0056,
+    "amsl_at_max_rel_alt_m": 220.31,
+    "csv_max_dt_s": 6.0,
+    "csv_median_dt_s": 1.0,
+    "disarm_touchdown_is_last_csv_row": false,
+    "flown_km_csv_1hz_repo_frame": 8.1254,
+    "flown_km_dataflash_planner_frame": 8.1235,
+    "flown_km_dataflash_repo_frame": 8.1287,
+    "gps_offset_s": 1473384200.8834,
+    "gps_offset_spread_s": 0.02,
+    "home_amsl_implied_m": 100.1644,
+    "log": "sitl/vtol/i101/logs/00000013.BIN",
+    "margin_to_120_000_m": -0.1456,
+    "margin_to_121_92_m": 1.7744,
+    "max_amsl_m": 220.31,
+    "max_rel_alt_m": 120.1456,
+    "max_rel_alt_m_csv_1hz": 120.14,
+    "n_gps": 775,
+    "n_pos": 3150,
+    "p999_rel_alt_m": 120.1407,
+    "p99_rel_alt_m": 120.0822,
+    "pos_max_dt_s": 1.56,
+    "pos_median_dt_s": 0.16,
+    "pos_rate_hz": 5.74,
+    "t_at_max_rel_alt_boot_s": 319.32,
+    "t_auto_boot_s": 67.526578,
+    "t_first_airborne_boot_s": 69.985,
+    "t_touchdown_2m_boot_s": 590.688,
+    "t_touchdown_disarm_csv_boot_s": 602.04,
+    "time_above_120_000_s": 57.622,
+    "time_above_121_92_s": 0.0,
+    "wind": {
+     "L1_kinematic_dataflash": {
+      "by_sector_median_gs_minus_as_mps": {
+       "east": 0.386,
+       "north": 0.379,
+       "south": 0.406,
+       "west": 0.404
+      },
+      "east_minus_west_mps": -0.018,
+      "implied_W_along_EW_mps": -0.009,
+      "implied_W_along_NS_mps": -0.013,
+      "median_airspeed_mps": 19.009,
+      "median_groundspeed_mps": 19.396,
+      "median_gs_minus_as_all_mps": 0.392,
+      "n_by_sector": {
+       "east": 238,
+       "north": 32,
+       "south": 15,
+       "west": 154
+      },
+      "n_cruise_gps_samples": 439,
+      "north_minus_south_mps": -0.027,
+      "note": "east-minus-west cancels any heading-independent groundspeed/airspeed scale offset exactly; the half-sum is that offset",
+      "scale_offset_removed_mps": 0.395
+     },
+     "L2_ekf_state_dataflash": {
+      "EKF2": {
+       "from_deg": 315.0,
+       "median_VWE_mps": 0.07,
+       "median_VWN_mps": -0.07,
+       "n": 2161,
+       "source": "dataflash NKF2 core 0, cruise band only",
+       "speed_mps": 0.099
+      },
+      "EKF3": {
+       "from_deg": 277.1,
+       "median_VWE_mps": 0.08,
+       "median_VWN_mps": -0.01,
+       "n": 2140,
+       "source": "dataflash XKF2 core 0, cruise band only",
+       "speed_mps": 0.081
+      }
+     },
+     "L3_telemetry_flight_csv": {
+      "available": false,
+      "note": "flight.csv has no wind_spd_est column (pre-patch run)"
+     }
+    }
+   },
+   "B3": {
+    "airborne_duration_s": 757.164,
+    "alt_peak_missed_by_1hz_m": 0.0022,
+    "amsl_at_max_rel_alt_m": 220.31,
+    "csv_max_dt_s": 7.0,
+    "csv_median_dt_s": 1.0,
+    "disarm_touchdown_is_last_csv_row": false,
+    "flown_km_csv_1hz_repo_frame": 12.7127,
+    "flown_km_dataflash_planner_frame": 12.7162,
+    "flown_km_dataflash_repo_frame": 12.7242,
+    "gps_offset_s": 1473384201.8784,
+    "gps_offset_spread_s": 0.04,
+    "home_amsl_implied_m": 100.1578,
+    "log": "sitl/vtol/i102/logs/00000013.BIN",
+    "margin_to_120_000_m": -0.1522,
+    "margin_to_121_92_m": 1.7678,
+    "max_amsl_m": 220.31,
+    "max_rel_alt_m": 120.1522,
+    "max_rel_alt_m_csv_1hz": 120.15,
+    "n_gps": 900,
+    "n_pos": 5499,
+    "p999_rel_alt_m": 120.1489,
+    "p99_rel_alt_m": 120.1104,
+    "pos_max_dt_s": 1.24,
+    "pos_median_dt_s": 0.16,
+    "pos_rate_hz": 6.16,
+    "t_at_max_rel_alt_boot_s": 424.94,
+    "t_auto_boot_s": 173.976578,
+    "t_first_airborne_boot_s": 176.486,
+    "t_touchdown_2m_boot_s": 933.65,
+    "t_touchdown_disarm_csv_boot_s": 945.04,
+    "time_above_120_000_s": 120.643,
+    "time_above_121_92_s": 0.0,
+    "wind": {
+     "L1_kinematic_dataflash": {
+      "by_sector_median_gs_minus_as_mps": {
+       "east": 0.402,
+       "north": 0.375,
+       "south": 0.382,
+       "west": 0.399
+      },
+      "east_minus_west_mps": 0.003,
+      "implied_W_along_EW_mps": 0.001,
+      "implied_W_along_NS_mps": -0.004,
+      "median_airspeed_mps": 19.001,
+      "median_groundspeed_mps": 19.401,
+      "median_gs_minus_as_all_mps": 0.399,
+      "n_by_sector": {
+       "east": 265,
+       "north": 31,
+       "south": 22,
+       "west": 226
+      },
+      "n_cruise_gps_samples": 544,
+      "north_minus_south_mps": -0.007,
+      "note": "east-minus-west cancels any heading-independent groundspeed/airspeed scale offset exactly; the half-sum is that offset",
+      "scale_offset_removed_mps": 0.4
+     },
+     "L2_ekf_state_dataflash": {
+      "EKF2": {
+       "from_deg": 195.9,
+       "median_VWE_mps": 0.02,
+       "median_VWN_mps": 0.07,
+       "n": 4010,
+       "source": "dataflash NKF2 core 0, cruise band only",
+       "speed_mps": 0.073
+      },
+      "EKF3": {
+       "from_deg": 270.0,
+       "median_VWE_mps": 0.02,
+       "median_VWN_mps": 0.0,
+       "n": 3953,
+       "source": "dataflash XKF2 core 0, cruise band only",
+       "speed_mps": 0.02
+      }
+     },
+     "L3_telemetry_flight_csv": {
+      "available": false,
+      "note": "flight.csv has no wind_spd_est column (pre-patch run)"
+     }
+    }
+   }
+  },
+  "scenario_altitude_m": 120.0,
+  "scenario_key": "gui_legal_120_1a2b",
+  "scenario_plan_wind": [
+   5.0,
+   270.0
+  ],
+  "scenario_sim_wind": null
+ },
+ "HV4SITL16": {
+  "home_lat_deg": 23.95,
+  "per_uav": {
+   "A1": {
+    "airborne_duration_s": 597.536,
+    "alt_peak_missed_by_1hz_m": 0.003,
+    "amsl_at_max_rel_alt_m": 220.11,
+    "csv_max_dt_s": 6.0,
+    "csv_median_dt_s": 1.0,
+    "disarm_touchdown_is_last_csv_row": true,
+    "flown_km_csv_1hz_repo_frame": 10.5228,
+    "flown_km_dataflash_planner_frame": 10.5188,
+    "flown_km_dataflash_repo_frame": 10.5274,
+    "gps_offset_s": 1473404698.8884,
+    "gps_offset_spread_s": 0.1,
+    "home_amsl_implied_m": 100.007,
+    "log": "sitl/vtol/i100/logs/00000014.BIN",
+    "margin_to_120_000_m": -0.103,
+    "margin_to_121_92_m": 1.817,
+    "max_amsl_m": 220.11,
+    "max_rel_alt_m": 120.103,
+    "max_rel_alt_m_csv_1hz": 120.1,
+    "n_gps": 1764,
+    "n_pos": 7910,
+    "p999_rel_alt_m": 120.0983,
+    "p99_rel_alt_m": 120.084,
+    "pos_max_dt_s": 1.24,
+    "pos_median_dt_s": 0.16,
+    "pos_rate_hz": 6.27,
+    "t_at_max_rel_alt_boot_s": 1170.03,
+    "t_auto_boot_s": 728.801578,
+    "t_first_airborne_boot_s": 731.273,
+    "t_touchdown_2m_boot_s": 1328.809,
+    "t_touchdown_disarm_csv_boot_s": 1340.04,
+    "time_above_120_000_s": 147.267,
+    "time_above_121_92_s": 0.0,
+    "wind": {
+     "L1_kinematic_dataflash": {
+      "by_sector_median_gs_minus_as_mps": {
+       "east": 0.443,
+       "north": 0.432,
+       "south": 0.429,
+       "west": 0.438
+      },
+      "east_minus_west_mps": 0.005,
+      "implied_W_along_EW_mps": 0.003,
+      "implied_W_along_NS_mps": 0.002,
+      "median_airspeed_mps": 21.493,
+      "median_groundspeed_mps": 21.943,
+      "median_gs_minus_as_all_mps": 0.439,
+      "n_by_sector": {
+       "east": 295,
+       "north": 60,
+       "south": 60,
+       "west": 229
+      },
+      "n_cruise_gps_samples": 644,
+      "north_minus_south_mps": 0.004,
+      "note": "east-minus-west cancels any heading-independent groundspeed/airspeed scale offset exactly; the half-sum is that offset",
+      "scale_offset_removed_mps": 0.44
+     },
+     "L2_ekf_state_dataflash": {
+      "EKF2": {
+       "from_deg": 216.9,
+       "median_VWE_mps": 0.03,
+       "median_VWN_mps": 0.04,
+       "n": 3106,
+       "source": "dataflash NKF2 core 0, cruise band only",
+       "speed_mps": 0.05
+      },
+      "EKF3": {
+       "from_deg": 251.6,
+       "median_VWE_mps": 0.03,
+       "median_VWN_mps": 0.01,
+       "n": 3064,
+       "source": "dataflash XKF2 core 0, cruise band only",
+       "speed_mps": 0.032
+      }
+     },
+     "L3_telemetry_flight_csv": {
+      "available": false,
+      "note": "flight.csv has no wind_spd_est column (pre-patch run)"
+     }
+    }
+   },
+   "B2": {
+    "airborne_duration_s": 520.615,
+    "alt_peak_missed_by_1hz_m": 0.0091,
+    "amsl_at_max_rel_alt_m": 220.14,
+    "csv_max_dt_s": 6.0,
+    "csv_median_dt_s": 1.0,
+    "disarm_touchdown_is_last_csv_row": false,
+    "flown_km_csv_1hz_repo_frame": 8.1248,
+    "flown_km_dataflash_planner_frame": 8.124,
+    "flown_km_dataflash_repo_frame": 8.1292,
+    "gps_offset_s": 1473404699.8884,
+    "gps_offset_spread_s": 0.0,
+    "home_amsl_implied_m": 100.0109,
+    "log": "sitl/vtol/i101/logs/00000014.BIN",
+    "margin_to_120_000_m": -0.1291,
+    "margin_to_121_92_m": 1.7909,
+    "max_amsl_m": 220.14,
+    "max_rel_alt_m": 120.1291,
+    "max_rel_alt_m_csv_1hz": 120.12,
+    "n_gps": 462,
+    "n_pos": 3106,
+    "p999_rel_alt_m": 120.1263,
+    "p99_rel_alt_m": 120.0775,
+    "pos_max_dt_s": 1.6,
+    "pos_median_dt_s": 0.16,
+    "pos_rate_hz": 5.66,
+    "t_at_max_rel_alt_boot_s": 323.53,
+    "t_auto_boot_s": 71.916578,
+    "t_first_airborne_boot_s": 74.327,
+    "t_touchdown_2m_boot_s": 594.942,
+    "t_touchdown_disarm_csv_boot_s": 605.04,
+    "time_above_120_000_s": 56.763,
+    "time_above_121_92_s": 0.0,
+    "wind": {
+     "L1_kinematic_dataflash": {
+      "by_sector_median_gs_minus_as_mps": {
+       "east": 0.389,
+       "north": 0.387,
+       "south": 0.338,
+       "west": 0.391
+      },
+      "east_minus_west_mps": -0.002,
+      "implied_W_along_EW_mps": -0.001,
+      "implied_W_along_NS_mps": 0.025,
+      "median_airspeed_mps": 19.006,
+      "median_groundspeed_mps": 19.393,
+      "median_gs_minus_as_all_mps": 0.388,
+      "n_by_sector": {
+       "east": 145,
+       "north": 16,
+       "south": 9,
+       "west": 103
+      },
+      "n_cruise_gps_samples": 273,
+      "north_minus_south_mps": 0.05,
+      "note": "east-minus-west cancels any heading-independent groundspeed/airspeed scale offset exactly; the half-sum is that offset",
+      "scale_offset_removed_mps": 0.39
+     },
+     "L2_ekf_state_dataflash": {
+      "EKF2": {
+       "from_deg": 323.1,
+       "median_VWE_mps": 0.06,
+       "median_VWN_mps": -0.08,
+       "n": 2128,
+       "source": "dataflash NKF2 core 0, cruise band only",
+       "speed_mps": 0.1
+      },
+      "EKF3": {
+       "from_deg": 270.0,
+       "median_VWE_mps": 0.08,
+       "median_VWN_mps": 0.0,
+       "n": 2112,
+       "source": "dataflash XKF2 core 0, cruise band only",
+       "speed_mps": 0.08
+      }
+     },
+     "L3_telemetry_flight_csv": {
+      "available": false,
+      "note": "flight.csv has no wind_spd_est column (pre-patch run)"
+     }
+    }
+   },
+   "B3": {
+    "airborne_duration_s": 756.645,
+    "alt_peak_missed_by_1hz_m": 0.0019,
+    "amsl_at_max_rel_alt_m": 220.19,
+    "csv_max_dt_s": 6.0,
+    "csv_median_dt_s": 1.0,
+    "disarm_touchdown_is_last_csv_row": false,
+    "flown_km_csv_1hz_repo_frame": 12.7084,
+    "flown_km_dataflash_planner_frame": 12.7116,
+    "flown_km_dataflash_repo_frame": 12.7196,
+    "gps_offset_s": 1473404700.8934,
+    "gps_offset_spread_s": 0.06,
+    "home_amsl_implied_m": 100.0281,
+    "log": "sitl/vtol/i102/logs/00000014.BIN",
+    "margin_to_120_000_m": -0.1619,
+    "margin_to_121_92_m": 1.7581,
+    "max_amsl_m": 220.19,
+    "max_rel_alt_m": 120.1619,
+    "max_rel_alt_m_csv_1hz": 120.16,
+    "n_gps": 968,
+    "n_pos": 4973,
+    "p999_rel_alt_m": 120.1543,
+    "p99_rel_alt_m": 120.1018,
+    "pos_max_dt_s": 1.4,
+    "pos_median_dt_s": 0.16,
+    "pos_rate_hz": 5.58,
+    "t_at_max_rel_alt_boot_s": 666.25,
+    "t_auto_boot_s": 178.121578,
+    "t_first_airborne_boot_s": 180.602,
+    "t_touchdown_2m_boot_s": 937.246,
+    "t_touchdown_disarm_csv_boot_s": 948.04,
+    "time_above_120_000_s": 126.105,
+    "time_above_121_92_s": 0.0,
+    "wind": {
+     "L1_kinematic_dataflash": {
+      "by_sector_median_gs_minus_as_mps": {
+       "east": 0.397,
+       "north": 0.389,
+       "south": 0.396,
+       "west": 0.417
+      },
+      "east_minus_west_mps": -0.019,
+      "implied_W_along_EW_mps": -0.01,
+      "implied_W_along_NS_mps": -0.003,
+      "median_airspeed_mps": 19.0,
+      "median_groundspeed_mps": 19.402,
+      "median_gs_minus_as_all_mps": 0.405,
+      "n_by_sector": {
+       "east": 301,
+       "north": 35,
+       "south": 25,
+       "west": 249
+      },
+      "n_cruise_gps_samples": 610,
+      "north_minus_south_mps": -0.007,
+      "note": "east-minus-west cancels any heading-independent groundspeed/airspeed scale offset exactly; the half-sum is that offset",
+      "scale_offset_removed_mps": 0.407
+     },
+     "L2_ekf_state_dataflash": {
+      "EKF2": {
+       "from_deg": 200.6,
+       "median_VWE_mps": 0.03,
+       "median_VWN_mps": 0.08,
+       "n": 3716,
+       "source": "dataflash NKF2 core 0, cruise band only",
+       "speed_mps": 0.085
+      },
+      "EKF3": {
+       "from_deg": 251.6,
+       "median_VWE_mps": 0.03,
+       "median_VWN_mps": 0.01,
+       "n": 3620,
+       "source": "dataflash XKF2 core 0, cruise band only",
+       "speed_mps": 0.032
+      }
+     },
+     "L3_telemetry_flight_csv": {
+      "available": false,
+      "note": "flight.csv has no wind_spd_est column (pre-patch run)"
+     }
+    }
+   }
+  },
+  "scenario_altitude_m": 120.0,
+  "scenario_key": "gui_legal_120_1a2b",
+  "scenario_plan_wind": [
+   5.0,
+   270.0
+  ],
+  "scenario_sim_wind": null
+ },
+ "HV4W00": {
+  "home_lat_deg": 23.95,
+  "per_uav": {
+   "A1": {
+    "airborne_duration_s": 593.472,
+    "alt_peak_missed_by_1hz_m": 0.0072,
+    "amsl_at_max_rel_alt_m": 219.56,
+    "csv_max_dt_s": 6.0,
+    "csv_median_dt_s": 1.0,
+    "disarm_touchdown_is_last_csv_row": true,
+    "flown_km_csv_1hz_repo_frame": 10.4614,
+    "flown_km_dataflash_planner_frame": 10.4593,
+    "flown_km_dataflash_repo_frame": 10.468,
+    "gps_offset_s": 1473966524.8784,
+    "gps_offset_spread_s": 0.0,
+    "home_amsl_implied_m": 99.9628,
+    "log": "sitl/vtol/i100/logs/00000017.BIN",
+    "margin_to_120_000_m": 0.4028,
+    "margin_to_121_92_m": 2.3228,
+    "max_amsl_m": 219.56,
+    "max_rel_alt_m": 119.5972,
+    "max_rel_alt_m_csv_1hz": 119.59,
+    "n_gps": 1595,
+    "n_pos": 7402,
+    "p999_rel_alt_m": 119.5922,
+    "p99_rel_alt_m": 119.5705,
+    "pos_max_dt_s": 0.92,
+    "pos_median_dt_s": 0.16,
+    "pos_rate_hz": 6.1,
+    "t_at_max_rel_alt_boot_s": 994.92,
+    "t_auto_boot_s": 686.561578,
+    "t_first_airborne_boot_s": 688.976,
+    "t_touchdown_2m_boot_s": 1282.448,
+    "t_touchdown_disarm_csv_boot_s": 1293.04,
+    "time_above_120_000_s": 0.0,
+    "time_above_121_92_s": 0.0,
+    "wind": {
+     "L1_kinematic_dataflash": {
+      "by_sector_median_gs_minus_as_mps": {
+       "east": 0.443,
+       "north": 0.412,
+       "south": 0.446,
+       "west": 0.434
+      },
+      "east_minus_west_mps": 0.009,
+      "implied_W_along_EW_mps": 0.004,
+      "implied_W_along_NS_mps": -0.017,
+      "median_airspeed_mps": 21.494,
+      "median_groundspeed_mps": 21.941,
+      "median_gs_minus_as_all_mps": 0.437,
+      "n_by_sector": {
+       "east": 258,
+       "north": 58,
+       "south": 47,
+       "west": 219
+      },
+      "n_cruise_gps_samples": 582,
+      "north_minus_south_mps": -0.034,
+      "note": "east-minus-west cancels any heading-independent groundspeed/airspeed scale offset exactly; the half-sum is that offset",
+      "scale_offset_removed_mps": 0.438
+     },
+     "L2_ekf_state_dataflash": {
+      "EKF2": {
+       "from_deg": 216.9,
+       "median_VWE_mps": 0.03,
+       "median_VWN_mps": 0.04,
+       "n": 2961,
+       "source": "dataflash NKF2 core 0, cruise band only",
+       "speed_mps": 0.05
+      },
+      "EKF3": {
+       "from_deg": 256.0,
+       "median_VWE_mps": 0.04,
+       "median_VWN_mps": 0.01,
+       "n": 2933,
+       "source": "dataflash XKF2 core 0, cruise band only",
+       "speed_mps": 0.041
+      }
+     },
+     "L3_telemetry_flight_csv": {
+      "arithmetic_mean_from_deg": 185.9,
+      "available": true,
+      "circular_median_from_deg": 257.2,
+      "median_speed_mps": 0.163,
+      "n": 456,
+      "note": "independent transport (telemetry), same estimator as L2; the arithmetic mean is shown only to expose the angle-wrap artefact",
+      "source": "runs/artifacts/HV4W00/A1/flight.csv MAVLink WIND, ~1 Hz"
+     }
+    }
+   },
+   "B2": {
+    "airborne_duration_s": 517.304,
+    "alt_peak_missed_by_1hz_m": 0.0107,
+    "amsl_at_max_rel_alt_m": 219.61,
+    "csv_max_dt_s": 6.0,
+    "csv_median_dt_s": 1.0,
+    "disarm_touchdown_is_last_csv_row": false,
+    "flown_km_csv_1hz_repo_frame": 8.0656,
+    "flown_km_dataflash_planner_frame": 8.0636,
+    "flown_km_dataflash_repo_frame": 8.0688,
+    "gps_offset_s": 1473966525.8834,
+    "gps_offset_spread_s": 0.06,
+    "home_amsl_implied_m": 99.9793,
+    "log": "sitl/vtol/i101/logs/00000017.BIN",
+    "margin_to_120_000_m": 0.3693,
+    "margin_to_121_92_m": 2.2893,
+    "max_amsl_m": 219.61,
+    "max_rel_alt_m": 119.6307,
+    "max_rel_alt_m_csv_1hz": 119.62,
+    "n_gps": 449,
+    "n_pos": 2790,
+    "p999_rel_alt_m": 119.626,
+    "p99_rel_alt_m": 119.5734,
+    "pos_max_dt_s": 1.04,
+    "pos_median_dt_s": 0.16,
+    "pos_rate_hz": 5.12,
+    "t_at_max_rel_alt_boot_s": 323.54,
+    "t_auto_boot_s": 73.561578,
+    "t_first_airborne_boot_s": 75.952,
+    "t_touchdown_2m_boot_s": 593.256,
+    "t_touchdown_disarm_csv_boot_s": 603.04,
+    "time_above_120_000_s": 0.0,
+    "time_above_121_92_s": 0.0,
+    "wind": {
+     "L1_kinematic_dataflash": {
+      "by_sector_median_gs_minus_as_mps": {
+       "east": 0.404,
+       "north": 0.394,
+       "south": 0.372,
+       "west": 0.402
+      },
+      "east_minus_west_mps": 0.002,
+      "implied_W_along_EW_mps": 0.001,
+      "implied_W_along_NS_mps": 0.011,
+      "median_airspeed_mps": 18.996,
+      "median_groundspeed_mps": 19.397,
+      "median_gs_minus_as_all_mps": 0.402,
+      "n_by_sector": {
+       "east": 142,
+       "north": 12,
+       "south": 8,
+       "west": 96
+      },
+      "n_cruise_gps_samples": 258,
+      "north_minus_south_mps": 0.023,
+      "note": "east-minus-west cancels any heading-independent groundspeed/airspeed scale offset exactly; the half-sum is that offset",
+      "scale_offset_removed_mps": 0.403
+     },
+     "L2_ekf_state_dataflash": {
+      "EKF2": {
+       "from_deg": 319.4,
+       "median_VWE_mps": 0.06,
+       "median_VWN_mps": -0.07,
+       "n": 2073,
+       "source": "dataflash NKF2 core 0, cruise band only",
+       "speed_mps": 0.092
+      },
+      "EKF3": {
+       "from_deg": 270.0,
+       "median_VWE_mps": 0.07,
+       "median_VWN_mps": 0.0,
+       "n": 2043,
+       "source": "dataflash XKF2 core 0, cruise band only",
+       "speed_mps": 0.07
+      }
+     },
+     "L3_telemetry_flight_csv": {
+      "arithmetic_mean_from_deg": 189.5,
+      "available": true,
+      "circular_median_from_deg": 270.8,
+      "median_speed_mps": 0.153,
+      "n": 324,
+      "note": "independent transport (telemetry), same estimator as L2; the arithmetic mean is shown only to expose the angle-wrap artefact",
+      "source": "runs/artifacts/HV4W00/B2/flight.csv MAVLink WIND, ~1 Hz"
+     }
+    }
+   },
+   "B3": {
+    "airborne_duration_s": 752.17,
+    "alt_peak_missed_by_1hz_m": 0.0027,
+    "amsl_at_max_rel_alt_m": 219.66,
+    "csv_max_dt_s": 6.0,
+    "csv_median_dt_s": 1.0,
+    "disarm_touchdown_is_last_csv_row": false,
+    "flown_km_csv_1hz_repo_frame": 12.6159,
+    "flown_km_dataflash_planner_frame": 12.6146,
+    "flown_km_dataflash_repo_frame": 12.6226,
+    "gps_offset_s": 1473966526.8834,
+    "gps_offset_spread_s": 0.0,
+    "home_amsl_implied_m": 99.9973,
+    "log": "sitl/vtol/i102/logs/00000017.BIN",
+    "margin_to_120_000_m": 0.3373,
+    "margin_to_121_92_m": 2.2573,
+    "max_amsl_m": 219.66,
+    "max_rel_alt_m": 119.6627,
+    "max_rel_alt_m_csv_1hz": 119.66,
+    "n_gps": 1174,
+    "n_pos": 4858,
+    "p999_rel_alt_m": 119.6416,
+    "p99_rel_alt_m": 119.6039,
+    "pos_max_dt_s": 0.92,
+    "pos_median_dt_s": 0.16,
+    "pos_rate_hz": 5.52,
+    "t_at_max_rel_alt_boot_s": 422.28,
+    "t_auto_boot_s": 173.241578,
+    "t_first_airborne_boot_s": 175.55,
+    "t_touchdown_2m_boot_s": 927.719,
+    "t_touchdown_disarm_csv_boot_s": 938.04,
+    "time_above_120_000_s": 0.0,
+    "time_above_121_92_s": 0.0,
+    "wind": {
+     "L1_kinematic_dataflash": {
+      "by_sector_median_gs_minus_as_mps": {
+       "east": 0.39,
+       "north": 0.381,
+       "south": 0.381,
+       "west": 0.399
+      },
+      "east_minus_west_mps": -0.008,
+      "implied_W_along_EW_mps": -0.004,
+      "implied_W_along_NS_mps": -0.0,
+      "median_airspeed_mps": 19.004,
+      "median_groundspeed_mps": 19.399,
+      "median_gs_minus_as_all_mps": 0.392,
+      "n_by_sector": {
+       "east": 348,
+       "north": 44,
+       "south": 27,
+       "west": 293
+      },
+      "n_cruise_gps_samples": 712,
+      "north_minus_south_mps": -0.0,
+      "note": "east-minus-west cancels any heading-independent groundspeed/airspeed scale offset exactly; the half-sum is that offset",
+      "scale_offset_removed_mps": 0.394
+     },
+     "L2_ekf_state_dataflash": {
+      "EKF2": {
+       "from_deg": 203.2,
+       "median_VWE_mps": 0.03,
+       "median_VWN_mps": 0.07,
+       "n": 3639,
+       "source": "dataflash NKF2 core 0, cruise band only",
+       "speed_mps": 0.076
+      },
+      "EKF3": {
+       "from_deg": 251.6,
+       "median_VWE_mps": 0.03,
+       "median_VWN_mps": 0.01,
+       "n": 3585,
+       "source": "dataflash XKF2 core 0, cruise band only",
+       "speed_mps": 0.032
+      }
+     },
+     "L3_telemetry_flight_csv": {
+      "arithmetic_mean_from_deg": 190.4,
+      "available": true,
+      "circular_median_from_deg": 261.8,
+      "median_speed_mps": 0.142,
+      "n": 564,
+      "note": "independent transport (telemetry), same estimator as L2; the arithmetic mean is shown only to expose the angle-wrap artefact",
+      "source": "runs/artifacts/HV4W00/B3/flight.csv MAVLink WIND, ~1 Hz"
+     }
+    }
+   }
+  },
+  "scenario_altitude_m": 119.5,
+  "scenario_key": "gui_legal_120_1a2b",
+  "scenario_plan_wind": [
+   0.0,
+   270.0
+  ],
+  "scenario_sim_wind": {
+   "dir_from_deg": 270.0,
+   "profile_type": 1.0,
+   "spd_mps": 0.0,
+   "turb": 0.0
+  }
+ },
+ "HV4W05": {
+  "home_lat_deg": 23.95,
+  "per_uav": {
+   "A1": {
+    "airborne_duration_s": 620.174,
+    "alt_peak_missed_by_1hz_m": 0.0129,
+    "amsl_at_max_rel_alt_m": 219.58,
+    "csv_max_dt_s": 6.0,
+    "csv_median_dt_s": 1.0,
+    "disarm_touchdown_is_last_csv_row": true,
+    "flown_km_csv_1hz_repo_frame": 10.6179,
+    "flown_km_dataflash_planner_frame": 10.6255,
+    "flown_km_dataflash_repo_frame": 10.6338,
+    "gps_offset_s": 1473966196.8934,
+    "gps_offset_spread_s": 0.0,
+    "home_amsl_implied_m": 99.9771,
+    "log": "sitl/vtol/i100/logs/00000016.BIN",
+    "margin_to_120_000_m": 0.3971,
+    "margin_to_121_92_m": 2.3171,
+    "max_amsl_m": 219.58,
+    "max_rel_alt_m": 119.6029,
+    "max_rel_alt_m_csv_1hz": 119.59,
+    "n_gps": 1485,
+    "n_pos": 7612,
+    "p999_rel_alt_m": 119.5968,
+    "p99_rel_alt_m": 119.5743,
+    "pos_max_dt_s": 0.76,
+    "pos_median_dt_s": 0.16,
+    "pos_rate_hz": 6.14,
+    "t_at_max_rel_alt_boot_s": 1031.37,
+    "t_auto_boot_s": 686.411578,
+    "t_first_airborne_boot_s": 689.008,
+    "t_touchdown_2m_boot_s": 1309.182,
+    "t_touchdown_disarm_csv_boot_s": 1320.04,
+    "time_above_120_000_s": 0.0,
+    "time_above_121_92_s": 0.0,
+    "wind": {
+     "L1_kinematic_dataflash": {
+      "by_sector_median_gs_minus_as_mps": {
+       "east": 5.43,
+       "north": -1.248,
+       "south": -1.194,
+       "west": -4.539
+      },
+      "east_minus_west_mps": 9.969,
+      "implied_W_along_EW_mps": 4.984,
+      "implied_W_along_NS_mps": -0.027,
+      "median_airspeed_mps": 21.493,
+      "median_groundspeed_mps": 18.54,
+      "median_gs_minus_as_all_mps": -2.969,
+      "n_by_sector": {
+       "east": 186,
+       "north": 55,
+       "south": 34,
+       "west": 261
+      },
+      "n_cruise_gps_samples": 536,
+      "north_minus_south_mps": -0.054,
+      "note": "east-minus-west cancels any heading-independent groundspeed/airspeed scale offset exactly; the half-sum is that offset",
+      "scale_offset_removed_mps": 0.445
+     },
+     "L2_ekf_state_dataflash": {
+      "EKF2": {
+       "from_deg": 270.0,
+       "median_VWE_mps": 4.94,
+       "median_VWN_mps": 0.0,
+       "n": 3169,
+       "source": "dataflash NKF2 core 0, cruise band only",
+       "speed_mps": 4.94
+      },
+      "EKF3": {
+       "from_deg": 270.0,
+       "median_VWE_mps": 4.94,
+       "median_VWN_mps": 0.0,
+       "n": 3139,
+       "source": "dataflash XKF2 core 0, cruise band only",
+       "speed_mps": 4.94
+      }
+     },
+     "L3_telemetry_flight_csv": {
+      "arithmetic_mean_from_deg": 270.0,
+      "available": true,
+      "circular_median_from_deg": 270.1,
+      "median_speed_mps": 4.95,
+      "n": 491,
+      "note": "independent transport (telemetry), same estimator as L2; the arithmetic mean is shown only to expose the angle-wrap artefact",
+      "source": "runs/artifacts/HV4W05/A1/flight.csv MAVLink WIND, ~1 Hz"
+     }
+    }
+   },
+   "B2": {
+    "airborne_duration_s": 553.836,
+    "alt_peak_missed_by_1hz_m": 0.0707,
+    "amsl_at_max_rel_alt_m": 219.65,
+    "csv_max_dt_s": 6.0,
+    "csv_median_dt_s": 1.0,
+    "disarm_touchdown_is_last_csv_row": false,
+    "flown_km_csv_1hz_repo_frame": 8.2224,
+    "flown_km_dataflash_planner_frame": 8.2342,
+    "flown_km_dataflash_repo_frame": 8.2394,
+    "gps_offset_s": 1473966197.8934,
+    "gps_offset_spread_s": 0.0,
+    "home_amsl_implied_m": 99.9893,
+    "log": "sitl/vtol/i101/logs/00000016.BIN",
+    "margin_to_120_000_m": 0.3393,
+    "margin_to_121_92_m": 2.2593,
+    "max_amsl_m": 219.65,
+    "max_rel_alt_m": 119.6607,
+    "max_rel_alt_m_csv_1hz": 119.59,
+    "n_gps": 806,
+    "n_pos": 2992,
+    "p999_rel_alt_m": 119.6524,
+    "p99_rel_alt_m": 119.5766,
+    "pos_max_dt_s": 1.36,
+    "pos_median_dt_s": 0.16,
+    "pos_rate_hz": 5.14,
+    "t_at_max_rel_alt_boot_s": 376.23,
+    "t_auto_boot_s": 73.401578,
+    "t_first_airborne_boot_s": 76.081,
+    "t_touchdown_2m_boot_s": 629.917,
+    "t_touchdown_disarm_csv_boot_s": 640.04,
+    "time_above_120_000_s": 0.0,
+    "time_above_121_92_s": 0.0,
+    "wind": {
+     "L1_kinematic_dataflash": {
+      "by_sector_median_gs_minus_as_mps": {
+       "east": 5.358,
+       "north": -0.349,
+       "south": -0.324,
+       "west": -4.557
+      },
+      "east_minus_west_mps": 9.915,
+      "implied_W_along_EW_mps": 4.957,
+      "implied_W_along_NS_mps": -0.012,
+      "median_airspeed_mps": 18.992,
+      "median_groundspeed_mps": 15.8,
+      "median_gs_minus_as_all_mps": -3.025,
+      "n_by_sector": {
+       "east": 189,
+       "north": 28,
+       "south": 16,
+       "west": 223
+      },
+      "n_cruise_gps_samples": 456,
+      "north_minus_south_mps": -0.024,
+      "note": "east-minus-west cancels any heading-independent groundspeed/airspeed scale offset exactly; the half-sum is that offset",
+      "scale_offset_removed_mps": 0.4
+     },
+     "L2_ekf_state_dataflash": {
+      "EKF2": {
+       "from_deg": 272.3,
+       "median_VWE_mps": 4.98,
+       "median_VWN_mps": -0.2,
+       "n": 2200,
+       "source": "dataflash NKF2 core 0, cruise band only",
+       "speed_mps": 4.984
+      },
+      "EKF3": {
+       "from_deg": 270.5,
+       "median_VWE_mps": 4.96,
+       "median_VWN_mps": -0.04,
+       "n": 2141,
+       "source": "dataflash XKF2 core 0, cruise band only",
+       "speed_mps": 4.96
+      }
+     },
+     "L3_telemetry_flight_csv": {
+      "arithmetic_mean_from_deg": 270.3,
+      "available": true,
+      "circular_median_from_deg": 270.5,
+      "median_speed_mps": 4.971,
+      "n": 333,
+      "note": "independent transport (telemetry), same estimator as L2; the arithmetic mean is shown only to expose the angle-wrap artefact",
+      "source": "runs/artifacts/HV4W05/B2/flight.csv MAVLink WIND, ~1 Hz"
+     }
+    }
+   },
+   "B3": {
+    "airborne_duration_s": 805.232,
+    "alt_peak_missed_by_1hz_m": 0.0085,
+    "amsl_at_max_rel_alt_m": 219.64,
+    "csv_max_dt_s": 6.0,
+    "csv_median_dt_s": 1.0,
+    "disarm_touchdown_is_last_csv_row": false,
+    "flown_km_csv_1hz_repo_frame": 12.8034,
+    "flown_km_dataflash_planner_frame": 12.8102,
+    "flown_km_dataflash_repo_frame": 12.8182,
+    "gps_offset_s": 1473966198.8784,
+    "gps_offset_spread_s": 0.1,
+    "home_amsl_implied_m": 99.9915,
+    "log": "sitl/vtol/i102/logs/00000016.BIN",
+    "margin_to_120_000_m": 0.3515,
+    "margin_to_121_92_m": 2.2715,
+    "max_amsl_m": 219.64,
+    "max_rel_alt_m": 119.6485,
+    "max_rel_alt_m_csv_1hz": 119.64,
+    "n_gps": 834,
+    "n_pos": 5132,
+    "p999_rel_alt_m": 119.6462,
+    "p99_rel_alt_m": 119.6195,
+    "pos_max_dt_s": 1.04,
+    "pos_median_dt_s": 0.16,
+    "pos_rate_hz": 5.5,
+    "t_at_max_rel_alt_boot_s": 561.46,
+    "t_auto_boot_s": 173.116578,
+    "t_first_airborne_boot_s": 175.672,
+    "t_touchdown_2m_boot_s": 980.904,
+    "t_touchdown_disarm_csv_boot_s": 991.04,
+    "time_above_120_000_s": 0.0,
+    "time_above_121_92_s": 0.0,
+    "wind": {
+     "L1_kinematic_dataflash": {
+      "by_sector_median_gs_minus_as_mps": {
+       "east": 5.362,
+       "north": -1.108,
+       "south": -0.107,
+       "west": -4.58
+      },
+      "east_minus_west_mps": 9.942,
+      "implied_W_along_EW_mps": 4.971,
+      "implied_W_along_NS_mps": -0.501,
+      "median_airspeed_mps": 19.002,
+      "median_groundspeed_mps": 15.15,
+      "median_gs_minus_as_all_mps": -3.846,
+      "n_by_sector": {
+       "east": 202,
+       "north": 26,
+       "south": 19,
+       "west": 259
+      },
+      "n_cruise_gps_samples": 506,
+      "north_minus_south_mps": -1.002,
+      "note": "east-minus-west cancels any heading-independent groundspeed/airspeed scale offset exactly; the half-sum is that offset",
+      "scale_offset_removed_mps": 0.391
+     },
+     "L2_ekf_state_dataflash": {
+      "EKF2": {
+       "from_deg": 269.4,
+       "median_VWE_mps": 4.94,
+       "median_VWN_mps": 0.05,
+       "n": 3908,
+       "source": "dataflash NKF2 core 0, cruise band only",
+       "speed_mps": 4.94
+      },
+      "EKF3": {
+       "from_deg": 270.0,
+       "median_VWE_mps": 4.93,
+       "median_VWN_mps": 0.0,
+       "n": 3860,
+       "source": "dataflash XKF2 core 0, cruise band only",
+       "speed_mps": 4.93
+      }
+     },
+     "L3_telemetry_flight_csv": {
+      "arithmetic_mean_from_deg": 270.0,
+      "available": true,
+      "circular_median_from_deg": 270.0,
+      "median_speed_mps": 4.934,
+      "n": 598,
+      "note": "independent transport (telemetry), same estimator as L2; the arithmetic mean is shown only to expose the angle-wrap artefact",
+      "source": "runs/artifacts/HV4W05/B3/flight.csv MAVLink WIND, ~1 Hz"
+     }
+    }
+   }
+  },
+  "scenario_altitude_m": 119.5,
+  "scenario_key": "gui_legal_120_1a2b",
+  "scenario_plan_wind": [
+   0.0,
+   270.0
+  ],
+  "scenario_sim_wind": {
+   "dir_from_deg": 270.0,
+   "profile_type": 1.0,
+   "spd_mps": 5.0,
+   "turb": 0.0
+  }
+ },
+ "HV4W55": {
+  "home_lat_deg": 23.95,
+  "per_uav": {
+   "A1": {
+    "airborne_duration_s": 623.404,
+    "alt_peak_missed_by_1hz_m": 0.0221,
+    "amsl_at_max_rel_alt_m": 219.6,
+    "csv_max_dt_s": 6.0,
+    "csv_median_dt_s": 1.0,
+    "disarm_touchdown_is_last_csv_row": true,
+    "flown_km_csv_1hz_repo_frame": 10.6818,
+    "flown_km_dataflash_planner_frame": 10.6861,
+    "flown_km_dataflash_repo_frame": 10.6944,
+    "gps_offset_s": 1473965825.8934,
+    "gps_offset_spread_s": 0.0,
+    "home_amsl_implied_m": 99.9779,
+    "log": "sitl/vtol/i100/logs/00000015.BIN",
+    "margin_to_120_000_m": 0.3779,
+    "margin_to_121_92_m": 2.2979,
+    "max_amsl_m": 219.6,
+    "max_rel_alt_m": 119.6221,
+    "max_rel_alt_m_csv_1hz": 119.6,
+    "n_gps": 1548,
+    "n_pos": 7919,
+    "p999_rel_alt_m": 119.6005,
+    "p99_rel_alt_m": 119.581,
+    "pos_max_dt_s": 1.36,
+    "pos_median_dt_s": 0.16,
+    "pos_rate_hz": 6.15,
+    "t_at_max_rel_alt_boot_s": 1162.65,
+    "t_auto_boot_s": 730.011578,
+    "t_first_airborne_boot_s": 732.623,
+    "t_touchdown_2m_boot_s": 1356.028,
+    "t_touchdown_disarm_csv_boot_s": 1367.04,
+    "time_above_120_000_s": 0.0,
+    "time_above_121_92_s": 0.0,
+    "wind": {
+     "L1_kinematic_dataflash": {
+      "by_sector_median_gs_minus_as_mps": {
+       "east": 5.419,
+       "north": -1.666,
+       "south": -0.957,
+       "west": -4.534
+      },
+      "east_minus_west_mps": 9.953,
+      "implied_W_along_EW_mps": 4.976,
+      "implied_W_along_NS_mps": -0.354,
+      "median_airspeed_mps": 21.499,
+      "median_groundspeed_mps": 18.321,
+      "median_gs_minus_as_all_mps": -3.276,
+      "n_by_sector": {
+       "east": 191,
+       "north": 48,
+       "south": 34,
+       "west": 268
+      },
+      "n_cruise_gps_samples": 541,
+      "north_minus_south_mps": -0.708,
+      "note": "east-minus-west cancels any heading-independent groundspeed/airspeed scale offset exactly; the half-sum is that offset",
+      "scale_offset_removed_mps": 0.443
+     },
+     "L2_ekf_state_dataflash": {
+      "EKF2": {
+       "from_deg": 270.0,
+       "median_VWE_mps": 4.94,
+       "median_VWN_mps": 0.0,
+       "n": 3206,
+       "source": "dataflash NKF2 core 0, cruise band only",
+       "speed_mps": 4.94
+      },
+      "EKF3": {
+       "from_deg": 270.0,
+       "median_VWE_mps": 4.94,
+       "median_VWN_mps": 0.0,
+       "n": 3167,
+       "source": "dataflash XKF2 core 0, cruise band only",
+       "speed_mps": 4.94
+      }
+     },
+     "L3_telemetry_flight_csv": {
+      "arithmetic_mean_from_deg": 270.0,
+      "available": true,
+      "circular_median_from_deg": 270.1,
+      "median_speed_mps": 4.948,
+      "n": 493,
+      "note": "independent transport (telemetry), same estimator as L2; the arithmetic mean is shown only to expose the angle-wrap artefact",
+      "source": "runs/artifacts/HV4W55/A1/flight.csv MAVLink WIND, ~1 Hz"
+     }
+    }
+   },
+   "B2": {
+    "airborne_duration_s": 557.379,
+    "alt_peak_missed_by_1hz_m": -0.0044,
+    "amsl_at_max_rel_alt_m": 219.63,
+    "csv_max_dt_s": 6.0,
+    "csv_median_dt_s": 1.0,
+    "disarm_touchdown_is_last_csv_row": false,
+    "flown_km_csv_1hz_repo_frame": 8.289,
+    "flown_km_dataflash_planner_frame": 8.2969,
+    "flown_km_dataflash_repo_frame": 8.3021,
+    "gps_offset_s": 1473965826.8884,
+    "gps_offset_spread_s": 0.02,
+    "home_amsl_implied_m": 99.9944,
+    "log": "sitl/vtol/i101/logs/00000015.BIN",
+    "margin_to_120_000_m": 0.3644,
+    "margin_to_121_92_m": 2.2844,
+    "max_amsl_m": 219.63,
+    "max_rel_alt_m": 119.6356,
+    "max_rel_alt_m_csv_1hz": 119.64,
+    "n_gps": 468,
+    "n_pos": 3093,
+    "p999_rel_alt_m": 119.6298,
+    "p99_rel_alt_m": 119.5915,
+    "pos_max_dt_s": 0.88,
+    "pos_median_dt_s": 0.16,
+    "pos_rate_hz": 5.29,
+    "t_at_max_rel_alt_boot_s": 381.05,
+    "t_auto_boot_s": 73.126578,
+    "t_first_airborne_boot_s": 75.802,
+    "t_touchdown_2m_boot_s": 633.181,
+    "t_touchdown_disarm_csv_boot_s": 643.04,
+    "time_above_120_000_s": 0.0,
+    "time_above_121_92_s": 0.0,
+    "wind": {
+     "L1_kinematic_dataflash": {
+      "by_sector_median_gs_minus_as_mps": {
+       "east": 5.36,
+       "north": -0.358,
+       "south": -0.578,
+       "west": -4.571
+      },
+      "east_minus_west_mps": 9.931,
+      "implied_W_along_EW_mps": 4.966,
+      "implied_W_along_NS_mps": 0.11,
+      "median_airspeed_mps": 19.003,
+      "median_groundspeed_mps": 16.994,
+      "median_gs_minus_as_all_mps": -1.993,
+      "n_by_sector": {
+       "east": 120,
+       "north": 15,
+       "south": 9,
+       "west": 131
+      },
+      "n_cruise_gps_samples": 275,
+      "north_minus_south_mps": 0.221,
+      "note": "east-minus-west cancels any heading-independent groundspeed/airspeed scale offset exactly; the half-sum is that offset",
+      "scale_offset_removed_mps": 0.394
+     },
+     "L2_ekf_state_dataflash": {
+      "EKF2": {
+       "from_deg": 272.3,
+       "median_VWE_mps": 4.97,
+       "median_VWN_mps": -0.2,
+       "n": 2202,
+       "source": "dataflash NKF2 core 0, cruise band only",
+       "speed_mps": 4.974
+      },
+      "EKF3": {
+       "from_deg": 270.5,
+       "median_VWE_mps": 4.96,
+       "median_VWN_mps": -0.04,
+       "n": 2176,
+       "source": "dataflash XKF2 core 0, cruise band only",
+       "speed_mps": 4.96
+      }
+     },
+     "L3_telemetry_flight_csv": {
+      "arithmetic_mean_from_deg": 270.3,
+      "available": true,
+      "circular_median_from_deg": 270.5,
+      "median_speed_mps": 4.965,
+      "n": 335,
+      "note": "independent transport (telemetry), same estimator as L2; the arithmetic mean is shown only to expose the angle-wrap artefact",
+      "source": "runs/artifacts/HV4W55/B2/flight.csv MAVLink WIND, ~1 Hz"
+     }
+    }
+   },
+   "B3": {
+    "airborne_duration_s": 810.48,
+    "alt_peak_missed_by_1hz_m": 0.0052,
+    "amsl_at_max_rel_alt_m": 219.68,
+    "csv_max_dt_s": 6.0,
+    "csv_median_dt_s": 1.0,
+    "disarm_touchdown_is_last_csv_row": false,
+    "flown_km_csv_1hz_repo_frame": 12.8973,
+    "flown_km_dataflash_planner_frame": 12.9054,
+    "flown_km_dataflash_repo_frame": 12.9135,
+    "gps_offset_s": 1473965827.8884,
+    "gps_offset_spread_s": 0.06,
+    "home_amsl_implied_m": 100.0047,
+    "log": "sitl/vtol/i102/logs/00000015.BIN",
+    "margin_to_120_000_m": 0.3248,
+    "margin_to_121_92_m": 2.2448,
+    "max_amsl_m": 219.68,
+    "max_rel_alt_m": 119.6752,
+    "max_rel_alt_m_csv_1hz": 119.67,
+    "n_gps": 873,
+    "n_pos": 5488,
+    "p999_rel_alt_m": 119.669,
+    "p99_rel_alt_m": 119.6136,
+    "pos_max_dt_s": 0.92,
+    "pos_median_dt_s": 0.16,
+    "pos_rate_hz": 5.81,
+    "t_at_max_rel_alt_boot_s": 570.57,
+    "t_auto_boot_s": 179.351578,
+    "t_first_airborne_boot_s": 181.859,
+    "t_touchdown_2m_boot_s": 992.34,
+    "t_touchdown_disarm_csv_boot_s": 1002.04,
+    "time_above_120_000_s": 0.0,
+    "time_above_121_92_s": 0.0,
+    "wind": {
+     "L1_kinematic_dataflash": {
+      "by_sector_median_gs_minus_as_mps": {
+       "east": 5.374,
+       "north": -0.381,
+       "south": -0.117,
+       "west": -4.583
+      },
+      "east_minus_west_mps": 9.957,
+      "implied_W_along_EW_mps": 4.979,
+      "implied_W_along_NS_mps": -0.132,
+      "median_airspeed_mps": 19.001,
+      "median_groundspeed_mps": 15.604,
+      "median_gs_minus_as_all_mps": -3.368,
+      "n_by_sector": {
+       "east": 211,
+       "north": 31,
+       "south": 19,
+       "west": 257
+      },
+      "n_cruise_gps_samples": 518,
+      "north_minus_south_mps": -0.264,
+      "note": "east-minus-west cancels any heading-independent groundspeed/airspeed scale offset exactly; the half-sum is that offset",
+      "scale_offset_removed_mps": 0.395
+     },
+     "L2_ekf_state_dataflash": {
+      "EKF2": {
+       "from_deg": 269.3,
+       "median_VWE_mps": 4.94,
+       "median_VWN_mps": 0.06,
+       "n": 3927,
+       "source": "dataflash NKF2 core 0, cruise band only",
+       "speed_mps": 4.94
+      },
+      "EKF3": {
+       "from_deg": 270.0,
+       "median_VWE_mps": 4.93,
+       "median_VWN_mps": 0.0,
+       "n": 3916,
+       "source": "dataflash XKF2 core 0, cruise band only",
+       "speed_mps": 4.93
+      }
+     },
+     "L3_telemetry_flight_csv": {
+      "arithmetic_mean_from_deg": 270.0,
+      "available": true,
+      "circular_median_from_deg": 269.9,
+      "median_speed_mps": 4.933,
+      "n": 604,
+      "note": "independent transport (telemetry), same estimator as L2; the arithmetic mean is shown only to expose the angle-wrap artefact",
+      "source": "runs/artifacts/HV4W55/B3/flight.csv MAVLink WIND, ~1 Hz"
+     }
+    }
+   }
+  },
+  "scenario_altitude_m": 119.5,
+  "scenario_key": "gui_legal_120_1a2b",
+  "scenario_plan_wind": [
+   5.0,
+   270.0
+  ],
+  "scenario_sim_wind": {
+   "dir_from_deg": 270.0,
+   "profile_type": 1.0,
+   "spd_mps": 5.0,
+   "turb": 0.0
+  }
+ }
+}

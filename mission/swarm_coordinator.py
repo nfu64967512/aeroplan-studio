@@ -382,6 +382,1080 @@ class SwarmMission:
         return self.__str__()
 
 
+def _zone_polygon_latlon(z):
+    """FenceZone → [(lat, lon), ...]。圓形展開成 24 邊形。認不得就回 None。"""
+    verts = getattr(z, 'vertices', None)
+    if verts and len(verts) >= 3:
+        return [(float(a), float(b)) for a, b in verts]
+    c, r = getattr(z, 'center', None), float(getattr(z, 'radius_m', 0.0) or 0.0)
+    if c and r > 0.0:
+        lat0 = float(c[0])
+        m_lat, m_lon = 111132.0, 111412.0 * math.cos(math.radians(lat0))
+        return [(lat0 + r * math.sin(2 * math.pi * k / 24) / m_lat,
+                 float(c[1]) + r * math.cos(2 * math.pi * k / 24) / m_lon)
+                for k in range(24)]
+    return None
+
+
+def split_areas_around_nfz(areas, zones, *, inset_m: float, logger=None):
+    """把與禁航區重疊的作業區切成「繞過禁航區的子區」。
+
+    ⚠⚠⚠ 為什麼需要這一步（實測，不是推測）：
+    禁航區蓋住某一塊作業區時，HV 規劃器是把**整塊區**判成 uncoverable，而且
+    連帶把**其他不相干的區也一起丟掉**。實測 4 塊區、1A+3B、禁航區只壓在第 2 塊上：
+
+        蓋住 ≥42.9% ⇒ **0 台上工、4 個區全部 no_feasible_insertion**
+        蓋住 ≤28%   ⇒ 掉一台，剩 3 台
+
+    同構型機隊也一樣，不是混編才有。所以在送進規劃器**之前**先把區切開，
+    讓它看到的每一塊都與禁航區無關 —— 這就是 Choset 的 boustrophedon cellular
+    decomposition，用障礙物的臨界點切胞。
+
+    `inset_m` 是禁航區往外膨脹的量。⚠ 航跡繞開**不等於**相機沒拍到：刈幅 w 的
+    相機沿邊界飛會拍進去 w/2，所以要「一格都不拍到」就得給 `inset_m = w/2`，
+    代價是禁航區周圍一圈寬 w/2 掃不到。
+
+    回傳新的 areas 清單；沒有重疊時原樣回傳（同一個物件，不複製）。
+    """
+    if not areas or not zones:
+        return areas
+    try:
+        from shapely.geometry import Polygon, box
+        from shapely.ops import unary_union
+    except ImportError:                                    # pragma: no cover
+        if logger:
+            logger.warning('shapely 不在，禁航區切區跳過')
+        return areas
+
+    zps = []
+    for z in zones:
+        pts = _zone_polygon_latlon(z)
+        if pts and len(pts) >= 3:
+            p = Polygon(pts)
+            if not p.is_valid:
+                p = p.buffer(0)
+            if not p.is_empty:
+                zps.append(p)
+    if not zps:
+        return areas
+    # 經緯度直接用度為單位做幾何：inset 換算成緯度度數（保守，經度方向更寬）
+    inset_deg = float(inset_m) / 111132.0
+    grow = unary_union([p.buffer(inset_deg, join_style=2) for p in zps])
+
+    # 子區用**全新的整數 id**（理由見下方賦值處），從現有最大值往上長。
+    next_id = max((int(a['area_id']) for a in areas
+                   if str(a.get('area_id', '')).isdigit()), default=0) + 1
+    out, n_split = [], 0
+    for a in areas:
+        poly = Polygon(a['polygon'])
+        if not poly.is_valid:
+            poly = poly.buffer(0)
+        if poly.is_empty or not poly.intersects(grow):
+            out.append(a)
+            continue
+        free = poly.difference(grow)
+        if free.is_empty:
+            if logger:
+                logger.warning(f"nfz_covers_area(area_id={a.get('area_id')}) "
+                               f"整塊被禁航區蓋掉，從任務移除")
+            continue
+        # BCD：在禁航區的經度極值處切一刀
+        x0, y0, x1, y1 = free.bounds
+        cuts = sorted({c for z in zps
+                       for c in (z.buffer(inset_deg, join_style=2).bounds[0],
+                                 z.buffer(inset_deg, join_style=2).bounds[2])
+                       if x0 < c < x1})
+        xs = [x0 - 1e-6] + cuts + [x1 + 1e-6]
+        pieces = []
+        for lo, hi in zip(xs, xs[1:]):
+            sl = free.intersection(box(lo, y0 - 1e-6, hi, y1 + 1e-6))
+            for g in getattr(sl, 'geoms', [sl]):
+                if g.geom_type == 'Polygon' and not g.is_empty:
+                    pieces.append(g)
+        # ★ 面積守恆：切區絕不可以靜默吃掉面積
+        lost = free.area - sum(g.area for g in pieces)
+        if abs(lost) > max(free.area * 1e-6, 1e-12):
+            if logger:
+                logger.error(f"nfz_split_lost_area(area_id={a.get('area_id')}, "
+                             f"{lost / free.area * 100:.2f}%) ⇒ 放棄切割，原樣送出")
+            out.append(a)
+            continue
+        for k, g in enumerate(pieces):
+            sub = dict(a)
+            # ⚠ `Polygon(a['polygon'])` 是拿 (lat, lon) 當 (x, y) 建的，
+            #   所以 coords 出來還是 (lat, lon)，**不可以**再交換一次。
+            sub['polygon'] = [(float(x), float(y)) for x, y in g.exterior.coords[:-1]]
+            # ⚠⚠⚠ 不可以用 "3_1" 這種字串當 id：轉接層會把它 int() 成 31，
+            #   於是與使用者真的畫了第 31 塊區、或機隊切區產生的 31 號子區撞號，
+            #   而且撞號之後完全靜默。機隊切區早就改成整數 id + `_src_area_id`
+            #   了（見 `split_area_for_fleet`），這裡跟進，兩條切區路徑一致。
+            sub['area_id'] = next_id
+            sub['_src_area_id'] = a.get('_src_area_id', a.get('area_id'))
+            next_id += 1
+            out.append(sub)
+        n_split += 1
+        if logger:
+            logger.info(f"nfz_split(area_id={a.get('area_id')}) → {len(pieces)} 塊子區"
+                        f"（禁航區佔 {(1 - free.area / poly.area) * 100:.1f}%）")
+    if n_split and logger:
+        logger.warning(f'nfz_area_split({n_split} 塊區被禁航區切開 ⇒ '
+                       f'{len(areas)} → {len(out)} 塊)')
+    return out
+
+
+def _min_width_dir(pts_xy):
+    """最小寬度方向（rad）。條帶垂直於它 ⇒ 條帶最長、掉頭最少（教科書做法）。"""
+    from shapely.geometry import Polygon
+    hull = Polygon(pts_xy).convex_hull
+    cs = list(hull.exterior.coords)[:-1]
+    best, best_w = 0.0, float('inf')
+    for i in range(len(cs)):
+        ax, ay = cs[i]
+        bx, by = cs[(i + 1) % len(cs)]
+        th = math.atan2(by - ay, bx - ax)
+        # ⚠⚠⚠ 旋轉 −th 之後的 y 座標是 **s·x + c·y**（c,s = cos(−th), sin(−th)）。
+        #   舊版寫成 `-s*x + c*y`，因為 s = −sin(th)，等於量了「對 x 軸鏡射後」
+        #   的寬度 ⇒ 對 1560×800 的區塊在 23°–67° 與 113°–157° 這兩段方位
+        #   （180° 裡的 90°）會選到**長軸**當最小寬度方向。
+        #   後果：切出來是 390×800 的短塊而不是 1560×200 的長條，條帶被剁成
+        #   1/4 長、掉頭次數翻倍 —— 正是本函式 docstring 說要避免的事。
+        #   sin 項在 th=0 消失、cos 項在 th=90 消失,所以**軸對齊的區塊剛好免疫**,
+        #   而既有測試用的就是軸對齊矩形 ⇒ 一直沒被抓到。
+        #   :573 的旋轉本來就寫對（`sn*x + c*y`），這裡跟它對齊。
+        c, s = math.cos(-th), math.sin(-th)
+        ys = [(s * x + c * y) for x, y in cs]
+        w = max(ys) - min(ys)
+        if w < best_w:
+            best_w, best = w, th
+    return best
+
+
+def nfz_defeats_fleet_split(areas, zones, *, swath_m: float):
+    """找出「禁航區太寬，把機隊切出來的子區吃穿」的子區。回傳診斷清單。
+
+    ⚠⚠⚠ 為什麼需要：這是「畫一大區、系統自動切」這條路**唯一**已量到的靜默失效。
+    機隊切區沿掃描步進軸把母區切成寬 ``W = 短軸/台數`` 的長條；禁航區切區接著再把
+    禁航區往外膨脹 ``刈幅/2``（見 :func:`split_areas_around_nfz`）。所以禁航區在
+    **步進軸方向**的跨度 ``S`` 會吃掉子區的 ``S + 刈幅``。當
+
+        S + swath ≳ W        亦即        S ≳ W − swath
+
+    那條子區就沒有剩下夠寬的地方放條帶 ⇒ 整胞 ``no_feasible_class``。
+
+    實測（1560×800 m 切 4 塊 ⇒ W = 200 m、刈幅 138.56 m ⇒ 門檻 **61.4 m**）：
+
+    ====== ================= ==================
+    跨度 S makespan          上工台數
+    ====== ================= ==================
+    40 m   1505 s            4/4
+    50 m   1538 s            4/4
+    60 m   1540 s            4/4
+    70 m   **2463 s（+60%）** 4/4
+    100 m  —                 **1/4**、未覆蓋 2
+    150 m  —                 **1/4**、未覆蓋 2
+    ====== ================= ==================
+
+    翻轉點落在 60–70 m，與閉式 61.4 m 吻合。
+
+    ⚠⚠ 而它**完全不會叫**：實測那一趟回報 ``status='GO_WITH_WARNINGS'``、
+    ``errors=[]``、``validate`` 也過，只在 ``uncovered`` 與一則 note 裡。
+    所以這裡要在規劃**之前**大聲說出來，並告訴使用者改成自己畫多塊、
+    把禁航區留在區與區的空隙裡。
+
+    ⚠ 這是**保守的必要條件**檢查（用軸對齊包絡量跨度），不是充分條件：
+    禁航區形狀斜置時實際吃掉的可能比 S 少。寧可多叫一次，不要漏掉。
+    """
+    out: list[dict] = []
+    if not areas or not zones or swath_m <= 0.0:
+        return out
+    try:
+        from shapely.geometry import Polygon
+    except ImportError:                                    # pragma: no cover
+        return out
+
+    zps = [p for p in (_zone_polygon_latlon(z) for z in zones) if p and len(p) >= 3]
+    if not zps:
+        return out
+    lat0 = areas[0]['polygon'][0][0]
+    lon0 = areas[0]['polygon'][0][1]
+    m_lat, m_lon = 111132.0, 111412.0 * math.cos(math.radians(lat0))
+    to_xy = lambda p: ((p[1] - lon0) * m_lon, (p[0] - lat0) * m_lat)     # noqa: E731
+
+    for a in areas:
+        pts = list(a.get('polygon') or ())
+        if len(pts) < 3:
+            continue
+        shape = Polygon([to_xy(p) for p in pts])
+        if not shape.is_valid or shape.is_empty:
+            continue
+        th = _min_width_dir(list(shape.exterior.coords)[:-1])
+        c, sn = math.cos(-th), math.sin(-th)
+        rot = lambda q: (c * q[0] - sn * q[1], sn * q[0] + c * q[1])     # noqa: E731
+        ys = [rot(q)[1] for q in shape.exterior.coords[:-1]]
+        width = max(ys) - min(ys)                          # 子區在步進軸方向的寬
+        budget = width - float(swath_m)                    # 還容得下多寬的禁航區
+        for zp in zps:
+            zs = Polygon([to_xy(p) for p in zp])
+            # ⚠ 誠實標註：`intersects` 這一半**咬不到突變**（拿掉它 14 條全綠），
+            #   因為下面的 `is_empty` 已經擋住不重疊的情形。留著只是省一次幾何運算，
+            #   不是承重的守衛 —— 不要因為「有測試」就以為它被涵蓋。
+            if not zs.is_valid or not zs.intersects(shape):
+                continue
+            inter = zs.intersection(shape)
+            if inter.is_empty:
+                continue
+            zys = [rot(q)[1] for g in getattr(inter, 'geoms', [inter])
+                   if g.geom_type == 'Polygon' for q in g.exterior.coords[:-1]]
+            if not zys:
+                continue
+            span = max(zys) - min(zys)
+            if span >= budget:
+                out.append({'area_id': a.get('area_id'), 'span_m': span,
+                            'width_m': width, 'budget_m': budget})
+    return out
+
+
+#: 轉接層 notes 裡要原樣併進 HARVEST 尾端 ``validation_notes`` 的前綴（A6 高程基準；審查 M2）。
+#: ⚠ 尾端那份 report 會整份蓋掉 GUI 的 ``_hv_last_report`` ⇒ 不併進來的話操作員看不到。
+HV_FORWARDED_ADAPTER_NOTE_PREFIXES: Tuple[str, ...] = (
+    'terrain_datum(', 'nfz_vertical_limits_ignored(', 'site_alt_vs_dem(')
+
+
+def parse_geoid_undulation(raw) -> Optional[float]:
+    """面板鍵 ``hv_geoid_undulation_m``（大地起伏 N，公尺）→ ``float`` 或 ``None``（A6）。
+
+    ``None``／空白字串 ⇒ ``None``（N 未知 ⇒ 橢球高 DEM 只准相對高度、MSL 匯出被拒）。
+    ⚠ bool（含 numpy bool）⇒ ValueError：``float(True)`` 會靜默變成「已知 N = 1.0 m」（2026-10-15 審查 L-a）。
+    非數字、NaN、±inf ⇒ ValueError。合理範圍（−110～90 m）由 :class:`hv_dccpp.geo.DemGrid` 驗。
+    """
+    if raw is None or (isinstance(raw, str) and raw.strip() == ''):
+        return None
+    import numpy as _np
+    if isinstance(raw, (bool, _np.bool_)):
+        raise ValueError(f"hv_geoid_undulation_m={raw!r} 是布林值，不是大地起伏 N（公尺；空白＝未知）"
+                         "——不會默默當成 N = 1／0")
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"hv_geoid_undulation_m={raw!r} 不是數字（大地起伏 N，公尺；空白＝未知）") from None
+    if not math.isfinite(v):
+        raise ValueError(f"hv_geoid_undulation_m={raw!r} 不是有限數（大地起伏 N，公尺；空白＝未知）")
+    return v
+
+
+def propose_recovery_assignment(plan, cfg, site_ids) -> dict:
+    """由**基準計畫的降落窗**推出逐機回收站指派。回傳 ``{uav_id: site_id}``（只含要改的機）。
+
+    ⚠⚠⚠ 為什麼不是枚舉：實測同一份幾何的 16 種指派分布在 **921–1394 s**，其中 2 種
+    validate 不過 —— 指派是彩票。但彩票的**成因**是可觀測的：降落走廊是逐站互斥的
+    時間區間，所以「誰該換場坪」就是一個標準的**多機台區間排程**問題，直接從基準
+    計畫的降落窗算得出來，不必試。
+
+    作法：取每機的降落窗 ``[t_arr_ptc − 30, t_land + t_sep_ldg]``（`deconflict.plan_windows`），
+    依窗起點排序，逐機指派到**最早空出來**的場坪（貪婪區間排程）。第一個場坪固定是
+    全域回收點，所以全部塞得下時回傳空字典 ⇒ 逐位元等於今天。
+
+    ⚠ 這是**候選**不是決定。換站之後返航段會重算、時刻會變 ⇒ 必須重新規劃再用
+    :func:`recovery_regression_guard` 驗過才能採用。
+    """
+    sites = [s for s in (site_ids or []) if s]
+    if not plan or len(sites) < 2 or len(getattr(plan, "plans", {}) or {}) < 2:
+        return {}
+
+    # ⚠⚠⚠ **不要**看基準計畫的降落窗絕對時刻：基準是**去衝突之後**的計畫，
+    #   而排程器正是靠押後起飛把那些窗錯開的 —— 實測 HV4SITL13 的四個窗
+    #   [391,611] [684,904] [1016,1236] [1311,1541] **完全不重疊**。
+    #   ⇒ 從那裡看不出任何排隊壓力，會得到一個與成因無關的指派。
+    #   真正的壓力在**架次時長**：四機的 t_land − t_takeoff 是 521.3 / 534.2 /
+    #   533.9 / 534.8 s，也就是**大家都想在同一時刻降落**，全被同一個坪擋住。
+    #   單坪最小 makespan ≈ 架次時長 + (n−1)·降落窗寬；k 個坪 ⇒ (⌈n/k⌉−1)·窗寬。
+    #   所以正確的指派是「依架次時長輪流分到各坪」，讓每個坪只排 ⌈n/k⌉ 台。
+    rows = sorted(((float(p.t_land_s) - float(p.t_takeoff_s), str(uid), str(p.landing_site))
+                   for uid, p in plan.plans.items()), reverse=True)
+    out: dict = {}
+    for i, (_dur, uid, cur) in enumerate(rows):
+        pick = sites[i % len(sites)]
+        if pick != cur:
+            out[uid] = pick
+    return out
+
+
+def recovery_regression_guard(base, cand, *, sep_tol_m: float = 1.0,
+                              energy_tol: float = 0.05) -> tuple[bool, str]:
+    """換場坪的**回歸守衛**：不准拿間距或能量餘裕換時間。
+
+    ``base`` / ``cand`` 是兩份量測字典，需含
+    ``passed`` / ``conflicts`` / ``uncovered`` / ``min_sep_h_m`` / ``energy_wh``（{uav: Wh}）/ ``n_cross_flown``。
+
+    ⚠⚠ 交叉航帶（建圖模式）：候選實際飛的交叉帶**比基準少** ⇒ 擋（2026-10-15 審查 L-e）。少飛交叉帶的計畫
+    makespan 自然比較短，沒有這條就會被「makespan 有變好」**主動**選中——等於拿建圖品質換時間，而且不出聲。
+    兩邊任一缺 ``n_cross_flown`` ⇒ 擋（無從比較就不放行，不默默當 0）。
+
+    ⚠⚠⚠ 為什麼這道守衛不是可選的：實測**最快的指派同時是最不安全的**——
+    基準最近接 148.4 m、100 m 內 0 筆；最快那組掉到 **51.9 m**、100 m 內 6 筆、
+    ≥3 台同時在空中 265.9 s（基準 0 s）。所有安全的分法都比較慢。
+    而去衝突的候選排序第一鍵是 makespan ⇒ 它會**主動**選中那一格，不是避開。
+
+    ⚠⚠ 能量同理：上游的 `energy_safe_check` 只保證「≥ 保留量」，所以換站被授權
+    把餘裕從 190.7 Wh 一路吃到剩 5 Wh 仍然全綠。⇒ 這裡用**逐機對基準的回歸界**，
+    不是地板。
+    """
+    if not cand.get("passed") or int(cand.get("conflicts", 0)) > 0:
+        return False, f"validate 未通過（conflicts={cand.get('conflicts')}）"
+    if int(cand.get("uncovered", 0)) > int(base.get("uncovered", 0)):
+        return False, f"未覆蓋變多（{base.get('uncovered')} → {cand.get('uncovered')}）"
+    b_x, c_x = base.get("n_cross_flown"), cand.get("n_cross_flown")
+    if b_x is None or c_x is None:
+        return False, f"缺交叉航帶讀數 n_cross_flown（基準 {b_x!r}、候選 {c_x!r}）⇒ 無從比較，不放行"
+    if int(c_x) < int(b_x):
+        return False, f"交叉航帶變少（{int(b_x)} → {int(c_x)} 條；少飛的 makespan 自然較短，不准拿建圖品質換時間）"
+
+    b_sep, c_sep = float(base.get("min_sep_h_m", 0.0)), float(cand.get("min_sep_h_m", 0.0))
+    if math.isfinite(b_sep) and c_sep < b_sep - float(sep_tol_m):
+        return False, f"最小水平間距變差（{b_sep:.1f} → {c_sep:.1f} m）"
+
+    be, ce = dict(base.get("energy_wh") or {}), dict(cand.get("energy_wh") or {})
+    for uid, b_wh in be.items():
+        c_wh = ce.get(uid)
+        if c_wh is None:
+            return False, f"{uid} 在候選裡沒有能量讀數"
+        if float(b_wh) > 0.0 and float(c_wh) < float(b_wh) * (1.0 - float(energy_tol)):
+            return False, (f"{uid} 落地餘電回歸超過 {energy_tol:.0%}"
+                           f"（{float(b_wh):.1f} → {float(c_wh):.1f} Wh）")
+    return True, "ok"
+
+
+def measure_harvest_plan(hv) -> dict:
+    """把一份 HARVEST 規劃結果量成 :func:`recovery_regression_guard` 吃的字典。
+
+    ⚠ 這裡**自己重跑一次** ``hv_dccpp.validate``。轉接層的 `status` 是
+    ``GO_WITH_WARNINGS`` 時 `errors` 可能仍是空的（實測 1/4 台上工、3 個胞掉光
+    的那一趟就是這個 status）⇒ 不可以拿 status 當通過與否的判準。
+    """
+    import hv_dccpp as _hvlib
+    from hv_dccpp.geometry import is_cross_strip
+    plan, ctx, cfg = hv.last_plan, hv.last_ctx, hv.cfg
+    v = _hvlib.validate(plan, ctx, _hvlib.build_validation_cache(plan, ctx, budget_only=False), cfg)
+    return {
+        'passed': bool(v.passed),
+        'conflicts': len(v.conflicts),
+        'uncovered': len(plan.uncovered or []),
+        # 實際排進各機航線的交叉航帶條數（UAVPlan.strips 是 (strip_id, 方向)；守衛不准候選比基準少）
+        'n_cross_flown': sum(1 for p in plan.plans.values() for sid, _d in (p.strips or ()) if is_cross_strip(sid)),
+        'min_sep_h_m': float(_hvlib.sim.min_separation(plan.plans, cfg)[0]),
+        'energy_wh': {u: float(p.waypoints[-1].energy_remaining_wh)
+                      for u, p in plan.plans.items() if p.waypoints},
+        'makespan_s': max((float(p.t_land_s) for p in plan.plans.values()), default=0.0),
+        'landing': {u: str(p.landing_site) for u, p in plan.plans.items()},
+    }
+
+
+def split_area_for_fleet(areas, n_uav: int, *, logger=None, max_pieces: int = 16,
+                         min_piece_width_m: float | None = None):
+    """把作業區切成夠多的子區，讓整個機隊都分得到工作。
+
+    ⚠⚠⚠ 為什麼需要：**單一大區配混編機隊會產出空計畫**。
+    殘帶對拍賣把每個母胞鎖成「構型 A 一台 + 構型 B 一台」，胞太少就餵不飽機隊，
+    而且**加機完全沒用**。實測 20 km²、1 Pioneer + 3 HERO：
+
+        單一大區 5.0×4.0 km  → 胞 1  → **0/4 台上工**
+        同一塊切成 2 條      → 胞 4  → 2/4
+        同一塊切成 3 條      → 胞 7  → 3/4
+        同一塊切成 4 條      → 胞 8  → **4/4、未覆蓋 0**
+
+    所以在送進規劃器之前先切。切的方向是**垂直於最小寬度方向**（也就是沿著
+    掃描步進的那一軸切），這樣每一塊子區的最小寬度方向與原區相同 ⇒
+    條帶方向不變、長度不變，只是被分段。沿另一軸切會把長條帶剁短，掉頭變多。
+
+    每塊區分到的份數依**面積**加權；總份數 = 機隊台數（實測 k = n_uav 剛好餵飽）。
+
+    ⚠⚠ 這裡刻意**不**依機型能力加權。2026-09-08 用生產碼實測推翻了那個做法：
+    等面積切進去，下游（`hv_dccpp` 的殘帶對拍賣）出來**已經是等時間**——
+    HV4SITL9 四台規劃工作時間 534.8 / 521.3 / 533.9 / 534.2 s，max/min = **1.026**。
+    在這一層再加權是第二層折扣，離線掃六個權重比全部比等份**差**。
+    詳見 `docs/adr/0013-fleet-split-stays-equal-area.md`。
+
+    ``max_pieces``：每塊母區的份數上限。⚠ 它**不是**在防「切太多塊會有未覆蓋」——
+    實跑 n_uav=6 照樣切 6 塊，這道上限要 n_uav ≥ 17 才咬得到。真正該擋的是下面那個
+    寬度守衛。（舊 docstring 宣稱「切 6 條反而多出 1 塊未覆蓋，所以有 max_pieces」，
+    在現行程式碼上不重現，也找不到那次實驗的紀錄 ⇒ 已移除該說法。）
+
+    ``min_piece_width_m``：**子區最小寬度**（公尺，通常給感測刈幅）。給了就把份數 k
+    往下夾，讓每塊至少一個刈幅寬。⚠⚠ 沒有這道守衛時 1560×800 配 8 台會切出 100 m 寬、
+    配 16 台切出 50 m 寬，全都窄於實飛刈幅（A1 實測 160.01 m）⇒ 一塊子區只放得下
+    一條條帶，相機大幅重複掃描而**沒有任何告警**（唯一的過濾是「面積 > 1 m²」）。
+    """
+    if not areas or n_uav <= 1:
+        return areas
+    try:
+        from shapely.geometry import Polygon, box
+    except ImportError:                                    # pragma: no cover
+        if logger:
+            logger.warning('shapely 不在，機隊切區跳過')
+        return areas
+
+    polys, lat0 = [], None
+    for a in areas:
+        pts = list(a['polygon'])
+        if len(pts) < 3:
+            return areas
+        if lat0 is None:
+            lat0 = sum(p[0] for p in pts) / len(pts)
+        polys.append(pts)
+    m_lat, m_lon = 111132.0, 111412.0 * math.cos(math.radians(lat0))
+    to_xy = lambda p: ((p[1] - areas[0]['polygon'][0][1]) * m_lon,      # noqa: E731
+                       (p[0] - areas[0]['polygon'][0][0]) * m_lat)
+    to_ll = lambda q: (areas[0]['polygon'][0][0] + q[1] / m_lat,        # noqa: E731
+                       areas[0]['polygon'][0][1] + q[0] / m_lon)
+
+    shapes = [Polygon([to_xy(p) for p in pts]) for pts in polys]
+    # ⚠⚠⚠ 不可以靜默用 `buffer(0)` 修好就當沒事。自交多邊形（使用者畫岔了）
+    #   修完可能只剩一半：實測蝴蝶結 (0,0)-(1000,1000)-(1000,0)-(0,1000)
+    #   兩瓣共 500,000 m²，`buffer(0)` 只留 250,000 m²，而下面那道「面積守恆」
+    #   守衛的基準線是**修好之後**的形狀 ⇒ 結構上看不見這 50%，還照樣印成功。
+    #   自交是使用者的輸入錯誤，要大聲說，不要幫他掃一半。
+    for a, s in zip(areas, shapes):
+        if s.is_valid:
+            continue
+        try:
+            from shapely.validation import explain_validity
+            why = explain_validity(s)
+        except Exception:                                   # noqa: BLE001
+            why = 'invalid polygon'
+        rep = s.buffer(0)
+        raise ValueError(
+            f"作業區 area_id={a.get('area_id')} 的多邊形不合法（{why}）："
+            f"修補後面積 {rep.area:,.0f} m²、原始 {s.area:,.0f} m²。"
+            f"自己畫岔的區塊不會被默默掃一半，請把邊界改成不自交的。")
+    total = sum(s.area for s in shapes)
+    if total <= 0:
+        return areas
+
+    # ── 份數：先按面積四捨五入，再用「最大餘數」把總份數補到 n_uav ────────
+    #   ⚠ 只做四捨五入時，3 塊等面積區配 4 台會得到 k=round(1.33)=1 ⇒ **完全不切**，
+    #     3 個胞餵 4 台，第 4 台分不到工作。補足之後才是 4 塊。
+    quota = [n_uav * s.area / total for s in shapes]
+    ks = [max(1, min(max_pieces, int(math.floor(q)))) for q in quota]
+    # ⚠⚠ 平手必須用**確定性**次鍵。實測三塊「等面積」母區配 4 台，三個 quota 的
+    #   小數部分是 0.33333333333333282 / ...282 / ...393（差 1 ULP）⇒ 誰拿到補的
+    #   那一份完全由浮點雜訊決定，**同一份輸入可能產出不同計畫**。所以小數部分先
+    #   量子化到 1e-9 再比，平手時退到 area_id，最後才是索引 —— 後兩者與浮點無關。
+    def _remainder_key(i):
+        frac = quota[i] - math.floor(quota[i])
+        aid = areas[i].get('area_id')
+        return (-round(frac, 9), '' if aid is None else str(aid), i)
+
+    order = sorted(range(len(shapes)), key=_remainder_key)
+    gi = 0
+    while sum(ks) < min(n_uav, max_pieces * len(shapes)) and order:
+        i = order[gi % len(order)]
+        if ks[i] < max_pieces:
+            ks[i] += 1
+        elif all(k >= max_pieces for k in ks):
+            break
+        gi += 1
+
+    out, n_split = [], 0
+    next_id = max((int(a['area_id']) for a in areas
+                   if str(a.get('area_id', '')).isdigit()), default=0) + 1
+    for a, s, k in zip(areas, shapes, ks):
+        if k <= 1 or s.is_empty:
+            out.append(a)
+            continue
+        th = _min_width_dir(list(s.exterior.coords)[:-1])
+        c, sn = math.cos(-th), math.sin(-th)
+        rot = Polygon([(c * x - sn * y, sn * x + c * y) for x, y in s.exterior.coords[:-1]])
+        x0, y0, x1, y1 = rot.bounds
+        # ── 子區最小寬度守衛 ──────────────────────────────────────────
+        #   ⚠⚠ 沒有這道守衛時，下面唯一的過濾是「面積 > 1 m²」，於是 1560×800
+        #   配 8 台切出 100 m 寬、配 16 台切出 50 m 寬，全都窄於實飛刈幅
+        #   （A1 實測 160.01 m）⇒ 一塊子區只放得下一條條帶、相機大幅重複掃描，
+        #   而且**完全沒有告警**。寧可餵不飽機隊也不要切出窄於刈幅的子區。
+        if min_piece_width_m and float(min_piece_width_m) > 0.0:
+            k_cap = max(1, int((y1 - y0) // float(min_piece_width_m)))
+            if k_cap < k:
+                if logger:
+                    logger.warning(
+                        f"fleet_split_width_capped(area_id={a.get('area_id')}："
+                        f"{k} → {k_cap} 份；母區寬 {y1 - y0:.1f} m、"
+                        f"最小子區寬 {float(min_piece_width_m):.1f} m）"
+                        f"⇒ 這塊餵不飽整個機隊，但比切出窄於刈幅的子區好")
+                k = k_cap
+            if k <= 1:
+                out.append(a)
+                continue
+        # 沿掃描步進軸（旋轉後的 y）等份切 ⇒ 條帶方向與長度不變
+        edges = [y0 + (y1 - y0) * i / k for i in range(k + 1)]
+        ci, si = math.cos(th), math.sin(th)
+        pieces = []
+        for lo, hi in zip(edges, edges[1:]):
+            g = rot.intersection(box(x0 - 1.0, lo, x1 + 1.0, hi))
+            for gg in getattr(g, 'geoms', [g]):
+                if gg.geom_type == 'Polygon' and gg.area > 1.0:
+                    pieces.append(Polygon([(ci * x - si * y, si * x + ci * y)
+                                           for x, y in gg.exterior.coords[:-1]]))
+        # ★ 面積守恆
+        lost = s.area - sum(p.area for p in pieces)
+        if not pieces or abs(lost) > max(s.area * 1e-6, 1.0):
+            if logger:
+                logger.error(f"fleet_split_lost_area(area_id={a.get('area_id')}, "
+                             f"{lost:.1f} m²) ⇒ 放棄切割，原樣送出")
+            out.append(a)
+            continue
+        for i, p in enumerate(pieces):
+            sub = dict(a)
+            sub['polygon'] = [to_ll(q) for q in p.exterior.coords[:-1]]
+            # ⚠ 子區要有**自己的**整數 id（規劃器用它當鍵），但下游（GUI 的
+            #   allocation、統計面板）要看到的是**使用者畫的那塊區**。所以把
+            #   來源記在 `_src_area_id`，HV 分支收到結果後照它把鍵換回去。
+            #   用整數而不是 "1_1" 這種字串：轉接層會把底線吃掉變成 11，
+            #   之後就對不回來了。
+            sub['area_id'] = next_id
+            # ⚠ 要與禁航區切區那一支對稱（見 `split_areas_around_nfz`）：若輸入已經
+            #   被切過一次，溯源必須指回**使用者畫的那塊**，不是上一層的子區 id。
+            #   目前靠呼叫順序（機隊切區先於禁航區切區）僥倖沒事，但順序一換就壞。
+            sub['_src_area_id'] = a.get('_src_area_id', a.get('area_id'))
+            next_id += 1
+            out.append(sub)
+        n_split += 1
+        if logger:
+            logger.info(f"fleet_split(area_id={a.get('area_id')}) → {len(pieces)} 條子區"
+                        f"（機隊 {n_uav} 台）")
+    if n_split and logger:
+        logger.warning(f'fleet_area_split({len(areas)} → {len(out)} 塊；'
+                       f'單一大區配混編機隊會產出空計畫，所以先切）')
+    return out
+
+
+def _uniform_camera(*, hfov_deg: float, vfov_deg: float):
+    """兩個構型共用的單光相機（正下方視角）。
+
+    由面板的 HFOV／VFOV 反推針孔相機幾何，使刈幅與面板算出來的足跡一致：
+    ``swath = 2·h·tan(HFOV/2) = h·sensor_width/focal`` ⇒ ``sensor_width = 2·f·tan(HFOV/2)``。
+    焦距與像素間距沿用 :class:`hv_dccpp.platform.CameraHardware` 的預設值（GSD 由它們決定）。
+    HFOV／VFOV 沒給時退回該預設相機。
+
+    ⚠ ``is_default_example=True``（2026-10-14 修正）：焦距 16 mm、像素 3.9 µm、最大拍照率 1 Hz 都還是
+    範例值，只有刈幅是面板的 ⇒ GSD 與觸發率限速都不是真相機。舊版標 False 會把 preflight 的
+    ``sensor_spec_default_example`` 警告壓掉（已驗證）。要真相機請開「航測建圖」（見 :func:`build_mapping_setup`）。
+    """
+    import math as _m
+    from hv_dccpp.platform import CameraHardware
+    _f = 16.0                       # CameraHardware.focal_length_mm 的預設值
+    if hfov_deg > 0.0 and vfov_deg > 0.0:
+        return CameraHardware(focal_length_mm=_f,
+                              sensor_width_mm=2.0 * _f * _m.tan(_m.radians(hfov_deg) / 2.0),
+                              sensor_height_mm=2.0 * _f * _m.tan(_m.radians(vfov_deg) / 2.0),
+                              is_default_example=True)
+    return CameraHardware(is_default_example=True)
+
+
+#: 飛控相機函式庫以 50 Hz 更新（AP_Camera::update），CAM1_INTRVAL_MIN 比 20 ms 更細也是下一拍才放行
+TRIGGER_INTERVAL_STEP_S = 0.02
+#: 建圖的側向重疊建議下限（低於它只警告，不擋）
+MAPPING_SIDE_OVERLAP_MIN = 0.60
+#: CAM1_DURATION（build_mapping_setup 固定送這個值；觸發率上限由它決定，見 trigger_min_spacing_s）
+MAPPING_TRIGGER_DURATION_S = 0.1
+#: 會被 CAM1_DURATION 限速的後端（AP_Camera_Relay／AP_Camera_Servo 的 trigger_counter）
+_DURATION_LIMITED_BACKENDS = ('relay', 'servo')
+#: servo 後端的大聲警告（R1 #4：PWM 脈衝串，樹莓派的上升緣擷取會把每個 PWM 週期都當成一張照片）
+SERVO_BACKEND_WARNING = 'servo 後端會持續輸出 PWM 脈衝，只適用 SITL；實機請用 relay'
+#: 建圖作業風速上限預設（m/s）：2026-10-15 使用者定調「首次建圖只在風速 ≤ 3 m/s 飛」（SITL 5 m/s 時 Pioneer 轉彎後
+#: 要 300 m 才改平、2.5% 照片 10–15° 側傾；引入段依機型 × 風速的函數**這次不做**）。面板鍵 hv_map_max_wind_mps。
+MAPPING_MAX_WIND_DEFAULT_MPS = 3.0
+#: 上限指的是現場實際風速（規劃用的風只是輸入），起飛前要實測 —— 每次建圖都提醒
+MAPPING_WIND_SITE_NOTE = '建圖作業風速上限指「現場實際風速」：規劃只檢查你輸入的規劃風速，起飛前必須在場實測'
+
+
+def trigger_min_spacing_s(duration_s) -> float:
+    """relay／servo 相機後端兩次觸發之間、**中間有乾淨低電位**的最短間隔（秒）。
+
+    ArduPilot（4.4.4–master，AP_Camera_Relay.cpp／AP_Camera_Servo.cpp）：
+    ``trigger_pic()`` 在 ``trigger_counter > 0`` 時**拒絕**新觸發，觸發時設 ``trigger_counter = CAM1_DURATION × 50``
+    （轉 uint16，截斷）；``update()`` 以 50 Hz 跑，counter > 0 就只遞減，**等到 counter 已經是 0 的下一個週期**
+    才把輸出放回 OFF。⇒ 觸發後 N 個週期都是 ON，第 N+1 個週期放 OFF，第 N+2 個週期才能再拉 ON
+    （中間才有一個 20 ms 低電位 = 樹莓派看得到的上升緣）。最短間隔 = (N + 2) × 20 ms。
+    CAM1_DURATION 0.1 s ⇒ N = 5 ⇒ 0.14 s ⇒ 7.14 Hz（第一階段驗證的「relay 約 7 Hz」）。
+    """
+    d = float(duration_s)
+    if not math.isfinite(d) or d < 0.0:
+        raise ValueError(f"CAM1_DURATION 須為 ≥ 0 的有限數，得 {duration_s!r}")
+    n = math.floor(d / TRIGGER_INTERVAL_STEP_S + 1e-6)
+    return round((n + 2) * TRIGGER_INTERVAL_STEP_S, 6)
+
+
+def trigger_interval_min_s(rate_hz) -> float:
+    """CAM1_INTRVAL_MIN ＝ 1 ／ 台架實測最大觸發率，**向上**取整到 0.02 s。
+
+    向上 ⇒ 飛控放行的觸發率 1/間隔 ≤ 實測值（不會要求相機拍得比證明過的還快）。
+    規劃器的 ``max_shutter_rate_hz`` 一律用 ``1 / 這個值``，兩邊才是同一個數（值鎖）。
+    """
+    if isinstance(rate_hz, bool) or not isinstance(rate_hz, (int, float)) \
+            or not math.isfinite(float(rate_hz)) or float(rate_hz) <= 0.0:
+        raise ValueError(f"實測最大觸發率須為 > 0 的有限數，得 {rate_hz!r}")
+    n = math.ceil((1.0 / float(rate_hz)) / TRIGGER_INTERVAL_STEP_S - 1e-9)
+    return round(n * TRIGGER_INTERVAL_STEP_S, 6)
+
+
+def build_mapping_setup(p) -> dict:
+    """VTOL 偵察頁「航測建圖」欄位（``hv_map_*``）→ 規劃器與飛控要用的**同一組**數字。
+
+    回傳::
+
+        {'camera': CameraHardware,            # 真相機（取代 _uniform_camera 的範例值）
+         'camera_cfg': CameraTriggerConfig,   # 上傳／匯出用（CAM1_*、206 擺放）
+         'mapping_mode': MappingModeConfig,   # 規劃器（接縫、不分層、偏流、引入段）
+         'forward_overlap', 'side_overlap',
+         'trigger_rate_hz',                   # 面板填的實測最大觸發率
+         'interval_min_s',                    # CAM1_INTRVAL_MIN（向上取整到 0.02 s）
+         'trigger_rate_planned_hz',           # = 1 / interval_min_s ＝ 規劃器的 max_shutter_rate_hz
+         'trigger_verified', 'readout_ms', 'warnings': [...], 'effective': {...}}
+
+    值鎖：``camera.max_shutter_rate_hz == 1 / camera_cfg.interval_min_s``、
+    ``mapping_mode.lead_in_m == camera_cfg.camera_lead_in_m``。
+    任何一個值不合法 ⇒ ``ValueError``（繁中訊息；CameraTriggerConfig 的訊息原樣帶出，例如 relay 沒給韌體版本）。
+    """
+    from hv_dccpp.ardupilot import CAMERA_BACKEND_TYPE, CameraTriggerConfig
+    from hv_dccpp.mission import MappingModeConfig, MissionInputError
+    from hv_dccpp.platform import CameraHardware
+
+    def _num(key, label, *, lo=None, lo_open=False, hi=None, hi_open=False):
+        v = p.get(key)
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(float(v)):
+            raise ValueError(f"{label}（{key}）須為有限數，得 {v!r}")
+        x = float(v)
+        if lo is not None and (x <= lo if lo_open else x < lo):
+            raise ValueError(f"{label}須{'>' if lo_open else '≥'} {lo:g}，得 {x:g}")
+        if hi is not None and (x >= hi if hi_open else x > hi):
+            raise ValueError(f"{label}須{'<' if hi_open else '≤'} {hi:g}，得 {x:g}")
+        return x
+
+    def _opt_int(key, label):
+        v = p.get(key)
+        if v is None:
+            return None
+        if isinstance(v, bool) or not isinstance(v, int):
+            raise ValueError(f"{label}（{key}）須為整數，得 {v!r}")
+        return int(v)
+
+    f_mm = _num('hv_map_focal_mm', '焦距', lo=0.0, lo_open=True)
+    pix_um = _num('hv_map_pixel_um', '像素間距', lo=0.0, lo_open=True)
+    w_px = _num('hv_map_width_px', '影像寬', lo=1.0)
+    h_px = _num('hv_map_height_px', '影像高', lo=1.0)
+    rate = _num('hv_map_trigger_hz', '實測最大觸發率', lo=0.0, lo_open=True)
+    fwd = _num('hv_map_forward_overlap', '前向重疊', lo=0.0, hi=1.0, hi_open=True)
+    side = _num('hv_map_side_overlap', '側向重疊', lo=0.0, hi=1.0, hi_open=True)
+    lead = _num('hv_map_lead_in_m', '引入段', lo=0.0)
+    roll = _num('hv_map_max_roll_deg', 'CAM_MAX_ROLL', lo=0.0, hi=180.0)
+    tol = p.get('hv_map_terrain_retrigger_tol')
+    tol = None if tol is None else _num('hv_map_terrain_retrigger_tol', '地形重觸發容差',
+                                        lo=0.0, lo_open=True, hi=1.0, hi_open=True)
+    readout = p.get('hv_map_readout_ms')
+    readout = None if readout is None else _num('hv_map_readout_ms', '讀出時間', lo=0.0)
+    # 建圖作業風速上限（缺鍵 ⇒ 預設 3.0，寫進有效值）
+    max_wind = (MAPPING_MAX_WIND_DEFAULT_MPS if p.get('hv_map_max_wind_mps') is None
+                else _num('hv_map_max_wind_mps', '建圖作業風速上限', lo=0.0, lo_open=True))
+    # 交叉航帶（opt-in）：沒勾時面積比例／高度差必須是 None（面板送 None），給了值就是「會被靜默忽略的值」⇒ 拒絕
+    cross_on = p.get('hv_map_cross_enabled')
+    if cross_on is not None and not isinstance(cross_on, bool):
+        raise ValueError(f"交叉航帶勾選（hv_map_cross_enabled）須為 bool，得 {cross_on!r}")
+    cross_on = bool(cross_on)
+    if cross_on:
+        cross_frac = _num('hv_map_cross_fraction', '交叉航帶面積比例', lo=0.0, lo_open=True, hi=1.0)
+        cross_dh = _num('hv_map_cross_alt_offset_m', '交叉航帶高度差')
+        # 鄰機空域（使用者 2026-10-15：多機預設禁止，可明確放行）：缺鍵／None ⇒ False（禁止），寫進有效值
+        cross_allow = p.get('hv_map_cross_allow_neighbor')
+        if cross_allow is not None and not isinstance(cross_allow, bool):
+            raise ValueError(f"交叉帶可飛進鄰機區塊（hv_map_cross_allow_neighbor）須為 bool，得 {cross_allow!r}")
+        cross_allow = bool(cross_allow)
+    else:
+        _given = [k for k in ('hv_map_cross_fraction', 'hv_map_cross_alt_offset_m', 'hv_map_cross_allow_neighbor')
+                  if p.get(k) is not None]
+        if _given:
+            raise ValueError(f"沒勾交叉航帶卻給了 {', '.join(_given)} ⇒ 這些值不會生效；要用就勾「交叉航帶」")
+        cross_frac, cross_dh, cross_allow = None, None, None
+    backend = str(p.get('hv_map_backend') or '')
+    if backend not in CAMERA_BACKEND_TYPE:
+        raise ValueError(f"相機後端須為 {tuple(CAMERA_BACKEND_TYPE)} 之一，得 {backend!r}")
+    fw = str(p.get('hv_map_firmware') or '').strip() or None
+    verified = bool(p.get('hv_map_trigger_verified'))
+
+    interval = trigger_interval_min_s(rate)
+    if interval > 10.0:
+        raise ValueError(f"實測最大觸發率 {rate:g} Hz ⇒ CAM1_INTRVAL_MIN {interval:g} s 超過飛控上限 10 s")
+    rate_eff = 1.0 / interval
+    # R1 #7：relay／servo 後端在 CAM1_DURATION 內拒絕新觸發 ⇒ 觸發率有硬上限；超過就是「規劃的前向重疊飛控給不出來」
+    #   （飛控會靜默把照片間距拉長），所以拒絕而不是警告。mavlink_v2 後端不經 trigger_counter，不受此限。
+    duration = MAPPING_TRIGGER_DURATION_S
+    if backend in _DURATION_LIMITED_BACKENDS:
+        spacing = trigger_min_spacing_s(duration)
+        if interval < spacing - 1e-9:
+            n_busy = int(round(spacing / TRIGGER_INTERVAL_STEP_S)) - 2
+            raise ValueError(
+                f"實測最大觸發率 {rate:g} Hz ⇒ CAM1_INTRVAL_MIN {interval:.2f} s（規劃拍照率 {rate_eff:.3f} Hz），"
+                f"但 CAM1_DURATION {duration:g} s 時 {backend} 後端兩次觸發至少要隔 {spacing:.2f} s"
+                f"（觸發後 {n_busy} 個 20 ms 週期內飛控拒絕新觸發，再要 1 個週期的低電位才有乾淨的上升緣）"
+                f" ⇒ 這個後端的觸發率上限是 {1.0 / spacing:.3f} Hz（CAM1_INTRVAL_MIN ≥ {spacing:.2f} s）；"
+                f"超過時飛控會靜默拉長照片間距、前向重疊不足。請把實測最大觸發率填到 ≤ {1.0 / spacing:.3f} Hz")
+
+    # first_shot_immediate=False：每帶第一張也走距離觸發（受 CAM_MAX_ROLL 擋）。206 p3=1 的「立即拍」不經
+    # 側傾門檻；SITL S1 在 5 m/s 風下，順風轉彎那幾條帶飛到引入點時還在 20–25° 側傾，立即拍那張是斜的、
+    # 下一張又被 CAM_MAX_ROLL 延後 ⇒ 帶首出現 2–8 d 的間距（runs/artifacts/S1_HDMAP_20261014_W5）。
+    # 無風時引入點已改平：上一張在前一條帶、距離早超過 d ⇒ 第一個 50 Hz 週期就拍，與立即拍同一點。
+    kw = dict(backend=backend, firmware=fw, duration_s=duration, interval_min_s=interval, auto_only=True,
+              max_roll_deg=roll, camera_lead_in_m=lead, terrain_retrigger_tol=tol, first_shot_immediate=False)
+    if backend == 'relay':
+        kw['relay_pin'] = _opt_int('hv_map_relay_pin', 'relay 腳位')
+        kw['aux_servo_channel_for_relay'] = _opt_int('hv_map_relay_aux_servo', 'AUX 伺服通道')
+    fb_pin = _opt_int('hv_map_feedback_pin', '回授腳位')
+    if fb_pin is not None and fb_pin >= 0:
+        kw['feedback_pin'] = fb_pin
+        kw['feedback_servo_channel'] = _opt_int('hv_map_feedback_servo', '回授通道')
+    try:
+        cc = CameraTriggerConfig(**kw)
+    except ValueError as e:
+        raise ValueError(f"相機觸發設定不合法：{e}") from e
+    try:
+        if cross_on:
+            mm = MappingModeConfig(lead_in_m=lead, cross_strips=True, cross_fraction=cross_frac,
+                                   cross_alt_offset_m=cross_dh, cross_allow_neighbor_airspace=cross_allow)
+        else:
+            mm = MappingModeConfig(lead_in_m=lead)
+    except MissionInputError as e:
+        raise ValueError(f"建圖模式設定不合法：{e}") from e
+    cam = CameraHardware(focal_length_mm=f_mm, sensor_width_mm=w_px * pix_um * 1e-3,
+                         sensor_height_mm=h_px * pix_um * 1e-3, pixel_pitch_um=pix_um,
+                         max_shutter_rate_hz=rate_eff, is_default_example=False)
+
+    warnings = []
+    if backend == 'servo':
+        warnings.append(SERVO_BACKEND_WARNING)
+    if not verified:
+        warnings.append(f"實測最大觸發率 {rate:g} Hz 未經台架驗證（相機拍不到這麼快時，飛控會靜默延後觸發 ⇒ 前向重疊不足）")
+    if rate_eff < rate - 1e-9:
+        warnings.append(f"觸發率量化：{rate:g} Hz → CAM1_INTRVAL_MIN {interval:.2f} s（向上取整到 0.02 s）"
+                        f" ⇒ 規劃與飛控都用 {rate_eff:.3f} Hz")
+    if side < MAPPING_SIDE_OVERLAP_MIN - 1e-9:
+        warnings.append(f"側向重疊 {side:.2f} < {MAPPING_SIDE_OVERLAP_MIN:.2f}（建圖建議 0.60–0.70）")
+    if readout is None:
+        warnings.append("讀出時間未填：後處理無法做滾動快門修正（全域快門相機可忽略）")
+    warnings.append(f"{MAPPING_WIND_SITE_NOTE}（上限 {max_wind:g} m/s）")
+    _hw = p.get('hv_wind')
+    try:
+        _w_in = float(_hw[0]) if _hw is not None else None
+    except (TypeError, ValueError, IndexError):
+        _w_in = None
+    if _w_in is not None and math.isfinite(_w_in) and _w_in > max_wind + 1e-9:
+        warnings.append(f"規劃風速 {_w_in:g} m/s 超過建圖作業風速上限 {max_wind:g} m/s ⇒ 規劃後不可上傳")
+    if cross_on:
+        warnings.append(f"交叉航帶：每架在自己飛的每個區塊多飛一組垂直條帶（面積比例 {cross_frac:g}、高度差 {cross_dh:+g} m）；"
+                        "文獻只在平地、GCP 少時效益大（Gerke 2016），同高度效果有限（Štroner 2021）——請與加密 GCP 對照")
+        if cross_allow:
+            warnings.append("交叉帶已明確放行飛進鄰機區塊：伸出區塊的那段（含迴轉）與鄰機同高、只靠起飛時間錯開，"
+                            "起飛延誤或風造成的時程漂移會吃掉間隔")
+        else:
+            warnings.append("交叉帶鄰機空域＝禁止（預設）：多機時會伸進他機區塊的交叉組不排（計畫照樣可上傳，"
+                            "那些區塊沒有交叉航帶；規劃後看 mapping_cross_forbidden）")
+    effective = {
+        'focal_mm': f_mm, 'pixel_um': pix_um, 'width_px': int(w_px), 'height_px': int(h_px),
+        'trigger_rate_hz': rate, 'trigger_verified': verified, 'interval_min_s': interval,
+        'trigger_rate_planned_hz': rate_eff, 'forward_overlap': fwd, 'side_overlap': side,
+        'lead_in_m': lead, 'backend': backend, 'firmware': fw, 'max_roll_deg': roll,
+        'terrain_retrigger_tol': tol, 'readout_ms': readout, 'duration_s': cc.duration_s,
+        'trigger_rate_cap_hz': (1.0 / trigger_min_spacing_s(cc.duration_s)
+                                if backend in _DURATION_LIMITED_BACKENDS else None),
+        'preset': p.get('hv_map_camera_preset'),
+        'max_wind_mps': max_wind,
+        'cross_strips': cross_on, 'cross_fraction': cross_frac, 'cross_alt_offset_m': cross_dh,
+        'cross_allow_neighbor_airspace': cross_allow,
+    }
+    return {'camera': cam, 'camera_cfg': cc, 'mapping_mode': mm, 'forward_overlap': fwd, 'side_overlap': side,
+            'trigger_rate_hz': rate, 'interval_min_s': interval, 'trigger_rate_planned_hz': rate_eff,
+            'trigger_verified': verified, 'readout_ms': readout, 'warnings': warnings, 'effective': effective,
+            'max_wind_mps': max_wind}
+
+
+def mapping_setup_note(setup) -> str:
+    """有效值一行（`validation_notes` 用，前綴 ``mapping_setup(``，GUI 會大聲顯示）。"""
+    e = setup['effective']
+    fw = e['firmware'] or '未填'
+    return (f"mapping_setup(相機 f={e['focal_mm']:g} mm、像素 {e['pixel_um']:g} µm、"
+            f"{e['width_px']}×{e['height_px']} px；實測觸發 {e['trigger_rate_hz']:g} Hz"
+            f"（{'已台架驗證' if e['trigger_verified'] else '未經台架驗證'}）→ CAM1_INTRVAL_MIN "
+            f"{e['interval_min_s']:.2f} s → 規劃用 {e['trigger_rate_planned_hz']:.3f} Hz；"
+            f"前向 {e['forward_overlap']:.2f}、側向 {e['side_overlap']:.2f}；引入段 {e['lead_in_m']:g} m；"
+            f"後端 {e['backend']}（韌體 {fw}）；CAM_MAX_ROLL {e['max_roll_deg']:g}°；"
+            f"地形重觸發 {('關' if e['terrain_retrigger_tol'] is None else format(e['terrain_retrigger_tol'], 'g'))}"
+            + (f"；建圖作業風速上限 {e['max_wind_mps']:g} m/s（指現場實際風速，起飛前實測）"
+               if e.get('max_wind_mps') is not None else '')
+            + (f"；交叉航帶 開（面積比例 {e['cross_fraction']:g}、高度差 {e['cross_alt_offset_m']:+g} m、鄰機空域 "
+               f"{'已明確放行' if e.get('cross_allow_neighbor_airspace') else '禁止'}）"
+               if e.get('cross_strips') else '；交叉航帶 關')
+            + ")")
+
+
+# ── B3（2026-10-16）：飛前曝光驗證接上傳閘門 ─────────────────────────────────
+#: 飛前曝光驗證（core.recon.exposure_verifier.verify_preflight）的格距（m）。4 m：1.2 km² 約 7.5 萬格、數秒；
+#: 2 m 時格數 ×4（views_by_uav 每架一張 int32 全格網）。只用來找「視數 < 門檻的破洞」，不是精度驗收。
+MAPPING_EXPOSURE_CELL_M = 4.0
+#: 視數門檻（SfM 常用 5 視）：**內部**（離測區邊界 > 半刈幅）有格視數 < 這個值 ⇒ 不可上傳
+MAPPING_EXPOSURE_MIN_VIEWS = 5
+#: 驗證器沒建模、會讓接縫／張數預測偏樂觀的事（有效值契約：摘要與面板一定寫出來）
+MAPPING_EXPOSURE_SEAM_CAVEAT = ('驗證器不建模 CAM_MAX_ROLL 側傾門檻與轉彎動態，有風時接縫預測偏樂觀'
+                                '（SITL：規劃 0.78、5 m/s 風飛後 0.32）')
+
+
+def _mapping_planning_wind(ctx):
+    """規劃生效的風 → ``((風速 m/s, 來向°), 來源說明)``。多層風取最大那一層（偏流最大 ⇒ 足跡最斜）；陣風不計。"""
+    layers = tuple(getattr(getattr(ctx, 'inputs', None), 'wind', None) or ())
+    if not layers:
+        return (0.0, 0.0), '規劃沒有風層 ⇒ 無風'
+    lay = max(layers, key=lambda l: float(l.speed_mps))
+    src = '規劃風（' + ('單層' if len(layers) == 1 else f'{len(layers)} 層取最大') + '）'
+    if any(float(getattr(l, 'gust_mps', 0.0) or 0.0) > 0.0 for l in layers):
+        src += '；陣風不計'
+    return (float(lay.speed_mps), float(lay.dir_from_deg) % 360.0), src
+
+
+def _mapping_survey_polygons(ctx):
+    """規劃器要蓋的面（與 decompose 的 F 同一個：作業區聯集 − 禁航區 ⊕ b_trk）→ ``(多邊形, 扣掉的禁航區數)``；
+    多邊形是 verify_preflight 吃的 ``[{'exterior': [(lat, lon), …], 'holes': [...]}, …]``。
+    禁航區不扣的話，區中央的禁航區會被當成內部破洞。"""
+    import numpy as _np
+    import shapely as _shp
+    surv = _shp.union_all([g for g in ctx.areas_enu.values() if g is not None and not g.is_empty])
+    nofly = list(getattr(ctx, 'nofly_buffered', None) or [])
+    if nofly:
+        surv = surv.difference(_shp.union_all(nofly))
+
+    def _ring(r):
+        xy = _np.asarray(r.coords, dtype=float)[:, :2]
+        ll = ctx.frame.to_wgs84(_np.column_stack([xy, _np.zeros(len(xy))]))
+        return [(float(a), float(b)) for a, b in ll[:, :2]]
+    return [{'exterior': _ring(g.exterior), 'holes': [_ring(h) for h in g.interiors]}
+            for g in getattr(surv, 'geoms', [surv])
+            if g.geom_type == 'Polygon' and not g.is_empty and g.area > 0.0], len(nofly)
+
+
+def mapping_exposure_report(hv, camera, *, cell_size_m: float = MAPPING_EXPOSURE_CELL_M):
+    """飛前曝光驗證的**完整報告**＋這次實際用了哪些輸入 → ``(ExposureReport, inputs)``。
+
+    上傳閘門（:func:`mapping_exposure_summary`）與「預覽高精地圖成果」（``survey.preview.compute_hdmap_preview``）
+    **共用這一支**：兩邊吃同一組生效值（有效值契約），只有格距可以不同。輸入的來源見 :func:`mapping_exposure_summary`。
+
+    ``inputs``：``k``（視數門檻）、``ks``、``airspeed_mps``／``airspeed_limits_mps``（每架）、``drone_of``（uav → drone_id）、
+    ``wind``／``wind_source``、``polygons``／``n_nofly``（測區）、``dem``（規劃 DEM）、``terrain``（傳給驗證器的地面函式）、
+    ``intrval_min_s``、``trigger_duration_s``、``cam_max_roll_deg``、``cell_size_m``。
+
+    ⚠ 報告含全格網（``grid.views_by_uav`` 每架一張 int32；大面積上百 MB）：呼叫端用完就丟，不要掛在長壽物件上。
+    驗證失敗讓例外往上丟（呼叫端決定）。
+    """
+    from core.recon.exposure_verifier import verify_preflight
+    from hv_dccpp.ardupilot import recommended_params
+    ctx, cc = hv.last_ctx, hv.camera_cfg
+    if ctx is None or getattr(hv, 'last_plan', None) is None:
+        raise ValueError('尚未規劃')
+    if cc is None:
+        raise ValueError('這份計畫沒有相機觸發設定（camera_cfg）⇒ 產生不了拍照指令')
+    k = int(MAPPING_EXPOSURE_MIN_VIEWS)
+    ks = tuple(sorted({k, 9}))
+    missions, spd, lim, drone_of = {}, {}, {}, {}
+    for did, uid in sorted(hv.id_map.items()):
+        up = hv.last_plan.plans.get(uid)
+        if up is None:
+            continue
+        missions[uid] = hv.mission_items(did, camera_cfg=cc)
+        drone_of[uid] = int(did)
+        spec = ctx.specs[up.cls]
+        p = recommended_params(spec, None, hv.cfg, sensor_kinds=('rgb',), camera_cfg=cc, warnings=[])
+        spd[uid] = float(p.get('AIRSPEED_CRUISE', spec.cruise_airspeed_mps))
+        lim[uid] = ((float(p['AIRSPEED_MIN']), float(p['AIRSPEED_MAX']))
+                    if 'AIRSPEED_MIN' in p and 'AIRSPEED_MAX' in p else None)
+    if not missions:
+        raise ValueError('這份計畫沒有任何一架有任務')
+    wind, wind_src = _mapping_planning_wind(ctx)
+    polygons, n_nofly = _mapping_survey_polygons(ctx)
+    dem = ctx.inputs.dem
+
+    def _ground(lat, lon):
+        return float(dem.sample_msl(lat, lon)[0])
+
+    rep = verify_preflight(missions, polygons, camera, airspeed_mps=spd, wind=wind, terrain=_ground,
+                           intrval_min_s=float(cc.interval_min_s), trigger_duration_s=float(cc.duration_s),
+                           accept_radius='mission', airspeed_limits_mps=lim, cell_size_m=float(cell_size_m),
+                           ks=ks, undercover_k=k)
+    inputs = {'k': k, 'ks': ks, 'airspeed_mps': spd, 'airspeed_limits_mps': lim, 'drone_of': drone_of,
+              'wind': wind, 'wind_source': wind_src, 'polygons': polygons, 'n_nofly': n_nofly, 'dem': dem,
+              'terrain': _ground, 'intrval_min_s': float(cc.interval_min_s),
+              'trigger_duration_s': float(cc.duration_s), 'cam_max_roll_deg': getattr(cc, 'max_roll_deg', None),
+              'cell_size_m': float(cell_size_m)}
+    return rep, inputs
+
+
+def mapping_exposure_assumptions(wind, wind_source, cell_size_m, cam_max_roll_deg) -> list:
+    """曝光驗證沒建模／假設的事（摘要的 ``assumptions``；預覽成果沿用同一份文字）。"""
+    roll = cam_max_roll_deg
+    return [
+        f'規劃風 {wind[0]:g} m/s 來自 {wind[1]:g}°（{wind_source}）—— 不是現場實測風',
+        f'格 {float(cell_size_m):g} m（視數以格心計，量化約 ±1 格）',
+        f'CAM_MAX_ROLL{"" if roll is None else f" {float(roll):g}°"} 未建模：轉彎改出時側傾超過門檻的觸發會被延後，'
+        '實際張數可能較少',
+        '轉彎切角與轉彎動態未建模（路徑＝相鄰 NAV 間直線）；足跡一律 pitch = roll = 0',
+    ]
+
+
+def mapping_exposure_summary(hv, camera, *, cell_size_m: float = MAPPING_EXPOSURE_CELL_M) -> dict:
+    """B3：飛前曝光驗證（:func:`core.recon.exposure_verifier.verify_preflight`）→ **只留摘要**的 dict。
+
+    輸入全部取「上傳／規劃當時生效的值」（由 :func:`mapping_exposure_report` 取，預覽成果也走那一支）：
+
+    * 任務項目＝上傳那一支 ``hv.mission_items(did, camera_cfg=hv.camera_cfg)``（相對本機起飛坪；第 0 列 home）；
+    * 測區＝規劃器要蓋的面（:func:`_mapping_survey_polygons`）；地形＝規劃用 DEM（``ctx.inputs.dem.sample_msl``，
+      與第 0 列 home 同一基準；N 未知的橢球高 DEM 兩邊都是橢球高，AGL 照樣對）；
+    * 風＝規劃風（:func:`_mapping_planning_wind`）；初始空速與 AIRSPEED_MIN/MAX＝匯出 .param 的值
+      （``recommended_params``，上傳讀回閘門也比這組）；CAM1_INTRVAL_MIN／CAM1_DURATION＝``hv.camera_cfg``。
+
+    ⚠ 報告本身不留（``grid.views_by_uav`` 每架一張 int32 全格網、照片、模擬結果；大面積上百 MB），
+    只回傳下列純資料：``ok``、視數比例、內部／邊緣帶統計、內部破洞（前 5 大）、接縫、照片數、``effective``（用了哪些值）、
+    ``assumptions``（沒建模的事）、``verifier_notes``（驗證器原樣的 notes）。驗證失敗讓例外往上丟（呼叫端決定）。
+    """
+    rep, inp = mapping_exposure_report(hv, camera, cell_size_m=cell_size_m)
+    k, ks, drone_of = inp['k'], inp['ks'], inp['drone_of']
+    spd, lim, wind, wind_src = inp['airspeed_mps'], inp['airspeed_limits_mps'], inp['wind'], inp['wind_source']
+    polygons, n_nofly, dem = inp['polygons'], inp['n_nofly'], inp['dem']
+
+    def _region(r):
+        if r is None:
+            return None
+        return {'area_m2': float(r.area_m2), 'frac_ge': {int(a): float(b) for a, b in r.frac_ge.items()},
+                'min_views': r.min_views, 'undercovered_area_m2': float(r.undercovered_area_m2),
+                'undercovered_frac': float(r.undercovered_frac)}
+    holes = [a for a in rep.undercovered if a.region == 'interior']
+    edge = [a for a in rep.undercovered if a.region == 'edge_band']
+    roll = inp['cam_max_roll_deg']
+    out = {
+        'ok': True, 'level': '曝光層級（視數）', 'cell_size_m': float(rep.cell_size_m), 'min_views': k, 'ks': ks,
+        'area_m2': float(rep.area_m2), 'frac_ge': {int(a): float(b) for a, b in rep.frac_ge.items()},
+        'edge_band_m': rep.edge_band_m, 'edge_band_source': rep.effective.get('edge_band_source'),
+        'interior': _region(rep.interior), 'edge_band': _region(rep.edge_band),
+        'undercovered_interior_area_m2': float(rep.undercovered_interior_area_m2),
+        'interior_hole_count': len(holes),
+        'interior_holes': [{'area_m2': float(a.area_m2), 'cells': int(a.cells), 'min_views': int(a.min_views),
+                            'centroid_latlon': tuple(a.centroid_latlon)} for a in holes[:5]],
+        'undercovered_edge_band_area_m2': float(rep.undercovered_edge_band_area_m2),
+        'edge_band_short_count': len(edge),
+        'seam_overlap_min': rep.seam_overlap_min,
+        'seams': [{'uav_a': s.uav_a, 'uav_b': s.uav_b, 'frac_min': float(s.frac_min), 'gap_m': s.gap_m,
+                   'cells': int(s.cells)} for s in rep.seams],
+        'forward_overlap_p05': rep.forward_overlap.p05, 'side_overlap_p05': rep.side_overlap.p05,
+        'photos_per_uav': dict(rep.photos_per_uav), 'photos_excluded': dict(rep.photos_excluded),
+        'drone_of': drone_of,
+        'effective': {'wind': wind, 'wind_source': wind_src, 'cell_size_m': float(rep.cell_size_m),
+                      'terrain': f"規劃 DEM（{dem.datum_label()}）", 'polygons': len(polygons),
+                      'polygon_source': '規劃器作業區聯集' + (f' − 禁航區 {n_nofly} 個 ⊕ b_trk' if n_nofly else ''),
+                      'camera_model': rep.effective.get('camera_model'),
+                      'airspeed_initial_mps': spd, 'airspeed_limits_mps': lim,
+                      'intrval_min_s': inp['intrval_min_s'], 'trigger_duration_s': inp['trigger_duration_s'],
+                      'accept_radius': 'mission（NAV_WAYPOINT param2）', 'cam_max_roll_deg': roll},
+        'assumptions': mapping_exposure_assumptions(wind, wind_src, rep.cell_size_m, roll),
+        'verifier_notes': [str(n) for n in rep.notes],
+        'elapsed_s': float(rep.elapsed_s),
+    }
+    del rep       # 報告（含全格網）不留：只回摘要
+    return out
+
+
+def mapping_exposure_block_reasons(summary) -> list:
+    """飛前曝光驗證 → 擋上傳的原因（空串列 ＝ 不擋）。
+
+    只擋「確定是破洞」的：**內部**（離測區邊界 > 半刈幅）有視數 < 門檻的面積（``undercovered_interior_area_m2 > 0``）。
+    沒跑到（None）或沒跑成功（``ok`` 不是 True）⇒ 也擋：沒驗過不能當驗過（與 validate 同一條規則）。
+    接縫最小重疊、邊緣帶視數不足**不擋**（:data:`MAPPING_EXPOSURE_SEAM_CAVEAT`）。
+    """
+    if summary is None:
+        return ['exposure_not_run(飛前曝光驗證沒有跑到 ⇒ 內部有沒有視數不足的破洞沒驗過，不能當驗過)']
+    if summary.get('ok') is not True:
+        return [f"exposure_verify_failed(飛前曝光驗證沒跑成功：{summary.get('error') or '原因不明'}"
+                " ⇒ 內部有沒有視數不足的破洞沒驗過，不能當驗過)"]
+    area = float(summary.get('undercovered_interior_area_m2') or 0.0)
+    if not area > 0.0:
+        return []
+    k = summary.get('min_views', MAPPING_EXPOSURE_MIN_VIEWS)
+    eb = summary.get('edge_band_m')
+    where = (f'離測區邊界 > {float(eb):.0f} m（半刈幅）' if eb is not None else '沒有可用照片 ⇒ 不分邊緣帶，全部算內部')
+    big = (summary.get('interior_holes') or [None])[0]
+    big_txt = ''
+    if big:
+        lat, lon = big['centroid_latlon']
+        big_txt = f"；最大一處 {big['area_m2']:,.0f} m²、最少 {big['min_views']} 視、中心 ({lat:.6f}, {lon:.6f})"
+    cell = float(summary.get('cell_size_m') or MAPPING_EXPOSURE_CELL_M)
+    return [f"exposure_interior_hole(曝光層級（視數）：內部（{where}）視數 < {k} 共 "
+            f"{summary.get('interior_hole_count', '?')} 處 {area:,.0f} m²{big_txt}；格 {cell:g} m)"]
+
+
+def mapping_exposure_note(summary) -> str:
+    """一行（``validation_notes`` 用，前綴 ``mapping_exposure(``）：曝光層級摘要＋用了哪些假設。"""
+    if summary is None or summary.get('ok') is not True:
+        return 'mapping_exposure(' + mapping_exposure_block_reasons(summary)[0] + ')'
+    k = summary['min_views']
+    inter = summary.get('interior') or {}
+    seam = summary.get('seam_overlap_min')
+    return (f"mapping_exposure(曝光層級（視數），格 {summary['cell_size_m']:g} m：內部視數 ≥{k} "
+            f"{float((inter.get('frac_ge') or {}).get(k, 0.0)):.2%}、內部破洞 {summary['interior_hole_count']} 處 "
+            f"{summary['undercovered_interior_area_m2']:,.0f} m²；邊緣帶視數 < {k} {summary['edge_band_short_count']} 處 "
+            f"{summary['undercovered_edge_band_area_m2']:,.0f} m²（不擋）；跨機接縫最窄 "
+            + ('—' if seam is None else f'{float(seam):.2f} 刈幅') + '（不擋）；假設：'
+            + '；'.join(summary.get('assumptions') or []) + ')')
+
+
+#: hv_dccpp.sim 的 AGL 違規前綴（``_AGL_KEYS``；validate 的 ``agl_ok`` 由它們決定）
+_HV_AGL_DETAIL_KINDS = ("agl_below_h_clr", "agl_below_h_minfw", "oper_agl_below_h_min", "oper_agl_above_h_max",
+                        "terrain_unknown")
+
+
+def hv_validate_fail_labels(v) -> list:
+    """``hv_dccpp.validate`` 沒過 → ``validate_failed(…)`` 括號裡的原因標籤。
+
+    2026-10-21：原本只列 coverage／energy／conflicts，**只有 AGL 失敗**（或坡度、曲率…）時 GUI 看到的是
+    ``validate_failed(unknown)``。AGL 列出 ``details`` 裡實際的種類（``agl(agl_below_h_minfw)``），其餘旗標用名字；
+    舊的三個標籤順序與寫法不變。"""
+    bad = [k for k, ok in (('coverage', v.coverage_ok), ('energy', v.energy_ok)) if not ok]
+    agl = sorted({str(s).split(':', 1)[0] for lst in (getattr(v, 'details', None) or {}).values()
+                  for s in (lst or []) if str(s).startswith(_HV_AGL_DETAIL_KINDS)})
+    if agl:
+        bad.append('agl(' + '、'.join(agl) + ')')
+    if v.conflicts:
+        bad.append(f'conflicts={len(v.conflicts)}')
+    for name, attr in (('slope', 'slope_ok'), ('curvature', 'curvature_ok'), ('link', 'link_ok'),
+                       ('airspace', 'airspace_ok'), ('time_window', 'time_window_ok'),
+                       ('integrity', 'integrity_ok'), ('separation', 'separation_ok')):
+        if getattr(v, attr, True) is False:
+            bad.append(name)
+    return bad
+
+
+def hv_terrain_clearance_notes(hv, terrain_label: str = ''):
+    """上傳那份任務（已縮點）的沿線 AGL（:func:`core.terrain_clearance.hv_uploaded_clearance`）→ ``(report, notes)``。
+
+    notes：摘要 ``terrain_clearance(…)``（每架最小 AGL、階段、位置、門檻、地形來源；只寫 log）＋每架有違規時
+    ``terrain_clearance_failed(…)``（GUI 大聲）。檢查本身壞掉 ⇒ ``(None, ['terrain_clearance_failed(…沒跑成功…)'])``：
+    沒驗過不能當驗過。"""
+    import logging as _log
+    try:
+        from core.terrain_clearance import hv_uploaded_clearance
+        rep = hv_uploaded_clearance(hv, terrain_label=terrain_label)
+    except Exception as e:      # noqa: BLE001 — 驗證壞掉不能吃掉規劃結果，也不能當驗過
+        m = (f'terrain_clearance_failed(上傳任務沿線 AGL 沒跑成功：{type(e).__name__}: {e} '
+             '⇒ 上傳那份任務對地形的高度沒驗過，不能當驗過)')
+        _log.getLogger(__name__).error(f"HARVEST: {m}", exc_info=True)
+        return None, [m]
+    notes = [rep.summary_note()] + rep.problem_notes()
+    _log.getLogger(__name__).info(f"HARVEST: {notes[0]}")
+    for m in notes[1:]:
+        _log.getLogger(__name__).error(f"HARVEST: {m}")
+    return rep, notes
+
+
 # ==========================================
 # 群飛協調器
 # ==========================================
@@ -396,6 +1470,57 @@ class SwarmCoordinator:
         """初始化協調器"""
         self.current_swarm: Optional[SwarmMission] = None
         self._active_drones: List[DroneInfo] = []   # 最近一次分配使用的無人機列表
+
+        # ── HARVEST（異構雙構型 VTOL）分支旗標 ────────────────────────
+        #   預設全部關閉 ⇒ plan_coverage_dccpp 的行為與既有 v2/legacy 路徑
+        #   逐位元相同，既有 golden 測試不受影響。呼叫端要用時自行打開。
+        #   接法見 docs/AEROPLAN_接入手冊.md §5、docs/adr/0007-hv-dccpp-planner.md。
+        self.use_harvest: bool = False
+        self.hv_class_of = None          # Callable[[dict], 'A'|'B']；★ 不給整隊會被當成構型 A
+        self.harvest_params: Dict[str, Any] = {}
+        self.hv_home = None              # (lat, lon)
+        self.hv_alternates = None        # [(lat, lon), ...] 備降點
+        # vendored #4：逐機回收站 {uav_id 或 drone_id: site_id}。None ⇒ 全員落全域回收點。
+        #   ⚠ 這只給**表達能力**，不含指派規則 —— 誰去哪一站要由呼叫端決定，而實測
+        #     顯示那是一張彩票（同幾何 16 種指派分布 921–1394 s，2 種 validate 不過）。
+        self.hv_recovery_sites = None
+        # 多場坪**自動指派**（vendored #4 的第二階段）。有 ≥2 個可用站點時才會動，
+        #   所以單場坪的既有情境逐位元不變、也不會多花規劃時間。
+        #   ⚠ 會多跑一次規劃（候選落選時再跑一次跑回基準 ⇒ 最壞三次）。
+        #   ⚠⚠ 採用與否由 `recovery_regression_guard` 決定：間距與逐機能量餘裕
+        #     **都不得比基準差**。實測最快的指派同時是最不安全的（51.5 m vs 148.4）。
+        self.hv_recovery_auto: bool = True
+        self.hv_wind = None              # (speed_mps, dir_from_deg)
+        self.hv_fence_zones = None       # [FenceZone, ...]；GUI 端先取好再傳進來（見下）
+        self.hv_progress = None          # Callable[[float, str], None]
+        self.hv_on_report = None         # Callable[[dict], None]
+        self.hv_coordinator = None       # 規劃後填入 HvDccppCoordinator，供匯出／上傳／重規劃取用
+        self.hv_validation = None        # 規劃後填入 hv_dccpp.validate() 的結果（轉接層自己不驗）
+        # validate 擋上傳的原因（R1 #8）：None ＝ 還沒跑到 validate；[] ＝ 通過；非空 ＝ 不可上傳
+        #   （'validate_failed(…)'，時空衝突／能量不足／驗證本身沒跑成功）。建圖閘門 hv_mapping_gate 會併入它，
+        #   GUI 上傳前也讀它（MainWindow._hv_upload_gate）。
+        self.hv_validation_reasons = None
+        # 上傳那份任務（已縮點）的沿線 AGL 報告（core.terrain_clearance.ClearanceReport）：None ＝ 沒跑到或沒跑成功
+        self.hv_terrain_clearance = None
+        # 航測建圖（harvest_params['hv_map_enabled']）：規劃後填入 build_mapping_setup() 的結果與上傳閘門；
+        #   沒開建圖 ⇒ 兩者都是 None（舊行為不變）。相機觸發設定同時存在 hv_coordinator.camera_cfg。
+        self.hv_mapping_setup = None
+        self.hv_mapping_gate = None
+        # B3：建圖規劃後的飛前曝光驗證**摘要**（mapping_exposure_summary；不留報告／格網）。None ＝ 沒跑到；
+        #   {'ok': False, 'error': …} ＝ 沒跑成功。兩者與「內部有視數不足的破洞」都會讓建圖閘門擋上傳。
+        self.hv_exposure_summary = None
+        # ── 單光相機（uniform sensor）─────────────────────────────────
+        #   True（預設）：兩個構型掛**同一台**單光相機 ⇒ 酬載不再是分工依據，
+        #   分工完全由平台性能（續航、速度、轉彎半徑、作業高度下限）決定。
+        #   False：回到轉接層預設，構型 A 被當成 LiDAR、B 被當成相機。
+        #   ⚠ 關掉它之前先看 docs/AEROPLAN_接入手冊.md §10.5：某構型找不到
+        #     對應 kind 的 PayloadRequirement 時**不會報錯**，只會整型分不到工作。
+        self.hv_uniform_sensor: bool = True
+        # 禁航區切區（BCD 前處理）。預設開；關掉會退回「整塊區判成不可覆蓋」的行為。
+        self.hv_split_areas_around_nfz: bool = True
+        # 機隊切區：單一大區自動切成夠多的子區。⚠ 關掉會退回「單一大區 +
+        # 混編機隊 = 空計畫」的行為。見 split_area_for_fleet。
+        self.hv_split_area_for_fleet: bool = True
     
     def create_swarm_from_survey(self, survey_mission: SurveyMission,
                                 num_drones: int = None) -> SwarmMission:
@@ -972,6 +2097,53 @@ class SwarmCoordinator:
     # ==========================================
     # DCCPP 論文整合：MDTSP + IDP + GDA
     # ==========================================
+    def _setup_world_terrain(self, areas, drones, dem_path):
+        """建 World Terrain 取樣器並預抓規劃範圍的圖磚。回傳 ``(取樣器, (最低, 最高) 或 None)``。
+
+        失敗（沒 token／token 被拒／連不上）一律丟 :class:`WorldTerrainError`，**不降級成平地**——
+        使用者勾了地形卻靜默拿到 0 m 平地，比直接報錯更糟（見 effective-value contract）。
+        """
+        import logging as _log
+        from core.terrain import CesiumWorldTerrain, WorldTerrainError
+        from utils.cesium_ion import configured_ion_token
+        token, source = configured_ion_token()
+        if not token:
+            raise WorldTerrainError(
+                "已勾選「使用 Cesium World Terrain」但沒有可用的 ion token："
+                "請把 token 放進 config/settings.json 的 map.cesium_ion_token，"
+                "或設環境變數 CESIUM_ION_TOKEN；或取消勾選。"
+                + (f"（{source}）" if source else ""))
+        pts = [(float(la), float(lo)) for a in (areas or []) for (la, lo) in (a.get('polygon') or [])]
+        if self.hv_home:
+            pts.append((float(self.hv_home[0]), float(self.hv_home[1])))
+        pts += [(float(d['position'][0]), float(d['position'][1])) for d in (drones or []) if d.get('position')]
+        if not pts:
+            raise WorldTerrainError("沒有作業區座標，無法決定要抓哪一塊地形")
+        p = self.harvest_params or {}
+        margin_m = float(p.get('hv_dem_margin_m') or 3000.0) + 1000.0     # 轉接層 DEM 邊界裕度 + 自動備降點等
+        dlat = margin_m / 111320.0
+        lat_c = sum(la for la, _ in pts) / len(pts)
+        dlon = margin_m / (111320.0 * max(0.2, math.cos(math.radians(lat_c))))
+        bounds = (min(la for la, _ in pts) - dlat, min(lo for _, lo in pts) - dlon,
+                  max(la for la, _ in pts) + dlat, max(lo for _, lo in pts) + dlon)
+        w = CesiumWorldTerrain(token)
+        st = w.prefetch(bounds)
+        # 起伏只看作業區 + 起降場（不含 3 km 裕度），給 NO_GO 提示用
+        core_b = (min(la for la, _ in pts), min(lo for _, lo in pts), max(la for la, _ in pts), max(lo for _, lo in pts))
+        if core_b[2] - core_b[0] < 1e-6 or core_b[3] - core_b[1] < 1e-6:
+            core_b = (core_b[0] - 1e-4, core_b[1] - 1e-4, core_b[2] + 1e-4, core_b[3] + 1e-4)
+        try:
+            relief = w.relief_m(core_b)
+        except WorldTerrainError:
+            relief = None
+        _log.getLogger(__name__).info(
+            f"HARVEST: 使用 Cesium World Terrain（token 來源：{source}）：level {st['level']}、"
+            f"{st['tiles']} 片圖磚（新抓 {st['fetched']} 片、{st['bytes'] / 1e6:.1f} MB，其餘用記憶體快取）"
+            + (f"、作業區起伏 {relief[1] - relief[0]:.0f} m（{relief[0]:.0f}~{relief[1]:.0f} m 橢球高）" if relief else ""))
+        if dem_path:
+            _log.getLogger(__name__).info(f"HARVEST: World Terrain 取代 DEM 檔 {dem_path}")
+        return w, relief
+
     def plan_coverage_dccpp(
         self,
         areas: List[Dict[str, Any]],
@@ -989,6 +2161,7 @@ class SwarmCoordinator:
         runway_length_m: float | None = None,
         landing_bearing_deg: float | None = None,
         landing_rollout_m: float = 0.0,
+        vtol_transition_alt_m: float | None = None,
     ) -> Dict[str, Any]:
         """
         使用論文 DCCPP 完整演算法進行多區域多 UAV 覆蓋路徑規劃。
@@ -1015,6 +2188,12 @@ class SwarmCoordinator:
             mounting_angle_deg: 感測器掛載角（度），>0 時啟用梯形 FOV 模型
             dem_path:           DEM 檔案路徑，非空時載入 DEM 進行地形查詢
             coordination_mode:  "uncoordinated" 或 "coordinated"
+            vtol_transition_alt_m:
+                                VTOL 的 MC↔FW 轉換高度（m AGL）。
+                                ⚠ 只有 HARVEST 分支（self.use_harvest=True）會真的用它產生
+                                垂直起降剖面；既有 v2 / legacy 路徑目前**沒有**垂直剖面能力
+                                （DCCPPPathBuilder 缺 prepend_vtol_takeoff/append_vtol_landing），
+                                此時只記一筆 warning 後照跑道剖面規劃，不會靜默吞掉。
 
         返回:
             Dict 包含：
@@ -1061,6 +2240,25 @@ class SwarmCoordinator:
                 import logging as _log
                 _log.getLogger(__name__).warning(f"FOV 模型載入失敗: {e}")
 
+        # ── Cesium World Terrain（HARVEST；面板勾選 hv_world_terrain 才用）────
+        #   2026-10-09 使用者：taiwan_dem.tif（SRTM3 90 m）解析度太低，要用 World Terrain。
+        #   ⚠ 明確勾選 ⇒ 優先於 DEM 檔（但呼叫端直接傳進來的 terrain_func 不動）。
+        #   ⚠⚠ 授權：只放記憶體、不存檔（ToS §2.2.2）；免費方案限個人/非商用。見 core/terrain/cesium_world_terrain.py。
+        _world = None
+        self._world_terrain = None
+        self._terrain_relief = None
+        self._terrain_hint = ''
+        # 高程基準（A6）：地形來源的基準，交給 HARVEST 轉接層（None ＝ 交給來源自我宣告／AMSL 舊契約）
+        self._terrain_vdatum = None
+        if (self.use_harvest and terrain_func is None
+                and bool((self.harvest_params or {}).get('hv_world_terrain'))):
+            _world, _relief = self._setup_world_terrain(areas, drones, dem_path)
+            terrain_func = _world.get_elevation
+            self._world_terrain, self._terrain_relief = _world, _relief
+            # ⚠ 明確給 "ellipsoid"，不只靠 CesiumWorldTerrain.vertical_datum 的鴨子型別宣告
+            #   （取樣器被包裝或替換時宣告會掉；轉接層對「明確 vs 宣告矛盾」會直接拒絕）
+            self._terrain_vdatum = 'ellipsoid'
+
         # ── DEM 地形載入（可選）────────────────────────
         if dem_path and terrain_func is None:
             try:
@@ -1068,11 +2266,740 @@ class SwarmCoordinator:
                 dem_mgr = DEMTerrainManager(default_elevation=0.0)
                 if dem_mgr.load_dem(dem_path):
                     terrain_func = dem_mgr.get_elevation
+                    # GeoTIFF 垂直 CRS／metadata 的判斷結果（None ＝ 沒宣告 ⇒ 轉接層依 AMSL 慣例並寫進 note）
+                    self._terrain_vdatum = getattr(dem_mgr, 'vertical_datum', None)
                     import logging as _log
                     _log.getLogger(__name__).info(f"DEM 載入成功: {dem_path}")
             except Exception as e:
                 import logging as _log
                 _log.getLogger(__name__).warning(f"DEM 載入失敗: {e}")
+
+        # ══ HARVEST 分支（異構雙構型 VTOL）══════════════════════════════
+        #   接法與理由見 docs/AEROPLAN_接入手冊.md §5、docs/adr/0007-hv-dccpp-planner.md。
+        #   插在這裡的理由：terrain_func 已由上面的 DEM 區塊解析完成，而 UAVState /
+        #   CoveragePath 都還沒建立 ⇒ 提早 return 不會浪費任何工作。
+        #   回傳的 6 鍵字典與下方 v2 路徑同形 ⇒ 地圖、統計、匯出、SITL 上傳全部不用改。
+        if self.use_harvest:
+            try:
+                from hv_dccpp.integration.aeroplan_adapter import (
+                    AeroPlanAdapterError, HvDccppCoordinator, to_planner_config,
+                )
+                # ★ AeroPlan 自己有兩個 PlannerConfig ⇒ hv 的一律用別名（手冊 §17.2）
+                from hv_dccpp.mission import PlannerConfig as HvPlannerConfig
+            except ImportError as _e:
+                import logging as _log
+                _log.getLogger(__name__).warning(
+                    f"hv_dccpp 未安裝或匯入失敗，降級為既有 DCCPP：{_e}")
+            else:
+                import logging as _log
+                _p = dict(self.harvest_params or {})
+                # ⚠⚠ 規劃**前**發出的 note 一律先收進這裡再一次送。
+                #   `hv_on_report` 在很多消費端是 dict.update，一則一則送的話
+                #   後送的會蓋掉先送的 —— 實測 dh_band_min_relaxed 把
+                #   min_fw_lowered 整則吃掉。尾端的 `_vnotes` 也會併進來。
+                _prenotes: list[str] = []
+
+                def _hv_get(*names, default=None):
+                    """依序取第一個「有給且非 None」的鍵；面板鍵一律帶 hv_ 前綴。"""
+                    for _n in names:
+                        if _p.get(_n) is not None:
+                            return _p[_n]
+                    return default
+
+                # ── 航測建圖（面板「航測建圖」勾選）──────────────────────────
+                #   真相機（焦距／像素／影像尺寸／實測觸發率）、前向重疊、MappingModeConfig 與
+                #   CameraTriggerConfig 由同一支 build_mapping_setup 算 ⇒ 規劃器與飛控吃同一組數字。
+                #   設定不合法 ⇒ ValueError（繁中訊息），整趟不規劃（不默默退回範例相機）。
+                self.hv_mapping_setup = None
+                self.hv_mapping_gate = None
+                self.hv_exposure_summary = None
+                self.hv_validation = None
+                self.hv_validation_reasons = None
+                self.hv_terrain_clearance = None
+                _map = None
+                if bool(_hv_get('hv_map_enabled', default=False)):
+                    _map = build_mapping_setup(_p)
+                    for _w in _map['warnings']:
+                        _log.getLogger(__name__).warning(f"HARVEST 建圖：{_w}")
+                    _log.getLogger(__name__).info(f"HARVEST 建圖有效值：{_map['effective']}")
+                    _prenotes.append(mapping_setup_note(_map))
+
+                # 禁飛區：NFZ + 威脅區（GEOFENCE 是 inclusion，語意相反，不能送）
+                # ★ 優先用呼叫端先取好的那份：`FenceZoneRegistry` 是主執行緒的 QObject 單例，
+                #   規劃跑在背景執行緒時不該由這裡去讀它（GUI 端在 _configure_hv_dccpp 已取好）。
+                _zones = list(self.hv_fence_zones) if self.hv_fence_zones is not None else None
+                if _zones is None:
+                    try:
+                        from mission.fence_zone import FenceZoneRegistry, ZoneCategory
+                        _reg = FenceZoneRegistry.instance()
+                        _zones = (_reg.by_category(ZoneCategory.NFZ)
+                                  + _reg.by_category(ZoneCategory.THREAT))
+                    except Exception as _e:
+                        # 只有「PyQt6 不在（headless）／registry 還沒建立」才會走到這裡。
+                        # 用 warning 而不是 debug：靜悄悄地把所有禁飛區丟掉是不能接受的。
+                        _log.getLogger(__name__).warning(
+                            f"HARVEST: 取不到 fence zone，本次規劃**不含任何禁飛區**：{_e}")
+                if _zones:
+                    _log.getLogger(__name__).info(f"HARVEST: 帶入 {len(_zones)} 個禁飛／威脅區")
+
+                # 單光相機：兩個構型掛同一台，kind 一律 'rgb'。
+                # 轉接層 `_hardware_for` 是**照構型字母**決定 kind（A→lidar、B→rgb），
+                # 所以不明確給 sensor_a/sensor_b 就會憑空生出一個酬載差異。
+                # ── 機隊切區：單一大區 → 夠多的子區 ─────────────────────
+                #   ⚠⚠⚠ 單一大區配混編機隊會產出**空計畫**（殘帶對拍賣把母胞鎖成
+                #   「A 一台 + B 一台」，胞太少餵不飽機隊，加機也沒用）。
+                #   實測 20 km²、1 Pioneer + 3 HERO：整塊 0/4 台，切 4 條 4/4 台。
+                #   詳見 split_area_for_fleet。
+                _src_of = {}
+                if bool(_hv_get('hv_split_area_for_fleet',
+                                default=self.hv_split_area_for_fleet)):
+                    # 刈幅（相機正下方足跡）：拿來當子區最小寬度，避免切出「一塊子區
+                    # 只放得下一條條帶」的窄長條。與禁航區切區用的是同一條式子。
+                    _fs_swath = (2.0 * float(coverage_altitude)
+                                 * math.tan(math.radians(
+                                     float(_hv_get('hfov_deg', default=0.0) or 0.0)) / 2.0))
+                    areas = split_area_for_fleet(
+                        areas, len(drones or []), logger=_log.getLogger(__name__),
+                        min_piece_width_m=(_fs_swath if _fs_swath > 0.0 else None))
+                    # ⚠⚠⚠ 「畫一大區、系統自動切」這條路唯一已量到的靜默失效：
+                    #   禁航區在步進軸方向太寬 ⇒ 子區被吃穿 ⇒ 整胞 no_feasible_class，
+                    #   而 status 仍是 GO_WITH_WARNINGS、errors 仍是空的。要大聲說。
+                    for _bad in nfz_defeats_fleet_split(areas, _zones or [],
+                                                        swath_m=_fs_swath):
+                        _m = (f"nfz_too_wide_for_auto_split(子區 {_bad['area_id']}："
+                              f"禁航區跨度 {_bad['span_m']:.0f} m ≥ 可用 "
+                              f"{_bad['budget_m']:.0f} m＝子區寬 {_bad['width_m']:.0f} "
+                              f"− 刈幅 {_fs_swath:.0f})。自動切會讓這塊變成"
+                              f"未覆蓋而**不會報錯**；請改成自己畫多塊，"
+                              f"把禁航區留在區與區的空隙裡")
+                        _log.getLogger(__name__).warning(f"HARVEST: {_m}")
+                        _prenotes.append(_m)
+                    _src_of = {a['area_id']: a['_src_area_id'] for a in areas
+                               if a.get('_src_area_id') is not None}
+
+                # ── 禁航區切區（BCD 前處理）───────────────────────────
+                #   把與禁航區重疊的作業區切成繞過它的子區，再送進規劃器。
+                #   不做的話：禁航區蓋住一塊區 ≥42.9% ⇒ **整趟任務 0 台上工**
+                #   （連不相干的區也一起被丟）。詳見 split_areas_around_nfz。
+                if bool(_hv_get('hv_split_areas_around_nfz',
+                                default=self.hv_split_areas_around_nfz)) and _zones:
+                    _sw = (2.0 * float(coverage_altitude)
+                           * math.tan(math.radians(
+                               float(_hv_get('hfov_deg', default=0.0) or 0.0)) / 2.0))
+                    areas = split_areas_around_nfz(
+                        areas, _zones, inset_m=(_sw / 2.0 if _sw > 0 else 0.0),
+                        logger=_log.getLogger(__name__))
+
+                _sensor_pair = None
+                if _map is not None and abs(float(mounting_angle_deg)) > 1e-6:
+                    # 建圖以正下視建模（觸發距離、足跡、後處理都假設 nadir）；傾斜相機不能默默當正下方飛
+                    raise ValueError(f"航測建圖模式只支援正下視相機：掛載角 {mounting_angle_deg}° 必須為 0")
+                if _map is not None:
+                    # 建圖：兩構型掛**面板那台真相機**（不是 _uniform_camera 的範例焦距／像素／1 Hz）
+                    _sensor_pair = (_map['camera'],)
+                    _log.getLogger(__name__).info(
+                        f"HARVEST 建圖：兩構型共用面板相機 {_sensor_pair[0]!r}")
+                if bool(_hv_get('hv_uniform_sensor', default=self.hv_uniform_sensor)) or _map is not None:
+                    # ⚠⚠ 作業區可以自己宣告 sensor_req。單光相機之下沒有人掛 LiDAR，
+                    #   那種區會變成 no_feasible_class 被**整塊丟掉**，而 status 仍是
+                    #   GO_WITH_WARNINGS、errors 是空的、raise_on_no_go 也不會 raise
+                    #   —— 只在 plan.uncovered 與一則 note 裡。實測：同一份幾何
+                    #   異構酬載 4 架 9 條帶 0 未覆蓋，單光相機變成 1 架 4 條帶 1 未覆蓋。
+                    _bad = [a.get('area_id', i) for i, a in enumerate(areas or [])
+                            if str(a.get('sensor_req') or 'any').lower()
+                            not in ('any', 'rgb', '')]
+                    if _bad:
+                        _log.getLogger(__name__).warning(
+                            f"HARVEST: 單光相機模式下，作業區 {_bad} 宣告了非 rgb 的 "
+                            f"sensor_req ⇒ 這些區會整塊變成未覆蓋。"
+                            f"把 sensor_req 拿掉（或設 'rgb'／'any'），"
+                            f"或關掉 hv_uniform_sensor。")
+                    if _map is None:
+                        _sensor_pair = (_uniform_camera(
+                            hfov_deg=float(_hv_get('hfov_deg', default=0.0) or 0.0),
+                            vfov_deg=float(_hv_get('vfov_deg', default=0.0) or 0.0)),)
+                        _log.getLogger(__name__).info(
+                            f"HARVEST: 兩構型共用單光相機 {_sensor_pair[0]!r}")
+                    if abs(float(mounting_angle_deg)) > 1e-6:
+                        # ⚠ 兩邊的 mount 角**基準不同**：面板是「離天底的傾角」（0=正下方），
+                        #   hv 的 TrapezoidFovSpec 是「離水平的俯角」（90=正下方）。
+                        #   直接把面板值送過去會得到錯的足跡，所以這裡不模型化傾角，只記一筆。
+                        _log.getLogger(__name__).warning(
+                            f"HARVEST: 單光相機以正下方（nadir）建模，"
+                            f"面板的 mounting_angle_deg={mounting_angle_deg} 未計入足跡")
+
+                # ── 面板把重疊吃進 fov_width_m ⇒ 要換算回 overlap_rate ────
+                #   ⚠⚠⚠ HV 的條帶間距**完全不看** coverage_width_m：實測 width 給
+                #   50 / 113.2 / 150 / 300 m，間距一律是相機推導的 161.7 m。
+                #   它只吃 overlap_rate（→ PayloadRequirement.side_overlap）。
+                #   而「VTOL 偵查」面板送的是 fov_width_m = 刈幅×(1−重疊)、
+                #   overlap_rate = 0.0（註解寫「重疊已經吃進 fov_width_m」）
+                #   ⇒ **使用者設的重疊在 HV 這條路徑上被整個丟掉，一律以 0% 重疊規劃**。
+                #   實測後果（4 塊 520×600 m、1A+3B、面板慣例）：舊 DCCPP 覆蓋 100%，
+                #   HV 只有 73.1 / 98.9 / 90.3 / 73.3%，而它自己回報 uncovered=0。
+                _ov = float(overlap_rate or 0.0)
+                if _map is not None:
+                    # 建圖：側向重疊直接用面板明送的那個數（不從扣了重疊的 fov_width_m 反推）
+                    _ov = float(_map['side_overlap'])
+                elif _ov <= 0.0 and float(coverage_width_m or 0.0) > 0.0:
+                    _swath = (2.0 * float(coverage_altitude)
+                              * math.tan(math.radians(float(_hv_get('hfov_deg', default=0.0)
+                                                            or 0.0)) / 2.0))
+                    if _swath > 0.0 and float(coverage_width_m) < _swath:
+                        _ov = min(0.95, max(0.0, 1.0 - float(coverage_width_m) / _swath))
+                        _log.getLogger(__name__).warning(
+                            f"overlap_folded_into_width(面板 fov_width_m="
+                            f"{float(coverage_width_m):.1f} m、刈幅 {_swath:.1f} m "
+                            f"⇒ 還原 overlap_rate={_ov:.3f})；不還原的話 HV 會以 0% 重疊規劃")
+                        _prenotes.append(f'overlap_folded_into_width({_ov:.3f})')
+
+                # ── 用面板的「目標 GSD」而不是自動合成的 1.05×h ──────────
+                #   ⚠⚠⚠ 這條與上面的 AGL 上限是**兩件獨立的事**，不要混在一起：
+                #     h_ceil  來自空域（豁免／法規），管的是 Δh_band
+                #     h_max   來自相機（GSD 反算），管的是 gsd_attainable
+                #   `gsd_attainable ⇔ h_max ≥ h_minfw + dh_band_min_m`
+                #   （platform.py:739），而 h_max = GSD·f/p。本機相機 f=16 mm、
+                #   p=3.9 µm ⇒ h_max ≈ 4102.6 × GSD，構型 A 需 h_max ≥ 140 m
+                #   ⇒ **GSD ≥ 0.0342 m/px**。
+                #   轉接層不給 payload_reqs 時會自己合成 gsd = 1.05·h·p/f
+                #   （aeroplan_adapter.py:1011）⇒ h_max = 1.05×作業高度，
+                #   120 m 只有 126 m < 140 ⇒ 構型 A 分不到工作。
+                #   面板本來就有「目標 GSD」欄位（預設 0.05 m/px），只是沒被送下來。
+                #   實測（2.45 km²、1A+1B、作業高度 120 m、h_ceil 200 m）：
+                #     自動合成（h_max 126 m）→ 只有 HERO，makespan 2085 s
+                #     GSD 0.05（h_max 205 m）→ **兩型都有**，1284 s
+                #     GSD 0.03（h_max 123 m）→ 只有 HERO（反向臂）
+                _reqs = None
+                _gsd = _hv_get('target_gsd', 'gsd_required_m', default=None)
+                try:
+                    _gsd = float(_gsd) if _gsd is not None else None
+                except (TypeError, ValueError):
+                    _gsd = None
+                if _gsd and _gsd > 0.0:
+                    from hv_dccpp.mission import PayloadRequirement as _PReq
+                    _reqs = {'default': _PReq(
+                        'default', 'rgb', gsd_required_m=_gsd,
+                        side_overlap=(_ov if 0.0 <= _ov < 1.0 else None),
+                        # 建圖：面板的前向重疊（預設 0.80）；否則維持舊值 0.70
+                        forward_overlap=(_map['forward_overlap'] if _map is not None else 0.70),
+                        h_target_agl_m=float(coverage_altitude))}
+                    _log.getLogger(__name__).info(
+                        f"HARVEST: 採用面板目標 GSD {_gsd:.3f} m/px"
+                        f"（不用自動合成的 1.05×作業高度）")
+
+                # ── AGL 上限（h_ceil）與可用高度帶：先算給人看 ──────────
+                #   ⚠⚠⚠ 上游 `Airspace.max_agl_m` 寫死 **120**（民航法規值），
+                #   `h_ceil = waiver_max_agl_m if given else max_agl_m`。
+                #   所以 waiver=None 就是「沒有豁免」＝法規上限 120 m。
+                #   可指派條件（decompose.altitude_band）：
+                #       Δh_band = h_ceil − max(h_minfw, h_clr) − 地形起伏 ≥ dh_band_min_m
+                #   實測（2.45 km²、1A+1B、作業高度 120、GSD 0.05）：
+                #       h_ceil 120 → **整趟 NO_GO**（連 HERO 都不行，起伏吃掉那 20 m）
+                #       h_ceil 125…140 → 只有 HERO（makespan 2085 s）
+                #       h_ceil ≥ 141   → 兩型都有（1424 s；200 m 時 1284 s）
+                #   NO_GO 訊息本身只寫「所有區域皆無可行構型」，看不出是高度帶，
+                #   所以這裡先把每個構型的算式攤開。
+                _wv = _hv_get('hv_waiver_max_agl_m', 'waiver_max_agl_m', default=None)
+                _waiver = None if _wv is None else float(_wv)
+                _ceil = 120.0 if _waiver is None else _waiver
+                from hv_dccpp.platform import (PLATFORM_HERO as _PLAT_B,
+                                               PLATFORM_PIONEER as _PLAT_A)
+
+                # ── 最低固定翼作業高度：可以往下調，但要說出代價 ──────────
+                #   ⚠⚠⚠ 表 1 的 120（Pioneer）／100（HERO）**不是機體能力極限**：
+                #     * 平台參數表對這一列的使用方式欄就寫「任務前需依地形、感測器
+                #       與法規調整」，而且它沒有像旁邊的轉換高度那樣標「暫定」——
+                #       它是使用者給的規劃值，全 repo 找不到任何原廠或法規出處。
+                #     * 規格 D35 明文 `h_minfw 只對 ENTRY/OPER/TRANS/RTB 生效`；
+                #       CLIMB/DESCENT 的 z_lo 不含它，ACCEL/DECEL 更是落在
+                #       H_tc（A 80–100 m）——**規劃器自己就讓飛機飛在 120 以下**。
+                #     * 全 repo 沒有任何一句話說低於它會失速／失去操縱權限。
+                #   ⚠ 但它有真實下游：`Q_RTL_ALT`（ardupilot.py:922）會進**匯出的
+                #     .param**，每條路徑都生效（HV4SITL8 讀回 Q_RTL_ALT,100 已確認）。
+                #     `FENCE_ALT_MIN`（mavlink_link.py:996）也綁著它，但那是
+                #     `upload_plan(write_params/set_params)` 才走的路 ——
+                #     AeroPlan 的 SITL 流程只上傳任務、參數走 --defaults ⇒ 不會送。
+                #   ⚠ 上游 `platform_overrides` **只允許調高**（context.py:285），
+                #     所以走轉接層自己的 `platform_a=`／`platform_b=`（:1653）。
+                #     表 1 檔案一個字都不改。
+                #   實測（2.45 km²、h_ceil=120、作業高度 120、GSD 0.05、風 0）：
+                #       A=120 B=100 band=20 → NO_GO
+                #       A=100 B=100 band=20 → NO_GO（只差不到 1 m 的地形起伏）
+                #       A=99  B=99  band=20 → ['A','B'] 1424 s
+                #       A=100 B=100 band=15 → ['A','B'] 1424 s
+                #   ⇒ h_ceil 120 配 min_fw 100 時可用窗恰好 20 m，等於把 20 m 的
+                #     坡度包絡餘裕壓到零，**任何**起伏都會讓它不可行。
+                _spec_a, _spec_b = _PLAT_A, _PLAT_B
+                _mf = _hv_get('hv_min_fw_agl_m', 'min_fw_agl_m', default=None)
+                if isinstance(_mf, dict):
+                    import dataclasses as _dc
+                    _lowered = []
+                    for _key, _base in (('A', _PLAT_A), ('B', _PLAT_B)):
+                        _v = _mf.get(_key)
+                        if _v is None:
+                            continue
+                        _v = float(_v)
+                        if abs(_v - float(_base.min_fw_operation_agl_m)) < 1e-9:
+                            continue
+                        # 轉換完成高度的上緣是硬底線：低於它等於要求飛機在轉換
+                        # 還沒完成前就用固定翼巡航。表 1 給 A 80–100、B 70–90。
+                        _tc_hi = float(_base.transition_complete_agl_m[1])
+                        if _v < _tc_hi - 1e-9:
+                            raise ValueError(
+                                f"min_fw_agl_m[{_key}]={_v:g} 低於轉換完成高度上緣 "
+                                f"{_tc_hi:g} m ⇒ 等於要求在轉換完成前就固定翼巡航")
+                        _new = _dc.replace(_base, min_fw_operation_agl_m=_v)
+                        if _key == 'A':
+                            _spec_a = _new
+                        else:
+                            _spec_b = _new
+                        if _v < float(_base.min_fw_operation_agl_m):
+                            _lowered.append(
+                                f"{_base.name}（構型 {_key}）"
+                                f"{_base.min_fw_operation_agl_m:g} → {_v:g} m")
+                    if _lowered:
+                        _m = 'min_fw_lowered(' + '；'.join(_lowered) + ')'
+                        _log.getLogger(__name__).warning(
+                            f"HARVEST: {_m}。表 1 的值是規劃值不是機體極限（使用方式欄："
+                            f"「任務前需依地形、感測器與法規調整」），但它會寫進飛控的 "
+                            f"Q_RTL_ALT（匯出的 .param，每條路徑都生效）⇒ QRTL 進場高度"
+                            f"跟著降；另外 FENCE_ALT_MIN 也綁著它，但只在走 "
+                            f"mavlink_link.upload_plan 寫參數那條路時才會送出。")
+                        _prenotes.append(_m)
+
+                # ── 高度帶下限（坡度包絡在起伏地形上需要的活動空間）─────────
+                #   ⚠ 規格 §4.6 給的 20 m 是「本文預設」(來源 D)，不是任務輸入，
+                #     而且全部文件都找不到它為什麼是 20 不是 15 或 25 的推導。
+                #     上游自己的測試在 h_ceil=120 的情境就用 15
+                #     （tests/hv_dccpp/test_preflight.py:354）。
+                #   ⚠⚠ 同一個常數還被另外兩處借用：相機的 GSD 可達性判準
+                #     （h_max ≥ h_minfw + 它）與相機預設目標高（h_max − 它）。
+                #     調小 = 三件事一起放寬，所以要記進 note。
+                _pc_over = dict(_p.get('hv_cfg') or {}) if isinstance(_p, dict) else {}
+                _bm = _hv_get('hv_dh_band_min_m', 'dh_band_min_m', default=None)
+                if _bm is not None and 'dh_band_min_m' not in _pc_over:
+                    _pc_over['dh_band_min_m'] = float(_bm)
+                _pp = dict(_p) if isinstance(_p, dict) else {}
+                if _pc_over:
+                    _pp['hv_cfg'] = _pc_over
+                _pcfg = to_planner_config(_pp, base=HvPlannerConfig(dem_step_m=25.0))
+                if float(_pcfg.dh_band_min_m) < 20.0 - 1e-9:
+                    _mb = f"dh_band_min_relaxed({_pcfg.dh_band_min_m:g} m，預設 20)"
+                    _log.getLogger(__name__).warning(
+                        f"HARVEST: {_mb}。這同時放寬了 GSD 可達性判準"
+                        f"（h_max ≥ 最低作業高度 + {_pcfg.dh_band_min_m:g}）與相機預設目標高。")
+                    _prenotes.append(_mb)
+
+                # ── 地形資料來源與起伏（World Terrain）────────────────────
+                _wt = getattr(self, '_world_terrain', None)
+                _rl = getattr(self, '_terrain_relief', None)
+                _relief_m = (_rl[1] - _rl[0]) if _rl else None
+                # 大地起伏 N（A6；面板鍵 hv_geoid_undulation_m，None／空白 ＝ 未知 ⇒ 橢球高 DEM 只准相對高度）
+                _geoid_n = parse_geoid_undulation(_hv_get('hv_geoid_undulation_m', default=None))
+                if _wt is not None:
+                    _prenotes.append(
+                        "terrain_source(Cesium World Terrain，橢球高"
+                        + (f"（大地起伏 N = {_geoid_n:.2f} m ⇒ 可換海拔）" if _geoid_n is not None
+                           else "（大地起伏 N 未知 ⇒ 只准相對高度，MSL 匯出會被拒）")
+                        + "、取樣間距約 35 m；"
+                        + (f"作業區起伏 {_relief_m:.0f} m；" if _relief_m is not None else "")
+                        + "授權：個人/非商用，只放記憶體不存檔)")
+                    if _wt.attribution_text:      # 資料來源（USGS／CGIAR-CSI／Copernicus…）：只進 log，不佔狀態列
+                        _prenotes.append(f"terrain_attribution({_wt.attribution_text[:300]})")
+
+                try:
+                    _band_min = float(getattr(_pcfg, 'dh_band_min_m', 20.0))
+                    _clr = float(_hv_get('hv_terrain_clearance_m',
+                                         'terrain_clearance_m', default=36.0) or 36.0)
+                    # ⚠ 這裡算的是**平地**的帶寬；真正的判準還要再扣地形起伏
+                    #   (z_max − z_min)。所以「剛好等於下限」也是會失敗的
+                    #   —— HERO 在 h_ceil=120 就是 20 − 起伏 < 20 而 NO_GO。
+                    #   把「勉強夠」的也一起講出來，不然使用者會以為只有 A 有事。
+                    _tight, _thin = [], []
+                    for _sp in (_spec_a, _spec_b):
+                        _lo = max(float(_sp.min_fw_operation_agl_m), _clr)
+                        _bw = _ceil - _lo
+                        _txt = (f"{_sp.name}（構型 {_sp.cls}）：{_ceil:.0f} − {_lo:.0f}"
+                                f" = {_bw:.0f} m")
+                        if _bw < _band_min:
+                            _tight.append(f"{_txt} < {_band_min:.0f} m ⇒ 需要 h_ceil ≥ "
+                                          f"{_lo + _band_min:.0f} m 再加地形起伏")
+                        elif _bw < _band_min + 5.0:
+                            _thin.append(f"{_txt}，只比下限多 {_bw - _band_min:.0f} m")
+                    # 地形起伏要再從窗裡扣掉：需要的 h_ceil = 最低作業高度 + 下限 + 起伏
+                    if _relief_m is not None:
+                        _need = []
+                        for _sp in (_spec_a, _spec_b):
+                            _lo = max(float(_sp.min_fw_operation_agl_m), _clr)
+                            _nc = _lo + _band_min + _relief_m
+                            if _ceil < _nc:
+                                _need.append(f"{_sp.name}（構型 {_sp.cls}）需要 h_ceil ≥ {math.ceil(_nc):.0f} m"
+                                             f"（{_lo:.0f} + 下限 {_band_min:.0f} + 起伏 {_relief_m:.0f}）")
+                        if _need:
+                            _mr = (f"terrain_relief_exceeds_band(作業區地形起伏約 {_relief_m:.0f} m，"
+                                   f"目前 AGL 上限 {_ceil:.0f} m：" + '；'.join(_need) + ')')
+                            _log.getLogger(__name__).warning(
+                                f"HARVEST: {_mr}。起伏是以作業區＋起降場粗取樣估計（規劃器實際用的範圍可能略有不同）。"
+                                f"請在「HARVEST 參數」勾選豁免並提高 AGL 上限，或降低最低固定翼作業高度。")
+                            _prenotes.append(_mr)
+                            self._terrain_hint = (
+                                f"（提示：作業區地形起伏約 {_relief_m:.0f} m，AGL 上限 {_ceil:.0f} m 的高度帶容不下："
+                                + '；'.join(_need) + "。請在「HARVEST 參數」勾選豁免並提高 AGL 上限，"
+                                "或降低最低固定翼作業高度。）")
+                    if _tight:
+                        _m = ('altitude_band_too_narrow(' + '；'.join(_tight) + ')')
+                        _log.getLogger(__name__).warning(
+                            f"HARVEST: {_m}。AGL 上限是"
+                            f"{'法規值 120 m（未申請豁免）' if _waiver is None else f'豁免值 {_waiver:.0f} m'}"
+                            f"；這些構型會分不到工作，全部落空時整趟是 NO_GO。"
+                            + (f"另外 {'；'.join(_thin)}，地形起伏會把它吃掉。" if _thin else ""))
+                        _prenotes.append(_m)
+                except Exception as _e:      # noqa: BLE001
+                    _log.getLogger(__name__).debug(f"高度帶預檢跳過：{_e}")
+
+                # 規劃前先送一次：NO_GO 會直接丟例外，尾端那次根本跑不到。
+                if _prenotes and self.hv_on_report:
+                    self.hv_on_report({'validation_note': ' ; '.join(_prenotes),
+                                       'validation_notes': list(_prenotes)})
+
+                _hv = HvDccppCoordinator(
+                    class_of=self.hv_class_of,          # ★ 不給的話整隊會被當成構型 A
+                    # ★ 生效後的平台規格（可能調過最低固定翼作業高度）。不傳的話
+                    #   轉接層會用它自己匯入時綁定的表 1 常數，面板的值就靜靜失效。
+                    platform_a=_spec_a, platform_b=_spec_b,
+                    sensor_a=_sensor_pair, sensor_b=_sensor_pair,
+                    payload_reqs=_reqs,
+                    cfg=_pcfg,
+                    fence_zones=_zones,
+                    home=self.hv_home,
+                    alternates=self.hv_alternates,
+                    recovery_sites=self.hv_recovery_sites,
+                    wind=(self.hv_wind if self.hv_wind is not None else _hv_get('hv_wind')),
+                    c2_range_km=float(_hv_get('hv_c2_range_km', 'c2_range_km', default=25.0)),
+                    terrain_clearance_m=_hv_get('hv_terrain_clearance_m', 'terrain_clearance_m'),
+                    # ⚠⚠⚠ None ＝**沒有豁免** ⇒ 上游用 max_agl_m（寫死 120，就是
+                    #   民航法規值）當 h_ceil。`float(None)` 會炸，而給 200.0 當
+                    #   預設等於在使用者沒說的情況下**假設他拿到了 200 m 豁免**。
+                    waiver_max_agl_m=_waiver,
+                    dem_step_m=float(_hv_get('hv_dem_step_m', default=50.0)),
+                    # ★ 一定要 3000：轉接層預設 1500 < context.TERRAIN_MARGIN_M(3000)
+                    #   ⇒ ENU 地形網格 55% 取樣為 nan（手冊 §11.1 實測）
+                    dem_margin_m=float(_hv_get('hv_dem_margin_m', default=3000.0)),
+                    energy=_hv_get('hv_energy'),
+                    reduce_waypoints=bool(_hv_get('hv_reduce_waypoints', default=True)),
+                    progress=self.hv_progress, on_report=self.hv_on_report,
+                    raise_on_no_go=True,
+                    # 建圖：引入段由 mapping_mode 外延條帶、camera_cfg 在帶起點後同一距離才開相機（轉接層驗值鎖）
+                    mapping_mode=(_map['mapping_mode'] if _map is not None else None),
+                    forward_overlap=(_map['forward_overlap'] if _map is not None else 0.70),
+                    camera_cfg=(_map['camera_cfg'] if _map is not None else None),
+                    # 建圖作業風速上限：放在轉接層建構參數 ⇒ mapping_gate()（MainWindow 不帶參數呼叫）也擋
+                    **({'mapping_max_wind_mps': _map['max_wind_mps']} if _map is not None else {}),
+                    # 高程基準（A6）：World Terrain = 橢球高；DEM 檔依垂直 CRS（沒宣告 ⇒ None ⇒ AMSL 慣例）；
+                    #   N 由面板給（沒給 ⇒ 未知 ⇒ 只准相對高度）。放建構子：plan_coverage_dccpp 簽章是契約
+                    vertical_datum=getattr(self, '_terrain_vdatum', None),
+                    geoid_undulation_m=_geoid_n)
+                self.hv_coordinator = _hv      # 供匯出／上傳（手冊 §12）與重規劃（§13）取用
+
+                _plan_kw = dict(
+                    areas=areas, drones=drones, coverage_width_m=coverage_width_m,
+                    overlap_rate=_ov, auto_scan_angle=auto_scan_angle,
+                    coverage_altitude=coverage_altitude,
+                    terrain_func=terrain_func,   # DEM 已在上面轉成回呼
+                    enable_altitude=enable_altitude,
+                    mounting_angle_deg=mounting_angle_deg,
+                    dem_path="",                 # 已轉成 terrain_func，不重複讀 raster
+                    coordination_mode=coordination_mode,
+                    runway_bearing_deg=runway_bearing_deg, runway_length_m=runway_length_m,
+                    landing_bearing_deg=landing_bearing_deg,
+                    landing_rollout_m=landing_rollout_m)
+                if _map is not None:
+                    # 轉接層拿 coverage_width_m 只做「刈幅核對」（差 > 25% 記 fov_width_mismatch）。面板送的是
+                    # 扣了重疊的條帶間距，建圖的側向 0.70 一定差 70% ⇒ 每次都誤報。建圖改送相機真刈幅。
+                    _cam = _map['camera']
+                    _plan_kw['coverage_width_m'] = (float(coverage_altitude) * float(_cam.sensor_width_mm)
+                                                    / float(_cam.focal_length_mm))
+
+                # ── 規劃（含多場坪自動指派）────────────────────────────
+                #   ⚠ 報告回呼要**緩衝**：跑兩次會送出兩份 report，而 GUI 端多半是
+                #     dict.update ⇒ 後送的會蓋掉先送的，使用者看到的是落選那一份。
+                #     所以兩次都收進暫存，最後只把**勝出**那一次的 payload 放行。
+                _rep_buf: list = []
+                _real_report, _real_prog = _hv.on_report, _hv.progress
+
+                def _plan_once(_rec):
+                    _hv.recovery_sites = _rec
+                    _rep_buf.clear()
+                    _hv.on_report = _rep_buf.append
+                    try:
+                        return _hv.plan_coverage_dccpp(**_plan_kw)
+                    finally:
+                        _hv.on_report = _real_report
+
+                _rec0 = self.hv_recovery_sites
+                try:
+                    result = _plan_once(_rec0)
+                except AeroPlanAdapterError as _e:
+                    # ⚠ 轉接層 NO_GO 是**先送 report 再 raise** ⇒ 緩衝裡那份（status=NO_GO、coverage_altitude_clamped、
+                    #   alternate_auto_placed…）不放行的話，失敗對話框只帶得到上面的 _prenotes。
+                    #   這裡的緩衝只有這一次規劃的那份（_plan_once 開頭清過），還沒有任何試跑。
+                    #   消費端壞掉不能把 NO_GO 換成別的例外（轉接層自己送時也是吞掉）。
+                    for _payload in _rep_buf:
+                        if _real_report is not None:
+                            try:
+                                _real_report(_payload)
+                            except Exception:                  # noqa: BLE001
+                                pass
+                    # NO_GO 的訊息只寫「所有區域皆無可行構型」，看不出是地形起伏吃掉高度帶 ⇒ 把算好的提示接上
+                    _hint = getattr(self, '_terrain_hint', '')
+                    if _hint and 'no_coverable_area' in str(_e):
+                        raise AeroPlanAdapterError(f"{_e} {_hint}", *getattr(_e, 'args', ())[1:]) from _e
+                    raise
+                _win_reports = list(_rep_buf)
+
+                if bool(_hv_get('hv_recovery_auto', default=self.hv_recovery_auto)):
+                    try:
+                        # ⚠⚠⚠ 只用**使用者真的宣告過**的站點，不是 ctx 裡的每一個。
+                        #   轉接層在沒給備降點時會**自己合成一個**（home 背向區域形心
+                        #   400 m），而它自己就發 `alternate_auto_placed` 警告說那個點
+                        #   「不見得能降落」。把飛機指派到系統發明出來的坪上是錯的 ——
+                        #   實測就會被 validate 擋下（conflicts=1），白跑一次規劃。
+                        #   使用者給了 k 個備降點時，轉接層命名為 ALT1..ALTk（見
+                        #   `_resolve_alternates`），所以取前 k 個即為使用者宣告的那些。
+                        _k = len(self.hv_alternates or [])
+                        if _k <= 0:
+                            _sites, _cand = [], {}
+                        else:
+                            _all = sorted(getattr(_hv.last_ctx, 'sites_enu', {}) or {})
+                            _home_id = str(_hv.last_ctx.inputs.home.site_id)
+                            _alts = [s for s in _all if s != _home_id][:_k]
+                            _sites = [_home_id] + _alts
+                            _cand = propose_recovery_assignment(_hv.last_plan, _hv.cfg, _sites)
+                    except Exception as _e:                     # noqa: BLE001
+                        _sites, _cand = [], {}
+                        _log.getLogger(__name__).warning(f"HARVEST: 自動指派候選算不出來：{_e}")
+                    if _cand and _cand != (_rec0 or {}):
+                        _base_m = measure_harvest_plan(_hv)
+                        _hv.progress = None                     # 試跑不要再推一次進度條
+                        _trial_err = None
+                        try:
+                            _res2 = _plan_once(_cand)
+                            _cand_m = measure_harvest_plan(_hv)
+                        except Exception as _e:                 # noqa: BLE001
+                            # ⚠⚠ 試跑失敗＝候選落選，不是整趟失敗（基準已經成功了）。轉接層 preflight NO_GO
+                            #   是 plan_mission 跑完、last_plan 換成候選**之後**才 raise ⇒ 一樣走下面落選那條
+                            #   跑回基準；重跑會清掉緩衝裡試跑那份，不會被放行。
+                            _trial_err = f"{type(_e).__name__}: {_e}"
+                            _log.getLogger(__name__).debug("HARVEST: 自動指派試跑失敗", exc_info=True)
+                        finally:
+                            _hv.progress = _real_prog
+                        if _trial_err is not None:
+                            _ok, _why, _better = False, f"試跑失敗：{_trial_err}", False
+                        else:
+                            _ok, _why = recovery_regression_guard(_base_m, _cand_m)
+                            _better = _cand_m['makespan_s'] < _base_m['makespan_s'] - 1e-9
+                        if _ok and _better:
+                            result, _win_reports = _res2, list(_rep_buf)
+                            _m = (f"recovery_auto_applied({_cand}；makespan "
+                                  f"{_base_m['makespan_s']:.1f} → {_cand_m['makespan_s']:.1f} s、"
+                                  f"最小間距 {_base_m['min_sep_h_m']:.1f} → "
+                                  f"{_cand_m['min_sep_h_m']:.1f} m)")
+                        else:
+                            # ⚠⚠ 候選落選 ⇒ 必須把 `_hv` 的狀態**跑回**基準，
+                            #   否則 `self.hv_coordinator.last_plan` 會留著落選的計畫，
+                            #   而匯出／上傳都讀它 ⇒ 飛出去的是沒被採用的那一份。
+                            result = _plan_once(_rec0)
+                            _win_reports = list(_rep_buf)
+                            _m = (f"recovery_auto_rejected({_cand}；"
+                                  f"{_why if not _ok else 'makespan 沒有變好'}）")
+                        _log.getLogger(__name__).warning(f"HARVEST: {_m}")
+                        _prenotes.append(_m)
+
+                _hv.recovery_sites = _rec0
+                # ⚠ 取樣沒抓全（預抓範圍外、或中途斷線）⇒ 轉接層會把那些點以平地 0 m 填補 ⇒ 結果不可信，
+                #   不能靜默放行。
+                if _world is not None and _world.failures:
+                    from core.terrain import WorldTerrainError
+                    raise WorldTerrainError(
+                        f"World Terrain 有 {len(_world.failures)} 個取樣點失敗（已被當成平地 0 m 填補，規劃結果不可信）："
+                        f"{_world.failures[0]}")
+                for _payload in _win_reports:                   # 只放行勝出那一份
+                    if _real_report is not None:
+                        _real_report(_payload)
+
+                _log.getLogger(__name__).info(
+                    f"HARVEST: makespan={result['total_makespan']:.1f}s "
+                    f"({len(result.get('assembled_paths') or {})} 機) "
+                    f"id_map={_hv.id_map} notes={len(_hv.notes)}")
+
+                # ── 把切出來的子區鍵換回使用者畫的那塊區 ────────────────
+                #   不換的話 `allocation` 會用子區 id 當鍵，任何拿它對回輸入
+                #   區域的下游都會對不上（契約測試就是這樣抓到的）。
+                if _src_of and isinstance(result.get('allocation'), dict):
+                    _merged: dict = {}
+                    for _k, _v in result['allocation'].items():
+                        _src = _src_of.get(_k, _k)
+                        _merged.setdefault(_src, [])
+                        for _d in (_v if isinstance(_v, (list, tuple)) else [_v]):
+                            if _d not in _merged[_src]:
+                                _merged[_src].append(_d)
+                    result['allocation'] = {k: sorted(v) for k, v in _merged.items()}
+
+                # ── 收尾（一）：有沒有人真的分到工作 ────────────────────
+                #   ⚠⚠⚠ 混編機隊（A、B 都有）碰到**只切出一個胞**的作業區時，
+                #   殘帶對拍賣把每個母胞硬鎖成「A 一台 + B 一台」，兩台吃不下就
+                #   整胞放棄 ⇒ 回傳 makespan=0.0、assembled_paths=None、
+                #   allocation={}，而 status 仍是 GO_WITH_WARNINGS、errors 空的。
+                #   實測（5.0×4.0 km 單一區、風 5 m/s）：
+                #       4A+0B → 4/4 台、8A+0B → 8/8 台、0A+4B → 4/4 台
+                #       1A+1B / 4A+4B / 8A+8B → **0 台**，加機完全沒用
+                #   同樣 20 km² 切成 4 塊就變成 8/8 台。決定量是**胞的數目**不是面積。
+                #   ⚠ 兩道收尾都可能有話要說，所以先收集再一次送出：
+                #     `hv_on_report` 在 GUI 端是 dict.update，後送的會**蓋掉**先送的。
+                _vnotes: list[str] = list(_prenotes)
+                _working = [u for u, p in (_hv.last_plan.plans or {}).items() if p.strips]
+                # ── 部分機隊閒置：要說出**是哪個構型**沒分到 ────────────
+                #   實測（2.45 km² 單區、1 Pioneer + 1 HERO、風 0）：
+                #     作業高度 ≥134 m → 兩型都有工作
+                #     作業高度 ≤133 m → **只有 HERO**，Pioneer 一條條帶都沒有
+                #   而且與對地淨空無關（手動設 0 結果相同），兩型的 h_op 也一樣，
+                #   所以不是高度被夾，是分配層算出來不派它。
+                #   使用者只看到「1/2 架」，完全不知道要調哪個旋鈕，所以這裡點名。
+                #   ⚠ 提示只在**該構型真的閒置**時才給。無條件附上去會在
+                #     「兩型都有工作、只是台數少」的情況指向錯誤的旋鈕。
+                if drones and _working and len(_working) < len(drones):
+                    _idle_cls = sorted({self.hv_class_of(d) for d in drones}
+                                       - {p.cls for p in _hv.last_plan.plans.values()
+                                          if p.strips})
+                    _msg = (f"partial_fleet_assigned({len(_working)}/{len(drones)} 台；"
+                            f"沒分到工作的構型 {_idle_cls or '—'})")
+                    _hint = ''
+                    if 'A' in _idle_cls:
+                        # 民航法規把作業高度壓在 120 m AGL，而合成 GSD 會把
+                        # 高度上限訂在 1.05×h ⇒ 可用高度帶只有 0.05×h，要
+                        # ≥134 m 才夠 20 m。所以在 120 m 下**不能**叫人調高，
+                        # 要叫他把目標 GSD 填進去（面板預設 0.05 就夠）。
+                        _hint = ('。構型 A 的最低固定翼作業高度是 120 m；沒填目標 '
+                                 'GSD 時要 ~134 m 才會被派工，但那已經超過法規的 '
+                                 '120 m ⇒ 請在面板填目標 GSD（≥0.035 m/px）')
+                    _log.getLogger(__name__).warning(f"HARVEST: {_msg}{_hint}")
+                    _vnotes.append(_msg)
+
+                if drones and not _working:
+                    _msg = (f"no_aircraft_assigned(機隊 {len(drones)} 台，"
+                            f"胞 {len(_hv.last_plan.cells)} 個)")
+                    _log.getLogger(__name__).error(
+                        f"HARVEST: {_msg} ⇒ 這份計畫是空的（makespan="
+                        f"{result.get('total_makespan')}）。混編機隊在只切出一個胞的"
+                        f"作業區上會這樣：把作業區切成多塊，或改用單一構型。")
+                    _vnotes.append(_msg)
+
+                # ── 收尾（二）：真的跑一次 hv_dccpp.validate() ──────────
+                #   ⚠⚠ 轉接層**從來不呼叫它**（全 repo grep 不到），所以在這裡補。
+                #   preflight 的 feasibility 與 plan.uncovered 只涵蓋「可行性與覆蓋」，
+                #   時空去衝突與能量預算是 validate 才會檢查的。實測成本 0.7 s。
+                #   結果走 notes（前綴 `validate_failed`）讓 GUI 的橫幅顯示得到。
+                self.hv_validation = None
+                self.hv_validation_reasons = None
+                try:
+                    import hv_dccpp as _hvlib
+                    _cache = _hvlib.build_validation_cache(
+                        _hv.last_plan, _hv.last_ctx, budget_only=False)
+                    _v = _hvlib.validate(_hv.last_plan, _hv.last_ctx, _cache, _hv.cfg)
+                    self.hv_validation = _v
+                    if not _v.passed:
+                        _bad = hv_validate_fail_labels(_v)      # 含 agl(agl_below_*)：只有 AGL 失敗時不再是 unknown
+                        _msg = f"validate_failed({', '.join(_bad) or 'unknown'})"
+                        _log.getLogger(__name__).error(f"HARVEST: {_msg}")
+                        _vnotes.append(_msg)
+                        self.hv_validation_reasons = [_msg]
+                    else:
+                        self.hv_validation_reasons = []
+                        _log.getLogger(__name__).info(
+                            f"HARVEST: validate passed（衝突 0，"
+                            f"最小水平間距 {_v.min_sep_h_m:.1f} m）")
+                except Exception as _e:      # noqa: BLE001
+                    # 驗證本身壞掉不該把規劃結果吃掉，但也不可以靜悄悄。
+                    _log.getLogger(__name__).warning(
+                        f"HARVEST: validate 沒跑成功（{type(_e).__name__}: {_e}）"
+                        f"⇒ 本次規劃**沒有**經過時空去衝突與能量驗證")
+                    _vnotes.append('validate_failed(驗證本身沒跑成功)')
+                    self.hv_validation_reasons = [
+                        f'validate_failed(驗證本身沒跑成功：{type(_e).__name__}: {_e})']
+                # ── 收尾（二之二）：**上傳那一份**任務的沿線 AGL ─────────────
+                #   validate 的 AGL 檢查看的是規劃器的密集航點；送上飛控的是 reduce_waypoints 縮點後的項目（高度剖面
+                #   DP 容差 cfg.delta_prof_m＝10 m、弧段外切頂點、整圈盤旋 → LOITER）。這裡對 mission_items 那份、
+                #   用同一份自然地形重算（core/terrain_clearance.py；docs/實作_2026-10-21_上傳任務沿線AGL.md）。
+                #   有違規（或檢查本身壞掉）⇒ terrain_clearance_failed(…) 一定送（GUI 大聲）。不改上傳閘門。
+                #   摘要 terrain_clearance(…) 只是資訊（helper 已寫 log）：**只搭尾端 report 的便車**，不為它多送一份
+                #   （下面 A6／M2：沒有尾端 report 時轉接層那份必須是最後一份）。
+                #   ⚠ 沒有地形資料（平地 DEM）時只對平地驗 ⇒ 摘要裡寫明，不當成驗過真地形。
+                _tl = ('Cesium World Terrain' if self._world_terrain is not None
+                       else ('DEM' if terrain_func is not None else '平地 DEM（沒有地形資料：只對平地驗）'))
+                self.hv_terrain_clearance, _tcn = hv_terrain_clearance_notes(_hv, _tl)
+                _tc_summary = _tcn[0] if self.hv_terrain_clearance is not None else None
+                _vnotes.extend(_tcn[1:] if _tc_summary is not None else _tcn)
+                # ── 收尾（三）：建圖上傳閘門 ─────────────────────────────
+                #   ⚠⚠ preflight 的 GO_WITH_WARNINGS 不夠：實測有 GO_WITH_WARNINGS 卻丟掉約 35% 面積的計畫。
+                #   未覆蓋／mapping_incomplete ⇒ 這份計畫不可上傳（GUI 上傳鈕依 hv_mapping_gate 擋）。
+                #   R1 #8：validate 失敗（4D 衝突／能量）也擋 ⇒ 併入 validate 的原因（轉接層的 mapping_gate 看不到 validate）。
+                if _map is not None:
+                    self.hv_mapping_setup = _map
+                    _g = _hv.mapping_gate()
+                    if self.hv_validation_reasons:
+                        _g = {'uploadable': False,
+                              'reasons': list(_g.get('reasons') or []) + list(self.hv_validation_reasons)}
+                    # B3：飛前曝光驗證（上傳那份任務項目 → AP_Camera 距離觸發模擬 → 每格視數）。只留摘要（全格網大面積
+                    #   上百 MB）；內部有視數不足的破洞、或驗證沒跑成功 ⇒ 擋。接縫／邊緣帶只顯示（不建模側傾門檻與轉彎動態）。
+                    try:
+                        self.hv_exposure_summary = mapping_exposure_summary(_hv, _map['camera'])
+                    except Exception as _e:      # noqa: BLE001 — 驗證壞掉不能吃掉規劃結果，也不能當驗過
+                        _log.getLogger(__name__).error(
+                            f"HARVEST 建圖：飛前曝光驗證沒跑成功（{type(_e).__name__}: {_e}）⇒ 不可上傳", exc_info=True)
+                        self.hv_exposure_summary = {'ok': False, 'error': f'{type(_e).__name__}: {_e}'}
+                    _xr = mapping_exposure_block_reasons(self.hv_exposure_summary)
+                    if _xr:
+                        _g = {'uploadable': False, 'reasons': list(_g.get('reasons') or []) + _xr}
+                    self.hv_mapping_gate = _g
+                    _vnotes.append(mapping_exposure_note(self.hv_exposure_summary))
+                    # 有效值：交叉航帶摘要（逐機逐區塊；退回／略過的區塊）與建圖作業風速上限（規劃風 vs 上限，
+                    #   「上限指現場實際風速」）也進 validation_notes（GUI 大聲顯示），不只躺在轉接層 notes 裡
+                    _eff = getattr(_hv, 'mapping_effective', None) or {}
+                    _vnotes.extend(str(_w) for _w in (_eff.get('cross') or []))
+                    _vnotes.extend(str(_n) for _n in (_hv.notes or []) if str(_n).startswith('mapping_wind('))
+                    if not self.hv_mapping_gate['uploadable']:
+                        _m = 'mapping_upload_blocked(' + '；'.join(self.hv_mapping_gate['reasons']) + ')'
+                        _log.getLogger(__name__).error(f"HARVEST 建圖：{_m}")
+                        _vnotes.append(_m)
+                # A6（2026-10-15 審查 M2）：轉接層的高程基準 note（terrain_datum／nfz_vertical_limits_ignored／
+                #   site_alt_vs_dem）只在它自己的 report 的 notes 裡；下面這份尾端 report 會**整份蓋掉**
+                #   MainWindow._hv_last_report ⇒ World Terrain 路徑（_prenotes 必有 terrain_source）操作員永遠看不到
+                #   「N 未知 ⇒ 只准相對高度」。⇒ 有尾端 report 時原樣併進來（勝出那次規劃的 _hv.notes；不重複；
+                #   接在前置 notes 之後）。沒有尾端 report 時轉接層那份就是最後一份、本來就帶著它們 ⇒ 不多送一份
+                #   （多送會把轉接層 report 的 uncovered／status 一起蓋掉）。
+                if _vnotes and _tc_summary is not None:
+                    _vnotes.append(_tc_summary)      # 上傳任務沿線 AGL 摘要：只在本來就有尾端 report 時附上
+                if _vnotes:
+                    _fwd: list[str] = []
+                    for _n in (str(x) for x in (_hv.notes or [])):
+                        if _n.startswith(HV_FORWARDED_ADAPTER_NOTE_PREFIXES) and _n not in _vnotes and _n not in _fwd:
+                            _fwd.append(_n)
+                    _vnotes[len(_prenotes):len(_prenotes)] = _fwd
+                if _vnotes and self.hv_on_report:
+                    self.hv_on_report({'validation_note': ' ; '.join(_vnotes),
+                                       'validation_notes': list(_vnotes)})
+                return result
+
+        # ⚠ 垂直起降剖面由 DCCPP v2 直通管線負責（見下方 prepend_vtol_takeoff）。
+        #   legacy 管線沒有這個能力，走到那裡要說出來，不要靜默把參數吞掉。
+        _vtol_alt = (float(vtol_transition_alt_m)
+                     if vtol_transition_alt_m is not None
+                     and float(vtol_transition_alt_m) > 0.0 else None)
+        #: 宣告自己是 VTOL 的機號 —— 這些機體走垂直剖面而不是跑道剖面。
+        #: ⚠ 判別式必須是 vehicle_type，不能是 turn_radius>0：VTOL 有轉彎半徑
+        #:   但**不需要跑道**，用半徑判會規劃出 500 m 跑道起降。
+        _vtol_ids = {d['drone_id'] for d in drones
+                     if str(d.get('vehicle_type', '')).lower() == 'vtol'}
 
         # ── 建立 UAVState 物件 ────────────────────────────
         uav_states: List[UAVState] = []
@@ -1190,11 +3117,21 @@ class SwarmCoordinator:
                 ap = AreaProcessor()
                 area_results = {}      # area_id -> AreaProcessingResult
                 area_transformers = {} # area_id -> CoordinateTransformer
+                effective_scan_angles = {}   # area_id -> 實際生效的掃描角 (compass)
                 for area_dict in areas:
                     aid = area_dict.get('area_id', id(area_dict))
-                    ar = ap.process_latlon(area_dict['polygon'], w_i, w_ovl)
+                    # ⚠⚠ 手動掃描角必須送到**這一支**才算生效。只送到 legacy 的
+                    #    RegionDivider 上，log 會照印角度、面板會照顯示，但真正
+                    #    飛出來的航點是這條管線產的，一點都不會變。
+                    _ang = (None if auto_scan_angle
+                            else float(area_dict.get('scan_angle_deg', 0.0)))
+                    ar = ap.process_latlon(area_dict['polygon'], w_i, w_ovl,
+                                           scan_angle_deg=_ang)
                     area_results[aid] = ar
                     area_transformers[aid] = _CT(ar.centroid_latlon[0], ar.centroid_latlon[1])
+                    # 顯示值 = 飛的值：自動模式回報幾何算出來的角，手動模式回報
+                    # 面板送進來的角（正規化到 0..360，面板允許負角）。
+                    effective_scan_angles[aid] = float(ar.min_width_result.alpha_k_deg)
 
                 # 2. 任務分配
                 allocator = UAVTaskAllocator()
@@ -1240,7 +3177,7 @@ class SwarmCoordinator:
                         )
                         # 為固定翼自動補上 TAKEOFF / LANDING，
                         # 讓 ArduPlane AUTO 能完整執行（NAV_TAKEOFF→任務→NAV_LAND）
-                        if u.turn_radius > 0 and built.waypoints:
+                        if (u.turn_radius > 0 or uid in _vtol_ids) and built.waypoints:
                             # 使用使用者設定的跑道方向；未設定時才自動計算
                             if runway_bearing_deg is not None:
                                 takeoff_bearing = float(runway_bearing_deg)
@@ -1251,13 +3188,6 @@ class SwarmCoordinator:
                                     math.cos(math.radians(u.position[0])),
                                     first_wp.lat - u.position[0],
                                 )) % 360.0
-                            builder.prepend_takeoff(
-                                built,
-                                home_lat=u.position[0],
-                                home_lon=u.position[1],
-                                runway_bearing_compass_deg=takeoff_bearing,
-                                climb_distance_m=runway_length_m,
-                            )
                             if landing_bearing_deg is not None:
                                 _landing_bearing = float(landing_bearing_deg)
                             else:
@@ -1267,6 +3197,36 @@ class SwarmCoordinator:
                                     math.cos(math.radians(last_wp.lat)),
                                     u.position[0] - last_wp.lat,
                                 )) % 360.0
+
+                        if uid in _vtol_ids and _vtol_alt is not None and built.waypoints:
+                            # ── 4+1 QuadPlane：真的垂直起降 ──
+                            #   ⚠ 不是「跑道剖面配 VTOL 韌體」：第一段必須是純
+                            #     垂直爬升（同經緯度），否則 3D 圖上是一條 500 m
+                            #     斜線，而面板的「轉換高度」根本沒人讀。
+                            builder.prepend_vtol_takeoff(
+                                built,
+                                home_lat=u.position[0],
+                                home_lon=u.position[1],
+                                bearing_compass_deg=takeoff_bearing,
+                                transition_alt_m=_vtol_alt,
+                                cruise_speed_mps=u.speed,
+                            )
+                            builder.append_vtol_landing(
+                                built,
+                                home_lat=u.position[0],
+                                home_lon=u.position[1],
+                                bearing_compass_deg=_landing_bearing,
+                                transition_alt_m=_vtol_alt,
+                                cruise_speed_mps=u.speed,
+                            )
+                        elif u.turn_radius > 0 and built.waypoints:
+                            builder.prepend_takeoff(
+                                built,
+                                home_lat=u.position[0],
+                                home_lon=u.position[1],
+                                runway_bearing_compass_deg=takeoff_bearing,
+                                climb_distance_m=runway_length_m,
+                            )
                             builder.append_landing(
                                 built,
                                 home_lat=u.position[0],
@@ -1295,6 +3255,7 @@ class SwarmCoordinator:
                     'uav_states': uav_states,
                     'total_makespan': total_makespan,
                     'assembled_paths': all_assembled if all_assembled else None,
+                    'effective_scan_angles': effective_scan_angles,
                 }
             except Exception as _e:
                 logger.warning(f"DCCPP v2 直通管線失敗，回退至舊 DCCPPSolver: {_e}", exc_info=True)

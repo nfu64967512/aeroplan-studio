@@ -1,0 +1,136 @@
+{
+ "new_scenario": "beamidp_1a2b_1195",
+ "trial": "BEAMIDP1",
+ "makespan_planned_s": 2348.04,
+ "makespan_sequential_estimate_s": 2532.5,
+ "makespan_delta_pct": 7.86,
+ "per_uav_estimate": {
+  "A1": {
+   "t_land_s": 2217.6,
+   "turn_delta_s": 218.48,
+   "t_land_sequential_s": 2436.1
+  },
+  "B2": {
+   "t_land_s": 2348.0,
+   "turn_delta_s": 184.54,
+   "t_land_sequential_s": 2532.5
+  },
+  "B3": {
+   "t_land_s": 1992.7,
+   "turn_delta_s": 178.13,
+   "t_land_sequential_s": 2170.8
+  }
+ },
+ "fleet": {
+  "seq_t": 1696.88,
+  "bid_t": 1115.73,
+  "seq_l": 32274.35,
+  "bid_l": 21413.1,
+  "hk_t": 1060.15,
+  "skip_t": 1196.48,
+  "skip_l": 22965.32,
+  "hk_l": 20328.06
+ },
+ "fleet_delta_turn_time_pct": -34.25,
+ "fleet_delta_turn_dist_pct": -33.65,
+ "fleet_delta_turn_energy_wh": -60.01,
+ "fleet_turn_energy_sequential_wh": 184.51,
+ "fleet_turn_energy_beamidp_wh": 124.49,
+ "fleet_delta_turn_energy_pct": -32.53,
+ "table_md_en": "| cell (class) | n | k | R_eff (m) | strip order | turning distance (m) | turning time (s) | turning energy (Wh) | cell mission time (s) | vs sequential (dist / time) |\n|---|---|---|---|---|---|---|---|---|---|\n| HERO Z1_1 | 13 | 3 | 120 | sequential | 9095.5 | 508.2 | 31.59 | 1771.4 | base |\n|  |  |  |  | fixed skip-k | 6377.0 | 352.5 | 21.91 | 1615.6 | -29.9% / -30.6% |\n|  |  |  |  | Beam-IDP (this work) | 5961.4 | 330.1 | 20.52 | 1593.3 | -34.5% / -35.0% |\n|  |  |  |  | Held-Karp optimum | 5449.3 | 302.6 | 18.80 | 1565.7 | -40.1% / -40.5% |\n| Pioneer Z2_1 | 6 | 5 | 200 | sequential | 6746.1 | 328.5 | 56.35 | 838.2 | base |\n|  |  |  |  | fixed skip-k | 5535.2 | 269.3 | 46.19 | 779.0 | -17.9% / -18.0% |\n|  |  |  |  | Beam-IDP (this work) | 4829.8 | 234.9 | 40.29 | 744.6 | -28.4% / -28.5% |\n|  |  |  |  | Held-Karp optimum | 4697.3 | 228.5 | 39.19 | 738.1 | -30.4% / -30.4% |\n| HERO Z2_1_B_k6 | 7 | 3 | 120 | sequential | 4547.7 | 254.1 | 15.79 | 934.5 | base |\n|  |  |  |  | fixed skip-k | 2917.8 | 161.9 | 10.06 | 842.3 | -35.8% / -36.3% |\n|  |  |  |  | Beam-IDP (this work) | 2753.8 | 152.5 | 9.48 | 832.9 | -39.5% / -40.0% |\n|  |  |  |  | Held-Karp optimum | 2753.8 | 152.5 | 9.48 | 832.9 | -39.5% / -40.0% |\n| Pioneer Z3_1 | 7 | 5 | 200 | sequential | 8095.3 | 394.2 | 67.62 | 988.9 | base |\n|  |  |  |  | fixed skip-k | 5673.5 | 275.8 | 47.30 | 870.4 | -29.9% / -30.0% |\n|  |  |  |  | Beam-IDP (this work) | 5541.1 | 269.3 | 46.20 | 864.0 | -31.6% / -31.7% |\n|  |  |  |  | Held-Karp optimum | 5100.6 | 247.8 | 42.51 | 842.5 | -37.0% / -37.1% |\n| HERO Z3_1_B_k7 | 6 | 3 | 120 | sequential | 3789.8 | 211.8 | 13.16 | 795.0 | base |\n|  |  |  |  | fixed skip-k | 2461.8 | 137.0 | 8.52 | 720.2 | -35.0% / -35.3% |\n|  |  |  |  | Beam-IDP (this work) | 2327.0 | 128.8 | 8.01 | 712.0 | -38.6% / -39.2% |\n|  |  |  |  | Held-Karp optimum | 2327.0 | 128.8 | 8.01 | 712.0 | -38.6% / -39.2% |",
+ "table_md_zh": "| 胞（構型） | n | k | R_eff (m) | 條帶序 | 迴轉距離 (m) | 迴轉時間 (s) | 迴轉能量 (Wh) | 胞內任務時間 (s) | 相對順序掃描（距離／時間） |\n|---|---|---|---|---|---|---|---|---|---|\n| HERO Z1_1 | 13 | 3 | 120 | 順序來回掃描 | 9095.5 | 508.2 | 31.59 | 1771.4 | base |\n|  |  |  |  | 固定跳帶 skip-k | 6377.0 | 352.5 | 21.91 | 1615.6 | -29.9% / -30.6% |\n|  |  |  |  | Beam-IDP（本文） | 5961.4 | 330.1 | 20.52 | 1593.3 | -34.5% / -35.0% |\n|  |  |  |  | Held–Karp 最佳解 | 5449.3 | 302.6 | 18.80 | 1565.7 | -40.1% / -40.5% |\n| Pioneer Z2_1 | 6 | 5 | 200 | 順序來回掃描 | 6746.1 | 328.5 | 56.35 | 838.2 | base |\n|  |  |  |  | 固定跳帶 skip-k | 5535.2 | 269.3 | 46.19 | 779.0 | -17.9% / -18.0% |\n|  |  |  |  | Beam-IDP（本文） | 4829.8 | 234.9 | 40.29 | 744.6 | -28.4% / -28.5% |\n|  |  |  |  | Held–Karp 最佳解 | 4697.3 | 228.5 | 39.19 | 738.1 | -30.4% / -30.4% |\n| HERO Z2_1_B_k6 | 7 | 3 | 120 | 順序來回掃描 | 4547.7 | 254.1 | 15.79 | 934.5 | base |\n|  |  |  |  | 固定跳帶 skip-k | 2917.8 | 161.9 | 10.06 | 842.3 | -35.8% / -36.3% |\n|  |  |  |  | Beam-IDP（本文） | 2753.8 | 152.5 | 9.48 | 832.9 | -39.5% / -40.0% |\n|  |  |  |  | Held–Karp 最佳解 | 2753.8 | 152.5 | 9.48 | 832.9 | -39.5% / -40.0% |\n| Pioneer Z3_1 | 7 | 5 | 200 | 順序來回掃描 | 8095.3 | 394.2 | 67.62 | 988.9 | base |\n|  |  |  |  | 固定跳帶 skip-k | 5673.5 | 275.8 | 47.30 | 870.4 | -29.9% / -30.0% |\n|  |  |  |  | Beam-IDP（本文） | 5541.1 | 269.3 | 46.20 | 864.0 | -31.6% / -31.7% |\n|  |  |  |  | Held–Karp 最佳解 | 5100.6 | 247.8 | 42.51 | 842.5 | -37.0% / -37.1% |\n| HERO Z3_1_B_k7 | 6 | 3 | 120 | 順序來回掃描 | 3789.8 | 211.8 | 13.16 | 795.0 | base |\n|  |  |  |  | 固定跳帶 skip-k | 2461.8 | 137.0 | 8.52 | 720.2 | -35.0% / -35.3% |\n|  |  |  |  | Beam-IDP（本文） | 2327.0 | 128.8 | 8.01 | 712.0 | -38.6% / -39.2% |\n|  |  |  |  | Held–Karp 最佳解 | 2327.0 | 128.8 | 8.01 | 712.0 | -38.6% / -39.2% |",
+ "paper_table_md": "| cell (class) | n | k | R_eff (m) | n > k ? | strip order actually used | turning distance (m) | turning time (s) |\n|---|---|---|---|---|---|---|---|\n| Pioneer Z2_1 | 1 | 5 | 200 | **no** | identical to sequential | 0.0 | 0.00 |\n| HERO Z2_1_B_k1 | 2 | 3 | 120 | **no** | identical to sequential | 757.4 | 42.32 |\n| Pioneer Z3_1 | 1 | 5 | 200 | **no** | identical to sequential | 0.0 | 0.00 |\n| HERO Z3_1_B_k1 | 2 | 3 | 120 | **no** | identical to sequential | 757.4 | 42.32 |\n| Pioneer Z4_1 | 1 | 5 | 200 | **no** | identical to sequential | 0.0 | 0.00 |\n| HERO Z4_1_B_k1 | 2 | 3 | 120 | **no** | identical to sequential | 757.4 | 42.32 |",
+ "paper_makespan_s": 1260.43,
+ "paper_fleet_turn": {
+  "seq_t": 126.95,
+  "bid_t": 126.95,
+  "seq_l": 2272.17,
+  "bid_l": 2272.17,
+  "hk_t": 126.95,
+  "skip_t": 126.95,
+  "skip_l": 2272.17,
+  "hk_l": 2272.17
+ },
+ "paper_all_orders_identical": true,
+ "strip_counts_new": {
+  "Z1_1|B": {
+   "n": 13,
+   "k": 3,
+   "cls": "HERO",
+   "uav": "B3",
+   "triggers": true
+  },
+  "Z2_1|A": {
+   "n": 6,
+   "k": 5,
+   "cls": "Pioneer",
+   "uav": "A1",
+   "triggers": true
+  },
+  "Z2_1_B_k6|B": {
+   "n": 7,
+   "k": 3,
+   "cls": "HERO",
+   "uav": "B2",
+   "triggers": true
+  },
+  "Z3_1|A": {
+   "n": 7,
+   "k": 5,
+   "cls": "Pioneer",
+   "uav": "A1",
+   "triggers": true
+  },
+  "Z3_1_B_k7|B": {
+   "n": 6,
+   "k": 3,
+   "cls": "HERO",
+   "uav": "B2",
+   "triggers": true
+  }
+ },
+ "strip_counts_paper": {
+  "Z2_1|A": {
+   "n": 1,
+   "k": 5,
+   "cls": "Pioneer",
+   "uav": "A1",
+   "triggers": false
+  },
+  "Z2_1_B_k1|B": {
+   "n": 2,
+   "k": 3,
+   "cls": "HERO",
+   "uav": "B2",
+   "triggers": false
+  },
+  "Z3_1|A": {
+   "n": 1,
+   "k": 5,
+   "cls": "Pioneer",
+   "uav": "A1",
+   "triggers": false
+  },
+  "Z3_1_B_k1|B": {
+   "n": 2,
+   "k": 3,
+   "cls": "HERO",
+   "uav": "B3",
+   "triggers": false
+  },
+  "Z4_1|A": {
+   "n": 1,
+   "k": 5,
+   "cls": "Pioneer",
+   "uav": "A1",
+   "triggers": false
+  },
+  "Z4_1_B_k1|B": {
+   "n": 2,
+   "k": 3,
+   "cls": "HERO",
+   "uav": "B3",
+   "triggers": false
+  }
+ }
+}

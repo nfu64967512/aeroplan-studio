@@ -1,0 +1,21 @@
+=== HERO R_theo: table value vs geometrically consistent value ===
+  V_a=19.0 m/s, ROLL_LIMIT_DEG=phi_max=25.0 deg
+  table R_theo          = 75.00 m  -> implied phi = 26.14 deg  (ABOVE the 25 deg limit)
+  consistent Va^2/(g tan phi) = 78.92 m  (table is -4.96% -> passes the +/-10% validator at platform.py:249-253)
+   W= 0.0: R_eff(table R_theo)= 120.00 m (bank needed on that ground circle 17.05 deg) | R_eff(consistent)= 120.00 m (bank 17.05 deg) | W*=5.033 vs 4.429
+   W= 5.0: R_eff(table R_theo)= 120.00 m (bank needed on that ground circle 26.07 deg) | R_eff(consistent)= 125.92 m (bank 25.00 deg) | W*=5.033 vs 4.429
+   W= 8.0: R_eff(table R_theo)= 151.45 m (bank needed on that ground circle 26.14 deg) | R_eff(consistent)= 159.36 m (bank 25.00 deg) | W*=5.033 vs 4.429
+  -> at the paper's W=5 m/s the CONSISTENT R_theo would give R_eff=125.92 m > R_plan=120 m,
+     i.e. the trochoid branch WOULD bind for HERO; skip_k(s=97) stays 3 either way.
+
+=== paper sensitivity table: W -> R_eff -> skip-k (s = 97.0 m) ===
+   W[m/s] |  A R_eff  k_A  |  B R_eff  k_B
+     0.0  |   200.00    5  |   120.00    3
+     3.0  |   200.00    5  |   120.00    3
+     5.0  |   200.00    5  |   120.00    3
+     6.0  |   212.68    5  |   129.85    3
+     8.0  |   244.74    6  |   151.45    4
+    10.0  |   279.05    6  |   174.72    4
+    12.0  |   315.61    7  |   199.65    5
+
+wrote hero_rtheo_sensitivity.json

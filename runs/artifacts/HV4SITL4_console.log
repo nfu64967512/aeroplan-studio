@@ -1,0 +1,60 @@
+情境 gui_uniform_2a2b（路徑 gui）：規劃 2.65s  makespan 1948.9s  status GO_WITH_WARNINGS
+validate passed=True conflicts=0 uncovered=0
+感測器 {'A': 'rgb', 'B': 'rgb'}   酬載需求 {'default': 'rgb'}
+  A1 A strips=5 wp=430 13.51km  t_off=415s t_land=1169s  E=225/675Wh
+  A2 A strips=4 wp=330 12.22km  t_off=1259s t_land=1949s  E=214/686Wh
+  B3 B strips=6 wp=305 12.98km  t_off=0s t_land=803s  E=80/174Wh
+  B4 B strips=5 wp=341 11.94km  t_off=893s t_land=1641s  E=77/177Wh
+匯出: {'A1': 140, 'A2': 89, 'B3': 87, 'B4': 124}
+
+機隊 ['A1', 'A2', 'B3', 'B4']  makespan 1949s  speedup 5.0  → 牆鐘約 6.5 分鐘
+
+已終止 0 個本次的 ArduPlane 行程
+SITL 已啟動: [('A1', 5760, 4508), ('A2', 5770, 24100), ('B3', 5780, 26712), ('B4', 5790, 8060)]
+  A1 心跳 OK (sysid 1, port 5760)
+  A2 心跳 OK (sysid 2, port 5770)
+  B3 心跳 OK (sysid 3, port 5780)
+  B4 心跳 OK (sysid 4, port 5790)
+
+參數讀回：68/68 相符
+  A1 上傳 140 → 讀回 140 OK
+  A2 上傳 89 → 讀回 89 OK
+  B3 上傳 87 → 讀回 87 OK
+  B4 上傳 124 → 讀回 124 OK
+  A1 armed（等 5s）
+  A2 armed（等 0s）
+  B3 armed（等 0s）
+  B4 armed（等 0s）
+
+放行時刻（牆鐘秒）: {'B3': 0.0, 'A1': 83.0, 'B4': 178.6, 'A2': 251.8}
+  > B3 放行切 AUTO（牆鐘 0.0s，規劃 t_off=0s）
+    [    0s] A1:  0.0m  A2:  0.0m  B3:  4.5m  B4:  0.1m
+    [   21s] A1:  0.1m  A2:  0.0m  B3:115.1m  B4:  0.1m
+    [   60s] A1:  0.1m  A2:  0.0m  B3:150.3m  B4:  0.1m
+    [   81s] A1:  0.1m  A2:  0.0m  B3:150.3m  B4:  0.1m
+  > A1 放行切 AUTO（牆鐘 83.0s，規劃 t_off=415s）
+    [  101s] A1:119.0m  A2:  0.0m  B3:150.3m  B4:  0.1m
+    [  121s] A1:156.0m  A2:  0.0m  B3:150.3m  B4:  0.1m
+    [  140s] A1:156.0m  A2:  0.0m  B3:150.3m  B4:  0.1m
+  B3 已降落 (sim t=842s)
+    [  160s] A1:156.0m  A2:  0.0m  B3:150.3m  B4:  0.1m
+  > B4 放行切 AUTO（牆鐘 179.2s，規劃 t_off=893s）
+    [  180s] A1:156.0m  A2:  0.0m  B3:150.3m  B4: 20.5m
+    [  200s] A1:158.9m  A2:  0.0m  B3:150.3m  B4:116.2m
+    [  220s] A1:158.9m  A2:  0.0m  B3:150.3m  B4:150.2m
+  A1 已降落 (sim t=1233s)
+    [  240s] A1:158.9m  A2:  0.0m  B3:150.3m  B4:150.3m
+  > A2 放行切 AUTO（牆鐘 252.6s，規劃 t_off=1259s）
+    [  261s] A1:158.9m  A2: 71.7m  B3:150.3m  B4:150.3m
+    [  281s] A1:158.9m  A2:160.0m  B3:150.3m  B4:150.3m
+    [  301s] A1:158.9m  A2:160.0m  B3:150.3m  B4:150.3m
+    [  321s] A1:158.9m  A2:160.0m  B3:150.3m  B4:150.3m
+  B4 已降落 (sim t=1691s)
+    [  340s] A1:158.9m  A2:160.0m  B3:150.3m  B4:150.3m
+    [  360s] A1:158.9m  A2:170.0m  B3:150.3m  B4:150.3m
+    [  380s] A1:158.9m  A2:170.0m  B3:150.3m  B4:150.3m
+  A2 已降落 (sim t=2009s)
+
+落地 4/4：['A1', 'A2', 'B3', 'B4']
+最高高度: {'A1': 158.9, 'A2': 170.0, 'B3': 150.3, 'B4': 150.3}
+已終止 0 個本次的 ArduPlane 行程

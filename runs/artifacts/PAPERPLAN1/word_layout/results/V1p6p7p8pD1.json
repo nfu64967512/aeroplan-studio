@@ -1,0 +1,171 @@
+{
+ "pages": 5,
+ "used_cm_per_page": [
+  25.06,
+  25.27,
+  25.21,
+  25.44,
+  19.56
+ ],
+ "content_cm": 120.54,
+ "pages_equiv": 4.69,
+ "last_page_lines": 41,
+ "last_line_top_cm": 21.06,
+ "last_page_used_cm": 19.51,
+ "body_height_cm": 25.7,
+ "last_page_fill_pct": 75.9,
+ "n_paragraphs": 155,
+ "n_paragraphs_snap_to_grid_on": 0,
+ "n_table_row_end_marks_reported_on": 15,
+ "where": [
+  [
+   "一、前言",
+   1,
+   13.3
+  ],
+  [
+   "二、研究方法",
+   1,
+   21.0
+  ],
+  [
+   "2.1 系統架構",
+   1,
+   21.5
+  ],
+  [
+   "2.2 規劃流程",
+   1,
+   24.0
+  ],
+  [
+   "2.3 核心公式",
+   1,
+   26.1
+  ],
+  [
+   "三、SITL 驗證與成果",
+   2,
+   22.2
+  ],
+  [
+   "3.1 實驗設置",
+   2,
+   22.7
+  ],
+  [
+   "3.2 規劃與 SITL",
+   3,
+   2.8
+  ],
+  [
+   "表1 規劃與 SITL ",
+   3,
+   6.3
+  ],
+  [
+   "3.3 規劃天花板與風場",
+   3,
+   13.6
+  ],
+  [
+   "表2 規劃天花板與風場之",
+   3,
+   20.1
+  ],
+  [
+   "[圖檔]",
+   4,
+   4.3
+  ],
+  [
+   "圖1 高度合規與 SIT",
+   4,
+   10.7
+  ],
+  [
+   "3.4 起降走廊判準對照",
+   4,
+   12.3
+  ],
+  [
+   "3.5 跳帶排序之觸發情",
+   4,
+   14.3
+  ],
+  [
+   "四、結論與限制",
+   4,
+   16.3
+  ],
+  [
+   "誌謝",
+   5,
+   2.8
+  ],
+  [
+   "參考文獻",
+   5,
+   3.9
+  ]
+ ],
+ "figures": [
+  {
+   "file": "fig5_compliance.png",
+   "width_cm": 16.992,
+   "height_cm": 6.392,
+   "scale_pct": [
+    100.0,
+    100.0
+   ]
+  }
+ ],
+ "tables": [
+  {
+   "tnum": "1",
+   "col_cm": [
+    6.51,
+    4.01,
+    6.49
+   ]
+  },
+  {
+   "tnum": "2",
+   "col_cm": [
+    2.11,
+    1.36,
+    3.0,
+    1.63,
+    2.87,
+    1.63,
+    4.39
+   ]
+  }
+ ],
+ "n_omath": 6,
+ "build_s": 4.7,
+ "layout": {
+  "indent": false,
+  "spacing": false,
+  "compress_punct": false,
+  "table_split": false
+ },
+ "caveats_missing": [],
+ "caveats_checked": 61,
+ "name": "V1+6+7+8+D1",
+ "cuts": [
+  1,
+  2,
+  3,
+  4,
+  5,
+  6,
+  7,
+  8
+ ],
+ "candidates": [
+  "D1"
+ ],
+ "docx": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\PAPERPLAN1\\word_layout\\variants\\V1p6p7p8pD1.docx",
+ "pdf": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\PAPERPLAN1\\word_layout\\variants\\V1p6p7p8pD1.pdf"
+}

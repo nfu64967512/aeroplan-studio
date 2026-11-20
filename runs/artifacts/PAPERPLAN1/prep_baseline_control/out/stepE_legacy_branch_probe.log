@@ -1,0 +1,25 @@
+    cell  branch           mode |    cov   maxkm    wp plans   4D  pad | CPini CPsyn CPhold    sec
+--------------------------------------------------------------------------------------------------
+    S1/4      v2  uncoordinated |    1.0   55.12   168     4    0   12 |     0     0      0    0.1
+    S1/4      v2    coordinated |    1.0   55.12   168     4    0   12 |     1     0      0    0.1
+    S1/4  legacy  uncoordinated | 0.9966   94.05 19107     4   51    9 |     0     0      0    0.1
+    S1/4  legacy    coordinated | 0.9966   95.02 19131     4   50    9 |     1     1      2    0.1
+    S1/8      v2  uncoordinated |    1.0   32.25   228     8    5   40 |     0     0      0    0.0
+    S1/8      v2    coordinated |    1.0   32.25   228     8    5   40 |     1     0      0    0.0
+    S1/8  legacy  uncoordinated | 0.9965   47.83 15714     8  102   41 |     0     0      0    0.1
+    S1/8  legacy    coordinated | 0.9965    48.8 15798     8  109   41 |     1     1      7    0.2
+   S1/16      v2  uncoordinated |    1.0   21.47   348    16   36  192 |     0     0      0    0.0
+   S1/16      v2    coordinated |    1.0   21.47   348    16   36  192 |     1     0      0    0.0
+   S1/16  legacy  uncoordinated | 0.9965   26.08  9430    16  258  201 |     0     0      0    0.1
+   S1/16  legacy    coordinated | 0.9965   27.06  9586    16  266  201 |     1     1     13    0.1
+    S3/8      v2  uncoordinated |    1.0   24.15   147     8   34   49 |     0     0      0    0.0
+    S3/8      v2    coordinated |    1.0   24.15   147     8   34   49 |     1     0      0    0.0
+    S3/8  legacy  uncoordinated |    1.0   22.72  3911     8   39   49 |     0     0      0    0.0
+    S3/8  legacy    coordinated |    1.0   23.69  3995     8   39   49 |     1     1      7    0.0
+    S4/8      v2  uncoordinated |    1.0   26.45   228     8    5   37 |     0     0      0    0.0
+    S4/8      v2    coordinated |    1.0   26.45   228     8    5   37 |     1     0      0    0.0
+    S4/8  legacy  uncoordinated | 0.9958   29.73  8479     8   99   39 |     0     0      0    0.1
+    S4/8  legacy    coordinated | 0.9958   30.71  8563     8  116   39 |     1     1      7    0.1
+
+coordination-code call totals: {'init': 10, 'synchronize': 5, 'insert_holding': 36}
+wrote C:\Users\joy46\Documents\Projects\aeroplan-studio\runs\artifacts\PAPERPLAN1\prep_baseline_control\out\stepE_legacy_branch_probe.json

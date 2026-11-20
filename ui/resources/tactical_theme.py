@@ -33,6 +33,7 @@ AeroPlan Studio — 戰術 UI 主題系統
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Final
 
@@ -179,13 +180,23 @@ class TacticalFonts:
 
     @staticmethod
     def _pick(stack: tuple[str, ...], size: int) -> QFont:
-        """在 stack 中挑選第一個系統實際存在的字型。"""
+        """在 stack 中挑選第一個系統實際存在的字型。
+
+        ⚠ 2026-10-17 效能：HUD 每次重繪會呼叫這裡 10 次，以前每次都 `QFontDatabase.families()` 枚舉全機
+          近 300 個字族（≈0.03 ms/次）；6 張卡 × 12 Hz 就是每秒上千次。族名解析改成每個 stack 只做一次。
+        """
+        return QFont(TacticalFonts._resolve_family(stack), size)
+
+    @staticmethod
+    @lru_cache(maxsize=16)
+    def _resolve_family(stack: tuple[str, ...]) -> str:
+        """stack → 第一個系統有的字族名（沒有就 generic family）；結果快取（字型安裝不會在執行中變）。"""
         families = QFontDatabase.families()
         for name in stack:
             if name in families:
-                return QFont(name, size)
+                return name
         # fallback：讓 Qt 自行選擇 generic family
-        return QFont(stack[-1], size)
+        return stack[-1]
 
     @classmethod
     def css_mono(cls) -> str:

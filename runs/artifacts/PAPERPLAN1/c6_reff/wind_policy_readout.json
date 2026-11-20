@@ -1,0 +1,26 @@
+{
+  "A_max_layer": {
+    "W_R_mps": 5.0,
+    "R_eff_m": 200.0,
+    "R_plan_m": 200.0,
+    "inert": true
+  },
+  "A_op_layer": {
+    "W_R_mps": 5.0,
+    "R_eff_m": 200.0,
+    "R_plan_m": 200.0,
+    "inert": true
+  },
+  "B_max_layer": {
+    "W_R_mps": 5.0,
+    "R_eff_m": 120.0,
+    "R_plan_m": 120.0,
+    "inert": true
+  },
+  "B_op_layer": {
+    "W_R_mps": 5.0,
+    "R_eff_m": 120.0,
+    "R_plan_m": 120.0,
+    "inert": true
+  }
+}

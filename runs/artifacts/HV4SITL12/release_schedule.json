@@ -1,0 +1,23 @@
+{
+ "speedup": 5.0,
+ "planned_t_takeoff_s": {
+  "A1": 467.6,
+  "B2": 210.0,
+  "B3": 0.0,
+  "B4": 1309.4
+ },
+ "release_wall_s": {
+  "A1": 93.5,
+  "B2": 42.0,
+  "B3": 0.0,
+  "B4": 261.9
+ },
+ "actual_release_wall_s": {
+  "B3": 0.0,
+  "B2": 42.2,
+  "A1": 93.9,
+  "B4": 262.3
+ },
+ "mode_change_rejected": [],
+ "link_lost": []
+}

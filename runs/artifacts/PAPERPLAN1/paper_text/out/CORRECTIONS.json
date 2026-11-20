@@ -1,0 +1,159 @@
+{
+ "_label": "paper_text",
+ "_rule": "Every entry names a wrong number that exists in a product today, the value that replaces it, the method, and the file that carries the wrong value. No product outside this label was modified; the one exception is the additive, non-destructive sidecar prep_beamidp/beamidp_table.CORRECTION.json (nothing overwritten).",
+ "corrections": [
+  {
+   "id": "K1",
+   "what": "flown minimum horizontal separation, EVERY value ever published by this project",
+   "wrong_value": "HV4SITL15 104.2 m; HV4SITL16 101.0 m; HV4W00 102.2 m; HV4W05 100.8 m; HV4W55 103.8 m; BEAMIDP1 182.7 m",
+   "right_value": "100.689 / 100.685 / 100.435 / 100.291 / 100.426 / 180.774 m",
+   "method": "exact continuous-time minimum over both aircraft's native ~6 Hz dataflash POS samples, in the WGS84 ellipsoidal frame the planner itself uses; cross-checked by an independent Vincenty inverse at the closest-approach instant (agrees to 0.0000 m)",
+   "why_the_old_value_was_wrong": "hv_sitl_report.py:129-133 and binsep.py use a flat 111132 m per degree of latitude while hv_dccpp/scenario.py:87-88 uses the exact WGS84 frame (110757.52 m/deg here, 0.338 % less), and the binding B2-B3 encounter is almost purely north-south; on top of that the reporter interpolates ~1 Hz telemetry onto a 2 s grid, which is an upper bound by its own docstring",
+   "carriers_of_the_wrong_value": [
+    "docs/hv_dccpp/AASRC2026_abstract/cowork_brief.md:81 (abstract, 101.0 m)",
+    "docs/hv_dccpp/AASRC2026_abstract/cowork_brief.md:181 (3.2, 101.0 m and 104.2 m)",
+    "docs/hv_dccpp/AASRC2026_abstract/cowork_brief.md:192 (Table 2)",
+    "docs/hv_dccpp/AASRC2026_abstract/cowork_brief.md:218 (limitation 2, 'margin only 1.0 m')",
+    "docs/hv_dccpp/AASRC2026_abstract/cowork_brief.md:272-273 (appendix B)",
+    "runs/artifacts/HV4SITL15/separation_from_tracks.json (104.2)",
+    "runs/artifacts/PAPERPLAN1/c4_params/c4_evidence.json (101.0, HV4SITL16 re-run of the reporter algorithm)",
+    "runs/artifacts/{HV4W55,HV4W05,HV4W00,BEAMIDP1}/separation_from_tracks.json",
+    "runs/artifacts/PAPERPLAN1/sorties/*_binsep.json and sortie_results.json"
+   ],
+   "source_of_the_right_value": "runs/artifacts/PAPERPLAN1/analysis/out/separation.json frames.ecef; verify.json V1",
+   "note_on_prep_check": "prep_check said the 101.0 for HV4SITL16 has no product and must be DELETED. It does have one (c4_params/c4_evidence.json, a re-run of the reporter's algorithm, which rounds to the flat-frame 101.026 m). The right action is to REPLACE it with 100.685 m, not to delete it."
+  },
+  {
+   "id": "K2",
+   "what": "KPI table caption, calibration of the energy estimator",
+   "wrong_value": "「量測工具已對 HARVEST 自己的 S1/n=4 計畫校準，相差 1.62 %」",
+   "right_value": "estimator error band -6.86 % to +2.31 % (mean +1.00 %) over 3 cells and 12 aircraft; S1/n=4 alone is +1.30 % to +1.32 %",
+   "method": "parsed every per-aircraft err% row out of prep_baseline_control/out/stepI_dplan_rule.log and took min/max/mean",
+   "why": "the string 1.62 does not exist anywhere in prep_baseline_control/out/*; quoting it would advertise an error bar four times narrower than the measured one. The conclusion is unaffected: 112.5 % and 114.4 % are still outside the band.",
+   "carriers_of_the_wrong_value": ["runs/artifacts/PAPERPLAN1/prep_result.json ctrl.honesty_audit and ctrl.text_zh"],
+   "source_of_the_right_value": "runs/artifacts/PAPERPLAN1/prep_baseline_control/out/stepI_dplan_rule.log:31 and its per-aircraft tables"
+  },
+  {
+   "id": "K3",
+   "what": "KPI table, the other 10 benchmark cells' fraction of the allocator's energy budget",
+   "wrong_value": "17.0 %-68.7 %",
+   "right_value": "23.2 %-68.7 %",
+   "method": "d_ceq / D_model with D_model = 97.726 km, over the 10 cells with r1_over == 0; min is S1/16 (22.630/97.726 = 23.16 %), max is S5/16 (67.120/97.726 = 68.68 %)",
+   "carriers_of_the_wrong_value": ["runs/artifacts/PAPERPLAN1/prep_result.json ctrl.control_result, ctrl.text_zh and ctrl.kpi_table_md"],
+   "source_of_the_right_value": "runs/artifacts/PAPERPLAN1/prep_baseline_control/out/stepL2_dmodel_vs_baseline.json"
+  },
+  {
+   "id": "K4",
+   "what": "Beam-IDP sequential-order makespan extrapolation, two conflicting values",
+   "wrong_value": "2541.8 s (+8.25 %)",
+   "right_value": "2532.6 s (+7.86 %)",
+   "method_kept": "per aircraft: its own planned landing time plus the sum over ITS OWN cells of (sequential - Beam-IDP) turn time, then the fleet MAXIMUM. A1 2436.12, B2 2532.58, B3 2170.82 -> 2532.58 s. makespan is a max by definition and here it is set by B2 alone.",
+   "method_rejected": "planned makespan + fleet turn-time delta / n_uav = 2348.04 + 581.15/3 = 2541.76 s. This treats the saving as if it were shared by all three aircraft.",
+   "still_an_estimate": true,
+   "estimate_caveat": "entry/RTB legs and 4-D deconfliction are not re-planned in either method; the paper should quote the directly computed turn-time saving (-34.25 %) and mark the makespan figure as an estimate, or drop it for space",
+   "carriers_of_the_wrong_value": [
+    "runs/artifacts/PAPERPLAN1/prep_beamidp/beamidp_table.json field makespan_sequential_estimate_s = 2541.8",
+    "runs/artifacts/PAPERPLAN1/prep_beamidp/{tables.json,table_new_en.md,table_new_zh.md} if they carry either value"
+   ],
+   "action_taken": "additive sidecar written at runs/artifacts/PAPERPLAN1/prep_beamidp/beamidp_table.CORRECTION.json; the original file was NOT modified (it is generated by beamidp_table.py, and editing another label's product by hand would desynchronise it from its generator and violates the 'evidence lives under its own label' rule)",
+   "remaining_action_for_the_user": "either regenerate beamidp_table.json with the corrected recipe, or accept the sidecar"
+  },
+  {
+   "id": "K5",
+   "what": "Table Y claim that all four strip orders are bit-identical in the paper scenario",
+   "wrong_value": "「四種條帶序逐位元相同」 / 「所飛之條帶序與順序來回掃描完全一致」",
+   "right_value": "the COSTS are term-by-term equal (42.32 s / 757.4 m per HERO cell at the 120 m cap; 42.35 s / 758.0 m at 119.5 m); the ORDERS are not - Beam-IDP commits [1, 0] in Z2_1_B_k1 and Z4_1_B_k1, and Held-Karp commits [1, 0] in Z3_1_B_k1 and Z4_1_B_k1",
+   "method": "read every order array out of beamidp_table.json for both paper-scenario entries and compared them per cell",
+   "right_phrasing": "本情境無可改變成本之排序自由度，四種序之成本逐項相同",
+   "carriers_of_the_wrong_value": ["runs/artifacts/PAPERPLAN1/prep_result.json beam.paper_scenario_table and beam.text_zh"],
+   "source_of_the_right_value": "runs/artifacts/PAPERPLAN1/paper_text/out/NUMBERS.json paper_scenario_orders (ALL_FOUR_ORDERS_IDENTICAL = false, ALL_FOUR_COSTS_IDENTICAL = true)"
+  },
+  {
+   "id": "K6",
+   "what": "benchmark CSV provenance claim in the KPI caption",
+   "wrong_value": "「取自已納管的 research/cpp_benchmark/results/project_rows_5e0295f5_dirty.csv」",
+   "right_value": "that CSV is UNTRACKED (git status: ?? research/cpp_benchmark/results/project_rows_5e0295f5_dirty.csv; the version-controlled one is project_rows_c5653199_dirty.csv), and research/cpp_benchmark/bench.py - which computes max_km - is MODIFIED in the working tree (' M'), while the CSV's provenance block records only swarm_coordinator.py and dccpp_path_builder.py, not bench.py",
+   "method": "git ls-files research/cpp_benchmark/results/ and git status --porcelain research/cpp_benchmark/, run in this session",
+   "consequence": "the row is reproducible in-house (this round's re-run is bit-identical and swarm_coordinator.py's md5 matches the provenance) but NOT third-party reproducible; the caption must say so",
+   "carriers_of_the_wrong_value": ["runs/artifacts/PAPERPLAN1/prep_result.json ctrl.text_zh caption"]
+  },
+  {
+   "id": "K7",
+   "what": "the paper's existing flight evidence exceeded the 120 m ceiling",
+   "wrong_value": "「最高高度貼齊 120 m 上限（最大超出 0.16 m）」 reads as compliant",
+   "right_value": "HV4SITL15 and HV4SITL16 each exported 88 navigation items above 120.000 m (38/13/37) and spent 325.79 s and 330.13 s of cumulative fleet time above 120.000 m; flown maxima 120.1522 m and 120.1619 m. At the 119.5 m ceiling all four new sorties have 0 items above 120 and 0.00 s above 120.000 m.",
+   "method": "dataflash POS.RelHomeAlt (~6 Hz), time-above by linear interpolation of the level crossings; corroborates c1_altitude/binlog_alt.json (147.3/56.8/126.1 s) to 0.03 s with an independent implementation",
+   "source_of_the_right_value": "runs/artifacts/PAPERPLAN1/analysis/out/altitude.json"
+  },
+  {
+   "id": "K8",
+   "what": "makespan definition",
+   "wrong_value": "the disarm rule, quoted as the primary definition",
+   "right_value": "last downward crossing of RelHomeAlt = 2.0 m across the fleet, on each aircraft's own GPS time-of-week clock: HV4W55 1281.91 s, HV4W05 1234.78 s, HV4W00 1207.88 s, BEAMIDP1 2272.34 s",
+   "why": "the runner's 'below 2 m and disarmed' touchdown lands on the FINAL flight.csv row for the last aircraft in all four sorties, because the monitor loop stops at that instant - so the disarm makespan is partly an artefact of when logging stopped; and the runner uses ONE median clock offset for three instances whose boot clocks differ by ~1 s",
+   "disarm_values_for_the_table_note": {"HV4W55": 1292.918, "HV4W05": 1245.638, "HV4W00": 1218.473, "BEAMIDP1": 2283.358},
+   "source_of_the_right_value": "runs/artifacts/PAPERPLAN1/analysis/out/timing.json and verify.json V2"
+  },
+  {
+   "id": "K9",
+   "what": "survey area denominator",
+   "wrong_value": "1.248 km2 (1 248 034.8 m2)",
+   "right_value": "1 243 447.7 m2 (1.2434 km2) on the WGS84 ellipsoid; the nominal 1560 x 800 m is 1559.6 x 797.3 m there",
+   "method": "meridian and prime-vertical radii at lat 23.95 deg applied to the scenario polygon, recomputed in this label; matches analysis/out/verify.json V3 to 0.2 m2",
+   "why": "the scenario polygon was authored with the flat 111132 m/deg; the planner reads it through the exact GeoFrame",
+   "effect_on_coverage_ratio": "none to 1e-4; only the denominator changes",
+   "carriers_of_the_wrong_value": ["cowork_brief.md:81, :177, :188, :271", "runs/artifacts/*/coverage_from_tracks.json"]
+  },
+  {
+   "id": "K10",
+   "what": "EKF wind magnitude reported by the sortie runner",
+   "wrong_value": "ekf_wind_from_median_components 4.80 / 4.87 / 4.88 m/s",
+   "right_value": "EKF3 (XKF2) cruise-band medians 4.94 / 4.96 / 4.93 m/s against a commanded 5.00",
+   "why": "binalt.py pools NKF2 (EKF2) with XKF2 (EKF3) into one list and includes ground, climb and descent samples where the wind state has not converged",
+   "source_of_the_right_value": "runs/artifacts/PAPERPLAN1/analysis/out/uav_kinematics.json L2_ekf_state_dataflash",
+   "note": "the runner is right that this field supersedes the broken mean_from_dir_deg (an arithmetic mean of a wrapping angle); it is still biased low by 0.10-0.14 m/s"
+  },
+  {
+   "id": "K11",
+   "what": "prep_beamidp's geometry-search line 'all at 119.5 m'",
+   "wrong_value": "one 3000x3000 Pioneer n=6 -> makespan 3842.6 s, listed under 'all at 119.5 m'",
+   "right_value": "3842.61 s is the 120.0 m figure; the same geometry at 119.5 m is 3013.88 s",
+   "source": "prep_runner beamidp_sortie_c120.json / _c1195.json (both carry the cap in their _note)",
+   "effect_on_the_paper": "none - the 3000x3000 geometry was rejected. But 'lowering the ceiling is nearly free' is only true for the paper's cell: on that geometry 120.0 -> 119.5 moves makespan 3842.61 -> 3013.88 s (-21.6 %) and min separation 190.6 -> 136.5 m. Any sentence about the cost of 119.5 m must be scoped to the paper's cell."
+  },
+  {
+   "id": "K12",
+   "what": "k increase with wind, as worded in the draft C6 note",
+   "wrong_value": "「W = 6 m/s 時為 213 m／130 m，W = 8 m/s 時為 245 m／151 m，跳帶數 k 亦由 5／3 增為 6／4」 reads as if k rises at both",
+   "right_value": "R_eff 212.68 / 129.85 m at W = 6 with k STILL 5 / 3; R_eff 244.74 / 151.45 m at W = 8, where k first becomes 6 / 4",
+   "method": "called hv_dccpp.platform.r_eff and hv_dccpp.dubins.skip_k at s = 96.591 in this label",
+   "source_of_the_right_value": "runs/artifacts/PAPERPLAN1/paper_text/out/NUMBERS.json r_eff"
+  }
+ ],
+ "not_corrected_but_flagged": [
+  {
+   "id": "F1",
+   "what": "the PLANNED separation is also an upper bound, not a guarantee",
+   "detail": "hv_dccpp/sim.py:1007-1034 min_separation() samples a grid of cfg.dt_4d_s = 2.0 s (mission.py:1092) and takes the value AT grid points. Measured on these very tracks a 2 s grid overstates the true minimum by +4.19 m (HV4W55), +0.01 m (HV4W05) and +0.09 m (HV4W00); the error is grid-PHASE dependent, not monotone in the step. So 'planned 105.70 m' does not imply 'flown >= 100 m'.",
+   "source": "runs/artifacts/PAPERPLAN1/analysis/out/separation.json grid_cost_ecef_frame"
+  },
+  {
+   "id": "F2",
+   "what": "HERO's R_theo = 75 m and phi_max = 25 deg are mutually inconsistent",
+   "detail": "geometric value V_a^2/(g tan phi) = 78.9 m (+5.2 %); flying a 120 m GROUND circle at the downwind phase in W = 5 needs 26.07 deg > 25 deg. Pioneer is fine (19.69 deg <= 20 deg, geometric 129.5 m vs table 130 m, -0.4 %).",
+   "action": "do NOT change platform.py's 75 before submission (it would desynchronise every existing product); add the Table 1 note instead, and never write 'R_eff guarantees the bank stays within phi_max'"
+  },
+  {
+   "id": "F3",
+   "what": "coverage of the two wind sorties is not 100 %",
+   "detail": "HV4W55 99.9666 % (415 m2 uncovered), HV4W05 99.9586 % (515 m2). HV4W00, HV4SITL15/16 and BEAMIDP1 are 100.0000 %. The planner-side fact 'uncovered subregions = 0' remains true for all of them (plan/mission_summary.json uncovered = []).",
+   "source": "runs/artifacts/PAPERPLAN1/analysis/out/timing.json coverage_all_airborne"
+  },
+  {
+   "id": "F4",
+   "what": "there is no WIND message in the dataflash",
+   "detail": "0 WIND records in all 18 .BIN logs. ArduPilot logs the wind estimate as the EKF state NKF2/XKF2 VWN,VWE; MAVLink WIND is telemetry-only and reaches flight.csv only because the patched runner mirrors it there. Any plan that says 'read the dataflash WIND message' is based on a false premise.",
+   "source": "runs/artifacts/PAPERPLAN1/analysis/cache/index.json per-log message counts"
+  }
+ ]
+}

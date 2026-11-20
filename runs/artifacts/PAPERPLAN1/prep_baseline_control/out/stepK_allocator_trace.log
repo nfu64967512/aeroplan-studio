@@ -1,0 +1,33 @@
+  (also patched hv_dccpp.planner.allocate)
+
+================ HARVEST S1/n=2 ================
+coverage=0.5277  strips flown per uav={'A1': 9, 'A2': 9}  total strips=36
+strips per cell (flown/total): Z2_1:0/18, Z3_1:0/18
+MissionPlan.uncovered = [['Z3_1', 'no_feasible_insertion']]
+  ASSIGN_CONFIG_AND_COUNT call 0: by_cell(lambda)={'Z2_1': ['A', 2], 'Z3_1': ['A', 0]}
+      partial(strips cut for energy)={}  infeasible={}
+  ALLOCATE call 0: lambda_by_cell={'Z2_1': ['A', 2]}  plans(tasks per uav)={'A1': 1, 'A2': 1}
+      uncoverable=[['Z3_1', 'no_feasible_insertion']]
+      leftover_strips=0 e.g. []
+
+================ HARVEST S1/n=4 ================
+coverage=1.0  strips flown per uav={'A1': 9, 'A2': 9, 'A3': 9, 'A4': 9}  total strips=36
+strips per cell (flown/total): Z2_1:0/9, Z3_1:0/9, Z4_1:0/9, Z5_1:0/9
+MissionPlan.uncovered = []
+  ASSIGN_CONFIG_AND_COUNT call 0: by_cell(lambda)={'Z2_1': ['A', 1], 'Z3_1': ['A', 1], 'Z4_1': ['A', 1], 'Z5_1': ['A', 1]}
+      partial(strips cut for energy)={}  infeasible={}
+  ALLOCATE call 0: lambda_by_cell={'Z2_1': ['A', 1], 'Z3_1': ['A', 1], 'Z4_1': ['A', 1], 'Z5_1': ['A', 1]}  plans(tasks per uav)={'A1': 1, 'A2': 1, 'A3': 1, 'A4': 1}
+      uncoverable=[]
+      leftover_strips=0 e.g. []
+
+================ HARVEST S5/n=8 ================
+coverage=0.617  strips flown per uav={'A1': 5, 'A2': 4, 'A3': 5, 'A4': 4, 'A5': 5, 'A6': 4, 'A7': 5, 'A8': 4}  total strips=72
+strips per cell (flown/total): Z2_1:0/9, Z3_1:0/9, Z4_1:0/9, Z5_1:0/9, Z6_1:0/9, Z7_1:0/9, Z8_1:0/9, Z9_1:0/9
+MissionPlan.uncovered = [['Z4_1', 'no_feasible_insertion'], ['Z7_1', 'no_feasible_insertion'], ['Z5_1', 'no_feasible_insertion'], ['Z6_1', 'no_feasible_insertion']]
+  ASSIGN_CONFIG_AND_COUNT call 0: by_cell(lambda)={'Z2_1': ['A', 2], 'Z3_1': ['A', 2], 'Z4_1': ['A', 0], 'Z5_1': ['A', 0], 'Z6_1': ['A', 0], 'Z7_1': ['A', 0], 'Z8_1': ['A', 2], 'Z9_1': ['A', 2]}
+      partial(strips cut for energy)={}  infeasible={}
+  ALLOCATE call 0: lambda_by_cell={'Z2_1': ['A', 2], 'Z3_1': ['A', 2], 'Z8_1': ['A', 2], 'Z9_1': ['A', 2]}  plans(tasks per uav)={'A1': 1, 'A2': 1, 'A3': 1, 'A4': 1, 'A5': 1, 'A6': 1, 'A7': 1, 'A8': 1}
+      uncoverable=[['Z4_1', 'no_feasible_insertion'], ['Z7_1', 'no_feasible_insertion'], ['Z5_1', 'no_feasible_insertion'], ['Z6_1', 'no_feasible_insertion']]
+      leftover_strips=0 e.g. []
+
+wrote C:\Users\joy46\Documents\Projects\aeroplan-studio\runs\artifacts\PAPERPLAN1\prep_baseline_control\out\stepK_allocator_trace.json

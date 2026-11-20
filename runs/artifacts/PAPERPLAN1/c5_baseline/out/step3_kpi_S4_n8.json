@@ -1,0 +1,193 @@
+{
+  "scenario": "S4",
+  "n": 8,
+  "mix": false,
+  "wind_mps_fromdeg": [
+    5.0,
+    270.0
+  ],
+  "alt_m": 140.0,
+  "pitch_m": 113.16065276116665,
+  "n_a": 8,
+  "n_b": 0,
+  "harvest_sec": 60.7,
+  "harvest": {
+    "makespan_s": 4273.810050411642,
+    "max_km": 32.5,
+    "total_km": 215.99,
+    "coverage": 1.0,
+    "passed": true,
+    "coverage_ok": true,
+    "energy_ok": true,
+    "curvature_ok": true,
+    "agl_ok": true,
+    "slope_ok": true,
+    "airspace_ok": true,
+    "link_ok": true,
+    "integrity_ok": true,
+    "separation_ok": true,
+    "n_conflicts": 0,
+    "min_sep_h_m": 160.6,
+    "min_sep_v_m": Infinity,
+    "total_distance_m": 214967.0,
+    "uncovered": 0,
+    "per_uav_violations": {
+      "A1": {},
+      "A2": {},
+      "A3": {},
+      "A4": {},
+      "A5": {},
+      "A6": {},
+      "A7": {},
+      "A8": {}
+    },
+    "max_leg_km": 32.36
+  },
+  "dccpp_sec": 0.0,
+  "dccpp_raw": {
+    "makespan_s": 1390.356009134191,
+    "n_uav": 8,
+    "total_km": 164.45,
+    "max_km": 26.45,
+    "coverage": 1.0,
+    "overhead": 2.215,
+    "redundancy": 1.221,
+    "balance": 1.287,
+    "scan_rate": 32.669,
+    "waste": 0.193,
+    "segment_types": {
+      "TAKEOFF": 56,
+      "ENTRY": 8,
+      "OPERATION": 72,
+      "TRANSFER": 28,
+      "LANDING": 64
+    },
+    "alt_min_m": 0.0,
+    "alt_max_m": 140.0,
+    "builtwaypoint_fields": [
+      "alt",
+      "heading_compass_deg",
+      "lat",
+      "lon",
+      "segment_type"
+    ],
+    "t_land_s": {
+      "D1": 1230.5,
+      "D2": 1200.6,
+      "D3": 1183.8,
+      "D4": 1158.1,
+      "D5": 847.6,
+      "D6": 760.2,
+      "D7": 672.6,
+      "D8": 598.3
+    }
+  },
+  "dccpp_kinematics": {
+    "D1": {},
+    "D2": {},
+    "D3": {},
+    "D4": {},
+    "D5": {},
+    "D6": {},
+    "D7": {},
+    "D8": {}
+  },
+  "dccpp_kinematics_sample": {
+    "D1": [],
+    "D2": []
+  },
+  "dccpp_separation": {
+    "ran": true,
+    "n_conflicts": 5,
+    "kinds": {
+      "4d": 5
+    },
+    "sample": [
+      "4d D7-D8 t=574 d_h=23 d_v=0",
+      "4d D6-D7 t=662 d_h=5 d_v=21",
+      "4d D5-D6 t=726 d_h=19 d_v=47",
+      "4d D2-D3 t=1136 d_h=18 d_v=0",
+      "4d D1-D2 t=1148 d_h=4 d_v=0"
+    ],
+    "min_sep_h_m": 0.0,
+    "min_sep_v_m": 0.0,
+    "at_t_s": 0.0,
+    "pair": [
+      "D1",
+      "D2"
+    ]
+  },
+  "dccpp_pad": {
+    "ran": true,
+    "n_conflicts": 37,
+    "sample": [
+      "corridor D1-D2 t=0",
+      "corridor D1-D3 t=0",
+      "corridor D1-D4 t=0",
+      "corridor D1-D5 t=0",
+      "corridor D1-D6 t=0",
+      "corridor D1-D7 t=0",
+      "corridor D1-D8 t=0",
+      "corridor D1-D2 t=1200"
+    ]
+  },
+  "dccpp_endurance": {
+    "D1": {
+      "cls": "A",
+      "d_plan_km": 26.46,
+      "d_use_km": 133.0,
+      "over": false,
+      "frac": 0.199
+    },
+    "D2": {
+      "cls": "A",
+      "d_plan_km": 25.81,
+      "d_use_km": 133.0,
+      "over": false,
+      "frac": 0.194
+    },
+    "D3": {
+      "cls": "A",
+      "d_plan_km": 25.45,
+      "d_use_km": 133.0,
+      "over": false,
+      "frac": 0.191
+    },
+    "D4": {
+      "cls": "A",
+      "d_plan_km": 24.9,
+      "d_use_km": 133.0,
+      "over": false,
+      "frac": 0.187
+    },
+    "D5": {
+      "cls": "A",
+      "d_plan_km": 18.22,
+      "d_use_km": 133.0,
+      "over": false,
+      "frac": 0.137
+    },
+    "D6": {
+      "cls": "A",
+      "d_plan_km": 16.34,
+      "d_use_km": 133.0,
+      "over": false,
+      "frac": 0.123
+    },
+    "D7": {
+      "cls": "A",
+      "d_plan_km": 14.46,
+      "d_use_km": 133.0,
+      "over": false,
+      "frac": 0.109
+    },
+    "D8": {
+      "cls": "A",
+      "d_plan_km": 12.86,
+      "d_use_km": 133.0,
+      "over": false,
+      "frac": 0.097
+    }
+  },
+  "dccpp_endurance_n_over": 0
+}

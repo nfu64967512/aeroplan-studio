@@ -20,6 +20,69 @@ from sensors.terrain_manager import TerrainManagerBase
 
 logger = logging.getLogger(__name__)
 
+_SRTM_NOTE = "依 SRTM 慣例當正高（EGM96）"
+
+
+def _vertical_datum_from_wkt(wkt: str) -> Tuple[Optional[str], str]:
+    """DEM 的 CRS（WKT）→ ``(vertical_datum, 說明)``；``vertical_datum`` ∈ {"msl", "ellipsoid", None}（A6）。
+
+    兩步判斷（pyproj 皆**延遲 import**：避免 sensors → survey／pyproj 的模組頂層依賴）：
+
+    1. 先以 pyproj 解析。**非複合**、3 軸、垂直（up）軸是 "Ellipsoidal height" 的 CRS ⇒ "ellipsoid"。這一類橢球高
+       宣告沒有垂直分量（``sub_crs_list`` 是空的），第 2 步看不到：EPSG:4979（WGS 84 3D）、``CRS.to_3d()`` 的投影
+       3D CRS，以及 WKT1 ``COMPD_CS[…, VERT_CS["Ellipsoid", VERT_DATUM[…, 2002]]]``（PROJ 會把它升級成 Geographic 3D）。
+       ⚠ 2026-10-15 審查（M1）：之前漏掉這一類 ⇒ 回 None ⇒ 被當正高、note 還寫「依 SRTM 慣例」——錯的說明。
+       非複合 3 軸但垂直軸不是橢球高 ⇒ None 並寫出軸名（不猜）。
+    2. 複合 CRS 用 ``survey.checkpoints.raster_vertical_datum``（垂直分量）判斷：EGM96／TWVD2001 → "msl"（兩者差別在此
+       丟失：DemGrid 只分正高／橢球高）；名稱含 Ellipsoid → "ellipsoid"。
+
+    沒有垂直資訊（2-D CRS；專案的 taiwan_dem.tif、huwei_dem.tif 實測皆為 EPSG:4326 2-D）、無法辨識的垂直 CRS、
+    或讀不了 → None（＝未宣告；HARVEST 轉接層依 terrain_func 的 AMSL 契約當正高，並把這段說明寫進
+    ``terrain_datum(...)`` note，不默默決定）。
+    """
+    if not wkt:
+        return None, f"DEM 檔沒有 CRS 資訊 ⇒ 高程基準未宣告，{_SRTM_NOTE}"
+    try:
+        from pyproj import CRS
+        crs = CRS.from_user_input(wkt)
+    except Exception as e:                                     # noqa: BLE001 - pyproj 缺席／WKT 解析失敗
+        return None, f"讀不了 DEM 的 CRS（{type(e).__name__}）⇒ 高程基準未宣告，{_SRTM_NOTE}"
+    base = crs.source_crs if (crs.is_bound and crs.source_crs is not None) else crs   # 帶 TOWGS84 的 BoundCRS
+    if not base.is_compound:
+        axes = list(base.axis_info or [])
+        up = [a for a in axes if str(a.direction).lower() == "up"]
+        if len(axes) == 3 and up:
+            ax = str(up[0].name or "")
+            if "ellipsoidal height" in ax.lower():
+                return "ellipsoid", f"DEM CRS 為 3-D {base.type_name}「{base.name}」，垂直軸 = 橢球高（{ax}）"
+            return None, (f"DEM CRS 為 3-D {base.type_name}「{base.name}」但垂直軸「{ax}」無法辨識 ⇒ 高程基準未宣告，"
+                          f"{_SRTM_NOTE}")
+    try:
+        from survey.checkpoints import raster_vertical_datum
+        name = raster_vertical_datum(wkt)
+    except Exception as e:                                     # noqa: BLE001 - pyproj 缺席等
+        return None, f"讀不了 DEM 的垂直 CRS（{type(e).__name__}）⇒ 高程基準未宣告，{_SRTM_NOTE}"
+    if name is None:
+        return None, f"DEM 無垂直 CRS ⇒ 高程基準未宣告，{_SRTM_NOTE}"
+    if name in ("EGM96", "TWVD2001"):
+        return "msl", f"DEM 垂直 CRS = {name}（正高）"
+    if name == "ellipsoidal":
+        return "ellipsoid", "DEM 垂直 CRS = 橢球高"
+    return None, f"DEM 垂直 CRS「{str(name).replace('other:', '')}」無法辨識 ⇒ 高程基準未宣告，{_SRTM_NOTE}"
+
+
+def _vertical_datum_from_meta(value) -> Tuple[Optional[str], str]:
+    """numpy DEM 的 metadata ``vertical_datum`` → ``(vertical_datum, 說明)``；缺鍵或無法辨識 → None 並寫明（不讓載入失敗：
+    載入失敗時呼叫端會退回平地 DEM，那更糟）。"""
+    if value is None:
+        return None, f"DEM metadata 沒有 vertical_datum ⇒ 高程基準未宣告，{_SRTM_NOTE}"
+    s = str(value).strip().lower()
+    if s in ("msl", "amsl", "egm96", "twvd2001", "orthometric", "正高"):
+        return "msl", f"DEM metadata vertical_datum = {value}（正高）"
+    if s in ("ellipsoid", "ellipsoidal", "h_ell", "橢球高"):
+        return "ellipsoid", f"DEM metadata vertical_datum = {value}（橢球高）"
+    return None, f"DEM metadata vertical_datum={value!r} 無法辨識 ⇒ 高程基準未宣告，{_SRTM_NOTE}"
+
 
 class DEMTerrainManager(TerrainManagerBase):
     """
@@ -31,7 +94,15 @@ class DEMTerrainManager(TerrainManagerBase):
             elev = dem.get_elevation(36.5, 93.5)  # 查詢海拔
         # 也可作為 terrain_func 傳入 AltitudePlanner
         alt_planner.plan_altitude(path_2d, terrain_func=dem.get_elevation)
+
+    高程基準（A6）：``vertical_datum`` ∈ {"msl", "ellipsoid", None} 是本來源的**自我宣告**（載入時由 DEM 的垂直
+    CRS／metadata 判斷；None ＝ 未宣告），``vertical_datum_note`` 寫明怎麼判斷的。HARVEST 轉接層經
+    ``get_elevation.__self__`` 讀這兩個屬性；None ⇒ 依 terrain_func 的 AMSL 契約當正高，並在 note 說出來。
     """
+
+    #: 高程基準自我宣告（A6）；載入成功後才有意義
+    vertical_datum: Optional[str] = None
+    vertical_datum_note: str = ""
 
     def __init__(self, default_elevation: float = 0.0):
         self._default_elev = default_elevation
@@ -46,6 +117,8 @@ class DEMTerrainManager(TerrainManagerBase):
         self._dlon = 0.0
         self._loaded = False
         self._nodata = -9999.0
+        self.vertical_datum = None
+        self.vertical_datum_note = ""
         logger.info(f"DEMTerrainManager initialized (default_elev={default_elevation})")
 
     # ── DEM 載入 ──────────────────────────────────────────
@@ -65,6 +138,10 @@ class DEMTerrainManager(TerrainManagerBase):
         返回:
             True 表示載入成功
         """
+        # 記下來源路徑：UI 端要用它把同一份 DEM 轉交給規劃器（見 main_window 的
+        # 覆蓋規劃入口），否則「載入 DEM」與「規劃時用到 DEM」是兩件不相干的事。
+        self.dem_path = str(file_path)
+        self.vertical_datum, self.vertical_datum_note = None, ""     # 重新載入時不殘留上一份的宣告
         # ── 嘗試 rasterio ──
         try:
             return self._load_rasterio(file_path)
@@ -105,6 +182,8 @@ class DEMTerrainManager(TerrainManagerBase):
             self._dlat = transform.e  # 負值（從上到下）
             self._lon_max = self._lon_min + self._cols * self._dlon
             self._lat_min = self._lat_max + self._rows * self._dlat
+            _wkt = src.crs.to_wkt() if src.crs is not None else ""
+        self.vertical_datum, self.vertical_datum_note = _vertical_datum_from_wkt(_wkt)
         self._loaded = True
         logger.info(
             f"DEM 載入成功 (rasterio): {self._rows}×{self._cols}, "
@@ -130,7 +209,9 @@ class DEMTerrainManager(TerrainManagerBase):
         self._dlat = gt[5]
         self._lon_max = self._lon_min + self._cols * self._dlon
         self._lat_min = self._lat_max + self._rows * self._dlat
+        _wkt = ds.GetProjection() or ""
         ds = None
+        self.vertical_datum, self.vertical_datum_note = _vertical_datum_from_wkt(_wkt)
         self._loaded = True
         logger.info(
             f"DEM 載入成功 (GDAL): {self._rows}×{self._cols}, "
@@ -143,7 +224,8 @@ class DEMTerrainManager(TerrainManagerBase):
         """
         載入 numpy 格式 DEM：
         - .npy 檔案 + 同名 .json 檔案包含 metadata
-          {"lat_min": ..., "lat_max": ..., "lon_min": ..., "lon_max": ...}
+          {"lat_min": ..., "lat_max": ..., "lon_min": ..., "lon_max": ..., "vertical_datum"?: "msl"|"ellipsoid"|"EGM96"…}
+          （``vertical_datum`` 選填；缺或無法辨識 ⇒ 未宣告，見 :func:`_vertical_datum_from_meta`）
         """
         import json
         from pathlib import Path
@@ -160,6 +242,7 @@ class DEMTerrainManager(TerrainManagerBase):
             self._lat_max = meta['lat_max']
             self._lon_min = meta['lon_min']
             self._lon_max = meta['lon_max']
+            self.vertical_datum, self.vertical_datum_note = _vertical_datum_from_meta(meta.get('vertical_datum'))
         else:
             raise FileNotFoundError(f"找不到 metadata: {meta_path}")
         self._dlat = -(self._lat_max - self._lat_min) / self._rows
@@ -187,7 +270,7 @@ class DEMTerrainManager(TerrainManagerBase):
             lon: 經度（度）
 
         返回:
-            海拔高度 (m, AMSL)
+            海拔高度 (m；基準見 :attr:`vertical_datum`，未宣告時依慣例為 AMSL)
         """
         if not self._loaded or self._data is None:
             return self._default_elev

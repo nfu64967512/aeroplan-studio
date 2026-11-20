@@ -1,0 +1,70 @@
+{
+  "paper10": [
+    [
+      "S1",
+      4
+    ],
+    [
+      "S1",
+      8
+    ],
+    [
+      "S1",
+      16
+    ],
+    [
+      "S2",
+      4
+    ],
+    [
+      "S2",
+      8
+    ],
+    [
+      "S3",
+      4
+    ],
+    [
+      "S3",
+      8
+    ],
+    [
+      "S4",
+      4
+    ],
+    [
+      "S4",
+      8
+    ],
+    [
+      "S5",
+      16
+    ]
+  ],
+  "aggregate": {
+    "homo": {
+      "n": 12,
+      "end": 0,
+      "sep": 117,
+      "pad": 623,
+      "agl": 90,
+      "cells_sep": 8,
+      "cells_pad": 12,
+      "cells_end": 0,
+      "cells_agl": 12
+    },
+    "mix": {
+      "n": 12,
+      "end": 5,
+      "sep": 120,
+      "pad": 629,
+      "agl": 90,
+      "cells_sep": 9,
+      "cells_pad": 12,
+      "cells_end": 2,
+      "cells_agl": 12
+    }
+  },
+  "corner_fit_verdict": "UNRELIABLE on Dubins-discretised arcs; excluded from the paper table",
+  "corner_fit_need_over_halfleg": 1.0003126465607108
+}

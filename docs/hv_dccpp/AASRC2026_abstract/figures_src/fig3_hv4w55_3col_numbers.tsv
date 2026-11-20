@@ -1,0 +1,25 @@
+格	圖上項目	圖上數字	檔案	欄位	JSON 值	一致	備註
+頂列	A1 規劃航程 (km)	10.294	metrics.json	HV4W55.timing.per_uav.A1.plan_km	10.2936	OK	
+頂列	A1 飛行航程 (km)	10.686	metrics.json	HV4W55.timing.per_uav.A1.flown_km	10.686	OK	
+頂列	B2 規劃航程 (km)	7.926	metrics.json	HV4W55.timing.per_uav.B2.plan_km	7.9265	OK	JSON 值恰為 .5，依原始值 7.9264736934434215（runs/artifacts/HV4W55/plan/mission_summary.json uavs.B2.distance_m ÷ 1000）判定
+頂列	B2 飛行航程 (km)	8.297	metrics.json	HV4W55.timing.per_uav.B2.flown_km	8.297	OK	
+頂列	B3 規劃航程 (km)	12.441	metrics.json	HV4W55.timing.per_uav.B3.plan_km	12.4406	OK	
+頂列	B3 飛行航程 (km)	12.905	metrics.json	HV4W55.timing.per_uav.B3.flown_km	12.9054	OK	
+b	作業上限線 (m)	120.000	NUMBERS.json	trials.HV4W55.altitude.flown_max_agl_m + margin_to_120_m	120.0	OK	＝ up_lib.CEIL_OPS_M（已斷言相等）
+b	規劃上限線 (m)	119.5	NUMBERS.json	trials.HV4W55.ceiling_m	119.5	OK	
+b	對照架次規劃上限 (m)	120.0	NUMBERS.json	trials.HV4W55R.ceiling_m	120.0	OK	
+b	本架次逾越 120.000 m 累計 (s)	0.00	NUMBERS.json	trials.HV4W55.altitude.t_above_120_s	0.0	OK	
+b	對照架次逾越 120.000 m 累計 (s)	354.93	NUMBERS.json	trials.HV4W55R.altitude.t_above_120_s	354.925	OK	JSON 值恰為 .5，依原始值 354.9251434323077（up_lib.time_above 逐機未捨入加總（BIN 重抽，與 up_metrics.altitude 同一函式））判定
+c	違規門檻 水平 (m)	100	metrics.json	HV4W55.separation.reporter_raw.thresholds.d_sep_m	100.0	OK	
+c	違規門檻 垂直 (m)	50	metrics.json	HV4W55.separation.reporter_raw.thresholds.dh_sep_m	50.0	OK	
+c	實飛最小水平間距 (m)	100.426	NUMBERS.json	trials.HV4W55.separation.flown_exact_m	100.4256	OK	
+c	最小間距機對	B2–B3	NUMBERS.json	trials.HV4W55.separation.binding_pair	B2-B3	OK	
+c	最小點垂直差 (m)	28.394	NUMBERS.json	trials.HV4W55.separation.vert_at_min_m	28.3942	OK	
+c	B2–B3 違規數	0	metrics.json	HV4W55.separation.frames.ecef.pairs.B2-B3.n_violation_intervals	0	OK	
+c	B2–B3 對取樣數	4714	metrics.json	HV4W55.separation.frames.ecef.pairs.B2-B3.n_samples	4714	OK	
+圖說	模擬風速 (m/s)	5	NUMBERS.json	trials.HV4W55.sim_wind.spd_mps	5.0	OK	
+圖說	模擬風向（來向，°）	270	NUMBERS.json	trials.HV4W55.sim_wind.dir_from_deg	270.0	OK	
+圖說	規劃上限 (m)	119.5	NUMBERS.json	trials.HV4W55.ceiling_m	119.5	OK	
+圖說	對照架次規劃上限 (m)	120.0	NUMBERS.json	trials.HV4W55R.ceiling_m	120.0	OK	
+圖說	違規門檻 水平 (m)	100	metrics.json	HV4W55.separation.reporter_raw.thresholds.d_sep_m	100.0	OK	
+圖說	違規門檻 垂直 (m)	50	metrics.json	HV4W55.separation.reporter_raw.thresholds.dh_sep_m	50.0	OK	

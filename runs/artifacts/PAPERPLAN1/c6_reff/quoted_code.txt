@@ -1,0 +1,99 @@
+### hv_dccpp/platform.py:295-304 (the definition)
+    # ------------------------------------------------------------------ 轉彎
+    def r_eff(self, wind_speed_mps: float) -> float:
+        """風修正有效轉彎半徑 R_eff(W) = max{R_plan, R_theo (1+W/Va)²}（規格 §3.2、D1；擺線最大曲率半徑）。"""
+        w = max(0.0, float(wind_speed_mps))
+        return max(self.turn_radius_planning_m,
+                   self.turn_radius_theoretical_m * (1.0 + w / self.cruise_airspeed_mps) ** 2)
+
+    def w_star(self) -> float:
+        """R_plan 內建裕度可吸收之風速 W* = Va(√(R_plan/R_theo) − 1)（A 5.17、B 5.03 m/s；規格 §3.2）。"""
+        return self.cruise_airspeed_mps * (math.sqrt(self.turn_radius_planning_m / self.turn_radius_theoretical_m) - 1.0)
+
+### hv_dccpp/platform.py:249-256 (validator: R_theo vs Va^2/(g tan phi), +/-10%)
+        # 4) Va²/(g tanφ) ≈ R_theo（±10%）
+        r_theo = va * va / (G_MPS2 * math.tan(math.radians(self.max_bank_angle_deg)))
+        if abs(r_theo - self.turn_radius_theoretical_m) > 0.10 * self.turn_radius_theoretical_m:
+            err.append(f"Va²/(g·tanφ) = {r_theo:.1f} vs turn_radius_theoretical_m "
+                       f"{self.turn_radius_theoretical_m}（±10%）")
+        # 5) R_plan ≥ R_theo
+        if self.turn_radius_planning_m < self.turn_radius_theoretical_m:
+            err.append("turn_radius_planning_m < turn_radius_theoretical_m")
+
+### hv_dccpp/wind.py:312-333 (thin wrapper + W_R policy)
+def r_eff(spec: PlatformSpec, wind_speed_mps: float) -> float:
+    """:math:`R_{eff}=\\max\\{R_{plan},R_{theo}(1+W/V_a)^2\\}`（D1；= ``spec.r_eff`` 薄包裝）。"""
+    return spec.r_eff(wind_speed_mps)
+
+
+def r_eff_wind_speed(wind: WindField, spec: PlatformSpec, z_site_m: float, z_op_max_m: float,
+                     policy: str) -> float:
+    """:math:`R_{eff}` 所用風速 :math:`W_{R,c}`（規格 §3.2；``cfg.r_eff_wind_policy``）。
+
+    * ``"max_layer"``（保守）：:math:`\\max\\{W(z): z\\in[z_{site}+H_{tc},\\ z_{op,\\max}]\\}`，
+      :math:`H_{tc}` 取區間下緣 ``transition_cmd().h_tc_clear_m``（範圍較寬 ⇒ 更保守）；
+      ``z_op_max_m`` 應由呼叫端已取 :math:`\\max(z_{op,c}, z_{transit,c})` over cells。
+    * ``"op_layer"``：作業層風速 ``wind.speed_at(z_op_max_m)``。
+    不變量：``max_layer`` 之值 ≥ 範圍內任一 ``speed_at``（含 ``op_layer`` 值）。
+    """
+    if policy == "max_layer":
+        z_lo = float(z_site_m) + spec.transition_cmd().h_tc_clear_m
+        z_hi = max(float(z_op_max_m), z_lo)
+        return wind.max_speed_between(z_lo, z_hi)
+    if policy == "op_layer":
+        return wind.speed_at(float(z_op_max_m))
+    raise ValueError(f"r_eff_wind_policy 須為 'max_layer' 或 'op_layer'，得 {policy!r}")
+
+### hv_dccpp/costs.py:938-946 (CostCache W_R / R_eff)
+    def _set_wind_params(self, cls: str, ctx: MissionContext) -> None:
+        """W_R,c（規格 §3.2 政策：[z_site + H_tc,lo, max z_op] 之最大風速）與 R_eff,c。"""
+        spec = ctx.specs[cls]
+        z_site = float(ctx.z_ground_home_m)
+        zs = [float(s.z_op_m) for s in self._class_strips(cls)]
+        z_top = max(zs) if zs else z_site + spec.transition_cmd().h_tc_cmd_m
+        z_top = max(z_top, z_site + spec.min_fw_operation_agl_m)
+        self.W_R[cls] = float(r_eff_wind_speed(self.wind, spec, z_site, z_top, ctx.cfg.r_eff_wind_policy))
+        self.R_eff[cls] = float(spec.r_eff(self.W_R[cls]))
+
+### hv_dccpp/decompose.py:241-243 (decompose r_eff_for_class)
+def r_eff_for_class(ctx: DecomposeContext, cls: str, z_top_m: float | None = None) -> float:
+    """R_eff,c = spec.r_eff(W_R,c)（D1；風速政策見 :func:`_wind_speed_for_r_eff`）。"""
+    return float(ctx.specs[cls].r_eff(_wind_speed_for_r_eff(ctx, cls, z_top_m)))
+
+### hv_dccpp/dubins.py:619-623 (skip_k = ceil(2R/s))
+def skip_k(s_m: float, R_m: float) -> int:
+    """skip-k：:math:`k=\\lceil 2R/s\\rceil`（規格 §8.3）。A（s=168.05, R=200）→ 3。"""
+    if not s_m > 0:
+        raise ValueError("s_m must be > 0")
+    return max(1, int(math.ceil(2.0 * R_m / s_m - 1e-9)))
+
+### hv_dccpp/ardupilot.py:903-904, 931-933 (exported params use r_eff)
+    va = float(spec.cruise_airspeed_mps)
+    r_eff = spec.r_eff(wind_speed_mps)
+        "WP_LOITER_RAD": float(round(loiter_radius_m if loiter_radius_m else r_eff, 1)),
+        "WP_RADIUS": float(round(wp_rad, 1)),
+        "RTL_RADIUS": float(round(r_eff, 1)),
+
+### hv_dccpp/mavlink_link.py:981-983 (FALLBACK path, wind-blind R_plan)
+        "WP_LOITER_RAD": float(spec.turn_radius_planning_m),
+        "RTL_RADIUS": float(spec.turn_radius_planning_m),
+        "WP_RADIUS": float(min(spec.turn_radius_planning_m / 2.0, 30.0)),
+
+### hv_dccpp/integration/aeroplan_adapter.py:961 (single wind layer 0-3000 m AGL)
+    winds = (WindLayer(0.0, 3000.0, speed, dir_from, gust_mps=speed * 1.3, z_ref="agl"),)
+
+### scripts/hv_sitl_scenarios.py:66 (scenario wind default)
+    wind: tuple[float, float] = (5.0, 270.0)
+
+### docs/hv_dccpp/HV-DCCPP_設計文件.md:335-341 (spec 3.2, eq 4-5 + trochoid rationale)
+$$R_{theo,c}=\frac{V_{a,c}^2}{g\tan\phi_{\max,c}}\quad(\text{A }129.5\approx130,\ \text{B }78.9\approx75)\tag{4}$$
+
+$$R_{eff,c}(W)=\max\Big\{R_{plan,c},\ R_{theo,c}\big(1+W/V_{a,c}\big)^2\Big\},\qquad W^*_c=V_{a,c}\Big(\sqrt{R_{plan,c}/R_{theo,c}}-1\Big)\tag{5}$$
+
+空氣座標的圓在風中的地面軌跡為擺線（trochoid），順風相位的曲率半徑最大為 $R(1+W/V_a)^2$；以地面半徑 $\ge R_{eff}$ 生成的航跡在任何相位需求傾角 $\le\phi_{\max}$（D1）。$W^*$ 為 $R_{plan}$ 內建裕度可吸收的風速：A 5.17 m/s、B 5.03 m/s；$W=8$ m/s 時 $R_{eff}$ = A 245 m、B 152 m。**Dubins 直接在地面座標以 $R_{eff}$ 生成**；規格書否決「$R_{plan}(1+W/V_a)^2$」（過度保守）與「空速座標系生成再轉換」（端點固定於地面時為移動目標問題）（D.18）。
+
+風層下 $R_{eff}$ 所用風速 $W_{R,c}$：`r_eff_wind_policy="max_layer"`（預設）取 $\max\{W(z):z\in[z_{site}+H_{tc},\max(z_{op,c},z_{transit,c})]\}$；`"op_layer"` 取各胞作業層風速。`CostCache.W_R[c]` 記錄所用值，供 §11.7「$R_{eff}$ 變化 >5% 才重算幾何層」比較。
+
+### docs/hv_dccpp/AASRC2026_abstract/cowork_brief.md:131,140 (current paper text)
+取 $h$ = 120 m、$\alpha_H$ = 60°、$o_s$ = 0.30，得 $w$ = 138.6 m、$s$ = 97.0 m。時間成本採含風地速[5]與有效半徑 $R_{eff}$ 之 Dubins 路徑[6]：
+$W_\parallel$、$W_\perp$ 為風速之航跡切向與法向分量，$\delta$ 為弧段步長（≤5°）。當 $s<2R_{eff}$ 時，跳帶數依 span coefficient $k=\lceil 2R_{eff}/s\rceil$ 決定[7,8]（公式值：Pioneer 5、HERO 3）。各胞機數以決策級配額決定：

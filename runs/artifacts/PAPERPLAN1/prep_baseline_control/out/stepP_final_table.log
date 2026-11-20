@@ -1,0 +1,72 @@
+========================================================================================================
+P1. EFFICIENCY (the paper's headline) -- ruler: bench.metrics max_km, 10 included cells
+========================================================================================================
+  DCCPP 21.47-63.64 km   HARVEST 25.25-68.18 km
+  HARVEST longer by +0.91% .. +22.87%  (mean +13.19%)
+  reproduced from project_rows_5e0295f5_dirty.csv, provenance head=5e0295f5
+
+========================================================================================================
+P2. COVERAGE / SELF-DECLARED INFEASIBILITY -- ruler: bench.metrics coverage, all 12 cells
+========================================================================================================
+  DCCPP coverage = 1.000 in 12/12 cells
+  HARVEST coverage = 1.000 in 10/12; declines S1/n=2 (cov 0.5277, self_validate=FAIL), S5/n=8 (cov 0.617, self_validate=FAIL)
+
+========================================================================================================
+P3. ENERGY FEASIBILITY -- ruler: D_ceq (5 m/s wind triangle) vs the allocator's own budget
+========================================================================================================
+  D_model (EnergyModel.cruise_equiv_km(e_usable_wh)) = 97.726 km   <- what the allocator enforces
+  D_use   (Table-1 usable_distance_cap_km)           = 133.0 km   <- what sim.py:913 checks
+  DCCPP exceeds D_model in 2/12 cells; exceeds D_use in 0/12 cells
+    S1/2: D_ceq 109.92 km = 112.5% of D_model, 2/2 aircraft over
+    S5/8: D_ceq 111.83 km = 114.4% of D_model, 8/8 aircraft over
+  HARVEST exceeds D_model in 0/12 cells: it declines exactly the two cells above.
+
+========================================================================================================
+P4. CONFLICT AXES -- identical checkers, HARVEST measured on its NATIVE plan objects
+========================================================================================================
+    cell | DCCPP 4D HARVEST 4D | DCCPP pad HARVEST pad | DCCPP+CA 4D DCCPP+CA pad
+---------------------------------------------------------------------------------
+    S1/4 |        0          0 |        12           0 |           0           12
+    S1/8 |        5          0 |        40           0 |           5           40
+   S1/16 |       36          0 |       192           0 |          36          192
+    S2/4 |        0          0 |         8           0 |           0            8
+    S2/8 |        7          0 |        41           0 |           7           41
+    S3/4 |        2          0 |         9           0 |           2            9
+    S3/8 |       34          0 |        49           0 |          34           49
+    S4/4 |        0          0 |         7           0 |           0            7
+    S4/8 |        5          0 |        37           0 |           5           37
+   S5/16 |       25          0 |       177           0 |          25          177
+---------------------------------------------------------------------------------
+   TOTAL |      114          0 |       572           0 |         114          572
+  baseline CollisionAvoidance detected 753 conflicts of its own and applied that many actions;
+  the two HARVEST checkers then reported 114 4-D and 572 pad conflicts,
+  i.e. NO CHANGE from 114 / 572.
+
+  INSTRUMENT NOTE: step N measured HARVEST through the same re-lift the baseline
+  needs (t=0 for everyone). Re-lift vs native, totalled over the 10 cells:
+    re-lift  4D=959  pad=688
+    native   4D=0  pad=0
+    -> the re-lift discards HARVEST's takeoff schedule and its own timestamps;
+       only the NATIVE numbers may be quoted for HARVEST.
+
+========================================================================================================
+P5. THE FAIR-FIGHT CONTROL (coordination_mode)
+========================================================================================================
+  24 configurations x 2 arms. Fields compared: ['coverage', 'max_km', 'total_km', 'makespan_s', 'sep_conflicts', 'pad_conflicts', 'n_endurance_over', 'n_agl_over_120', 'n_wp_total']
+  cells where ANY field moved: 0/24
+  pad total  uncoordinated 1252 -> coordinated 1252
+  4-D total  uncoordinated 237 -> coordinated 237
+  CoordinatedPlanner.__init__ 24x, .synchronize 0x, ._insert_holding_pattern 0x
+  reproduction of the previous session's scan: REPRODUCED (0 differences)
+
+========================================================================================================
+P6. ROWS THAT DID NOT SURVIVE THE HONESTY CHECK (excluded from the paper table)
+========================================================================================================
+  * AGL > 120 m: the benchmark's own coverage altitude is 140 m AGL, so EVERY aircraft of BOTH planners exceeds 120 m by
+    construction. Measured max AGL: DCCPP 140.00 m, HARVEST 170.24 m.  HARVEST is the HIGHER one.
+  * corner-fit / unflyable corners: c5_baseline step7 showed the test sits within
+    0.03 % of its own threshold on 10 m-discretised Dubins arcs -> coin flip. Excluded.
+  * makespan: DCCPP's self-reported makespan and HARVEST's are computed by different
+    code paths and are not comparable (research/cpp_benchmark/bench.py:109).
+
+wrote C:\Users\joy46\Documents\Projects\aeroplan-studio\runs\artifacts\PAPERPLAN1\prep_baseline_control\out\stepP_final_table.json

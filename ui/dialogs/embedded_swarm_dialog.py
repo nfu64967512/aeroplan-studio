@@ -141,7 +141,11 @@ class EmbeddedSwarmDialog(QDialog):
 
         self.spin_base_port = QSpinBox()
         self.spin_base_port.setRange(1024, 65535)
-        self.spin_base_port.setValue(5760)  # 原生 ArduPlane SITL -I0 的 TCP 埠
+        # 預設 6760 = MAVProxy 對 AeroPlan 的分流埠（swarm_sitl_up.sh / bridge 開的
+        # tcpin:6760+10i）。第 i 機 = 6760 + i*10 → 6760/6770/6780…。
+        # 若不經 MAVProxy、直連原生 ArduPlane SITL 單機（-I0）則改 5760，但那模式
+        # MAVROS 就接不到（SITL TCP 只收一個 client）。間隔務必=10（SITL 慣例）。
+        self.spin_base_port.setValue(6760)
         self.spin_base_port.valueChanged.connect(self._refresh_preview)
         form.addRow('基準 TCP Port：', self.spin_base_port)
 
@@ -215,7 +219,7 @@ class EmbeddedSwarmDialog(QDialog):
     # 舊版 UDP 監看的基準埠預設值（14550）；改用 TCP 後不再適用，
     # 載入到此值時一律遷移為原生 SITL 的 TCP 基準埠，免得預覽顯示無效的 tcp:…:14550。
     _LEGACY_UDP_BASE_PORT = 14550
-    _TCP_DEFAULT_BASE_PORT = 5760
+    _TCP_DEFAULT_BASE_PORT = 6760   # MAVProxy 對 AeroPlan 的分流基準埠
 
     def _populate_from_saved(self) -> None:
         s = self._saved

@@ -1,0 +1,207 @@
+{
+ "pages": 6,
+ "used_cm_per_page": [
+  20.51,
+  24.72,
+  22.35,
+  23.17,
+  24.99,
+  18.52
+ ],
+ "content_cm": 134.26,
+ "pages_equiv": 5.224,
+ "last_page_lines": 39,
+ "last_line_top_cm": 20.02,
+ "last_page_used_cm": 18.47,
+ "body_height_cm": 25.7,
+ "last_page_fill_pct": 71.9,
+ "n_paragraphs": 159,
+ "n_paragraphs_snap_to_grid_on": 0,
+ "n_table_row_end_marks_reported_on": 15,
+ "where": [
+  [
+   "一、前言",
+   1,
+   13.3
+  ],
+  [
+   "二、研究方法",
+   1,
+   21.0
+  ],
+  [
+   "2.1 系統架構",
+   1,
+   21.5
+  ],
+  [
+   "[圖檔]",
+   2,
+   2.8
+  ],
+  [
+   "圖1 HARVEST 系",
+   2,
+   9.6
+  ],
+  [
+   "2.2 規劃流程",
+   2,
+   10.1
+  ],
+  [
+   "[圖檔]",
+   2,
+   11.1
+  ],
+  [
+   "圖2 HARVEST 規",
+   2,
+   18.8
+  ],
+  [
+   "2.3 核心公式",
+   2,
+   19.3
+  ],
+  [
+   "三、SITL 驗證與成果",
+   3,
+   15.7
+  ],
+  [
+   "3.1 實驗設置",
+   3,
+   16.3
+  ],
+  [
+   "3.2 規劃與 SITL",
+   3,
+   20.8
+  ],
+  [
+   "表1 規劃與 SITL ",
+   4,
+   2.8
+  ],
+  [
+   "3.3 規劃天花板與風場",
+   4,
+   10.0
+  ],
+  [
+   "表2 規劃天花板與風場之",
+   4,
+   16.6
+  ],
+  [
+   "[圖檔]",
+   5,
+   2.8
+  ],
+  [
+   "圖3 高度合規與 SIT",
+   5,
+   9.2
+  ],
+  [
+   "3.4 起降走廊判準對照",
+   5,
+   10.7
+  ],
+  [
+   "3.5 跳帶排序之觸發情",
+   5,
+   12.8
+  ],
+  [
+   "四、結論與限制",
+   5,
+   14.8
+  ],
+  [
+   "誌謝",
+   5,
+   25.9
+  ],
+  [
+   "參考文獻",
+   6,
+   2.8
+  ]
+ ],
+ "figures": [
+  {
+   "file": "fig1_architecture.png",
+   "width_cm": 16.992,
+   "height_cm": 6.798,
+   "scale_pct": [
+    100.0,
+    100.0
+   ]
+  },
+  {
+   "file": "fig2_flowchart.png",
+   "width_cm": 16.992,
+   "height_cm": 7.594,
+   "scale_pct": [
+    100.0,
+    100.0
+   ]
+  },
+  {
+   "file": "fig5_compliance.png",
+   "width_cm": 16.992,
+   "height_cm": 6.392,
+   "scale_pct": [
+    100.0,
+    100.0
+   ]
+  }
+ ],
+ "tables": [
+  {
+   "tnum": "1",
+   "col_cm": [
+    6.51,
+    4.01,
+    6.49
+   ]
+  },
+  {
+   "tnum": "2",
+   "col_cm": [
+    2.11,
+    1.36,
+    3.0,
+    1.63,
+    2.87,
+    1.63,
+    4.39
+   ]
+  }
+ ],
+ "n_omath": 6,
+ "build_s": 4.9,
+ "layout": {
+  "indent": false,
+  "spacing": false,
+  "compress_punct": false,
+  "table_split": false,
+  "no_widow": false
+ },
+ "caveats_missing": [],
+ "caveats_checked": 61,
+ "name": "V1+8",
+ "cuts": [
+  1,
+  2,
+  3,
+  4,
+  5,
+  8
+ ],
+ "candidates": [],
+ "docx": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\PAPERPLAN1\\word_layout\\variants\\V1p8.docx",
+ "pdf": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\PAPERPLAN1\\word_layout\\variants\\V1p8.pdf"
+}

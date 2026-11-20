@@ -371,6 +371,232 @@ vtol:
     loiter_radius_m: 50.0
     rtl_altitude_m: 80.0
 
+  # ★ Pioneer PNP（开拓者，Pioneer V1.0）—— 動力系統規格
+  #   ⚠ 規劃用數值（速度、轉彎半徑、起降高度、質量、航程）一律以 core/base/airframe.py 的
+  #     PIONEER_PNP 為準，這裡不重抄（同 hero_pnp）。
+  #   動力規格來源：使用者 2026-11-04 貼的廠商規格圖與台架測試表（升力 6518 KV200、前推 6525 KV180）。
+  #   ⚠ 測試表是廠商台架數據（44.4 V 定電壓、0 空速靜態），不是這架實機的量測。
+  #     兩張表頭都寫「電流 (V)」是筆誤，數值是安培（電壓×電流＝功率欄，逐列核對過）。
+  #   同一份資料也寫在 vio_ate_studio 的 pid_advisor/aircraft/pioneer.yaml（lift_motor／forward_motor）。
+  pioneer_pnp:
+    name: "Pioneer PNP（开拓者）"
+    type: "vtol"
+    manufacturer: "MFE"
+    rotor_count: 4                 # QuadPlane 4+1：Quad X 升力 ×4（SERVO9–12）＋前推 ×1（SERVO3＝70），依原廠參數
+
+    powertrain:
+      battery_cells: 12            # 12S，台架測試電壓 44.4 V
+      lift_motor:
+        count: 4
+        model: "6518 KV200"        # 規格圖寫法；手冊寫 M6518 KV200
+        kv: 200
+        slot_pole: "24N28P"
+        size_mm: "72.8×42.4"       # 規格圖原文
+        mass_g: 423
+        rated_voltage: "12S (44.4 V)"
+        no_load_current_a: 2.4     # @20 V
+        phase_resistance_mohm: 24  # 相間內阻
+        max_current_a: 87
+        rated_power_w: 1200
+        max_thrust_g: 14700
+        max_torque_nm: 3.74
+        esc_recommended_a: 100
+        propeller_recommended: "2278 碳纖槳"
+        stator: "進口材料／表面防鏽處理"
+        magnet_wire_rating: "耐 180°C"
+        magnet_rating: "耐 180°C"
+        centrifugal_cooling: true  # 離心散熱設計
+        rotor_balance: "≤5 mg"
+        coil_hipot: "500 V AC"     # 線圈耐壓測試
+        ip_rating: "IP35"
+        lead_length_mm: 100
+        prop_mount_holes: "M4×16×4"
+        motor_mount_holes: "M4×8×4"
+        # 台架測試：碳纖維 2278 槳。手冊升力槳 22 吋與測試槳同徑；實裝槳型號未經使用者確認。
+        bench_test:
+          propeller: "碳纖維 2278"
+          columns: [voltage_v, current_a, thrust_g, power_w, efficiency_g_per_w]
+          rows:
+            - [44.4,  2.4,  1025,  106.56, 9.62]
+            - [44.4,  3.3,  1291,  146.52, 8.81]
+            - [44.4,  4.5,  1610,  199.8,  8.06]
+            - [44.4,  5.2,  1794,  230.88, 7.77]
+            - [44.4,  6.8,  2219,  301.92, 7.35]
+            - [44.4, 12.1,  3588,  537.24, 6.68]
+            - [44.4, 14.6,  4225,  648.24, 6.52]
+            - [44.4, 19.6,  5380,  870.24, 6.18]
+            - [44.4, 23.2,  6105, 1030.08, 5.93]
+            - [44.4, 28.0,  7050, 1243.2,  5.67]
+            - [44.4, 32.7,  7755, 1451.88, 5.34]
+            - [44.4, 38.9,  8763, 1727.16, 5.07]
+            - [44.4, 46.6, 10250, 2069.04, 4.95]
+            - [44.4, 52.1, 11175, 2313.24, 4.83]
+            - [44.4, 62.9, 12512, 2792.76, 4.48]
+            - [44.4, 75.7, 13748, 3361.08, 4.09]
+            - [44.4, 87.4, 14737, 3880.56, 3.80]
+      pusher_motor:
+        count: 1
+        model: "6525 KV180"        # 規格圖寫法；手冊寫 X6525 KV180
+        kv: 180
+        slot_pole: "24N28P"
+        size_mm: "72.8×50.4"       # 規格圖原文
+        mass_g: 563
+        rated_voltage: "12S (44.4 V)"
+        no_load_current_a: 1.3     # @20 V
+        phase_resistance_mohm: 18.4  # 相間內阻
+        max_current_a: 85
+        rated_power_w: 1500
+        max_thrust_g: 11900
+        max_torque_nm: 3.9
+        esc_recommended: "12S 120 A"
+        propeller_recommended: "2113E"
+        stator: "特殊表面防鏽處理"
+        magnet_wire_rating: "耐 210°C"
+        magnet_rating: "耐 210°C"
+        centrifugal_cooling: true  # 離心散熱設計
+        rotor_balance: "≤5 mg"
+        coil_hipot: "500 V AC"     # 線圈耐壓測試
+        ip_rating: "IP35"
+        lead_length_mm: 100
+        prop_mount_holes: "M4×8×4"
+        motor_mount_holes: "M4×8×4"
+        # 台架測試：2113E 槳。手冊前推槳 21 吋與測試槳同徑；實裝槳型號未經使用者確認。
+        # ⚠ 靜態推力表（0 空速）不能直接換算巡航功率：同樣推力在 21.5 m/s 前進時耗電高得多。
+        bench_test:
+          propeller: "2113E"
+          columns: [voltage_v, current_a, thrust_g, power_w, efficiency_g_per_w]
+          rows:
+            - [44.4,  2.6,  1175,  115.44, 10.18]
+            - [44.4,  3.5,  1505,  155.4,   9.68]
+            - [44.4,  5.5,  2101,  244.2,   8.60]
+            - [44.4,  6.3,  2320,  279.72,  8.29]
+            - [44.4,  8.2,  2805,  364.08,  7.70]
+            - [44.4, 10.1,  3257,  448.44,  7.26]
+            - [44.4, 12.9,  3898,  572.76,  6.81]
+            - [44.4, 15.4,  4515,  683.76,  6.60]
+            - [44.4, 18.6,  5225,  825.84,  6.33]
+            - [44.4, 27.9,  6675, 1238.76,  5.39]
+            - [44.4, 37.9,  8030, 1682.76,  4.77]
+            - [44.4, 44.4,  8845, 1971.36,  4.49]
+            - [44.4, 50.5,  9713, 2242.2,   4.33]
+            - [44.4, 63.4, 10910, 2814.96,  3.88]
+            - [44.4, 69.5, 11544, 3085.8,   3.74]
+            - [44.4, 75.7, 11748, 3361.08,  3.50]
+            - [44.4, 85.7, 11952, 3805.08,  3.14]
+
+  # ★ HERO PNP（逆行者，Hero V4.0）—— 動力系統規格
+  #   ⚠ 規劃用數值（速度、轉彎半徑、起降高度、質量、航程）一律以 core/base/airframe.py 的
+  #     HERO_PNP 為準，這裡不重抄，避免兩份分叉（docs/hv_dccpp/AEROPLAN_接入手冊.md §10.2）。
+  #   動力規格來源：使用者 2026-11-04 貼的廠商規格圖與台架測試表（升力 M4112 KV460、後推 X3520 KV500）。
+  #   ⚠ 測試表是廠商台架數據（22.2 V 定電壓、0 空速靜態），不是這架實機的量測。
+  #   同一份資料也寫在 vio_ate_studio 的 pid_advisor/aircraft/hero.yaml（lift_motor／forward_motor）。
+  hero_pnp:
+    name: "HERO PNP（逆行者）"
+    type: "vtol"
+    manufacturer: "MFE"
+    rotor_count: 4                 # QuadPlane 4+1：Quad X 升力 ×4（SERVO9–12）＋後推 ×1（SERVO3＝70）
+
+    powertrain:
+      battery_cells: 6             # 6S，台架測試電壓 22.2 V
+      lift_motor:
+        count: 4
+        model: "M4112 KV460"
+        kv: 460
+        slot_pole: "12N14P"
+        size_mm: "49.8×27"         # 規格圖原文
+        mass_g: 177
+        rated_voltage: "6S (22.2 V)"
+        no_load_current_a: 1.1     # @20 V
+        phase_resistance_mohm: 113 # 相間內阻
+        max_current_a: 39
+        rated_power_w: 350
+        max_thrust_g: 4100
+        max_torque_nm: 1.2
+        esc_recommended_a: 50
+        propeller_recommended: "1550 碳纖槳"
+        stator: "進口材料／表面防鏽處理"
+        magnet_wire_rating: "耐 180°C"
+        magnet_rating: "耐 180°C"
+        centrifugal_cooling: true  # 離心散熱設計
+        rotor_balance: "≤5 mg"
+        coil_hipot: "500 V AC"     # 線圈耐壓測試
+        ip_rating: "IP35"
+        lead_length_mm: 100
+        prop_mount_holes: "M3 Ø12×4 / M3 Ø15×4"
+        motor_mount_holes: "M3 Ø30×4"
+        # 台架測試：碳纖維 1550 槳（＝實裝升力槳，使用者 2026-10-27 確認 1550 全碳纖 15 吋）
+        bench_test:
+          propeller: "碳纖維 1550"
+          columns: [voltage_v, current_a, thrust_g, power_w, efficiency_g_per_w]
+          rows:
+            - [22.2,  0.8,  294,  17.76, 16.55]
+            - [22.2,  1.4,  442,  31.08, 14.22]
+            - [22.2,  2.5,  675,  55.5,  12.16]
+            - [22.2,  3.0,  731,  66.6,  10.98]
+            - [22.2,  3.6,  801,  79.92, 10.02]
+            - [22.2,  5.0, 1019, 111.0,   9.18]
+            - [22.2,  7.3, 1351, 162.06,  8.34]
+            - [22.2,  8.6, 1472, 190.92,  7.71]
+            - [22.2, 10.1, 1614, 224.22,  7.20]
+            - [22.2, 12.2, 1878, 270.84,  6.93]
+            - [22.2, 15.5, 2201, 344.1,   6.40]
+            - [22.2, 18.0, 2454, 399.6,   6.14]
+            - [22.2, 20.7, 2703, 459.54,  5.88]
+            - [22.2, 23.2, 2868, 515.04,  5.57]
+            - [22.2, 25.9, 3192, 574.98,  5.55]
+            - [22.2, 29.6, 3384, 657.12,  5.15]
+            - [22.2, 32.2, 3542, 714.84,  4.95]
+            - [22.2, 35.9, 3810, 796.98,  4.78]
+            - [22.2, 39.8, 4108, 883.56,  4.65]
+      pusher_motor:
+        count: 1
+        model: "X3520 KV500"
+        kv: 500
+        slot_pole: "12N14P"
+        size_mm: "49.1×42.5"       # 規格圖原文（圖上沒標哪個是直徑）
+        mass_g: 218
+        rated_voltage: "22.2 V"
+        no_load_current_a: 2.0     # ≤2.0 A @20 V
+        no_load_rpm: "10220 ±5% @20 V"
+        resistance_mohm: 33        # 33 ±4 mΩ @25°C
+        max_continuous_current: "70 A / 30 s"
+        rated_power_w: 280
+        max_thrust_g: 5400
+        esc_recommended_a: "80–100"
+        propeller_recommended: "1512"
+        stator: "特殊表面防鏽處理"
+        hipot: "DC 700 V (3 s)"    # 整機耐壓
+        balance: "≤20 mg"          # 整機平衡度
+        face_runout_mm: 0.025      # 端面跳動 ≤
+        radial_runout_mm: 0.025    # 徑向跳動 ≤
+        ip_rating: "IP35"
+        lead_length_mm: 200
+        lead_wire: "矽膠線 16#252，紅黑藍"
+        motor_mount_holes: "M3 Ø25×4"
+        storage_temp_c: [-10, 50]
+        storage_humidity_max_pct: 85
+        operating_temp_c: [-10, 65]
+        # 台架測試：1512 槳。⚠ 實裝後推槳尺寸未確認（手冊中文 15 吋／英文 16 in 互相矛盾；
+        #   3D 模型照實機照片用 APC 15×10），不是 1512 時這張表不適用。
+        # ⚠ 靜態推力表（0 空速）不能直接換算巡航功率：同樣推力在 19 m/s 前進時耗電高得多。
+        bench_test:
+          propeller: "1512"
+          columns: [voltage_v, current_a, thrust_g, power_w, efficiency_g_per_w]
+          rows:
+            - [22.2,  2.2,  500,   49, 10.24]
+            - [22.2,  3.8,  750,   84,  8.89]
+            - [22.2,  5.6, 1000,  124,  8.04]
+            - [22.2,  7.8, 1250,  173,  7.22]
+            - [22.2, 10.0, 1500,  222,  6.76]
+            - [22.2, 12.5, 1750,  278,  6.31]
+            - [22.2, 15.6, 2000,  346,  5.78]
+            - [22.2, 18.8, 2300,  417,  5.51]
+            - [22.2, 23.0, 2600,  511,  5.09]
+            - [22.2, 28.8, 3000,  639,  4.69]
+            - [22.2, 37.5, 3500,  833,  4.20]
+            - [22.2, 46.9, 4000, 1041,  3.84]
+            - [22.2, 59.0, 4500, 1310,  3.44]
+
 # ==========================================
 # 預設配置
 # ==========================================

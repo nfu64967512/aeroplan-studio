@@ -51,11 +51,18 @@ class _HorizontalRail(QWidget):
     """
 
     current_uav_changed = pyqtSignal(str)
+    # 使用者點了某一格（**包括已經是目前那一格**）。current_uav_changed 只在「換了」才發 ⇒ rail 自動改選到 UAV-3
+    # 之後，使用者再點 UAV-3 想把 HUD 單機也對過來是 no-op（2026-10-22 審查）；main_window 另接這條。
+    user_picked = pyqtSignal(str)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._cells: Dict[str, _RailCell] = {}
         self._current: Optional[str] = None
+        # 這次 current_uav_changed 是「自動選」發的（第一台註冊、選中的那台被反註冊改選下一台），
+        # 不是使用者點的。SITL 頁單機模式同步（main_window.sync_hud_to_rail）靠它：選定那台斷線時
+        # 不可以跟著 rail 靜默改看（＝改指令對象）別台（2026-10-22）。
+        self._auto_pick = False
         self.setFixedHeight(56)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setStyleSheet(
@@ -96,6 +103,17 @@ class _HorizontalRail(QWidget):
     def current_callsign(self) -> Optional[str]:
         return self._current
 
+    def is_auto_pick(self) -> bool:
+        """目前正在發的 current_uav_changed 是不是自動選的（不是使用者點的）。"""
+        return bool(self._auto_pick)
+
+    def _emit_auto(self, callsign: str) -> None:
+        self._auto_pick = True
+        try:
+            self.current_uav_changed.emit(callsign)
+        finally:
+            self._auto_pick = False
+
     def set_current(self, callsign: str) -> None:
         if callsign not in self._cells or self._current == callsign:
             return
@@ -104,16 +122,26 @@ class _HorizontalRail(QWidget):
             cell.set_selected(cs == callsign)
         self.current_uav_changed.emit(callsign)
 
+    def _on_cell_clicked(self, callsign: str) -> None:
+        """使用者點一格：照舊 set_current（換了才發 current_uav_changed），另外**一定**發 user_picked。"""
+        self.set_current(callsign)
+        if callsign in self._cells:
+            self.user_picked.emit(callsign)
+
     def _on_uav_registered(self, callsign: str) -> None:
         if callsign in self._cells:
             return
         cell = _RailCell(callsign, self._cells_host)
-        cell.clicked.connect(self.set_current)
+        cell.clicked.connect(self._on_cell_clicked)
         # 插到 stretch 前面
         self._cells_lay.insertWidget(self._cells_lay.count() - 1, cell)
         self._cells[callsign] = cell
         if self._current is None:
-            self.set_current(callsign)
+            self._auto_pick = True
+            try:
+                self.set_current(callsign)
+            finally:
+                self._auto_pick = False
 
     def _on_uav_unregistered(self, callsign: str) -> None:
         cell = self._cells.pop(callsign, None)
@@ -122,7 +150,9 @@ class _HorizontalRail(QWidget):
         if self._current == callsign:
             self._current = next(iter(self._cells), None)
             if self._current:
-                self.current_uav_changed.emit(self._current)
+                for cs, c in self._cells.items():
+                    c.set_selected(cs == self._current)
+                self._emit_auto(self._current)
 
     def _on_telemetry(self, callsign: str, frame: TelemetryFrame) -> None:
         cell = self._cells.get(callsign)
@@ -155,6 +185,12 @@ class SitlCommandPanel(QWidget):
     """
 
     current_uav_changed = pyqtSignal(str)
+    # rail 上使用者點的（含點已選的那一格）；見 _HorizontalRail.user_picked
+    user_picked = pyqtSignal(str)
+    # 面板顯示出來（切到 Command 分頁）。main_window 用它套用「延後的」單機選台同步：
+    # rail 換選會讓 DroneDetailPanel 向那台要全部參數（PARAM_REQUEST_LIST），
+    # 不該因為在 HUD 頁換看一台就在背景對飛控送出（2026-10-22）。
+    shown = pyqtSignal()
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -178,10 +214,15 @@ class SitlCommandPanel(QWidget):
 
         # rail → detail 串接
         self.rail.current_uav_changed.connect(self._on_rail_selected)
+        self.rail.user_picked.connect(self.user_picked.emit)
 
     def _on_rail_selected(self, callsign: str) -> None:
         self.detail.set_callsign(callsign)
         self.current_uav_changed.emit(callsign)
+
+    def showEvent(self, event) -> None:  # noqa: N802 — Qt 覆寫
+        super().showEvent(event)
+        self.shown.emit()
 
 
 __all__ = ["SitlCommandPanel"]

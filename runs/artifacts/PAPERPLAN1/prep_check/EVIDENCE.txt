@@ -1,0 +1,53 @@
+prep_check — index (2026-09-21)
+================================
+
+WHAT THIS LABEL IS
+  A cross-check of the four prep workstreams (prep_runner / prep_beamidp /
+  prep_baseline_control / prep_text) before the sortie batch. Every number below
+  was produced by re-reading the cited artifact or re-running the cited library
+  call in THIS label, not by quoting another agent.
+
+NO FLIGHT. No SITL / ArduPilot / MAVProxy process was started. No WSL tree and no
+COM port was touched. No git add / commit / push. No source file was edited by
+this label. Nothing under runs/artifacts/HV4SITL15 or HV4SITL16 was written.
+
+FILES
+  scripts/recheck.py   the single generator; pure Python, read-only except for
+                       its own output. Re-runnable:
+                         python runs/artifacts/PAPERPLAN1/prep_check/scripts/recheck.py
+  recheck.json         its output. Keys:
+
+    c1_vs_matrix                 c1_altitude/ablation_cap.json vs
+                                 prep_runner/plan_matrix.json  -> agree = true
+    separation_flag_planned      planned min_sep_h for all 8 matrix cells
+    exports                      independent QGC-WPL parse of four plan folders:
+                                 item count, max REL-frame altitude, items > 120.000
+    skip_k / skip_sequence_identity   live calls into hv_dccpp.dubins.skip_k and
+                                 hv_dccpp.decompose._skip_sequence
+    wind_triangle_W5_from270     live calls into hv_dccpp.wind.ground_speed
+    c4_params                    recount of HV4SITL16/params_readback.csv and of
+                                 the three plan/*.param files
+    flown_min_sep_all_trials     every runs/artifacts/HV4SITL*/separation_from_tracks.json
+    noenv_vs_HV4SITL15           SHA-256 of prep_runner NOENV plan vs the archived plan
+    beamidp_makespan_estimate    the two disagreeing sequential-makespan estimates
+    paper_cell_orders_n_gt_1     the committed strip orders in the paper scenario
+    gitignore_status             git check-ignore for every trial name in play
+    benchmark_csv                tracked / ignored / dirty state of the efficiency CSV
+    machine                      wind.parm presence and LASTLOG.TXT
+
+THREE THINGS THE JSON PROVES THAT ARE EASY TO MISREAD
+  1. exports.W55_c1195 and exports.W00_c1195 both show 82 / 53 / 84 items. The
+     "73 / 46 / 73" in prep_text's Table-2 skeleton is ablation_cap.json's
+     `n_items` (planner waypoints after reduce_waypoints, before the takeoff /
+     landing / servo items are appended) — a different counter. RUNBOOK gate G4
+     (82 / 53 / 84) is the correct one for the 119.5 m sorties. Do not "fix" it.
+  2. flown_min_sep_smallest = 104.2 (HV4SITL15) and
+     HV4SITL16_has_separation_artifact = false. There is no flown 101.0 m anywhere.
+  3. gitignore_status: HV4SITL* is trackable, but HV4W00 / HV4W05 / HV4W55 /
+     HV4W55S / HV4W55R / BEAMIDP1 are all IGNORED by .gitignore:109
+     (`runs/artifacts/*`, negated only for `!runs/artifacts/HV4SITL*`). The new
+     campaign's evidence cannot be committed until that negation is extended.
+
+DELIVERABLE
+  The ordered sortie runbook, the gate-failure decisions and the residual risks
+  were returned to the calling agent as text, not written here.

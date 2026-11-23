@@ -1,0 +1,26 @@
+{
+ "A1": {
+  "n_pts": 73,
+  "max_rel": 120.05262885801494,
+  "n_over": 38,
+  "n_vertex_over": 38,
+  "max_rel_nonvertex": 119.99998730327934,
+  "max_agl_field": 120.00000000000009
+ },
+ "B2": {
+  "n_pts": 46,
+  "max_rel": 120.03314702119678,
+  "n_over": 13,
+  "n_vertex_over": 13,
+  "max_rel_nonvertex": 119.99998028483242,
+  "max_agl_field": 120.00000000000001
+ },
+ "B3": {
+  "n_pts": 73,
+  "max_rel": 120.033123485744,
+  "n_over": 37,
+  "n_vertex_over": 37,
+  "max_rel_nonvertex": 119.9999903542921,
+  "max_agl_field": 120.00000000000007
+ }
+}

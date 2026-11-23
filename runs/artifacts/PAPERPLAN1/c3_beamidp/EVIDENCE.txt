@@ -1,0 +1,135 @@
+C3 Beam-IDP / skip-k interlacing -- evidence index
+==================================================
+All numbers below come from code that was RUN (pure Python, no SITL, no repo edits).
+Repo state: branch quad_swarm, 2026-09-21.
+
+FILES
+-----
+probe_seq_cost.py        synthetic n-strip sweep, planner-native Dubins cost -> seq_cost.json
+probe_plan_strips.py     reproduces the paper's scenario, per-cell strip census
+                         -> plan_strips_gui_legal_120_1a2b.json
+probe_geom_sweep.py      geometry search for a trigger -> geom_sweep.json
+probe_real_order.py      solo-fleet: planner's real order vs sequential -> real_order.json
+probe_real_order_mixed.py 1A+2B on 9 km2 -> real_order_mixed.json
+c3_table.csv             consolidated table (30 rows)
+
+QUOTED CODE (the trigger)
+-------------------------
+hv_dccpp/dubins.py:619-623
+    def skip_k(s_m: float, R_m: float) -> int:
+        """skip-k: k=ceil(2R/s) (spec 8.3). A (s=168.05, R=200) -> 3."""
+        if not s_m > 0:
+            raise ValueError("s_m must be > 0")
+        return max(1, int(math.ceil(2.0 * R_m / s_m - 1e-9)))
+
+hv_dccpp/decompose.py:689-693
+    def _skip_sequence(n: int, k: int) -> list[int]:
+        """fixed skip-k sequence (0, k, 2k, ..., 1, 1+k, ...)."""
+        k = max(1, int(k))
+        return [i for start in range(k) for i in range(start, n, k)]
+
+hv_dccpp/platform.py:296-300   (R_eff -- also answers C6)
+    def r_eff(self, wind_speed_mps: float) -> float:
+        """R_eff(W) = max{R_plan, R_theo (1+W/Va)^2} (spec 3.2, D1; max curvature
+        radius of the trochoid)."""
+        w = max(0.0, float(wind_speed_mps))
+        return max(self.turn_radius_planning_m,
+                   self.turn_radius_theoretical_m * (1.0 + w / self.cruise_airspeed_mps) ** 2)
+
+hv_dccpp/planner.py:604-605   (the K-nearest in BEAM_IDP is by COST, not by geometry)
+    Kn = int(min(K, m.size))
+    sel = np.argsort(t_add, kind="stable")[:Kn]
+
+Call sites of skip_k / _skip_sequence:
+  hv_dccpp/decompose.py:548  (proxy sweep-angle time, ProxyTime)
+  hv_dccpp/decompose.py:825,850  (exact_time / T_single)
+  hv_dccpp/allocate.py:228-232   (sweep_order -> task entry/exit endpoints)
+  NOTE: the FLOWN order is NOT _skip_sequence. It is produced by
+  hv_dccpp/planner.py:831 beam_idp (beam search over the Dubins cost cache).
+  skip-k is (a) the estimator's sequence and (b) the tie-breaking structure that
+  the beam search converges to whenever s < 2 R_eff.
+
+DEGENERACY (the real reason C3's feature never fired)
+-----------------------------------------------------
+_skip_sequence(n, k) == list(range(n))  i.e. IDENTICAL TO SEQUENTIAL, whenever k >= n.
+  verified: k=5 -> identity for n=2,3,4,5 ; first differs at n=6 -> [0,5,1,2,3,4]
+            k=3 -> identity for n=2,3     ; first differs at n=4 -> [0,3,1,2]
+So the correct threshold is n > k, NOT "n >= 3".
+
+PAPER SCENARIO CENSUS (gui_legal_120_1a2b = HV4SITL15/HV4SITL16)
+----------------------------------------------------------------
+Reproduced exactly: makespan 1260.4260664854269 s, identical to
+runs/artifacts/HV4SITL16/plan/mission_summary.json.
+  cell        n   s(m)    L(m)     R_eff   k   triggers(n>k)
+  Z2_1|A      1   96.99   1695.4   200.0   5   False
+  Z3_1|A      1   96.99   1695.4   200.0   5   False
+  Z4_1|A      1   96.99   1695.5   200.0   5   False
+  Z2_1_B_k1|B 2   96.99   1685.6   120.0   3   False
+  Z3_1_B_k1|B 2   96.99   1685.5   120.0   3   False
+  Z4_1_B_k1|B 2   96.99   1685.4   120.0   3   False
+Cause: split_area_for_fleet cuts 1560x800 m into one subregion per aircraft
+(3 aircraft -> 3 subregions), and each subregion is then split by class in the
+fleet ratio 1A:2B. 9 strips total / 3 subregions / (1+2) => n=1 (A) and n=2 (B).
+
+HEADLINE MEASUREMENT (real planner order vs sequential, planner's own cost model)
+---------------------------------------------------------------------------------
+Same 1560x800 m area, same airspace (no waiver, 120 m AGL, min_fw 100/100,
+dh band 15 m, GSD 0.05), same 5 m/s west wind; only the fleet is reduced to
+one aircraft so the whole area is ONE cell.
+
+ solo Pioneer, n=9, s=96.99 m, R_eff=200 m, k=5, strip L=1687.9 m
+   sequential          turn 525.5 s  10789.5 m  90.13 Wh
+   fixed skip-5        turn 287.4 s   5922.2 m  49.29 Wh   -45.31% / -45.11%
+   HARVEST as planned  turn 287.4 s   5922.2 m  49.29 Wh   -45.31% / -45.11%
+                       (order [0,5,1,6,2,7,3,8,4] = exactly the skip-5 sequence)
+   Held-Karp optimum   turn 287.3 s   5922.2 m              -45.32% / -45.11%
+   in-cell total distance 25980.6 -> 21113.3 m  (-18.73%)
+   planner makespan 1303.9 s; est. sequential makespan 1542.0 s (+18.3%) [ESTIMATE:
+   adds the turn-time delta only; entry/RTB legs not re-planned]
+
+ solo HERO, n=9, s=96.99 m, R_eff=120 m, k=3, strip L=1677.9 m
+   sequential          turn 338.6 s   6059.1 m  21.05 Wh
+   fixed skip-3        turn 211.1 s   3812.2 m  13.12 Wh   -37.66% / -37.08%
+   HARVEST as planned  turn 213.5 s   3842.9 m  13.27 Wh   -36.94% / -36.58%
+   Held-Karp optimum   turn 209.6 s   3779.1 m  13.03 Wh   -38.11% / -37.63%
+   in-cell total distance 21160.2 -> 18944.0 m  (-10.47%)
+   planner makespan 1291.4 s; est. sequential 1416.5 s (+9.7%) [ESTIMATE]
+
+ solo Pioneer n=16 (1560x1600 m): -39.05% turn time, -40.54% turn distance
+ solo HERO    n=16 (1560x1600 m): -33.46% turn time, -35.76% turn distance
+
+MIXED FLEET THAT ALSO TRIGGERS THE PIONEER (real 1 Pioneer + 2 HERO)
+---------------------------------------------------------------------
+3000 x 3000 m = 9.00 km2, same airspace, spawn_spread 10 m.
+plan time 41.1 s, status GO_WITH_WARNINGS, uncovered 0, makespan 3842.6 s.
+  cell         n    k   triggers
+  Z2_1|B       11   3   True
+  Z3_1|A        5   5   False
+  Z3_1_B_k5|B   6   3   True
+  Z4_1|A        6   5   True
+  Z4_1_B_k6|B   5   3   True
+Per aircraft (tour over its own strips, sequential = geometric v-order):
+  A1 (A, 11 strips, 2 cells)  629.8 -> 499.4 s (-20.70%), 12788.9 -> 10064.0 m
+                              (-21.31%), -22.35 Wh
+  B2 (B, 11 strips, 1 cell)   403.9 -> 267.6 s (-33.76%),  7574.0 ->  4866.9 m
+                              (-35.74%),  -8.48 Wh
+  B3 (B, 11 strips, 2 cells)  604.4 -> 281.8 s (-53.37%), 10881.8 ->  5341.1 m
+                              (-50.92%), -20.05 Wh
+Smaller mixed geometries tried and REJECTED (Pioneer cell never exceeds k=5):
+  1560x2400 (3.74 km2): A cells n=3 ; 2000x3000 (6.00 km2): A cells n=3,4
+  2600x2600 (6.76 km2): A cells n=4,5
+
+CAN A SEQUENTIAL BASELINE BE FLOWN WITHOUT EDITING THE LIBRARY?
+----------------------------------------------------------------
+No config does it. planner.py:604-605 ranks the K-nearest candidates by t_add
+(transition + operate TIME), so K=1 gives the greediest SKIP order, not a
+sequential scan. legacy_mode only sets sweep_sequence="fixed" (estimator) plus
+B=1 / lockstep / K=inf -- still cost-driven.
+Two non-invasive routes exist, both needing a driver script (not a repo edit):
+ (a) runtime monkeypatch of hv_dccpp.planner._candidates so `sel` sorts by
+     geometric adjacency instead of t_add -> whole pipeline (energy, altitude,
+     deconfliction, export) still runs -> a genuinely flyable sequential mission;
+ (b) beam_idp(..., warm_start={uav: full sequential [(strip_id, dir)] list}) --
+     warm_start is a FIXED PREFIX (planner.py:840,862-869), so a full-length one
+     pins the entire tour. Main path planner.py:1491 does not pass warm_start,
+     so this also needs a driver.

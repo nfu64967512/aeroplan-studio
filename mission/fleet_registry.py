@@ -10,15 +10,30 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from typing import Dict, Optional
 
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtCore import QObject, QTimer, pyqtSignal
 
 from mission.sitl_link import SITLLink, TelemetryFrame
 
 
 logger = logging.getLogger(__name__)
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, '') or default)
+    except ValueError:
+        return default
+
+
+#: `telemetry_updated` 的廣播上限（Hz，每個 callsign）。訂閱者是三個純顯示的面板（Command 分頁的機卡列、
+#: 機隊儀表板、單機詳情），每條鏈路每秒幾十幀 × 6 架 × 3 個訂閱者的 setText/setStyleSheet 是看不見的浪費
+#: （2026-10-17 多機效能）。`latest()`／`snapshot()`／`latest_age_sec()` 不受影響——每幀都立刻記。
+#: 環境變數 AEROPLAN_FLEET_HZ 可調；0 ⇒ 每幀都廣播（舊行為）。
+FLEET_TELEMETRY_HZ: float = _env_float('AEROPLAN_FLEET_HZ', 10.0)
 
 
 class FleetRegistry(QObject):
@@ -44,6 +59,8 @@ class FleetRegistry(QObject):
         # callsign ↔ sysid 對應；多數情境 callsign = "UAV-<sysid>"，
         # 但允許外部覆寫（如 HAWK-01）。
         self._sysid_index: Dict[int, str] = {}
+        # 已排定廣播、還沒發出的 callsign（telemetry_updated 以 FLEET_TELEMETRY_HZ 合幀）
+        self._pending_emit: set = set()
 
     @classmethod
     def instance(cls) -> "FleetRegistry":
@@ -76,6 +93,7 @@ class FleetRegistry(QObject):
         link = self._links.pop(callsign, None)
         self._latest.pop(callsign, None)
         self._last_packet_ts.pop(callsign, None)
+        self._pending_emit.discard(callsign)
         # 移除反向索引
         for sysid, cs in list(self._sysid_index.items()):
             if cs == callsign:
@@ -127,9 +145,23 @@ class FleetRegistry(QObject):
 
     # ── 內部 ──────────────────────────────────────────────────
     def _on_telemetry(self, callsign: str, frame: TelemetryFrame) -> None:
+        # 黑板每幀都更新（協調器／讀 latest 的人拿到的永遠是最新）；廣播給顯示面板的才合幀
         self._latest[callsign] = frame
         self._last_packet_ts[callsign] = time.monotonic()
-        self.telemetry_updated.emit(callsign, frame)
+        if FLEET_TELEMETRY_HZ <= 0:
+            self.telemetry_updated.emit(callsign, frame)
+            return
+        if callsign in self._pending_emit:
+            return                          # 這個窗口已經排了，到時候發「最新那幀」
+        self._pending_emit.add(callsign)
+        QTimer.singleShot(int(1000.0 / FLEET_TELEMETRY_HZ), lambda cs=callsign: self._emit_latest(cs))
+
+    def _emit_latest(self, callsign: str) -> None:
+        """合幀窗口到：發這個 callsign 最新的一幀（期間 unregister 了就不發）。"""
+        self._pending_emit.discard(callsign)
+        frame = self._latest.get(callsign)
+        if frame is not None and callsign in self._links:
+            self.telemetry_updated.emit(callsign, frame)
 
 
 __all__ = ["FleetRegistry"]

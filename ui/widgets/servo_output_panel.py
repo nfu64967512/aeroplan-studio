@@ -65,6 +65,7 @@ class PwmBar(QWidget):
         p.fillRect(rect, QColor(TC.BG_SUNKEN))
 
         # 填充比例
+        fill_w = 0
         if self._max > self._min and self._pwm > 0:
             ratio = (self._pwm - self._min) / (self._max - self._min)
             ratio = max(0.0, min(1.0, ratio))
@@ -79,15 +80,43 @@ class PwmBar(QWidget):
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawRect(rect)
 
-        # 中央 PWM 文字
-        font = TF.mono(9, bold=True)
+        # 中央 PWM 文字：填色那一段用深色字、沒填到的那一段用主色字（分段裁切）——
+        # 以前整串都用深色，填充沒蓋到中央時（例如 1100 μs）數字是黑底黑字看不見（2026-10-22）。
+        # 10pt：Cascadia Mono Bold 9pt 的「5」在螢幕上跟「6」幾乎一樣（1150 看成 1160；2026-10-22 截圖查到）
+        font = TF.mono(10, bold=True)
         p.setFont(font)
         text = f'{self._pwm}' if self._pwm > 0 else '---'
-        # 文字色：在綠色填充上用深底色，灰色填充上用主色
-        p.setPen(QPen(QColor(TC.BG_PRIMARY) if self._enabled_ch and self._pwm > 0
-                      else QColor(TC.FG_PRIMARY)))
-        p.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
+        rf = QRectF(rect)
+        filled = QRectF(rf.left(), rf.top(), float(fill_w), rf.height())
+        empty = QRectF(rf.left() + fill_w, rf.top(), rf.width() - fill_w, rf.height())
+        for clip, col in ((empty, TC.FG_PRIMARY),
+                          (filled, TC.BG_PRIMARY if self._enabled_ch else TC.FG_PRIMARY)):
+            if clip.width() <= 0:
+                continue
+            p.save()
+            p.setClipRect(clip)
+            p.setPen(QPen(QColor(col)))
+            p.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
+            p.restore()
         p.end()
+
+
+# 欄寬（表頭與每一列共用，兩邊才對得齊）。2026-10-22 壓窄：SITL 頁「單機」模式第一次進入會自動展開這張表，
+# 而 SITL 頁實際寬度約 420–450 px（螢幕 22%），扣掉直向捲軸與分頁框只剩約 400 px；以前 140／120／56 加起來整張表
+# 要 522 px、第一次壓到 424 px 仍然冒水平捲軸（審查實測：422 px 面板 ⇒ 捲軸 32 px）。
+# 現在 PWM 條是**彈性欄**（最少 _W_BAR_MIN、多的寬度都給它；表頭同一套設定所以對得齊），整張表最少約 360 px。
+# 功能欄 98 px 容得下最長的名稱（TiltMotorRearRight 87 px ＋ 內距／框）；Min/Trim/Max 44 px 容得下四位數（23 px）
+# 與表頭「Trim (μs)」（實測 44 px；§5.17.20.3.10 單位要寫在欄名裡，所以不縮欄名）。
+_W_CH, _W_BAR_MIN, _W_BAR_MAX, _W_REV, _W_FUNC, _W_NUM, _SPACING = 18, 60, 260, 18, 98, 44, 4
+_W_BAR = _W_BAR_MIN       # 舊名（外部若有人讀）：現在是彈性欄的最小寬
+
+
+def _elastic_bar_column(w: QWidget) -> None:
+    """PWM 欄（表頭標籤與每列的條圖）用同一套尺寸設定：忽略 sizeHint、最少 _W_BAR_MIN、最多 _W_BAR_MAX。
+    兩邊設定完全一樣 ⇒ 同寬的列裡分到的寬度一樣 ⇒ 表頭對得齊。"""
+    w.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+    w.setMinimumWidth(_W_BAR_MIN)
+    w.setMaximumWidth(_W_BAR_MAX)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -111,11 +140,11 @@ class ServoChannelRow(QWidget):
     def _init_ui(self):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(2, 0, 2, 0)
-        layout.setSpacing(6)
+        layout.setSpacing(_SPACING)
 
         # 通道號
         self.lbl_ch = QLabel(f'{self.ch}')
-        self.lbl_ch.setFixedWidth(20)
+        self.lbl_ch.setFixedWidth(_W_CH)
         self.lbl_ch.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_ch.setStyleSheet(
             f'color:{TC.FG_SECONDARY};font-size:10px;'
@@ -123,14 +152,14 @@ class ServoChannelRow(QWidget):
         )
         layout.addWidget(self.lbl_ch)
 
-        # PWM bar
+        # PWM bar（彈性欄：見 _elastic_bar_column）
         self.bar = PwmBar()
-        self.bar.setFixedWidth(140)
-        layout.addWidget(self.bar)
+        _elastic_bar_column(self.bar)
+        layout.addWidget(self.bar, 1)
 
         # Reverse 顯示（唯讀 checkbox 樣式）
         self.lbl_rev = QLabel('☐')
-        self.lbl_rev.setFixedWidth(20)
+        self.lbl_rev.setFixedWidth(_W_REV)
         self.lbl_rev.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_rev.setStyleSheet(
             f'color:{TC.FG_MUTED};font-size:14px;'
@@ -140,13 +169,8 @@ class ServoChannelRow(QWidget):
 
         # Function 名稱
         self.lbl_func = QLabel('Disabled')
-        self.lbl_func.setFixedWidth(120)
-        self.lbl_func.setStyleSheet(
-            f'background:{TC.BG_SUNKEN};color:{TC.FG_PRIMARY};'
-            f'border:1px solid {TC.BORDER_DEFAULT};border-radius:0;'
-            f'padding:2px 6px;font-size:10px;'
-            f'font-family:{TF.css_condensed()};letter-spacing:0.5px;'
-        )
+        self.lbl_func.setFixedWidth(_W_FUNC)
+        self.lbl_func.setStyleSheet(self._func_css(muted=False))
         layout.addWidget(self.lbl_func)
 
         # Min / Trim / Max（QSpinBox 樣式但唯讀）
@@ -154,21 +178,53 @@ class ServoChannelRow(QWidget):
             sb = QSpinBox()
             sb.setRange(800, 2200)
             sb.setValue({'min': 1000, 'trim': 1500, 'max': 2000}[name])
-            sb.setFixedWidth(56)
+            sb.setFixedWidth(_W_NUM)
             sb.setReadOnly(not self.EDITABLE)
             sb.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons if not self.EDITABLE
                                   else QSpinBox.ButtonSymbols.UpDownArrows)
-            sb.setStyleSheet(
-                f'QSpinBox{{background:{TC.BG_SUNKEN};color:{TC.FG_PRIMARY};'
-                f'border:1px solid {TC.BORDER_DEFAULT};border-radius:0;'
-                f'padding:1px 4px;font-size:10px;'
-                f'font-family:{TF.css_mono()};}}'
-            )
+            sb.setStyleSheet(self._sb_css(False))
             setattr(self, f'sb_{name}', sb)
             layout.addWidget(sb)
 
-        layout.addStretch(1)
+        layout.addStretch(0)                  # PWM 欄到最大寬之後，多的寬度留在最右邊（表頭同一套）
         self.setFixedHeight(24)
+        # 一開始就是「尚未讀回」：以前預設顯示 Disabled／1000／1500／2000，看起來像讀回值（有效值契約）
+        self.reset()
+
+    @staticmethod
+    def _sb_css(muted: bool) -> str:
+        return (f'QSpinBox{{background:{TC.BG_SUNKEN};'
+                f'color:{TC.FG_MUTED if muted else TC.FG_PRIMARY};'
+                f'border:1px solid {TC.BORDER_DEFAULT};border-radius:0;'
+                f'padding:1px 2px;font-size:10px;'
+                f'font-family:{TF.css_mono()};}}')
+
+    @staticmethod
+    def _func_css(muted: bool) -> str:
+        return (f'background:{TC.BG_SUNKEN};'
+                f'color:{TC.FG_MUTED if muted else TC.FG_PRIMARY};'
+                f'border:1px solid {TC.BORDER_DEFAULT};border-radius:0;'
+                f'padding:2px 4px;font-size:10px;'
+                f'font-family:{TF.css_condensed()};letter-spacing:0px;')
+
+    def reset(self) -> None:
+        """回到「這台還沒讀回任何 SERVOn_*」：PWM 0（顯示 ---）、功能「—」、Min/Trim/Max 灰字（數字只是佔位）。
+
+        換看另一台時一定要先 reset：不然上一台讀回的功能名會留在沒收到的通道上，被當成這台的值。
+        """
+        self.bar.set_pwm(0)
+        self.bar.set_enabled_channel(True)
+        self.lbl_func.setText('—')
+        self.lbl_func.setToolTip(f'尚未讀回 SERVO{self.ch}_FUNCTION')
+        self.lbl_func.setStyleSheet(self._func_css(muted=True))
+        for name, default in (('min', 1000), ('trim', 1500), ('max', 2000)):
+            sb = getattr(self, f'sb_{name}')
+            sb.setValue(default)
+            sb.setStyleSheet(self._sb_css(True))
+            sb.setToolTip(f'尚未讀回 SERVO{self.ch}_{name.upper()}（{default} 只是佔位）')
+        self.bar.set_range(1000, 2000)
+        self.set_reversed(False)
+        self.lbl_rev.setToolTip(f'SERVO{self.ch}_REVERSED（尚未讀回）')
 
     # ── 公開資料寫入 ─────────────────────────────────────────────
     def set_pwm(self, pwm: int):
@@ -177,28 +233,25 @@ class ServoChannelRow(QWidget):
     def set_function(self, func_code: int):
         name = servo_function_name(func_code)
         self.lbl_func.setText(name)
+        self.lbl_func.setToolTip(f'SERVO{self.ch}_FUNCTION = {int(func_code)}（{name}）')
         is_disabled = (func_code == 0)
         self.bar.set_enabled_channel(not is_disabled)
         # 停用通道整列文字降亮度
-        self.lbl_func.setStyleSheet(
-            f'background:{TC.BG_SUNKEN};'
-            f'color:{TC.FG_MUTED if is_disabled else TC.FG_PRIMARY};'
-            f'border:1px solid {TC.BORDER_DEFAULT};border-radius:0;'
-            f'padding:2px 6px;font-size:10px;'
-            f'font-family:{TF.css_condensed()};letter-spacing:0.5px;'
-        )
+        self.lbl_func.setStyleSheet(self._func_css(muted=is_disabled))
 
     def set_min_trim_max(self, pmin: int = None, ptrim: int = None, pmax: int = None):
-        if pmin is not None:
-            self.sb_min.setValue(int(pmin))
-        if ptrim is not None:
-            self.sb_trim.setValue(int(ptrim))
-        if pmax is not None:
-            self.sb_max.setValue(int(pmax))
+        for name, v in (('min', pmin), ('trim', ptrim), ('max', pmax)):
+            if v is None:
+                continue
+            sb = getattr(self, f'sb_{name}')
+            sb.setValue(int(v))
+            sb.setStyleSheet(self._sb_css(False))
+            sb.setToolTip(f'SERVO{self.ch}_{name.upper()} = {int(v)}')
         # 同步 PWM bar 範圍（取 min/max）
         self.bar.set_range(self.sb_min.value(), self.sb_max.value())
 
     def set_reversed(self, rev: bool):
+        self.lbl_rev.setToolTip(f'SERVO{self.ch}_REVERSED = {int(bool(rev))}')
         if rev:
             self.lbl_rev.setText('☑')
             self.lbl_rev.setStyleSheet(
@@ -222,7 +275,14 @@ class ServoOutputPanel(QFrame):
         panel = ServoOutputPanel()
         sitl_link.telemetry.connect(panel.on_telemetry)        # 灌入 SERVO_OUTPUT_RAW
         sitl_link.servo_param.connect(panel.on_servo_param)    # 灌入 SERVOn_*
+
+    多機時（SITLHud 單機模式）由 SITLHud 依 sysid 快取 SERVOn_*，換看另一台時
+    reset() → 重灌那台的快取 → set_source(sysid, 筆數)；面板本身不分 sysid。
     """
+
+    TITLE = '▎SERVO OUTPUT  —  16 通道 PWM (μs)'
+    #: 每台要讀回的 SERVOn_* 筆數（16 通道 × FUNCTION/MIN/TRIM/MAX/REVERSED）
+    N_PARAMS = 16 * 5
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -238,39 +298,44 @@ class ServoOutputPanel(QFrame):
         v.setContentsMargins(6, 6, 6, 6)
         v.setSpacing(0)
 
-        # 標題列
-        title = QLabel('▎SERVO OUTPUT  —  16 通道 PWM (μs)')
-        title.setStyleSheet(
+        # 標題列（set_source 會改成「— UAVn —」並帶參數讀回筆數）
+        self.lbl_title = QLabel(self.TITLE)
+        # 標題帶機號＋讀回筆數時很長：可換行，不讓它把整張表的最小寬撐大（單機頁寬約 400 px）
+        self.lbl_title.setWordWrap(True)
+        self.lbl_title.setStyleSheet(
             f'color:{TC.FG_EMPHASIS};'
             f'font-family:{TF.css_condensed()};letter-spacing:1.5px;'
             f'font-size:11px;font-weight:bold;padding:2px 0 4px 2px;'
         )
-        v.addWidget(title)
+        v.addWidget(self.lbl_title)
 
         # 表頭（與 ServoChannelRow 對齊）
         header = QHBoxLayout()
         header.setContentsMargins(2, 0, 2, 0)
-        header.setSpacing(6)
+        header.setSpacing(_SPACING)
         # §5.17.20.3.10 — units 必須包含於 column label
         for txt, w, align in [
-            ('#',          20,  Qt.AlignmentFlag.AlignCenter),
-            ('PWM (μs)',  140, Qt.AlignmentFlag.AlignCenter),
-            ('Rev',        20,  Qt.AlignmentFlag.AlignCenter),
-            ('Function',  120, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-            ('Min (μs)',   56,  Qt.AlignmentFlag.AlignCenter),
-            ('Trim (μs)',  56,  Qt.AlignmentFlag.AlignCenter),
-            ('Max (μs)',   56,  Qt.AlignmentFlag.AlignCenter),
+            ('#',         _W_CH,   Qt.AlignmentFlag.AlignCenter),
+            ('PWM (μs)',  None,    Qt.AlignmentFlag.AlignCenter),     # None ＝ 彈性欄（同條圖）
+            ('Rev',       _W_REV,  Qt.AlignmentFlag.AlignCenter),
+            ('Function',  _W_FUNC, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            ('Min (μs)',  _W_NUM,  Qt.AlignmentFlag.AlignCenter),
+            ('Trim (μs)', _W_NUM,  Qt.AlignmentFlag.AlignCenter),
+            ('Max (μs)',  _W_NUM,  Qt.AlignmentFlag.AlignCenter),
         ]:
             lbl = QLabel(txt)
-            lbl.setFixedWidth(w)
+            if w is None:
+                _elastic_bar_column(lbl)
+            else:
+                lbl.setFixedWidth(w)
             lbl.setAlignment(align)
             lbl.setStyleSheet(
                 f'color:{TC.FG_SECONDARY};font-size:9px;font-weight:bold;'
-                f'font-family:{TF.css_condensed()};letter-spacing:1.2px;'
+                f'font-family:{TF.css_condensed()};letter-spacing:0.3px;'
                 f'border-bottom:1px solid {TC.BORDER_SUBTLE};padding:0 0 2px 0;'
             )
-            header.addWidget(lbl)
-        header.addStretch(1)
+            header.addWidget(lbl, 1 if w is None else 0)
+        header.addStretch(0)
         head_w = QWidget()
         head_w.setLayout(header)
         head_w.setFixedHeight(18)
@@ -298,6 +363,27 @@ class ServoOutputPanel(QFrame):
                 v.addWidget(sep)
 
         v.addStretch(1)
+
+    # ── 來源（哪一台）─────────────────────────────────────────────
+    def reset(self) -> None:
+        """16 列全部回到「尚未讀回」，標題回到不帶機號。"""
+        for row in self._rows:
+            row.reset()
+        self.lbl_title.setText(self.TITLE)
+        self.lbl_title.setToolTip('')
+
+    def set_source(self, sysid, n_params: int) -> None:
+        """標題標出這是哪一台、SERVOn_* 讀回了幾筆（共 N_PARAMS）。sysid None ⇒ 不帶機號。"""
+        if sysid is None:
+            self.lbl_title.setText(self.TITLE)
+            self.lbl_title.setToolTip('')
+            return
+        k = int(n_params)
+        self.lbl_title.setText(
+            f'▎SERVO OUTPUT — UAV{int(sysid)} — 16 通道 PWM (μs)　參數 {k}/{self.N_PARAMS}')
+        self.lbl_title.setToolTip(
+            f'UAV{int(sysid)} 的 SERVOn_FUNCTION/MIN/TRIM/MAX/REVERSED 已讀回 {k} 筆（共 {self.N_PARAMS}）；'
+            '連線時讀一次。功能欄「—」＝那個通道還沒讀回。')
 
     # ── 信號接收 ─────────────────────────────────────────────────
     def on_telemetry(self, frame):

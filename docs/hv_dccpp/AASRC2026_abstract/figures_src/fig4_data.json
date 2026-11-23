@@ -1,0 +1,201 @@
+{
+ "caveats": [
+  "SITL 內建 --model quadplane；SIM_WIND_TURB = 0、SIM_WIND_T = 1（等高度常值風），陣風、紊流與風切完全沒有模擬。",
+  "5 m/s 是 Scenario.wind 的預設值，不是場址實測風。",
+  "作業段條帶為東西向而風亦為東西向 ⇒ 沿航跡分量在往返之間相消；本圖不能推廣到條帶與風不平行的情況。",
+  "HV4SITL16 規劃假設 5 m/s 但模擬從未設風（本圖 (a) 直接量到東−西 ≈ 0），這正是圖 (b) 三格要取代它的理由。",
+  "每格 1 趟，SITL 為決定性模擬 ⇒ 沒有重複量測的散布。"
+ ],
+ "definitions": {
+  "east_minus_west": "cancels any heading-independent groundspeed/airspeed scale offset exactly; equals 2W for a pure east-west wind",
+  "gs_minus_as": "dataflash GPS.Spd minus ARSP.Airspeed, interpolated onto the GPS samples, restricted to RelHomeAlt > 100 m and airspeed > 10 m/s, median per heading sector",
+  "makespan_flown": "last downward crossing of RelHomeAlt = 2.0 m across the fleet, on the GPS time-of-week clock, minus the plan's own t = 0"
+ },
+ "figure": {
+  "dpi": 300,
+  "height_cm": 6.0,
+  "png": "docs/hv_dccpp/AASRC2026_abstract/fig4_wind.png",
+  "svg": "docs/hv_dccpp/AASRC2026_abstract/fig4_wind.svg",
+  "width_cm": 17.0
+ },
+ "panel_a_wind_evidence": [
+  {
+   "east_median_gs_minus_as_mps": 0.443,
+   "east_minus_west_mps": 0.005,
+   "heading_independent_offset_mps": 0.44,
+   "n_cruise_gps_samples": 644,
+   "trial": "HV4SITL16",
+   "uav": "A1",
+   "west_median_gs_minus_as_mps": 0.438
+  },
+  {
+   "east_median_gs_minus_as_mps": 0.389,
+   "east_minus_west_mps": -0.002,
+   "heading_independent_offset_mps": 0.39,
+   "n_cruise_gps_samples": 273,
+   "trial": "HV4SITL16",
+   "uav": "B2",
+   "west_median_gs_minus_as_mps": 0.391
+  },
+  {
+   "east_median_gs_minus_as_mps": 0.397,
+   "east_minus_west_mps": -0.019,
+   "heading_independent_offset_mps": 0.407,
+   "n_cruise_gps_samples": 610,
+   "trial": "HV4SITL16",
+   "uav": "B3",
+   "west_median_gs_minus_as_mps": 0.417
+  },
+  {
+   "east_median_gs_minus_as_mps": 0.443,
+   "east_minus_west_mps": 0.009,
+   "heading_independent_offset_mps": 0.438,
+   "n_cruise_gps_samples": 582,
+   "trial": "HV4W00",
+   "uav": "A1",
+   "west_median_gs_minus_as_mps": 0.434
+  },
+  {
+   "east_median_gs_minus_as_mps": 0.404,
+   "east_minus_west_mps": 0.002,
+   "heading_independent_offset_mps": 0.403,
+   "n_cruise_gps_samples": 258,
+   "trial": "HV4W00",
+   "uav": "B2",
+   "west_median_gs_minus_as_mps": 0.402
+  },
+  {
+   "east_median_gs_minus_as_mps": 0.39,
+   "east_minus_west_mps": -0.008,
+   "heading_independent_offset_mps": 0.394,
+   "n_cruise_gps_samples": 712,
+   "trial": "HV4W00",
+   "uav": "B3",
+   "west_median_gs_minus_as_mps": 0.399
+  },
+  {
+   "east_median_gs_minus_as_mps": 5.43,
+   "east_minus_west_mps": 9.969,
+   "heading_independent_offset_mps": 0.445,
+   "n_cruise_gps_samples": 536,
+   "trial": "HV4W05",
+   "uav": "A1",
+   "west_median_gs_minus_as_mps": -4.539
+  },
+  {
+   "east_median_gs_minus_as_mps": 5.358,
+   "east_minus_west_mps": 9.915,
+   "heading_independent_offset_mps": 0.4,
+   "n_cruise_gps_samples": 456,
+   "trial": "HV4W05",
+   "uav": "B2",
+   "west_median_gs_minus_as_mps": -4.557
+  },
+  {
+   "east_median_gs_minus_as_mps": 5.362,
+   "east_minus_west_mps": 9.942,
+   "heading_independent_offset_mps": 0.391,
+   "n_cruise_gps_samples": 506,
+   "trial": "HV4W05",
+   "uav": "B3",
+   "west_median_gs_minus_as_mps": -4.58
+  },
+  {
+   "east_median_gs_minus_as_mps": 5.419,
+   "east_minus_west_mps": 9.953,
+   "heading_independent_offset_mps": 0.443,
+   "n_cruise_gps_samples": 541,
+   "trial": "HV4W55",
+   "uav": "A1",
+   "west_median_gs_minus_as_mps": -4.534
+  },
+  {
+   "east_median_gs_minus_as_mps": 5.36,
+   "east_minus_west_mps": 9.931,
+   "heading_independent_offset_mps": 0.394,
+   "n_cruise_gps_samples": 275,
+   "trial": "HV4W55",
+   "uav": "B2",
+   "west_median_gs_minus_as_mps": -4.571
+  },
+  {
+   "east_median_gs_minus_as_mps": 5.374,
+   "east_minus_west_mps": 9.957,
+   "heading_independent_offset_mps": 0.395,
+   "n_cruise_gps_samples": 518,
+   "trial": "HV4W55",
+   "uav": "B3",
+   "west_median_gs_minus_as_mps": -4.583
+  }
+ ],
+ "panel_b_derived": {
+  "A_cost_of_the_air_same_plan_HV4W05_minus_HV4W00": {
+   "d_flown_fleet_km": 0.5324,
+   "d_flown_makespan_pct": 2.227,
+   "d_flown_makespan_s": 26.899,
+   "d_flown_makespan_s_disarm_def": 27.165,
+   "note": "identical mission files (9 plan files bit-identical per prep_check); only SIM_WIND differs, so this isolates the air",
+   "prediction_error_in_wind_pct": 2.428,
+   "prediction_error_still_air_pct": 0.197
+  },
+  "B_cost_of_ignoring_the_wind_model_same_air_HV4W05_vs_HV4W55": {
+   "d_flown_fleet_km": -0.2185,
+   "d_flown_makespan_pct": -3.676,
+   "d_flown_makespan_s": -47.126,
+   "d_planned_makespan_s": -54.944,
+   "makespan_decomposition": {
+    "A1_flown_airborne_duration_wind_aware_s": 623.404,
+    "A1_flown_airborne_duration_wind_ignorant_s": 620.174,
+    "A1_release_delay_added_by_wind_aware_plan_s": 44.0,
+    "d_airborne_duration_s": 3.23,
+    "reading": "the 47 s by which the wind-aware fleet finishes later is almost entirely a 44 s later scheduled release of A1, not a slower flight"
+   },
+   "note": "both flown in 5 m/s from 270; HV4W55's plan knows about it, HV4W05's does not",
+   "per_aircraft_prediction_error_pct": {
+    "A1": {
+     "wind_aware": 1.702,
+     "wind_ignorant": 2.428
+    },
+    "B2": {
+     "wind_aware": 4.901,
+     "wind_ignorant": 7.078
+    },
+    "B3": {
+     "wind_aware": 2.876,
+     "wind_ignorant": 6.219
+    }
+   },
+   "prediction_error_wind_aware_pct": 1.702,
+   "prediction_error_wind_ignorant_pct": 2.428
+  }
+ },
+ "panel_b_makespan": [
+  {
+   "flown_makespan_s": 1207.881,
+   "planned_makespan_s": 1205.5101155418506,
+   "prediction_error_pct": 0.197,
+   "trial": "HV4W00"
+  },
+  {
+   "flown_makespan_s": 1234.78,
+   "planned_makespan_s": 1205.5101155418506,
+   "prediction_error_pct": 2.428,
+   "trial": "HV4W05"
+  },
+  {
+   "flown_makespan_s": 1281.906,
+   "planned_makespan_s": 1260.453960577981,
+   "prediction_error_pct": 1.702,
+   "trial": "HV4W55"
+  }
+ ],
+ "sources": {
+  "runs/artifacts/PAPERPLAN1/analysis/out/altitude.json": "5e1f671c97543fef7c1367d3f064463ce82b9a7a5c26aa773addd04ddbd23bc0",
+  "runs/artifacts/PAPERPLAN1/analysis/out/contradictions.json": "47bfe08cbd44dc5986dc375ba8b320566bf586201e00311b361714ba152ae707",
+  "runs/artifacts/PAPERPLAN1/analysis/out/derived.json": "07241ba2e6253478cb34f772d72fd071c5fdf071d4a5a6102e53eb097d1c9dfc",
+  "runs/artifacts/PAPERPLAN1/analysis/out/separation.json": "de6a0c43587c89aaeb49df1db4689b81672e77b912994e7bad8255e702c78d10",
+  "runs/artifacts/PAPERPLAN1/analysis/out/timing.json": "49619ba8f7ea0b93163fe8b6aadf1bed7639096ea44961383e0206a1f0c5c133",
+  "runs/artifacts/PAPERPLAN1/analysis/out/uav_kinematics.json": "15e8d6f7ae09673547b9eeffcdaac0192a3c3e4054885ecf1314297868b12eee",
+  "runs/artifacts/PAPERPLAN1/analysis/out/verify.json": "8833895ae2c58a974e41921d85a69b58157f86dd6210d1bf482d19cd6c410826"
+ }
+}

@@ -1,0 +1,61 @@
+{
+  "scenario": "S4",
+  "n": 8,
+  "mix": false,
+  "uav": "D1",
+  "cls": "A",
+  "n_waypoints": 30,
+  "A_examined_triples": 5,
+  "A_skipped": {
+    "phase": 14,
+    "chord": 9,
+    "turn": 0,
+    "degenerate": 0
+  },
+  "A_phase_histogram": {
+    "TAKEOFF": 7,
+    "ENTRY": 1,
+    "OPERATE": 10,
+    "TRANSFER": 4,
+    "LAND": 8
+  },
+  "A_R_eff_m": 200.0,
+  "A_min_circumradius_m": 2003.2,
+  "A_pctile_circumradius_m": [
+    2003.2,
+    2003.2,
+    2007.2,
+    2012.9,
+    2347.1
+  ],
+  "A_baseline_violations": [],
+  "B1_inject_index": 9,
+  "B1_kink_m": 40.0,
+  "B1_fired": false,
+  "B1_chords_m": [
+    4000.0,
+    227.1
+  ],
+  "B1_deflection_deg": 14.0,
+  "B2_offset_m": 113.5,
+  "B2_violations": [],
+  "B2_fired": false,
+  "B3_expected_circumradius_m": 141.4,
+  "B3_violations": [
+    "curvature_below_R_eff: wp=1 OPERATE R=141.4 < R_eff=200.0"
+  ],
+  "B3_fired": true,
+  "C_violations": [
+    "slope_exceeded: wp=21 OPERATE ground slope=-7.93deg (limit +4.30/-6.13 at V_g=17.5; air +3.5/-5.0)",
+    "above_ceiling: wp=8 OPERATE agl=340.5 > h_ceil=200.0",
+    "above_ceiling: wp=8 OPERATE agl=340.5 > h_ceil=200.0",
+    "above_ceiling: wp=8 OPERATE agl=340.5 > h_ceil=200.0",
+    "above_ceiling: wp=8 OPERATE agl=340.5 > h_ceil=200.0"
+  ],
+  "C_fired": true,
+  "C_h_ceil_m": 200.0,
+  "C_min_fw_operation_agl_m": 120.0,
+  "D_note": "R_eff at 5 m/s equals R_plan for both classes (see step0_reff.log); DCCPP builds Dubins arcs at min_turn_radius = the same R_plan it was handed."
+}
+
+wrote C:\Users\joy46\Documents\Projects\aeroplan-studio\runs\artifacts\PAPERPLAN1\c5_baseline\out\step4_verifier_S4_n8.json

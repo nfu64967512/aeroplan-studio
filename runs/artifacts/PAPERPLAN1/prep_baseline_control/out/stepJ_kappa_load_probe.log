@@ -1,0 +1,22 @@
+
+########## HARVEST S1/n=2 ##########
+ kappa_load  effective |     cov    strips  uncov max D_plan  valid    sec
+--------------------------------------------------------------------------
+default(0.85) 0.85(default) |  0.5277     18/36      1       76.4  False    2.7
+        0.9        0.9 |  0.5277     18/36      1       76.4  False    2.2
+       0.95       0.95 |  0.5277     18/36      1       76.4  False    2.2
+        1.0        1.0 |  0.5277     18/36      1       76.4  False    2.2
+        1.2        1.2 |  0.5277     18/36      1       76.4  False    2.2
+        1.5        1.5 |     0.0      0/36      2        0.0  False    1.1
+
+########## HARVEST S5/n=8 ##########
+ kappa_load  effective |     cov    strips  uncov max D_plan  valid    sec
+--------------------------------------------------------------------------
+default(0.85) 0.85(default) |   0.617     36/72      4       84.8  False   50.1
+        0.9        0.9 |   0.617     36/72      4       84.8  False   49.9
+       0.95       0.95 |   0.617     36/72      4       84.8  False   50.7
+        1.0        1.0 |   0.617     36/72      4       84.8  False   50.1
+        1.2        1.2 |     0.0      0/72      8        0.0  False    4.4
+        1.5        1.5 |     0.0      0/72      8        0.0  False    4.4
+
+wrote C:\Users\joy46\Documents\Projects\aeroplan-studio\runs\artifacts\PAPERPLAN1\prep_baseline_control\out\stepJ_kappa_load_probe.json

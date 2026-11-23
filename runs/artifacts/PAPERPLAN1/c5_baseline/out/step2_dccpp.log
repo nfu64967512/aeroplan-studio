@@ -1,0 +1,12 @@
+=== DCCPP S2 4 ===
+@@ROW@@{"method": "DCCPP", "scenario": "S2", "n_uav_req": 4, "sec": 0.78, "self_makespan_s": 2809.5, "n_uav": 4, "total_km": 243.14, "max_km": 62.63, "coverage": 1.0, "overhead": 1.965, "redundancy": 1.044, "balance": 1.03, "scan_rate": 22.991, "waste": 0.148, "self_uncovered": "", "self_validate": "", "n_tracks": 4, "wpts": [51, 51, 51, 51]}
+wrote C:\Users\joy46\Documents\Projects\aeroplan-studio\runs\artifacts\PAPERPLAN1\c5_baseline\out\tracks\DCCPP_S2_n4.json md5 83b37b4989b30d8e753f17b3d0f1eda8
+=== DCCPP S4 8 ===
+@@ROW@@{"method": "DCCPP", "scenario": "S4", "n_uav_req": 8, "sec": 0.16, "self_makespan_s": 1390.4, "n_uav": 8, "total_km": 164.45, "max_km": 26.45, "coverage": 1.0, "overhead": 2.215, "redundancy": 1.221, "balance": 1.287, "scan_rate": 32.669, "waste": 0.193, "self_uncovered": "", "self_validate": "", "n_tracks": 8, "wpts": [30, 30, 30, 30, 27, 27, 27, 27]}
+wrote C:\Users\joy46\Documents\Projects\aeroplan-studio\runs\artifacts\PAPERPLAN1\c5_baseline\out\tracks\DCCPP_S4_n8.json md5 cc30887c9b599aefa4b55d13eda01d1d
+=== DCCPP_mix S1 2 ===
+@@ROW@@{"method": "DCCPP_mix", "scenario": "S1", "n_uav_req": 2, "sec": 32.17, "self_makespan_s": 5558.8, "n_uav": 2, "total_km": 208.12, "max_km": 104.25, "coverage": 1.0, "overhead": 1.682, "redundancy": 1.015, "balance": 1.002, "scan_rate": 13.813, "waste": 0.0423, "self_uncovered": "", "self_validate": "", "n_tracks": 2, "wpts": [69, 69]}
+wrote C:\Users\joy46\Documents\Projects\aeroplan-studio\runs\artifacts\PAPERPLAN1\c5_baseline\out\tracks\DCCPP_mix_S1_n2.json md5 93da184b8c85a01c300b0a5544cac891
+=== DCCPP S1 2 ===
+@@ROW@@{"method": "DCCPP", "scenario": "S1", "n_uav_req": 2, "sec": 32.15, "self_makespan_s": 4912.4, "n_uav": 2, "total_km": 208.12, "max_km": 104.25, "coverage": 1.0, "overhead": 1.682, "redundancy": 1.015, "balance": 1.002, "scan_rate": 13.813, "waste": 0.0423, "self_uncovered": "", "self_validate": "", "n_tracks": 2, "wpts": [69, 69]}
+wrote C:\Users\joy46\Documents\Projects\aeroplan-studio\runs\artifacts\PAPERPLAN1\c5_baseline\out\tracks\DCCPP_S1_n2.json md5 9243a787af56a9bf6f500371a925897f

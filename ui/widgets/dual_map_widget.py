@@ -4,6 +4,7 @@
 提供無縫切換功能，對外介面與原 MapWidget 完全相容。
 """
 
+import math
 from typing import List, Tuple
 
 from PyQt6.QtWidgets import (
@@ -76,6 +77,7 @@ class DualMapWidget(MapWidgetBase):
         super().__init__(parent)
         self._mode = _MODE_2D
         self._map3d_settling = False     # 剛切到 3D、WebGL 重建中的安定窗口
+        self._survey_ortho = {}          # 航測正射：圖層代號 → 2D 重疊用的 (路徑, scheme, bounds)
         self._init_ui()
         self._connect_signals()
         logger.info('DualMapWidget 初始化完成')
@@ -328,6 +330,21 @@ class DualMapWidget(MapWidgetBase):
             swarm_data    = getattr(m, '_swarm_data', None),
         )
 
+    def ensure_3d(self) -> bool:
+        """確保 3D Cesium 圖台**真的在顯示**；已經在 3D 就什麼都不做。
+
+        給「只有 3D 才畫得出來」的功能用（覆蓋熱力圖、漏掃標示）。
+        回傳是否成功切到 3D。
+        """
+        if self._mode == _MODE_3D:
+            return True
+        self._switch_mode(_MODE_3D)
+        return self._mode == _MODE_3D
+
+    def is_3d(self) -> bool:
+        """目前是否顯示 3D Cesium 圖台。"""
+        return self._mode == _MODE_3D
+
     def _on_fly_clicked(self):
         """飛向路徑（3D 模式才有效果）"""
         if self._mode == _MODE_3D:
@@ -503,17 +520,17 @@ class DualMapWidget(MapWidgetBase):
     # ─────────────────────────────────────────────────────────────────
 
     # ── 路徑顯示（每次自動建構 Geofence —— 強制飛安政策）───────────
-    def display_path(self, path, altitude: float = 50.0):
+    def display_path(self, path, altitude: float = 50.0, scan_angle_deg=None):
         self.map_2d.display_path(path, altitude)
         self.map_3d.display_path(path, altitude)
-        self._auto_build_fence([path], altitude)
+        self._auto_build_fence([path], altitude, scan_angle_deg=scan_angle_deg)
 
-    def display_paths(self, paths_list, altitude: float = 50.0):
+    def display_paths(self, paths_list, altitude: float = 50.0, scan_angle_deg=None):
         self.map_2d.display_paths(paths_list, altitude)
         self.map_3d.display_paths(paths_list, altitude)
-        self._auto_build_fence(paths_list, altitude)
+        self._auto_build_fence(paths_list, altitude, scan_angle_deg=scan_angle_deg)
 
-    def display_fw_paths(self, takeoff, mission, landing):
+    def display_fw_paths(self, takeoff, mission, landing, scan_angle_deg=None):
         self.map_2d.display_fw_paths(takeoff, mission, landing)
         self.map_3d.display_fw_paths(takeoff, mission, landing)
         # 三段都要納入圍籬範圍；固定翼建議 buffer ≥ 100m
@@ -521,13 +538,96 @@ class DualMapWidget(MapWidgetBase):
         for p in (takeoff, mission, landing):
             if p:
                 all_paths.append(p)
-        self._auto_build_fence(all_paths, altitude=None, buffer_m=120.0)
+        self._auto_build_fence(all_paths, altitude=None, buffer_m=120.0,
+                               scan_angle_deg=scan_angle_deg)
+
+    # ── 飛控任務航線（讀回的那一份）──────────────────────────────
+    def display_fc_mission(self, path2d, path3d, loiters=None,
+                           color: str = None, home=None, *,
+                           sysid=None, kind=None, label=None, fit=False) -> dict:
+        """把一份任務（讀回的、或從檔案匯入的）同時疊到 2D 與 3D，**每個 (sysid, kind) 一層**。
+
+        ⚠️⚠️ **刻意不呼叫 `_auto_build_fence`** —— 上面每個 display_* 都會呼叫
+        它，那是「強制飛安政策」，對**規劃出來的**航線是對的。但讀回的任務是
+        觀測，不是規劃：拿它重建圍籬會把「上傳電子圍籬」按鈕的來源
+        （`_last_fence_bundle`）換成包住 AUTO 航線的矩形，而使用者完全不會
+        知道自己按下的是別的東西。觀測不可以有副作用。
+
+        2D 收二元組、3D 收三元組 —— 兩個**不同**的參數，不是同一份轉型。
+        混用會讓 folium 丟 ValueError 並讓整張 2D 圖靜靜消失
+        （見 `mission/mission_view.py` 的模組 docstring）。
+
+        sysid, kind : 圖層鍵，兩張圖**同一套**（`mission_view.fc_layer_key`）：2D 畫進
+            `window._fcMissionLayers[key]`、3D 畫進 `_missionLayers[key]`。
+            * 都是 None ⇒ 舊語意：兩張圖都先清掉全部層、畫成單一疊圖 'fc'。
+            * 只給 sysid ⇒ 'uav<n>'（讀回）；都給 ⇒ 'uav<n>-<kind>'（kind='import'
+              是匯入預覽，不會跟同一架的讀回互相蓋掉）；只給 kind ⇒ '<kind>'
+              （kind='loaded' 是單檔載入，只換自己這層、**不**清別人）。
+            同一把鍵再畫只換那一層，其他層不動（多機並存）。
+        color / label : None ⇒ 依 sysid 取 `mission_view.sysid_color` /
+            `fc_mission_label`，兩張圖同色同名。
+        fit : True ⇒ 2D fitBounds 到這份任務；3D 相機飛到航線中心（距離依範圍）。
+
+        ⚠️ 兩張圖**直接呼叫**，不再用 hasattr 守：以前 2D 沒有
+        `display_fc_mission`，hasattr 把「方法不存在」翻譯成「什麼都不做」，
+        載入後 2D 看不到也不報錯（2026-10-17 補上 2D 之前就是這樣）。
+
+        Returns
+        -------
+        dict  `{'2d': 2D 回傳的 dict, 'layer': 圖層鍵, 'color': ..., 'label': ...}`
+        """
+        from mission import mission_view as _mv
+        color = str(color) if color else _mv.sysid_color(sysid)
+        label = _mv.fc_mission_label(sysid, label)
+        r2 = self.map_2d.display_fc_mission(path2d, loiters, color, home=home,
+                                            sysid=sysid, kind=kind, label=label, fit=fit)
+        self.map_3d.display_fc_mission(path3d, loiters, color, label=label,
+                                       home=home, sysid=sysid, kind=kind)
+        if fit:
+            self._fly_3d_to_mission(path3d, home)
+        return {'2d': r2, 'layer': (r2 or {}).get('layer'), 'color': color, 'label': label}
+
+    def _fly_3d_to_mission(self, path3d, home=None):
+        """3D 相機飛到航線（含 home）的中心；距離依範圍放大，至少 600 m。沒有點就不動。"""
+        pts = [(float(p[0]), float(p[1])) for p in (path3d or []) if len(p) >= 2]
+        if home:
+            pts.append((float(home['lat']), float(home['lon'])))
+        if not pts:
+            return
+        lat = sum(p[0] for p in pts) / len(pts)
+        lon = sum(p[1] for p in pts) / len(pts)
+        span_lat = max(p[0] for p in pts) - min(p[0] for p in pts)
+        span_lon = (max(p[1] for p in pts) - min(p[1] for p in pts)) * math.cos(math.radians(lat))
+        span_m = max(span_lat, span_lon) * 111_320.0
+        self.map_3d.fly_to_position(lat, lon, 0.0, max(600.0, span_m * 1.6))
+
+    def clear_fc_mission(self, sysid=None, kind=None) -> dict:
+        """清除任務疊圖，兩張圖都清（規則同一份：`mission_view.fc_layer_selector`）：
+        都是 None ⇒ 全部層；只給 sysid ⇒ 整架（'uav<n>' 與 'uav<n>-*'）；
+        都給／只給 kind ⇒ 恰好那一層。
+
+        回傳 `{'2d': 2D 原本有沒有東西(bool), '3d': None}`（3D 是 fire-and-forget 的 JS）。
+        """
+        r2 = self.map_2d.clear_fc_mission(sysid, kind=kind)
+        self.map_3d.clear_fc_mission(sysid, kind=kind)
+        return {'2d': r2, '3d': None}
 
     # ── Geofence 自動建構 ─────────────────────────────────────────
-    def _auto_build_fence(self, paths_list, altitude=None, buffer_m: float = 30.0):
+    def _auto_build_fence(self, paths_list, altitude=None, buffer_m: float = 30.0,
+                          scan_angle_deg=None, method: str = 'hull'):
         """
-        強制飛安：將所有航點包進矩形圍籬並上 3D 地圖渲染。
+        強制飛安：將所有航點包進**貼合航線的凸多邊形**圍籬並上 2D/3D 地圖渲染。
+
+        ⭐ 2026-10-08 使用者定調：規劃器出來的圍籬一律貼合路徑（底層預設 'hull'）。
+        ``scan_angle_deg`` 只有在呼叫端**明確**要矩形（method='aabb'）時才用；預設忽略。
         失敗（航點 <2 個、shapely 計算錯誤等）僅記錄，不阻斷顯示。
+
+        ``scan_angle_deg`` 給了就產生**對齊掃描角**的矩形（羅盤慣例：0=北、
+        順時針為正）。軸對齊矩形在斜掃描角下可以比實際需要大到 2 倍
+        （45° 掃描角、矩形作業區實測 2.06×）。
+
+        ⚠️ 沒有掃描角的航線（圓心螺旋、A*、DWA、手繪、匯入）一律傳 ``None``
+        並維持軸對齊 —— 硬湊一個角度會把圍籬轉到航線沒有走的方向。
         """
         try:
             from mission.geofence_manager import GeofenceConstraintManager
@@ -544,30 +644,53 @@ class DualMapWidget(MapWidgetBase):
                     flat.append((float(p[0]), float(p[1]), a))
         if len(flat) < 2:
             self.map_3d.clear_geofence()
+            self._clear_fence_2d()
             self._last_fence_bundle = None
             self.fence_built.emit(None)
             return
         try:
-            mgr = GeofenceConstraintManager(buffer_radius_m=buffer_m)
-            bundle = mgr.build(waypoints=flat)
+            # method='hull'：貼合航線的凸多邊形（不吃掃描角）；其餘維持矩形＋可選的掃描角對齊
+            mgr = GeofenceConstraintManager(buffer_radius_m=buffer_m, method=method)
+            bundle = mgr.build(waypoints=flat,
+                               scan_angle_deg=None if method == 'hull' else scan_angle_deg)
         except Exception as e:
-            logger.warning(f'[Geofence] 建構失敗: {e}')
+            # ⚠️⚠️ 舊版只記一行 warning 就 return，**沒有**清掉
+            # `_last_fence_bundle`（上面航點不足那一支有清）。結果是建構失敗時
+            # 兩張圖仍畫著**上一趟**的圍籬，而「上傳電子圍籬」按鈕會把那個
+            # 舊矩形送上飛控 —— 使用者完全看不出自己上傳的是別的東西。
+            # 建構失敗 = 沒有有效圍籬，就要長得像沒有。
+            logger.warning(f'[Geofence] 建構失敗（已清除舊圍籬）: {e}')
+            self.map_3d.clear_geofence()
+            self._clear_fence_2d()
+            self._last_fence_bundle = None
             self.fence_built.emit(None)
             return
         self._last_fence_bundle = bundle
         if self._fence_visible:
             self.map_3d.set_geofence(bundle.geofence)
+            self._set_fence_2d(bundle.geofence)
         logger.info(bundle.summary())
         self.fence_built.emit(bundle)
+
+    # ── 2D 圍籬渲染（map_2d 若支援 set_geofence/clear_geofence 才呼叫）──
+    def _set_fence_2d(self, geofence) -> None:
+        if hasattr(self.map_2d, 'set_geofence'):
+            self.map_2d.set_geofence(geofence)
+
+    def _clear_fence_2d(self) -> None:
+        if hasattr(self.map_2d, 'clear_geofence'):
+            self.map_2d.clear_geofence()
 
     def _on_fence_toggle(self):
         self._fence_visible = self._btn_fence.isChecked()
         if self._fence_visible and getattr(self, '_last_fence_bundle', None):
             self.map_3d.set_geofence(self._last_fence_bundle.geofence)
+            self._set_fence_2d(self._last_fence_bundle.geofence)
             self._btn_fence.setStyleSheet(_btn_qss(active=True))
             self._btn_fence.setText('圍籬')
         else:
             self.map_3d.clear_geofence()
+            self._clear_fence_2d()
             self._btn_fence.setStyleSheet(_btn_qss())
             self._btn_fence.setText('圍籬 (隱藏)')
 
@@ -602,13 +725,85 @@ class DualMapWidget(MapWidgetBase):
         self.map_3d.clear_home_point_overlay()
 
     # ── 群飛 ─────────────────────────────────────────────────────────
-    def display_swarm_coverage(self, swarm_mission, coverage_paths=None):
+    def display_swarm_coverage(self, swarm_mission, coverage_paths=None,
+                               scan_angle_deg=None):
         self.map_2d.display_swarm_coverage(swarm_mission, coverage_paths)
         self.map_3d.display_swarm_coverage(swarm_mission, coverage_paths)
+        # 強制飛安：群飛協同覆蓋路徑也綁定矩形圍籬（與 display_paths 一致）
+        try:
+            self._auto_build_fence(
+                self._coverage_to_paths(swarm_mission, coverage_paths),
+                buffer_m=60.0, scan_angle_deg=scan_angle_deg)
+        except Exception as e:
+            logger.warning(f'[Geofence] 群飛覆蓋圍籬建構略過: {e}')
 
-    def display_swarm_raw(self, swarm_data: dict):
+    def display_swarm_raw(self, swarm_data: dict, scan_angle_deg=None):
         self.map_2d.display_swarm_raw(swarm_data)
         self.map_3d.display_swarm_raw(swarm_data)
+        # 強制飛安：DCCPP / 蜂群結果同樣綁定圍籬，涵蓋所有 UAV 作業 + 轉場路徑。
+        # 先前此路徑未建構圍籬 → _last_fence_bundle=None → 無法顯示/上傳/匯出圍籬。
+        #
+        # ⚠ 這裡的圍籬同時包住起降段與轉場段，而那些航段**不是**沿掃描角飛的。
+        #   所以對齊掃描角在這條路徑上省下來的面積會比純作業區的 2.06× 少很多。
+        #
+        # ⭐ 2026-10-08 使用者定調：圍籬「隨著我的路徑修正、平均覆蓋全部飛行路徑」⇒ 'hull'
+        #   （貼合航線的凸多邊形，四周平均外擴 buffer）。以前是矩形：HARVEST 不回報掃描角
+        #   ⇒ 退成正南北的軸對齊框；就算轉到條帶方向，起降場在作業區外時角落仍大片空白
+        #   （使用者那份：軸對齊 6.10、對齊條帶 6.43、凸多邊形 4.32 km²）。
+        #   scan_angle_deg 在這條路徑上因此不再用來定圍籬（參數保留給呼叫端相容）。
+        try:
+            self._auto_build_fence(
+                self._swarm_raw_to_paths(swarm_data), buffer_m=60.0, method='hull')
+        except Exception as e:
+            logger.warning(f'[Geofence] DCCPP/蜂群圍籬建構略過: {e}')
+
+    # ── 蜂群資料 → 路徑串列（供 _auto_build_fence 包圍籬）─────────────
+    @staticmethod
+    def _swarm_raw_to_paths(swarm_data) -> list:
+        """從 display_swarm_raw 的 swarm_data 取出所有 UAV 路徑（list of paths）。
+
+        ⚠ 必須涵蓋**全部五種**航段，尤其是起降段 —— 2026-08-25 修：
+        舊版只取 ``operation_paths`` / ``transfer_paths``，把
+        ``takeoff_paths`` / ``entry_paths`` / ``landing_paths`` 漏掉了。
+        那三段正是**唯一會碰到地面**的航段（VTOL 從 0 m 垂直爬到轉換高度、
+        再垂直降回 0 m）。漏掉的後果不只是畫面上圍籬「浮在天上」：
+
+          * ``alt_min = max(最低航點 − 20, 2)``，只餵作業段 ⇒ 最低是巡航高度
+            120 m ⇒ 圍籬地板 100 m。
+          * 這是 **inclusion** 圍籬 —— 地板 100 m 表示飛機在 100 m 以下
+            全部算「在圍籬外」。上傳飛控後 FENCE_ACTION 會在**還停在地面時**
+            就判定越界，起飛與降落整段都在違規區。
+
+        相容鍵：五種 list-of-paths 以及單一 ``path``。每個點為 (lat, lon[, alt])。
+        """
+        paths = []
+        for d in (swarm_data or {}).get('drones', []) or []:
+            if not isinstance(d, dict):
+                continue
+            for key in ('takeoff_paths', 'entry_paths', 'operation_paths',
+                        'transfer_paths', 'landing_paths'):
+                for p in (d.get(key) or []):
+                    if p:
+                        paths.append(p)
+            if d.get('path'):
+                paths.append(d['path'])
+        return paths
+
+    @staticmethod
+    def _coverage_to_paths(swarm_mission, coverage_paths) -> list:
+        """從群飛覆蓋資料取出路徑串列（優先用顯式 coverage_paths）。"""
+        if coverage_paths:
+            if isinstance(coverage_paths, dict):
+                return [p for p in coverage_paths.values() if p]
+            return [p for p in coverage_paths if p]
+        paths = []
+        drones = (getattr(swarm_mission, 'drones', None)
+                  or getattr(swarm_mission, 'missions', None) or [])
+        for d in drones:
+            p = getattr(d, 'path', None) or getattr(d, 'waypoints', None)
+            if p:
+                paths.append(p)
+        return paths
 
     def display_survey(self, survey_mission):
         self.map_2d.display_survey(survey_mission)
@@ -638,13 +833,203 @@ class DualMapWidget(MapWidgetBase):
         self.map_2d.add_corner(lat, lon)
         self.map_3d.add_corner(lat, lon)
 
+    def display_survey_areas(self, polygons: list):
+        """已完成的作業區（多區模式）—— 2D 一定畫，3D 有能力才畫。
+
+        ⚠ 沒有這個明確的方法時 `__getattr__` 也會代理到 2D，但那是**碰巧**能動。
+        寫出來是為了讓「3D 目前不畫」變成有意識的決定而不是意外。
+        """
+        self.map_2d.display_survey_areas(polygons)
+        fn = getattr(self.map_3d, 'display_survey_areas', None)
+        if callable(fn):
+            fn(polygons)
+
+    def remove_last_corner(self):
+        """刪除最後一個邊界點 —— **2D 與 3D 一起刪**。
+
+        ⚠ 這是 2026-08-25 修的：舊流程只動 2D，3D 的角點留著不動，
+        於是「刪除上一點」在 3D 看起來沒作用，而且兩邊索引開始漂移。
+        add_corner 是兩邊都加，刪除本來就該對稱。
+        """
+        removed = self.map_2d.remove_last_corner()
+        if hasattr(self.map_3d, 'remove_last_corner'):
+            self.map_3d.remove_last_corner()
+        return removed
+
     def move_corner(self, index, lat, lon):
         self.map_2d.move_corner(index, lat, lon)
         self.map_3d.move_corner(index, lat, lon)
 
     def clear_all(self):
-        self.map_2d.clear_all()
-        self.map_3d.clear_all()
+        """2D + 3D 一起清空所有規劃疊圖。
+
+        ⚠️ 自動建構的圍籬（`_last_fence_bundle`）也必須一起歸零 —— 否則
+        「顯示圍籬」開關一按，或下一次 `_refresh_fence_visibility()`，
+        剛被清掉的琥珀矩形又原地長回來（清除只清了畫面，沒清來源）。
+        """
+        # 先斷掉圍籬的**來源**：只清畫面的話，「顯示圍籬」開關一按
+        # （`_refresh_fence_visibility()` 讀的就是 `_last_fence_bundle`），
+        # 剛被清掉的琥珀矩形就原地長回來。
+        self._last_fence_bundle = None
+        # 兩張圖各自的 clear_all 已經把自己的 geofence 歸零 + 重繪，
+        # 這裡不要再呼叫 clear_geofence()，否則 2D 會白白多重載一次頁面。
+        for m in (self.map_2d, self.map_3d):
+            if hasattr(m, 'clear_all'):
+                m.clear_all()
+        self.fence_built.emit(None)
+
+    # ── 航測成果：正射瓦片、照片位姿（2D + 3D 都要畫）──────────────────
+    #   ⚠ 這幾個一定要明確寫：`__getattr__` 只會代理到 2D ⇒ 沒有它們時
+    #     add_ortho_layer 直接 AttributeError（2D 沒有這個名字），set_photo_poses
+    #     只畫 2D、3D 靜默空白。
+    def _ortho_registry(self) -> dict:
+        # 用 __dict__ 取：屬性不存在時不能走 __getattr__（會被代理到 2D）
+        return self.__dict__.setdefault('_survey_ortho', {})
+
+    def add_ortho_layer(self, layer_id: str, path_or_url, scheme: str = 'tms',
+                        bounds=None, alpha: float = 1.0) -> dict:
+        """疊正射瓦片：3D ImageryLayer ＋ 2D folium TileLayer。
+
+        回傳 ``{'3d': 3D 實際生效設定, '2d': 2D 實際生效設定}``（bounds_source、層級…）。
+        2D 的 Leaflet 圖層沒有透明度設定 ⇒ ``'2d'['alpha']`` 固定回報 None，alpha ≠ 1 會記 warning。
+        """
+        eff3d = self.map_3d.add_ortho_layer(layer_id, path_or_url, scheme=scheme,
+                                            bounds=bounds, alpha=alpha)
+        eff2d = dict(self.map_2d.add_ortho_tiles(path_or_url, tms=(scheme == 'tms'), bounds=bounds))
+        eff2d['alpha'] = None
+        if float(alpha) != 1.0:
+            logger.warning(f'[Ortho] {layer_id}：alpha={alpha} 只套用在 3D，2D 圖層不透明')
+        self._ortho_registry()[layer_id] = (path_or_url, scheme, bounds)
+        return {'3d': eff3d, '2d': eff2d}
+
+    def remove_ortho_layer(self, layer_id: str) -> bool:
+        """移除一層正射。2D 沒有逐層移除 ⇒ 清掉 2D 正射後把其餘經由本方法加的圖層重疊回去。"""
+        reg = self._ortho_registry()
+        existed = self.map_3d.remove_ortho_layer(layer_id)
+        existed = (reg.pop(layer_id, None) is not None) or existed
+        self.map_2d.clear_ortho_tiles()
+        for path, scheme, bounds in reg.values():
+            self.map_2d.add_ortho_tiles(path, tms=(scheme == 'tms'), bounds=bounds)
+        return existed
+
+    def set_photo_poses(self, layer_id: str, rows, color=None, *, path=None) -> dict:
+        """照片位姿（photos.csv 的列）畫到 2D 與 3D。
+
+        3D 一次內嵌最多 PHOTO_POSES_INLINE_MAX 點；超過時必須給 ``path``（同一份 photos.csv），
+        改由 3D 頁面自己讀檔。2D 超過上限只顯示「請切到 3D」提示（見 MapWidget.set_photo_poses）。
+        回傳 ``{'3d': ..., '2d': ...}``。
+        """
+        from ui.widgets.cesium_map_widget import PHOTO_POSES_INLINE_MAX
+        rows = list(rows)
+        if len(rows) > PHOTO_POSES_INLINE_MAX and path is None:
+            raise ValueError(f'{len(rows)} 點超過 3D 內嵌上限 {PHOTO_POSES_INLINE_MAX}：'
+                             f'請給 photos.csv 路徑（path=）讓 3D 頁面讀檔，否則 3D 會是空的')
+        if len(rows) > PHOTO_POSES_INLINE_MAX:
+            eff3d = self.map_3d.load_photo_poses_file(layer_id, path, color=color)
+        else:
+            eff3d = self.map_3d.set_photo_poses(layer_id, rows, color=color)
+        eff2d = self.map_2d.set_photo_poses(layer_id, rows, color=color)
+        return {'3d': eff3d, '2d': eff2d}
+
+    def load_photo_poses_file(self, layer_id: str, path, color=None) -> dict:
+        """photos.csv（F2）或 JSON（``{"rows": [...]}``）：3D 由頁面讀檔，2D 讀同一份檔案的列。"""
+        import csv
+        import json
+        from pathlib import Path
+        eff3d = self.map_3d.load_photo_poses_file(layer_id, path, color=color)
+        p = Path(path)
+        if p.suffix.lower() == '.json':
+            rows = json.loads(p.read_text(encoding='utf-8')).get('rows') or []
+        else:
+            with open(p, encoding='utf-8-sig', newline='') as fh:
+                rows = list(csv.DictReader(fh))
+        eff2d = self.map_2d.set_photo_poses(layer_id, rows, color=color)
+        return {'3d': eff3d, '2d': eff2d}
+
+    def clear_photo_poses(self, layer_id: str) -> bool:
+        a = self.map_3d.clear_photo_poses(layer_id)
+        b = self.map_2d.clear_photo_poses(layer_id)
+        return bool(a or b)
+
+    def clear_survey_layers(self) -> None:
+        """正射與位姿兩張圖一起清。"""
+        self._ortho_registry().clear()
+        self.map_3d.clear_survey_layers()
+        self.map_2d.clear_survey_layers()
+
+    # ── GCP／檢核點佈設（survey.gcp_plan）：2D + 3D 都要畫（理由同上，不能靠 __getattr__）──
+    def set_survey_points(self, layer_id: str, points) -> dict:
+        """GCP／檢核點畫到 2D 與 3D；回傳 ``{'3d': 統計, '2d': 統計}``。"""
+        points = list(points)
+        eff3d = self.map_3d.set_survey_points(layer_id, points)
+        eff2d = self.map_2d.set_survey_points(layer_id, points)
+        return {'3d': eff3d, '2d': eff2d}
+
+    def clear_survey_points(self, layer_id: str) -> bool:
+        a = self.map_3d.clear_survey_points(layer_id)
+        b = self.map_2d.clear_survey_points(layer_id)
+        return bool(a or b)
+
+    # ── 風場圖層（core.wind_field）：2D + 3D 都要畫（理由同上，不能靠 __getattr__）──
+    def set_wind_field(self, field) -> dict:
+        """風場（規劃風均勻場／外部網格）畫到 2D 與 3D；回傳 ``{'3d': …, '2d': …}``。"""
+        eff3d = self.map_3d.set_wind_field(field)
+        eff2d = self.map_2d.set_wind_field(field)
+        return {'3d': eff3d, '2d': eff2d}
+
+    def clear_wind_field(self) -> bool:
+        a = self.map_3d.clear_wind_field()
+        b = self.map_2d.clear_wind_field()
+        return bool(a or b)
+
+    def set_wind_arrows(self, arrows) -> dict:
+        arrows = list(arrows)
+        eff3d = self.map_3d.set_wind_arrows(arrows)
+        eff2d = self.map_2d.set_wind_arrows(arrows)
+        return {'3d': eff3d, '2d': eff2d}
+
+    def clear_wind_arrows(self) -> bool:
+        a = self.map_3d.clear_wind_arrows()
+        b = self.map_2d.clear_wind_arrows()
+        return bool(a or b)
+
+    def set_wind_options(self, **opts) -> dict:
+        eff3d = self.map_3d.set_wind_options(**opts)
+        eff2d = self.map_2d.set_wind_options(**opts)
+        return {'3d': eff3d, '2d': eff2d}
+
+    # 分層風場（10／80／120 m）：3D 每層畫在自己的高度＋剖面柱；2D 只畫一層＋剖面表。各自回傳實際生效的值。
+    def set_wind_profile(self, payload: dict) -> dict:
+        eff3d = self.map_3d.set_wind_profile(payload)
+        eff2d = self.map_2d.set_wind_profile(payload)
+        return {'2d': eff2d, '3d': eff3d}
+
+    def clear_wind_profile(self) -> bool:
+        a = self.map_3d.clear_wind_profile()
+        b = self.map_2d.clear_wind_profile()
+        return bool(a or b)
+
+    def set_wind_profile_view(self, *, height_2d_m: float | None = None,
+                              layers_3d: list | None = None) -> None:
+        self.map_3d.set_wind_profile_view(height_2d_m=height_2d_m, layers_3d=layers_3d)
+        self.map_2d.set_wind_profile_view(height_2d_m=height_2d_m, layers_3d=layers_3d)
+
+    # ── 預計成果（高精地圖規劃預測）：2D + 3D 都要畫（理由同上，不能靠 __getattr__ —— 它只代理到 2D）──
+    def set_hdmap_preview(self, layer_id: str, payload: dict) -> dict:
+        """預計成果畫到 2D 與 3D；回傳 ``{'2d': {...'ok'...}, '3d': {...'ok'...}}``（各自的結果，不合併）。"""
+        eff3d = self.map_3d.set_hdmap_preview(layer_id, payload)
+        eff2d = self.map_2d.set_hdmap_preview(layer_id, payload)
+        return {'2d': eff2d, '3d': eff3d}
+
+    def clear_hdmap_preview(self, layer_id: str | None = None) -> bool:
+        """兩張圖一起移除（``None`` = 全部）；任一張原本有東西就回 True。"""
+        a = self.map_3d.clear_hdmap_preview(layer_id)
+        b = self.map_2d.clear_hdmap_preview(layer_id)
+        return bool(a or b)
+
+    def set_hdmap_preview_visible(self, layer_id: str, visible: bool) -> None:
+        self.map_3d.set_hdmap_preview_visible(layer_id, visible)
+        self.map_2d.set_hdmap_preview_visible(layer_id, visible)
 
     # ── 屬性代理（讓 main_window 直接存取 corners 等）─────────────────
     @property
@@ -654,6 +1039,12 @@ class DualMapWidget(MapWidgetBase):
     @corners.setter
     def corners(self, value):
         self.map_2d.corners = value
+
+    @property
+    def markers(self):
+        """2D 的角點標記清單。舊版沒有這個代理，main_window 存取
+        ``map_widget.markers`` 會 AttributeError（刪除流程整個中斷）。"""
+        return self.map_2d.markers
 
     @property
     def paths(self):
@@ -720,34 +1111,66 @@ class DualMapWidget(MapWidgetBase):
     # ─────────────────────────────────────────────────────────────────
     # SITL 接口（直接代理到 3D 地圖）
     # ─────────────────────────────────────────────────────────────────
+    # 2D 頁面藏在 3D 後面時，仍每隔這麼多批更新一次（切回 2D 時標記不會停在很久以前）
+    HIDDEN_2D_EVERY_N_BATCHES = 5
+
+    def update_uav_positions(self, batch) -> dict:
+        """一次更新多架 UAV（主視窗合幀後呼叫，約 12 Hz）。batch 是 `[{'sysid','lat','lon','alt','hdg','spd',
+        'mode','armed','vt','pitch','roll'}, …]`。回 `{'3d': 送出架數, '2d': 送出架數}`。
+
+        3D：只在 3D 模式且非「切換安定窗口」時推（理由見舊的 update_uav_position）。
+        2D：2D 可見時每批都推；藏在 3D 後面時每 HIDDEN_2D_EVERY_N_BATCHES 批推一次（隱藏頁持續吃 IPC 是無謂負載，
+            但完全不推的話切回 2D 會看到舊位置）。
+        沒有批次 API 的地圖替身（測試）退回逐架 update_uav_position。
+        """
+        batch = list(batch or [])
+        if not batch:
+            return {'3d': 0, '2d': 0}
+        if not hasattr(self, '_active_sysids'):
+            self._active_sysids = set()
+        for it in batch:
+            try:
+                self._active_sysids.add(int(it['sysid']))
+            except Exception:
+                pass
+        sent3 = sent2 = 0
+        if self._mode == _MODE_3D and not self._map3d_settling:
+            m3 = self.map_3d
+            if hasattr(m3, 'update_uav_positions'):
+                m3.update_uav_positions(batch)
+                sent3 = len(batch)
+            elif hasattr(m3, 'update_uav_position'):
+                for it in batch:
+                    m3.update_uav_position(it['lat'], it['lon'], it.get('alt', 0.0), it.get('hdg', 0.0),
+                                           it.get('spd', 0.0), sysid=it['sysid'], mode=it.get('mode', ''),
+                                           armed=it.get('armed', False), vehicle_type=it.get('vt', ''),
+                                           pitch_deg=it.get('pitch', 0.0), roll_deg=it.get('roll', 0.0))
+                    sent3 += 1
+        n = self.__dict__.get('_uav_batch_count', 0) + 1
+        self._uav_batch_count = n
+        two_d_visible = self._mode != _MODE_3D
+        if two_d_visible or (n % self.HIDDEN_2D_EVERY_N_BATCHES == 0):
+            m2 = self.map_2d
+            if hasattr(m2, 'update_uav_positions'):
+                sent2 = int(m2.update_uav_positions(batch) or 0)
+            elif hasattr(m2, 'update_uav_position'):
+                for it in batch:
+                    m2.update_uav_position(it['lat'], it['lon'], it.get('alt', 0.0), it.get('hdg', 0.0),
+                                           it.get('spd', 0.0), sysid=it['sysid'], mode=it.get('mode', ''),
+                                           armed=it.get('armed', False), vehicle_type=it.get('vt', ''))
+                    sent2 += 1
+        return {'3d': sent3, '2d': sent2}
+
     def update_uav_position(self, lat: float, lon: float, alt: float,
                              heading_deg: float = 0.0, speed_ms: float = 0.0,
                              sysid: int = 1, mode: str = '', armed: bool = False,
                              vehicle_type: str = '',
                              pitch_deg: float = 0.0, roll_deg: float = 0.0):
-        """
-        SITL / MAVLink 即時 UAV 位置更新（多機支援，含姿態同步）。
-        只更新 3D 地圖內部狀態，不強制切換模式（否則使用者切到 2D 會一直被踢回 3D）。
-        """
-        # 記錄出現過的 sysid，供跟隨選單列出
-        if not hasattr(self, '_active_sysids'):
-            self._active_sysids = set()
-        self._active_sysids.add(int(sysid))
-
-        # 只在 3D 模式且非「切換安定窗口」時才推送到 3D：
-        #   (1) 2D 模式下推 3D 是無謂負載（畫面看不到），且讓隱藏頁持續吃 IPC；
-        #   (2) 剛切到 3D 時 WebGL 正重建 GPU context，暫停推送以免主執行緒被
-        #       串流與初始化夾擊而凍結（見 _switch_mode 的安定窗口說明）。
-        # 切回 3D 後約 100ms 內即會收到下一筆遙測，機體位置自然補上，無視覺落差。
-        if self._mode == _MODE_3D and not self._map3d_settling:
-            self.map_3d.update_uav_position(lat, lon, alt, heading_deg, speed_ms,
-                                             sysid=sysid, mode=mode, armed=armed,
-                                             vehicle_type=vehicle_type,
-                                             pitch_deg=pitch_deg, roll_deg=roll_deg)
-        if hasattr(self.map_2d, 'update_uav_position'):
-            self.map_2d.update_uav_position(lat, lon, alt, heading_deg, speed_ms,
-                                             sysid=sysid, mode=mode, armed=armed,
-                                             vehicle_type=vehicle_type)
+        """單架版（舊 API）：包成一筆批次走 update_uav_positions（同一套 3D／2D 可見性規則）。"""
+        self.update_uav_positions([{'sysid': int(sysid), 'lat': float(lat), 'lon': float(lon), 'alt': float(alt or 0.0),
+                                    'hdg': float(heading_deg or 0.0), 'spd': float(speed_ms or 0.0),
+                                    'mode': str(mode or ''), 'armed': bool(armed), 'vt': str(vehicle_type or ''),
+                                    'pitch': float(pitch_deg or 0.0), 'roll': float(roll_deg or 0.0)}])
 
     def set_chase_camera(self, sysid: int):
         """公開 API：程式化啟用/關閉跟隨相機。"""
@@ -761,6 +1184,10 @@ class DualMapWidget(MapWidgetBase):
     def reset_chase_view(self):
         """公開 API：歸零跟隨鏡頭視角回飛機正後方。"""
         self.map_3d.reset_chase_view()
+
+    def set_uav_airframes(self, mapping=None, default=None) -> dict:
+        """公開 API：3D 圖上每架畫哪個機體模型（{sysid: 'hero'|'pioneer'|''}；只換外觀，2D 圖示不變）。"""
+        return self.map_3d.set_uav_airframes(mapping, default)
 
     # ─────────────────────────────────────────────────────────────
     # 地形跟隨（Terrain-Following at constant AGL）
@@ -870,9 +1297,23 @@ class DualMapWidget(MapWidgetBase):
             except Exception:
                 pass
 
-    def fly_to_position(self, lat, lon, alt=0.0, range_m=600.0):
+    def fly_to_position(self, lat, lon, alt=0.0, range_m=600.0) -> bool:
+        """把目前顯示的那張圖移到 (lat, lon)；回傳有沒有真的動。
+
+        3D：Cesium flyToPos。2D：頁面載好就用 Leaflet setView（不整頁重繪，角點／路徑的 fitBounds 不會把它蓋掉），
+        頁面還沒好就寫 _view_state 讓下次重繪以它為中心。⚠ 以前 2D 什麼都不做又靜默回 None（場地預設套用後畫面不動）。
+        """
         if self._mode == _MODE_3D:
             self.map_3d.fly_to_position(lat, lon, alt, range_m)
+            return True
+        zoom = 16 if float(range_m) <= 2500.0 else (14 if float(range_m) <= 10000.0 else 12)
+        m2 = self.map_2d
+        page = getattr(m2, 'custom_page', None)
+        if page is not None:
+            page.runJavaScript(
+                f"if (window.currentMap) {{ window.currentMap.setView([{float(lat)}, {float(lon)}], {zoom}); }}")
+        m2._view_state = {'lat': float(lat), 'lon': float(lon), 'zoom': zoom}
+        return True
 
     # ─────────────────────────────────────────────────────────────────
     # 戰術模組代理（只作用於 3D Cesium 地圖）

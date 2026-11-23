@@ -1,0 +1,370 @@
+[
+ {
+  "key": "big_3000x3000_1a2b",
+  "rect_m": [
+   3000,
+   3000
+  ],
+  "area_km2": 9.0,
+  "plan_s": 41.1,
+  "status": "GO_WITH_WARNINGS",
+  "makespan_s": 3842.6,
+  "uncovered": 0,
+  "per_uav": {
+   "A1": {
+    "cls": "A",
+    "n": 11,
+    "spacing_m": 96.99,
+    "R_eff_m": 200.0,
+    "k": 5,
+    "strip_len_m": 3125.8,
+    "cells": [
+     "Z3_1",
+     "Z4_1"
+    ],
+    "planned_distance_m": 51095.3,
+    "planned_energy_wh": 529.73,
+    "t_takeoff_s": 1288.0,
+    "t_land_s": 3842.6,
+    "orders": {
+     "sequential": {
+      "order": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       8,
+       9,
+       10
+      ],
+      "turn_time_s": 629.76,
+      "turn_dist_m": 12788.9,
+      "d_time_s": 0.0,
+      "d_time_pct": 0.0,
+      "d_dist_m": 0.0,
+      "d_dist_pct": 0.0,
+      "d_energy_wh": 0.0
+     },
+     "skip_k_fixed": {
+      "order": [
+       0,
+       5,
+       10,
+       1,
+       6,
+       2,
+       7,
+       3,
+       8,
+       4,
+       9
+      ],
+      "turn_time_s": 568.24,
+      "turn_dist_m": 11550.9,
+      "d_time_s": -61.52,
+      "d_time_pct": -9.77,
+      "d_dist_m": -1238.0,
+      "d_dist_pct": -9.68,
+      "d_energy_wh": -10.55
+     },
+     "harvest_as_planned": {
+      "order": [
+       6,
+       0,
+       8,
+       2,
+       4,
+       9,
+       1,
+       10,
+       3,
+       7,
+       5
+      ],
+      "turn_time_s": 499.43,
+      "turn_dist_m": 10064.0,
+      "d_time_s": -130.33,
+      "d_time_pct": -20.7,
+      "d_dist_m": -2724.9,
+      "d_dist_pct": -21.31,
+      "d_energy_wh": -22.35
+     },
+     "held_karp_opt": {
+      "order": [
+       3,
+       10,
+       1,
+       9,
+       4,
+       5,
+       0,
+       8,
+       2,
+       7,
+       6
+      ],
+      "turn_time_s": 454.29,
+      "turn_dist_m": 9624.4,
+      "d_time_s": -175.47,
+      "d_time_pct": -27.86,
+      "d_dist_m": -3164.6,
+      "d_dist_pct": -24.74,
+      "d_energy_wh": -30.1
+     }
+    }
+   },
+   "B2": {
+    "cls": "B",
+    "n": 11,
+    "spacing_m": 96.99,
+    "R_eff_m": 120.0,
+    "k": 3,
+    "strip_len_m": 3115.6,
+    "cells": [
+     "Z2_1"
+    ],
+    "planned_distance_m": 45879.2,
+    "planned_energy_wh": 191.74,
+    "t_takeoff_s": 722.0,
+    "t_land_s": 3323.1,
+    "orders": {
+     "sequential": {
+      "order": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       8,
+       9,
+       10
+      ],
+      "turn_time_s": 403.95,
+      "turn_dist_m": 7574.0,
+      "d_time_s": 0.0,
+      "d_time_pct": 0.0,
+      "d_dist_m": 0.0,
+      "d_dist_pct": 0.0,
+      "d_energy_wh": 0.0
+     },
+     "skip_k_fixed": {
+      "order": [
+       0,
+       3,
+       6,
+       9,
+       1,
+       4,
+       7,
+       10,
+       2,
+       5,
+       8
+      ],
+      "turn_time_s": 281.55,
+      "turn_dist_m": 5249.3,
+      "d_time_s": -122.4,
+      "d_time_pct": -30.3,
+      "d_dist_m": -2324.7,
+      "d_dist_pct": -30.69,
+      "d_energy_wh": -7.61
+     },
+     "harvest_as_planned": {
+      "order": [
+       0,
+       3,
+       6,
+       9,
+       5,
+       8,
+       10,
+       7,
+       4,
+       1,
+       2
+      ],
+      "turn_time_s": 267.57,
+      "turn_dist_m": 4866.9,
+      "d_time_s": -136.38,
+      "d_time_pct": -33.76,
+      "d_dist_m": -2707.1,
+      "d_dist_pct": -35.74,
+      "d_energy_wh": -8.48
+     },
+     "held_karp_opt": {
+      "order": [
+       1,
+       4,
+       7,
+       10,
+       8,
+       5,
+       2,
+       0,
+       3,
+       6,
+       9
+      ],
+      "turn_time_s": 244.12,
+      "turn_dist_m": 4601.4,
+      "d_time_s": -159.83,
+      "d_time_pct": -39.57,
+      "d_dist_m": -2972.6,
+      "d_dist_pct": -39.25,
+      "d_energy_wh": -9.93
+     }
+    }
+   },
+   "B3": {
+    "cls": "B",
+    "n": 11,
+    "spacing_m": 96.99,
+    "R_eff_m": 120.0,
+    "k": 3,
+    "strip_len_m": 3115.4,
+    "cells": [
+     "Z3_1_B_k5",
+     "Z4_1_B_k6"
+    ],
+    "planned_distance_m": 48369.4,
+    "planned_energy_wh": 200.3,
+    "t_takeoff_s": 0.0,
+    "t_land_s": 2738.8,
+    "orders": {
+     "sequential": {
+      "order": [
+       0,
+       1,
+       2,
+       3,
+       4,
+       5,
+       6,
+       7,
+       8,
+       9,
+       10
+      ],
+      "turn_time_s": 604.38,
+      "turn_dist_m": 10881.8,
+      "d_time_s": 0.0,
+      "d_time_pct": 0.0,
+      "d_dist_m": 0.0,
+      "d_dist_pct": 0.0,
+      "d_energy_wh": 0.0
+     },
+     "skip_k_fixed": {
+      "order": [
+       0,
+       3,
+       6,
+       9,
+       1,
+       4,
+       7,
+       10,
+       2,
+       5,
+       8
+      ],
+      "turn_time_s": 542.13,
+      "turn_dist_m": 9755.3,
+      "d_time_s": -62.25,
+      "d_time_pct": -10.3,
+      "d_dist_m": -1126.4,
+      "d_dist_pct": -10.35,
+      "d_energy_wh": -3.87
+     },
+     "harvest_as_planned": {
+      "order": [
+       9,
+       3,
+       7,
+       1,
+       5,
+       0,
+       6,
+       2,
+       8,
+       4,
+       10
+      ],
+      "turn_time_s": 281.82,
+      "turn_dist_m": 5341.1,
+      "d_time_s": -322.56,
+      "d_time_pct": -53.37,
+      "d_dist_m": -5540.7,
+      "d_dist_pct": -50.92,
+      "d_energy_wh": -20.05
+     },
+     "held_karp_opt": {
+      "order": [
+       5,
+       1,
+       7,
+       3,
+       9,
+       0,
+       6,
+       2,
+       8,
+       4,
+       10
+      ],
+      "turn_time_s": 267.97,
+      "turn_dist_m": 5147.1,
+      "d_time_s": -336.41,
+      "d_time_pct": -55.66,
+      "d_dist_m": -5734.7,
+      "d_dist_pct": -52.7,
+      "d_energy_wh": -20.91
+     }
+    }
+   }
+  },
+  "per_cell": {
+   "Z2_1|B": {
+    "n": 11,
+    "s": 96.99,
+    "R_eff": 120.0,
+    "k": 3,
+    "triggers": true
+   },
+   "Z3_1|A": {
+    "n": 5,
+    "s": 96.99,
+    "R_eff": 200.0,
+    "k": 5,
+    "triggers": false
+   },
+   "Z3_1_B_k5|B": {
+    "n": 6,
+    "s": 96.99,
+    "R_eff": 120.0,
+    "k": 3,
+    "triggers": true
+   },
+   "Z4_1|A": {
+    "n": 6,
+    "s": 96.98,
+    "R_eff": 200.0,
+    "k": 5,
+    "triggers": true
+   },
+   "Z4_1_B_k6|B": {
+    "n": 5,
+    "s": 96.99,
+    "R_eff": 120.0,
+    "k": 3,
+    "triggers": true
+   }
+  }
+ }
+]

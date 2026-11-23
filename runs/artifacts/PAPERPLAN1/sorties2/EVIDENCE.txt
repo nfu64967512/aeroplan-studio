@@ -1,0 +1,89 @@
+label: sorties2   (AASRC2026 / HARVEST)   2026-09-21
+=====================================================
+
+WHAT THIS LABEL DID
+  U1  implemented the documented spawn-tolerance override HV_SPAWN_TOL_M
+      (default unchanged at 2.0 m) in scripts/hv_sitl_run.py, recorded the
+      displacement per aircraft, verified the fleet translates rigidly, and
+      investigated the bearing.  Flew HV4W55S (plan 5@180 / sim 5@180,
+      ceiling 119.5) with the override.
+  U2  flew HV4W55R (plan 5@270 / sim 5@270, ceiling 120.0) as the
+      single-variable ceiling control against HV4W55.
+  U3  prepared the commit.  NOTHING WAS COMMITTED OR STAGED.
+
+READ THESE FIRST
+  ACCEPTANCE.md        both sorties, gate by gate, plus the ceiling table
+  SPAWN_ANNOTATION.md  the spawn displacement: what is supported, what is not
+  COMMIT_PLAN.md       what to stage, two commit messages, the caveats
+
+HEADLINES (every number recomputed in this label)
+  HV4W55S   params 102/102 | wind 15/15 w/ MIN_GROUNDSPEED 0 | items 83/53/77
+            3/3 landed | flown max AGL 119.6786 m, 0.00 s above 120
+            full-rate min separation 267.075 m, 0 violations
+            planned makespan 966.2207 -> flown 1008.5 s (+42.28 s, +4.376%)
+            planned 33.500 -> flown 34.960 km
+            SIGNED WIND (180 deg => read the north-south legs):
+              north-minus-south +9.90 / +9.68 / +9.61 m/s  (rule +2W = +10.0 +/-1.0, positive)
+              east-minus-west   -0.02 / -0.02 / -0.01 m/s  (rule 0 +/-1.0, ~0 by construction)
+              EKF wind 4.952/4.852/4.881 m/s FROM 179.5/180.0/179.3 deg
+            spawn 5.015 / 5.070 / 5.118 m at bearing 44.29 / 43.85 / 43.51 deg,
+            accepted under HV_SPAWN_TOL_M=6.0, tol_overridden=true;
+            pairwise spacing preserved to 0.0218 m (rigid translation)
+
+  HV4W55R   params 102/102 | wind 15/15 | items 82/53/84 | 3/3 landed
+            spawn 0.134/0.183/0.215 m at the DEFAULT 2.0 m tolerance
+            full-rate min separation 100.939 m, 0 violations
+            planned makespan 1260.4261 -> flown 1293.0 s (+32.57 s, +2.584%)
+            east-minus-west +9.98 / +9.97 / +9.98 m/s, EKF wind FROM 270.0 deg
+
+  CEILING CONTROL (identical wind 5@270, only the ceiling differs)
+            exported waypoints above 120.000 m   HV4W55   0 / 216
+                                                 HV4W55R 88 / 216
+            flown max AGL                        119.6752 m  vs  120.1742 m
+            flown time above 120 m (sim seconds)      0.00 s vs  354.93 s
+            planned makespan cost of 119.5              +0.0279 s
+            flown makespan                       1294.0 s vs 1293.0 s
+
+FILES
+  ACCEPTANCE.md, SPAWN_ANNOTATION.md, COMMIT_PLAN.md, EVIDENCE.txt
+  spawn_record.json          per-aircraft home/spawn/displacement/spacing, 6 trials
+  ceiling_control.json       the HV4W55 vs HV4W55R table, machine readable
+  exported_alt.json          exported waypoints above 120 m, 5 trials
+  HV4W55S_accept.json        gates G1-G6, H2 (1 Hz), H3, S
+  HV4W55R_accept.json        ditto
+  HV4W55S_binalt.json        full-rate altitude + EKF wind, log 00000019
+  HV4W55R_binalt.json        ditto, log 00000020
+  HV4W55_recheck_binalt.json my own recomputation of HV4W55 (log 00000015);
+                             identical to the prior label's figures
+  HV4W55S_binsep.json        full-rate separation, all three pairs
+  HV4W55R_binsep.json        ditto
+  HV4W55_binsep_from_prior_label.json   copied, clearly named as not mine
+  *_windaxis.json            signed wind on BOTH axes, 5 trials
+  HV4W55S_spawn_probe.json   SITL truth (SIM) vs EKF (POS), parked IMU and attitude
+  HV4W55S_spawn_arc.json     per-step displacement bearing vs own heading
+  scripts/                   every generator; accept/binalt/binsep are the
+                             `sorties` label's, with only the output directory
+                             changed; windaxis/exported_alt/spawn_probe/
+                             spawn_arc/make_records are new here
+  src/hv_sitl_run.py.before | .after | spawn_tol.diff   the source change
+  logs/                      full stdout/stderr of both fly and both report runs,
+                             plus .t0/.t1 wall-clock epochs
+
+MACHINE HYGIENE
+  Two sorties, one at a time, Windows side only: sitl/ArduPlane.exe,
+  instances 100-102, ports 6760/6770/6780.  HV_TRIAL was set explicitly on
+  every fly and every report; HV4SITL15/HV4SITL16 were never used as trial
+  names.  No WSL tree, no ~/ardupilot*, no ~/airframeJ, no kill-by-name, no
+  COM port, no pip, no git add/commit/push.
+  New dataflash: sitl/vtol/i10{0,1,2}/logs/00000019.BIN (HV4W55S) and
+  00000020.BIN (HV4W55R); LASTLOG.TXT went 18 -> 20.
+  check_backup.py re-run after both sorties: HV4SITL15 (39 files) and
+  HV4SITL16 (27 files) still byte-identical to the prep_runner backup.
+
+WHAT IS NOT SETTLED
+  The magnitude and the ground-model branch behind the pre-arm creep.  The
+  bearing and the yaw ARE explained and measured; see SPAWN_ANNOTATION.md
+  section 4 for exactly what could not be supported and why.
+  Runbook S3 (flown min separation within 3 m of validation.json) fails
+  literally on both sorties, as it already did on the three accepted ones;
+  see ACCEPTANCE.md section 4.

@@ -1,0 +1,68 @@
+{
+ "trial": "HV4W55",
+ "per_uav": {
+  "A1": {
+   "n_cruise_samples": 483,
+   "eastbound_45_135": {
+    "n": 165,
+    "median_gs_minus_as": 5.43
+   },
+   "westbound_225_315": {
+    "n": 254,
+    "median_gs_minus_as": -4.55
+   },
+   "northbound_315_45": {
+    "n": 37,
+    "median_gs_minus_as": -1.83
+   },
+   "southbound_135_225": {
+    "n": 27,
+    "median_gs_minus_as": -1.26
+   },
+   "east_minus_west": 9.98,
+   "north_minus_south": -0.57
+  },
+  "B2": {
+   "n_cruise_samples": 430,
+   "eastbound_45_135": {
+    "n": 144,
+    "median_gs_minus_as": 5.35
+   },
+   "westbound_225_315": {
+    "n": 250,
+    "median_gs_minus_as": -4.61
+   },
+   "northbound_315_45": {
+    "n": 13,
+    "median_gs_minus_as": -1.15
+   },
+   "southbound_135_225": {
+    "n": 23,
+    "median_gs_minus_as": 0.1
+   },
+   "east_minus_west": 9.96,
+   "north_minus_south": -1.25
+  },
+  "B3": {
+   "n_cruise_samples": 668,
+   "eastbound_45_135": {
+    "n": 226,
+    "median_gs_minus_as": 5.37
+   },
+   "westbound_225_315": {
+    "n": 384,
+    "median_gs_minus_as": -4.6
+   },
+   "northbound_315_45": {
+    "n": 29,
+    "median_gs_minus_as": -0.46
+   },
+   "southbound_135_225": {
+    "n": 29,
+    "median_gs_minus_as": 0.06
+   },
+   "east_minus_west": 9.97,
+   "north_minus_south": -0.52
+  }
+ }
+}

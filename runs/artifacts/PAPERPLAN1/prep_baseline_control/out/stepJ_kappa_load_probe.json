@@ -1,0 +1,434 @@
+{
+  "grid": [
+    null,
+    {
+      "kappa_load": 0.9
+    },
+    {
+      "kappa_load": 0.95
+    },
+    {
+      "kappa_load": 1.0
+    },
+    {
+      "kappa_load": 1.2
+    },
+    {
+      "kappa_load": 1.5
+    }
+  ],
+  "runs": [
+    {
+      "scenario": "S1",
+      "n": 2,
+      "cfg_requested": {},
+      "cfg_effective": {},
+      "sec": 2.7,
+      "coverage": 0.5277,
+      "max_km": 59.06,
+      "total_km": 118.0,
+      "n_uncovered": 1,
+      "uncovered": [
+        [
+          "Z3_1",
+          "no_feasible_insertion"
+        ]
+      ],
+      "strips_flown": 18,
+      "strips_total": 36,
+      "max_cruise_equiv_km": 76.4,
+      "makespan_planner_s": 3224.8,
+      "validate_passed": false
+    },
+    {
+      "scenario": "S1",
+      "n": 2,
+      "cfg_requested": {
+        "kappa_load": 0.9
+      },
+      "cfg_effective": {
+        "kappa_load": 0.9
+      },
+      "sec": 2.2,
+      "coverage": 0.5277,
+      "max_km": 59.06,
+      "total_km": 118.0,
+      "n_uncovered": 1,
+      "uncovered": [
+        [
+          "Z3_1",
+          "no_feasible_insertion"
+        ]
+      ],
+      "strips_flown": 18,
+      "strips_total": 36,
+      "max_cruise_equiv_km": 76.4,
+      "makespan_planner_s": 3224.8,
+      "validate_passed": false
+    },
+    {
+      "scenario": "S1",
+      "n": 2,
+      "cfg_requested": {
+        "kappa_load": 0.95
+      },
+      "cfg_effective": {
+        "kappa_load": 0.95
+      },
+      "sec": 2.2,
+      "coverage": 0.5277,
+      "max_km": 59.06,
+      "total_km": 118.0,
+      "n_uncovered": 1,
+      "uncovered": [
+        [
+          "Z3_1",
+          "no_feasible_insertion"
+        ]
+      ],
+      "strips_flown": 18,
+      "strips_total": 36,
+      "max_cruise_equiv_km": 76.4,
+      "makespan_planner_s": 3224.8,
+      "validate_passed": false
+    },
+    {
+      "scenario": "S1",
+      "n": 2,
+      "cfg_requested": {
+        "kappa_load": 1.0
+      },
+      "cfg_effective": {
+        "kappa_load": 1.0
+      },
+      "sec": 2.2,
+      "coverage": 0.5277,
+      "max_km": 59.06,
+      "total_km": 118.0,
+      "n_uncovered": 1,
+      "uncovered": [
+        [
+          "Z3_1",
+          "no_feasible_insertion"
+        ]
+      ],
+      "strips_flown": 18,
+      "strips_total": 36,
+      "max_cruise_equiv_km": 76.4,
+      "makespan_planner_s": 3224.8,
+      "validate_passed": false
+    },
+    {
+      "scenario": "S1",
+      "n": 2,
+      "cfg_requested": {
+        "kappa_load": 1.2
+      },
+      "cfg_effective": {
+        "kappa_load": 1.2
+      },
+      "sec": 2.2,
+      "coverage": 0.5277,
+      "max_km": 59.06,
+      "total_km": 118.0,
+      "n_uncovered": 1,
+      "uncovered": [
+        [
+          "Z3_1",
+          "no_feasible_insertion"
+        ]
+      ],
+      "strips_flown": 18,
+      "strips_total": 36,
+      "max_cruise_equiv_km": 76.4,
+      "makespan_planner_s": 3224.8,
+      "validate_passed": false
+    },
+    {
+      "scenario": "S1",
+      "n": 2,
+      "cfg_requested": {
+        "kappa_load": 1.5
+      },
+      "cfg_effective": {
+        "kappa_load": 1.5
+      },
+      "sec": 1.1,
+      "coverage": 0.0,
+      "max_km": 0.0,
+      "total_km": 0.0,
+      "n_uncovered": 2,
+      "uncovered": [
+        [
+          "Z2_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z3_1",
+          "no_feasible_insertion"
+        ]
+      ],
+      "strips_flown": 0,
+      "strips_total": 36,
+      "max_cruise_equiv_km": 0.0,
+      "makespan_planner_s": 0.0,
+      "validate_passed": false
+    },
+    {
+      "scenario": "S5",
+      "n": 8,
+      "cfg_requested": {},
+      "cfg_effective": {},
+      "sec": 50.1,
+      "coverage": 0.617,
+      "max_km": 67.01,
+      "total_km": 494.65,
+      "n_uncovered": 4,
+      "uncovered": [
+        [
+          "Z4_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z7_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z5_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z6_1",
+          "no_feasible_insertion"
+        ]
+      ],
+      "strips_flown": 36,
+      "strips_total": 72,
+      "max_cruise_equiv_km": 84.8,
+      "makespan_planner_s": 4630.0,
+      "validate_passed": false
+    },
+    {
+      "scenario": "S5",
+      "n": 8,
+      "cfg_requested": {
+        "kappa_load": 0.9
+      },
+      "cfg_effective": {
+        "kappa_load": 0.9
+      },
+      "sec": 49.9,
+      "coverage": 0.617,
+      "max_km": 67.01,
+      "total_km": 494.65,
+      "n_uncovered": 4,
+      "uncovered": [
+        [
+          "Z4_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z7_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z5_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z6_1",
+          "no_feasible_insertion"
+        ]
+      ],
+      "strips_flown": 36,
+      "strips_total": 72,
+      "max_cruise_equiv_km": 84.8,
+      "makespan_planner_s": 4630.0,
+      "validate_passed": false
+    },
+    {
+      "scenario": "S5",
+      "n": 8,
+      "cfg_requested": {
+        "kappa_load": 0.95
+      },
+      "cfg_effective": {
+        "kappa_load": 0.95
+      },
+      "sec": 50.7,
+      "coverage": 0.617,
+      "max_km": 67.01,
+      "total_km": 494.65,
+      "n_uncovered": 4,
+      "uncovered": [
+        [
+          "Z4_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z7_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z5_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z6_1",
+          "no_feasible_insertion"
+        ]
+      ],
+      "strips_flown": 36,
+      "strips_total": 72,
+      "max_cruise_equiv_km": 84.8,
+      "makespan_planner_s": 4630.0,
+      "validate_passed": false
+    },
+    {
+      "scenario": "S5",
+      "n": 8,
+      "cfg_requested": {
+        "kappa_load": 1.0
+      },
+      "cfg_effective": {
+        "kappa_load": 1.0
+      },
+      "sec": 50.1,
+      "coverage": 0.617,
+      "max_km": 67.01,
+      "total_km": 494.65,
+      "n_uncovered": 4,
+      "uncovered": [
+        [
+          "Z4_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z7_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z5_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z6_1",
+          "no_feasible_insertion"
+        ]
+      ],
+      "strips_flown": 36,
+      "strips_total": 72,
+      "max_cruise_equiv_km": 84.8,
+      "makespan_planner_s": 4630.0,
+      "validate_passed": false
+    },
+    {
+      "scenario": "S5",
+      "n": 8,
+      "cfg_requested": {
+        "kappa_load": 1.2
+      },
+      "cfg_effective": {
+        "kappa_load": 1.2
+      },
+      "sec": 4.4,
+      "coverage": 0.0,
+      "max_km": 0.0,
+      "total_km": 0.0,
+      "n_uncovered": 8,
+      "uncovered": [
+        [
+          "Z2_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z9_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z3_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z8_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z4_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z7_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z5_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z6_1",
+          "no_feasible_insertion"
+        ]
+      ],
+      "strips_flown": 0,
+      "strips_total": 72,
+      "max_cruise_equiv_km": 0.0,
+      "makespan_planner_s": 0.0,
+      "validate_passed": false
+    },
+    {
+      "scenario": "S5",
+      "n": 8,
+      "cfg_requested": {
+        "kappa_load": 1.5
+      },
+      "cfg_effective": {
+        "kappa_load": 1.5
+      },
+      "sec": 4.4,
+      "coverage": 0.0,
+      "max_km": 0.0,
+      "total_km": 0.0,
+      "n_uncovered": 8,
+      "uncovered": [
+        [
+          "Z2_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z9_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z3_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z8_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z4_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z7_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z5_1",
+          "no_feasible_insertion"
+        ],
+        [
+          "Z6_1",
+          "no_feasible_insertion"
+        ]
+      ],
+      "strips_flown": 0,
+      "strips_total": 72,
+      "max_cruise_equiv_km": 0.0,
+      "makespan_planner_s": 0.0,
+      "validate_passed": false
+    }
+  ]
+}

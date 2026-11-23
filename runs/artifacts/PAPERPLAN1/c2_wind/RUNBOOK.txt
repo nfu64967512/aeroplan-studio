@@ -1,0 +1,194 @@
+C2 WIND RE-RUN — RUNBOOK (exact commands, expected artifacts, costs)
+written 2026-09-21; NOTHING here has been executed (another workflow owns SITL).
+All paths absolute from C:/Users/joy46/Documents/Projects/aeroplan-studio.
+
+---------------------------------------------------------------------
+STEP 1  APPLY THE PATCH  (one file, scripts/hv_sitl_run.py, +141 lines)
+---------------------------------------------------------------------
+  cd C:/Users/joy46/Documents/Projects/aeroplan-studio
+  git apply --check runs/artifacts/PAPERPLAN1/c2_wind/patch/c2_wind_sitl.patch   # already verified OK
+  git apply         runs/artifacts/PAPERPLAN1/c2_wind/patch/c2_wind_sitl.patch
+  python -m py_compile scripts/hv_sitl_run.py
+
+What it adds (nothing else changes; with the default env the behaviour is
+byte-identical to today because SIM_WIND_SPD defaults to 0):
+  * HV_SIM_WIND_SPD / _DIR / _TURB / _T  ->  per-instance sitl/vtol/iN/wind.parm,
+    appended LAST on the --defaults chain (later file wins).
+  * HV_PLAN_WIND_SPD / _DIR  ->  overrides Scenario.wind for that run, so the
+    "planned 0 / flown 5" mismatch cell needs no new scenario.
+  * a wind read-back gate -> runs/artifacts/<TRIAL>/wind_readback.json, aborting
+    before arming if SIM_WIND_* did not take, and asserting MIN_GROUNDSPEED == 0.
+  * two new flight.csv columns: wind_spd_est, wind_dir_from_est
+    (the flight controller's own EKF wind estimate, MAVLink WIND).
+  * scenario.json gains a "sim_wind" block, so plan-wind and sim-wind can never
+    again be confused in the artifacts.
+
+---------------------------------------------------------------------
+STEP 2  THE MATRIX   (scenario gui_legal_120_1a2b == the paper's 1P+2H)
+---------------------------------------------------------------------
+Two knobs, deliberately independent:
+   plan wind  = what the planner ASSUMES     (HV_PLAN_WIND_SPD)
+   sim  wind  = what the aircraft MEETS      (HV_SIM_WIND_SPD)
+
+  cell  trial      plan W   sim W   what it answers
+  ----  ---------  ------   -----   ------------------------------------------
+  W00   HV4W00       0        0     control: no wind anywhere
+  W50   HV4W50       5        0     == today's HV4SITL16, re-flown under the
+                                     patched code so all cells share one state
+  W05   HV4W05       0        5     COST OF IGNORING WIND (the reviewer's point)
+  W55   HV4W55       5        5     the paper's claim, honestly validated
+  W66   HV4W66       6        6     optional: the first wind where R_eff really
+                                     binds (A 212.7 m / B 129.9 m, not 200/120)
+  W56   HV4W56       5        6     optional: under-estimated wind
+
+Each command is one line (bash; for PowerShell use $env:NAME='v'; before the
+python call).  Run them ONE AT A TIME — three ArduPlane.exe per sortie.
+
+  HV_TRIAL=HV4W00 HV_PLAN_WIND_SPD=0 HV_SIM_WIND_SPD=0 HV_SIM_WIND_DIR=270 \
+    python scripts/hv_sitl_run.py fly gui_legal_120_1a2b
+  HV_TRIAL=HV4W00 python scripts/hv_sitl_report.py gui_legal_120_1a2b
+
+  HV_TRIAL=HV4W50 HV_PLAN_WIND_SPD=5 HV_SIM_WIND_SPD=0 HV_SIM_WIND_DIR=270 \
+    python scripts/hv_sitl_run.py fly gui_legal_120_1a2b
+  HV_TRIAL=HV4W50 python scripts/hv_sitl_report.py gui_legal_120_1a2b
+
+  HV_TRIAL=HV4W05 HV_PLAN_WIND_SPD=0 HV_SIM_WIND_SPD=5 HV_SIM_WIND_DIR=270 \
+    python scripts/hv_sitl_run.py fly gui_legal_120_1a2b
+  HV_TRIAL=HV4W05 python scripts/hv_sitl_report.py gui_legal_120_1a2b
+
+  HV_TRIAL=HV4W55 HV_PLAN_WIND_SPD=5 HV_SIM_WIND_SPD=5 HV_SIM_WIND_DIR=270 \
+    python scripts/hv_sitl_run.py fly gui_legal_120_1a2b
+  HV_TRIAL=HV4W55 python scripts/hv_sitl_report.py gui_legal_120_1a2b
+
+  # optional
+  HV_TRIAL=HV4W66 HV_PLAN_WIND_SPD=6 HV_SIM_WIND_SPD=6 HV_SIM_WIND_DIR=270 \
+    python scripts/hv_sitl_run.py fly gui_legal_120_1a2b
+  HV_TRIAL=HV4W56 HV_PLAN_WIND_SPD=5 HV_SIM_WIND_SPD=6 HV_SIM_WIND_DIR=270 \
+    python scripts/hv_sitl_run.py fly gui_legal_120_1a2b
+
+⚠ HV_TRIAL must be set for BOTH the fly and the report command: the report
+  resolves its output directory through the same out_dir(sc).
+⚠ Do NOT reuse HV4SITL15/16 as trial names — the sortie artifacts are
+  overwrite-style and those two are committed paper evidence.
+⚠ Leave HV_SPEEDUP at 5 and HV_SIM_WIND_TURB at 0.  Turbulence is rand()-driven
+  (SIM_Aircraft.cpp) and destroys the determinism the A/B rests on.
+⚠ Do not run while another session is using the WSL SITL block; the scripts
+  already move to instance 100+ / port 6760+, but stop_ours() only kills
+  processes whose command line contains this repo's sitl/vtol path.
+
+8 m/s (the advisor's Case 3) CANNOT be planned: gust is hard-wired to 1.3 x W
+(aeroplan_adapter.py:961) and the site gust limit is 8.0 m/s, so W >= 6.16
+returns preflight NO_GO.  Already demonstrated, no SITL needed:
+  evidence/planner_wind_sweep.json (W=8) and ..._2_4_6_7.json (W=7).
+
+---------------------------------------------------------------------
+STEP 3  POST-PROCESSING (read-only scripts in this folder)
+---------------------------------------------------------------------
+  python runs/artifacts/PAPERPLAN1/c2_wind/wind_probe_from_flightcsv.py \
+      HV4W00 HV4W50 HV4W05 HV4W55
+      -> per-aircraft: median (groundspeed - airspeed) split east/west, and the
+         flight controller's own wind estimate.  ACCEPTANCE (see step 4).
+  python runs/artifacts/PAPERPLAN1/c2_wind/replay_planned_vs_flown.py \
+      HV4W00 HV4W50 HV4W05 HV4W55
+      -> planned vs flown makespan / distance per cell, without touching the
+         trials' own artifacts.
+  python scripts/hv_sitl_compare.py HV4W00 HV4W50 HV4W05 HV4W55
+
+---------------------------------------------------------------------
+STEP 4  ACCEPTANCE — what proves the wind actually acted
+---------------------------------------------------------------------
+BASELINE, measured today on the three existing no-wind sorties
+(evidence/wind_absence_probe.json):
+    median(groundspeed - airspeed) = +0.44 m/s (Pioneer, Va 21.5)
+                                     +0.38 m/s (HERO,    Va 19.0)
+    -> heading-INDEPENDENT and proportional to airspeed (0.44/21.5 = 2.05 %,
+       0.38/19.0 = 2.00 %): a true-airspeed vs reported-airspeed bias, NOT wind.
+       ⚠ its exact origin is NOT established here — ISA density at 220 m MSL
+       would give only ~1.1 %, and this repo already has a note about SITL
+       airspeed/density (memory: sitl-airspeed-double-density).  Whatever it
+       is, it is a constant multiplier and must be subtracted (or, better,
+       compared cell-to-cell) before any delta is read as wind.
+    east-minus-west asymmetry = 0.00 - 0.02 m/s over 10 aircraft
+    -> implied along-EW wind <= 0.01 m/s.  The sim had no wind, full stop.
+
+AFTER a 5 m/s / 270 deg sortie, ALL FOUR must hold or the cell is void:
+  (a) wind_readback.json: 15/15 rows ok (SIM_WIND_SPD 5, DIR 270, TURB 0, T 1,
+      MIN_GROUNDSPEED 0, x 3 aircraft).
+  (b) east-minus-west of (gs - as) = +10.0 m/s +/- 1.0  (2W), and eastbound
+      (gs - as) about +5.4 while westbound is about -4.6 (the +0.4 density
+      offset rides on top of both).
+  (c) flight.csv wind_spd_est settles near 5 m/s and wind_dir_from_est near
+      270 deg once fixed-wing cruise is established (EKF needs ~30 s of flight;
+      ignore the VTOL phase).
+  (d) the dataflash log agrees: sitl/vtol/i100..i102/logs/000000NN.BIN, message
+      WIND (and ARSP vs GPS ground speed).  Extract without MAVProxy:
+        python -m pymavlink.tools.mavlogdump --types WIND --format csv \
+          sitl/vtol/i100/logs/00000015.BIN > runs/artifacts/PAPERPLAN1/c2_wind/evidence/HV4W55_A1_WIND.csv
+      (check LASTLOG.TXT in each instance dir for the number, and do this right
+       after the sortie: the next sortie appends a new log but the folder is
+       already 433 MB in i100 alone.)
+
+---------------------------------------------------------------------
+STEP 5  THE TABLE THE PAPER NEEDS
+---------------------------------------------------------------------
+per cell: plan W | sim W | planned makespan s | flown makespan s | err % |
+          planned total km | flown total km | err % |
+          planned min_sep_h (validation.json) | flown min_sep_h
+          (separation_from_tracks.json) | violations | peak AGL m
+Planned columns for the matched cells are ALREADY computed and need no SITL
+(evidence/planner_wind_sweep.json, ..._2_4_6_7.json):
+    W=0  makespan 1205.5 s  total 30.435 km  min_sep 105.06 m
+    W=2  makespan 1208.7 s  total 30.524 km  min_sep 101.42 m
+    W=4  makespan 1238.7 s  total 30.614 km  min_sep 107.85 m
+    W=5  makespan 1260.4 s  total 30.658 km  min_sep 105.46 m
+    W=6  makespan  939.1 s  total 33.035 km  min_sep 107.15 m   (R_eff binds;
+         the allocation restructures, so makespan is NOT monotone in W)
+    W=7, W=8  preflight NO_GO (gust 9.1 / 10.4 > 8.0 m/s)
+
+WIND DIRECTION MATTERS AS MUCH AS SPEED (evidence/planner_wind_crosswind_dirs.json).
+The scanning strips of this scenario run EAST-WEST (in HV4SITL16's flight.csv,
+383 of A1's 458 cruise samples are on east- or west-bound tracks), so a 270 deg
+wind is PURELY ALONG-TRACK: it exercises only the parallel term of the wind
+triangle, and the two directions cancel in the totals — exactly the reviewer's
+"east-west errors may cancel".  Planned, same scenario, 5 m/s:
+    from 270 (along strips): makespan 1260.4 s  30.658 km  min_sep_h 105.46 m
+    from 180 (across strips): makespan  966.2 s  33.509 km  min_sep_h 322.22 m
+    from   0 (across strips): makespan 1221.0 s  31.697 km  min_sep_h  96.52 m
+                              (legal: min_sep_v 60.0 m >= dh_sep 50 m)
+=> recommend ONE extra cell, HV4W55S: plan 5 @180 / sim 5 @180, which is the
+   only cell that tests the perpendicular (crab-angle) term at all:
+  HV_TRIAL=HV4W55S HV_PLAN_WIND_SPD=5 HV_PLAN_WIND_DIR=180 \
+    HV_SIM_WIND_SPD=5 HV_SIM_WIND_DIR=180 \
+    python scripts/hv_sitl_run.py fly gui_legal_120_1a2b
+
+---------------------------------------------------------------------
+STEP 6  EXPECTED ARTIFACT TREE PER CELL
+---------------------------------------------------------------------
+runs/artifacts/HV4W55/
+  scenario.json              <- now carries BOTH "wind" (plan) and "sim_wind"
+  wind_readback.json         <- NEW: SIM_WIND_* + MIN_GROUNDSPEED read back x3
+  sitl_cmdlines.txt          <- now ends with .../iN/wind.parm
+  params_readback.csv        <- unchanged: 34 params x 3 = 102 rows (C4 stays clean)
+  spawn_readback.json  mission_upload.json  release_schedule.json
+  validation.json            <- planned min_sep_h_m for this wind
+  report.json  compare.png
+  flight_summary.json  separation_from_tracks.json  coverage_from_tracks.json
+  A1/flight.csv  B2/flight.csv  B3/flight.csv   <- +2 columns
+  plan/{A1,B2,B3}.{param,plan,waypoints}  plan/*_fence.txt  plan/*_rally.txt
+  plan/mission_summary.json
+  git_state.txt + copies of the four driver scripts
+plus, outside the trial dir:
+  sitl/vtol/i100..i102/wind.parm      <- the file that carried the wind
+  sitl/vtol/i100..i102/logs/*.BIN     <- ~35 MB per aircraft per sortie
+
+---------------------------------------------------------------------
+STEP 7  COST
+---------------------------------------------------------------------
+measured per 3-aircraft sortie of this scenario (HV4SITL16 mtimes):
+  planning+export 15 s, SITL boot + param/mission gate 18 s, flight
+  1268 s / speedup 5 = 254 s, teardown few s  ->  about 5 min wall clock.
+  Three ArduPlane.exe run concurrently; CPU is roughly 3 cores for 4-5 min.
+4 cells   ~20-25 min of flying + ~1 min of reports  -> budget 45 min with checks.
+6 cells   ~35 min                                   -> budget 60 min.
+disk: about 105 MB of .BIN per sortie (3 x 35 MB) + ~1 MB of artifacts.
+The planner-only rows (including the W=8 NO_GO) cost 15 s each and are done.

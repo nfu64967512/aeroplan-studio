@@ -16,6 +16,8 @@
                 'enable_fanout': bool,
                 'auto_firewall': bool,
                 'save_as_default': bool,
+                'sim_wind': (風速 m/s, 來向°) | None,   # 勾「帶入規劃風」才有；None = SITL 無風
+                'sim_wind_source': str,          # 那個風從哪來（計畫生效值／面板）；沒帶 = ''
                 'instances': [
                     {
                         'sysid': int,
@@ -32,8 +34,8 @@ from __future__ import annotations
 from typing import Optional, List
 
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QSpinBox, QCheckBox, QPushButton, QGroupBox,
+    QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel,
+    QSpinBox, QCheckBox, QPushButton, QGroupBox, QComboBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QTextEdit,
     QMessageBox, QWidget,
 )
@@ -41,7 +43,10 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtCore import QRegularExpression
 
 from config.settings import get_settings
-from mission.sitl_launcher import _get_lan_ip
+from config.spawn_presets import SPAWN_PRESETS, get_preset_by_key
+from mission.sitl_launcher import (
+    _get_lan_ip, sim_wind_limit_warning, SITL_VTOL_WIND_VERIFIED_MAX_MPS,
+)
 from ui.resources.aeroplan_theme.widgets import IconButton
 from utils.logger import get_logger
 
@@ -78,10 +83,14 @@ class SITLLaunchDialog(QDialog):
     def __init__(self,
                  vehicle: str,
                  count: int,
-                 parent: Optional[QWidget] = None):
+                 parent: Optional[QWidget] = None,
+                 plan_wind: Optional[dict] = None):
         super().__init__(parent)
         self._vehicle = vehicle
         self._count = max(1, int(count))
+        # 「帶入規劃風」要帶的值（ui.main_window.sitl_plan_wind_offer）：
+        #   {'speed_mps', 'dir_from_deg', 'source', 'text'}；None = 沒有可帶的風（選項停用、SITL 無風）
+        self._plan_wind = dict(plan_wind) if plan_wind else None
 
         self.setWindowTitle('SITL 啟動設定')
         self.setMinimumSize(640, 520)
@@ -118,6 +127,69 @@ class SITLLaunchDialog(QDialog):
         lan_lbl.setProperty('role', 'caption')
         lan_lbl.style().polish(lan_lbl)
         root.addWidget(lan_lbl)
+
+        # ── 出生地點（spawn / home）預設 ─────────────────────────
+        # 讓使用者一鍵把 SITL 生成點設到常用地點（虎尾 / 桃園機場…），
+        # 免手打經緯度。選「自動」時不覆寫 —— 沿用任務原點或 settings 預設。
+        # 注意：若目前已有任務（DCCPP / 蜂群打擊）的每架獨立起飛點，
+        #       那些仍優先，本預設只在「無任務原點」時生效（見 on_sitl_launch）。
+        home_group = QGroupBox('出生地點（SITL 生成點）')
+        hg_layout = QFormLayout(home_group)
+        hg_layout.setContentsMargins(8, 8, 8, 8)
+        self.home_preset_combo = QComboBox()
+        self.home_preset_combo.addItem('自動（任務原點 / 系統預設）', userData='')
+        for p in SPAWN_PRESETS:
+            self.home_preset_combo.addItem(
+                f'{p.label}  —  {p.lat:.5f}, {p.lon:.5f}', userData=p.key
+            )
+        self.home_preset_combo.currentIndexChanged.connect(self._on_home_preset_changed)
+        hg_layout.addRow('生成點：', self.home_preset_combo)
+        self.home_preset_hint = QLabel('')
+        self.home_preset_hint.setProperty('role', 'caption')
+        self.home_preset_hint.setWordWrap(True)
+        hg_layout.addRow('', self.home_preset_hint)
+        root.addWidget(home_group)
+
+        # ── 模擬風（SITL）：帶入規劃風 ───────────────────────────
+        # 2026-10-20 之前 GUI 開的 SITL 一律無風，有考慮風的計畫被無風模擬飛（評估_2026-10-20 §5.1）。
+        # 預設勾選並把值與方向寫在選項上；不勾 = 無風（SIM_WIND_SPD 韌體預設 0）。
+        # ⚠ 不存進 settings：每次開都預設勾選，免得某次取消勾選之後一直靜靜無風。
+        wind_group = QGroupBox('模擬風（SITL）')
+        wg_layout = QVBoxLayout(wind_group)
+        wg_layout.setContentsMargins(8, 8, 8, 8)
+        pw = self._plan_wind
+        if pw is not None:
+            spd, dfrom = float(pw['speed_mps']), float(pw['dir_from_deg']) % 360.0
+            label = (f'帶入規劃風：{round(spd, 1):g} m/s 來自 {round(dfrom) % 360}°'
+                     f'（寫入 SIM_WIND_SPD {round(spd, 3):g}／SIM_WIND_DIR {round(dfrom, 3) % 360.0:g}）')
+            if spd < 0.05:
+                label += '——規劃風 0 m/s＝無風規劃 ⇒ SITL 也無風'
+        else:
+            label = '帶入規劃風（沒有可帶入的規劃風 ⇒ SITL 無風）'
+        self.chk_sim_wind = QCheckBox(label)
+        self.chk_sim_wind.setChecked(pw is not None)
+        self.chk_sim_wind.setEnabled(pw is not None)
+        wg_layout.addWidget(self.chk_sim_wind)
+        self.sim_wind_hint = QLabel(
+            (f'來源：{pw.get("source", "")}。' if pw is not None else '')
+            + 'SIM_WIND_DIR 與規劃器同為「來向」（270 = 西風）；風不隨高度變（SIM_WIND_T 1）、無湍流（SIM_WIND_TURB 0）。'
+            '不勾 = SITL 無風——與有考慮風的計畫不一致。'
+            + (f'GUI 通用 VTOL 實測驗證到 {SITL_VTOL_WIND_VERIFIED_MAX_MPS:g} m/s。'
+               if str(self._vehicle).upper() == 'VTOL' else ''))
+        self.sim_wind_hint.setProperty('role', 'caption')
+        self.sim_wind_hint.setWordWrap(True)
+        wg_layout.addWidget(self.sim_wind_hint)
+        # 風速上限（2026-10-22 實測，mission.sitl_launcher.SITL_VTOL_WIND_VERIFIED_MAX_MPS）：
+        #   VTOL 帶入的風超過驗證上限 ⇒ 琥珀色警告大聲講（不擋：使用者可能就是要測）；不勾 ⇒ 不帶風、警告收起。
+        self._sim_wind_warn_text = (sim_wind_limit_warning(self._vehicle, float(pw['speed_mps']))
+                                    if pw is not None else None)
+        self.sim_wind_warn = QLabel(self._sim_wind_warn_text or '')
+        self.sim_wind_warn.setProperty('role', 'warning')
+        self.sim_wind_warn.setWordWrap(True)
+        wg_layout.addWidget(self.sim_wind_warn)
+        self.chk_sim_wind.toggled.connect(self._refresh_sim_wind_warn)
+        self._refresh_sim_wind_warn()
+        root.addWidget(wind_group)
 
         # ── 表格：每台 SITL 設定 ────────────────────────────────
         # 3 欄結構：#（instance 編號）/ SYSID / SITL UDP 監聽 port
@@ -217,6 +289,12 @@ class SITLLaunchDialog(QDialog):
         self.chk_auto_firewall.setChecked(bool(s.auto_firewall))
         self.chk_save_default.setChecked(True)  # 預設勾選，避免每次都要手動勾
 
+        # 出生地點預設：回填上次選的 key（找不到 → 停在「自動」）
+        saved_key = getattr(s, 'home_preset', '') or ''
+        idx = self.home_preset_combo.findData(saved_key)
+        self.home_preset_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self._on_home_preset_changed(self.home_preset_combo.currentIndex())
+
         # 把上次儲存的每列設定塞回表格（只覆蓋上次儲存過的列數）
         # 注意：embedded_ip 欄位向下相容保留於 settings.json 但不再寫回 UI
         saved_instances = s.instances or []
@@ -239,11 +317,31 @@ class SITLLaunchDialog(QDialog):
     # ──────────────────────────────────────────────────────────────
     # Signal handlers
     # ──────────────────────────────────────────────────────────────
+    def _refresh_sim_wind_warn(self, *_args) -> None:
+        """風速上限警告：有警告文字而且勾了「帶入規劃風」才顯示。"""
+        self.sim_wind_warn.setVisible(bool(self._sim_wind_warn_text) and self.chk_sim_wind.isChecked())
+
     def _on_fanout_toggled(self, checked: bool) -> None:
         """fanout 沒勾選時 disable 整個表格與防火牆選項，讓使用者只能跑本機 SITL。"""
         self.table.setEnabled(checked)
         self.chk_auto_firewall.setEnabled(checked)
         self._refresh_apm_hint()
+
+    def _on_home_preset_changed(self, _index: int) -> None:
+        """更新出生地點說明列（顯示所選預設的完整座標 / 航向 / 備註）。"""
+        key = self.home_preset_combo.currentData()
+        preset = get_preset_by_key(key)
+        if preset is None:
+            self.home_preset_hint.setText(
+                '不覆寫生成點：有任務（DCCPP / 蜂群打擊）時用各架起飛點，'
+                '否則用系統預設座標。'
+            )
+        else:
+            self.home_preset_hint.setText(
+                f'生成於 {preset.lat:.6f}, {preset.lon:.6f}　'
+                f'海拔 {preset.alt_m:.0f} m　航向 {preset.heading:.0f}°　'
+                f'（{preset.note}）'
+            )
 
     def _refresh_apm_hint(self) -> None:
         """根據當前表格內容組出 apm.launch 範例片段，給使用者直接複製。"""
@@ -310,6 +408,7 @@ class SITLLaunchDialog(QDialog):
                 gs = get_settings()
                 gs.sitl_launch.enable_fanout = result['enable_fanout']
                 gs.sitl_launch.auto_firewall = result['auto_firewall']
+                gs.sitl_launch.home_preset = result.get('home_preset', '')
                 gs.sitl_launch.instances = list(result['instances'])  # 深拷貝避免共用
                 ok = gs.save()
                 if ok:
@@ -339,11 +438,22 @@ class SITLLaunchDialog(QDialog):
                 'embedded_ip': '',  # deprecated；新版 SITL 為 udpin 被動模式
                 'embedded_port': int(port_w.value()),
             })
+        # 出生地點：key（''=自動）+ 解析後的 (lat, lon, heading) override
+        home_key = self.home_preset_combo.currentData() or ''
+        preset = get_preset_by_key(home_key)
+        home_override = preset.as_tuple() if preset is not None else None
+        pw = self._plan_wind
+        take_wind = pw is not None and self.chk_sim_wind.isChecked()
         return {
             'enable_fanout': bool(self.chk_enable_fanout.isChecked()),
             'auto_firewall': bool(self.chk_auto_firewall.isChecked()),
             'save_as_default': bool(self.chk_save_default.isChecked()),
+            'home_preset': home_key,
+            'home_override': home_override,   # None = 不覆寫生成點
             'instances': instances,
+            # 模擬風：(風速 m/s, 來向°)；None = SITL 無風
+            'sim_wind': ((float(pw['speed_mps']), float(pw['dir_from_deg']) % 360.0) if take_wind else None),
+            'sim_wind_source': (str(pw.get('source', '')) if take_wind else ''),
         }
 
     # ──────────────────────────────────────────────────────────────
@@ -352,9 +462,12 @@ class SITLLaunchDialog(QDialog):
     @staticmethod
     def get_config(vehicle: str,
                    count: int,
-                   parent: Optional[QWidget] = None) -> Optional[dict]:
-        """便利方法：執行 modal 並回傳結果 dict，使用者取消則回 None。"""
-        dlg = SITLLaunchDialog(vehicle=vehicle, count=count, parent=parent)
+                   parent: Optional[QWidget] = None,
+                   plan_wind: Optional[dict] = None) -> Optional[dict]:
+        """便利方法：執行 modal 並回傳結果 dict，使用者取消則回 None。
+
+        ``plan_wind``：「帶入規劃風」選項要帶的值（見 ``ui.main_window.sitl_plan_wind_offer``）；None ⇒ 選項停用。"""
+        dlg = SITLLaunchDialog(vehicle=vehicle, count=count, parent=parent, plan_wind=plan_wind)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             return getattr(dlg, '_result', dlg.collect_result())
         return None

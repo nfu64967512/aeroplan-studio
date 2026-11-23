@@ -1,0 +1,6 @@
+# 由 scripts/hv_sitl_run.py 產生；SIM_WIND_DIR 是氣象「來向」（270 = 西風）
+SIM_WIND_SPD  0
+SIM_WIND_DIR  270
+SIM_WIND_TURB 0
+SIM_WIND_T    1
+SIM_WIND_DIR_Z 0

@@ -1,0 +1,204 @@
+{
+ "HV4SITL15": {
+  "A1": {
+   "cache": "HV4SITL15_A1.npz",
+   "counts": {
+    "ARSP": 3332,
+    "ATT": 8888,
+    "EV": 1,
+    "GPS": 1782,
+    "MODE": 2,
+    "NKF2": 17587,
+    "POS": 8054,
+    "SIM": 8036,
+    "STAT": 1342,
+    "XKF2": 16847
+   },
+   "log": "sitl/vtol/i100/logs/00000013.BIN",
+   "log_bytes": 36704256,
+   "log_mtime_epoch": 1789349252.411256,
+   "lognum": 13,
+   "rows": {
+    "arsp": 3332,
+    "att": 8888,
+    "ev": 1,
+    "gps": 1782,
+    "mode": 2,
+    "nkf2": 8843,
+    "pos": 8054,
+    "sim": 8036,
+    "stat": 1342,
+    "xkf2": 8568
+   },
+   "trial": "HV4SITL15",
+   "uav": "A1"
+  },
+  "B2": {
+   "cache": "HV4SITL15_B2.npz",
+   "counts": {
+    "ARSP": 1346,
+    "ATT": 3845,
+    "EV": 2,
+    "GPS": 775,
+    "MODE": 2,
+    "NKF2": 7504,
+    "POS": 3150,
+    "SIM": 3134,
+    "STAT": 455,
+    "XKF2": 6909
+   },
+   "log": "sitl/vtol/i101/logs/00000013.BIN",
+   "log_bytes": 16129536,
+   "log_mtime_epoch": 1789349252.0528474,
+   "lognum": 13,
+   "rows": {
+    "arsp": 1346,
+    "att": 3845,
+    "ev": 2,
+    "gps": 775,
+    "mode": 2,
+    "nkf2": 3799,
+    "pos": 3150,
+    "sim": 3134,
+    "stat": 455,
+    "xkf2": 3576
+   },
+   "trial": "HV4SITL15",
+   "uav": "B2"
+  },
+  "B3": {
+   "cache": "HV4SITL15_B3.npz",
+   "counts": {
+    "ARSP": 2302,
+    "ATT": 6430,
+    "EV": 2,
+    "GPS": 900,
+    "MODE": 2,
+    "NKF2": 12723,
+    "POS": 5499,
+    "SIM": 5478,
+    "STAT": 928,
+    "XKF2": 11958
+   },
+   "log": "sitl/vtol/i102/logs/00000013.BIN",
+   "log_bytes": 26648075,
+   "log_mtime_epoch": 1789349252.175876,
+   "lognum": 13,
+   "rows": {
+    "arsp": 2302,
+    "att": 6430,
+    "ev": 2,
+    "gps": 900,
+    "mode": 2,
+    "nkf2": 6401,
+    "pos": 5499,
+    "sim": 5478,
+    "stat": 928,
+    "xkf2": 6160
+   },
+   "trial": "HV4SITL15",
+   "uav": "B3"
+  }
+ },
+ "HV4SITL16": {
+  "A1": {
+   "cache": "HV4SITL16_A1.npz",
+   "counts": {
+    "ARSP": 3317,
+    "ATT": 8654,
+    "EV": 1,
+    "GPS": 1764,
+    "MODE": 2,
+    "NKF2": 17137,
+    "POS": 7910,
+    "SIM": 7885,
+    "STAT": 1318,
+    "XKF2": 16481
+   },
+   "log": "sitl/vtol/i100/logs/00000014.BIN",
+   "log_bytes": 35717120,
+   "log_mtime_epoch": 1789369752.4295278,
+   "lognum": 14,
+   "rows": {
+    "arsp": 3317,
+    "att": 8654,
+    "ev": 1,
+    "gps": 1764,
+    "mode": 2,
+    "nkf2": 8620,
+    "pos": 7910,
+    "sim": 7885,
+    "stat": 1318,
+    "xkf2": 8385
+   },
+   "trial": "HV4SITL16",
+   "uav": "A1"
+  },
+  "B2": {
+   "cache": "HV4SITL16_B2.npz",
+   "counts": {
+    "ARSP": 1275,
+    "ATT": 3753,
+    "EV": 2,
+    "GPS": 462,
+    "MODE": 2,
+    "NKF2": 7353,
+    "POS": 3106,
+    "SIM": 3088,
+    "STAT": 491,
+    "XKF2": 6780
+   },
+   "log": "sitl/vtol/i101/logs/00000014.BIN",
+   "log_bytes": 15592367,
+   "log_mtime_epoch": 1789369751.9645252,
+   "lognum": 14,
+   "rows": {
+    "arsp": 1275,
+    "att": 3753,
+    "ev": 2,
+    "gps": 462,
+    "mode": 2,
+    "nkf2": 3725,
+    "pos": 3106,
+    "sim": 3088,
+    "stat": 491,
+    "xkf2": 3507
+   },
+   "trial": "HV4SITL16",
+   "uav": "B2"
+  },
+  "B3": {
+   "cache": "HV4SITL16_B3.npz",
+   "counts": {
+    "ARSP": 2189,
+    "ATT": 6071,
+    "EV": 2,
+    "GPS": 968,
+    "MODE": 2,
+    "NKF2": 11933,
+    "POS": 4973,
+    "SIM": 4870,
+    "STAT": 794,
+    "XKF2": 11152
+   },
+   "log": "sitl/vtol/i102/logs/00000014.BIN",
+   "log_bytes": 25044286,
+   "log_mtime_epoch": 1789369750.8945239,
+   "lognum": 14,
+   "rows": {
+    "arsp": 2189,
+    "att": 6071,
+    "ev": 2,
+    "gps": 968,
+    "mode": 2,
+    "nkf2": 6013,
+    "pos": 4973,
+    "sim": 4870,
+    "stat": 794,
+    "xkf2": 5708
+   },
+   "trial": "HV4SITL16",
+   "uav": "B3"
+  }
+ }
+}

@@ -1,0 +1,290 @@
+{
+  "label": "prep_baseline_control",
+  "date": "2026-09-21",
+  "repo_head": "5e0295f5eb63e6597a787120d66526d3e4b17e7f (dirty working tree; no source file was modified by this label)",
+  "python": "3.14.3",
+  "rule": "pure-Python planner + analysis only; no SITL / ArduPilot / MAVProxy; no git writes; no source edits (runtime monkeypatches only, all reverted in-process)",
+  "source_files_modified": [],
+  "files": [
+    {
+      "path": "out/stepA_prediction.txt",
+      "bytes": 2359,
+      "md5": "4f00d82d0873"
+    },
+    {
+      "path": "out/stepB_step1_rerun.log",
+      "bytes": 1585,
+      "md5": "51bf6171a937"
+    },
+    {
+      "path": "out/stepC_kpi_scan_control.json",
+      "bytes": 151843,
+      "md5": "e0f098317991"
+    },
+    {
+      "path": "out/stepC_kpi_scan_control.log",
+      "bytes": 4464,
+      "md5": "2a3749f09a9b"
+    },
+    {
+      "path": "out/stepD_arm_diff.json",
+      "bytes": 11166,
+      "md5": "9b87841a3799"
+    },
+    {
+      "path": "out/stepD_arm_diff.log",
+      "bytes": 4379,
+      "md5": "863416133a8b"
+    },
+    {
+      "path": "out/stepE_legacy_branch_probe.json",
+      "bytes": 9522,
+      "md5": "e01681bb6437"
+    },
+    {
+      "path": "out/stepE_legacy_branch_probe.log",
+      "bytes": 2427,
+      "md5": "5811eca4a270"
+    },
+    {
+      "path": "out/stepF_excluded_cells.json",
+      "bytes": 73944,
+      "md5": "b268ef0dfc38"
+    },
+    {
+      "path": "out/stepF_excluded_cells.log",
+      "bytes": 1878,
+      "md5": "80ec67843d00"
+    },
+    {
+      "path": "out/stepG_windfair_endurance.json",
+      "bytes": 31550,
+      "md5": "1adb91d79aa3"
+    },
+    {
+      "path": "out/stepG_windfair_endurance.log",
+      "bytes": 2663,
+      "md5": "7082237cdbe4"
+    },
+    {
+      "path": "out/stepH2_effective_value.log",
+      "bytes": 244,
+      "md5": "63c8df2da721"
+    },
+    {
+      "path": "out/stepH_multisortie_probe.json",
+      "bytes": 3755,
+      "md5": "1425e78989da"
+    },
+    {
+      "path": "out/stepH_multisortie_probe.log",
+      "bytes": 1529,
+      "md5": "aaf1af7b0205"
+    },
+    {
+      "path": "out/stepI_dplan_rule.json",
+      "bytes": 28792,
+      "md5": "fef7561f3ef9"
+    },
+    {
+      "path": "out/stepI_dplan_rule.log",
+      "bytes": 3142,
+      "md5": "8e36e9ec36ab"
+    },
+    {
+      "path": "out/stepJ_kappa_load_probe.json",
+      "bytes": 8990,
+      "md5": "6f7a6e66dae8"
+    },
+    {
+      "path": "out/stepJ_kappa_load_probe.log",
+      "bytes": 1445,
+      "md5": "23f870644a9a"
+    },
+    {
+      "path": "out/stepK2_lambda_vs_kappa.log",
+      "bytes": 887,
+      "md5": "361297acffc6"
+    },
+    {
+      "path": "out/stepK_allocator_trace.json",
+      "bytes": 6089,
+      "md5": "11de7887cd05"
+    },
+    {
+      "path": "out/stepK_allocator_trace.log",
+      "bytes": 2498,
+      "md5": "73e8ada02af8"
+    },
+    {
+      "path": "out/stepL2_dmodel_vs_baseline.json",
+      "bytes": 1860,
+      "md5": "94c641fef15b"
+    },
+    {
+      "path": "out/stepL2_dmodel_vs_baseline.log",
+      "bytes": 1477,
+      "md5": "2a058b2ed24e"
+    },
+    {
+      "path": "out/stepL_two_budgets.log",
+      "bytes": 750,
+      "md5": "9bf06a4d7e3c"
+    },
+    {
+      "path": "out/stepN_fair_fight.json",
+      "bytes": 4580,
+      "md5": "aec975292930"
+    },
+    {
+      "path": "out/stepN_fair_fight.log",
+      "bytes": 1915,
+      "md5": "946c06f615c4"
+    },
+    {
+      "path": "out/stepO_harvest_native.json",
+      "bytes": 7328,
+      "md5": "19d12677696c"
+    },
+    {
+      "path": "out/stepO_harvest_native.log",
+      "bytes": 1642,
+      "md5": "7a4ce7f9e52a"
+    },
+    {
+      "path": "out/stepP_final_table.json",
+      "bytes": 18352,
+      "md5": "6f8db9d7329f"
+    },
+    {
+      "path": "out/stepP_final_table.log",
+      "bytes": 5484,
+      "md5": "b9839244d9c6"
+    },
+    {
+      "path": "out/stepQ_tradeoff.json",
+      "bytes": 1950,
+      "md5": "b334f771cdbc"
+    },
+    {
+      "path": "out/stepQ_tradeoff.log",
+      "bytes": 1267,
+      "md5": "eb168bbc9f1a"
+    },
+    {
+      "path": "scripts/__pycache__/stepC_kpi_scan_control.cpython-314.pyc",
+      "bytes": 15826,
+      "md5": "22bdae16f826"
+    },
+    {
+      "path": "scripts/__pycache__/stepD_arm_diff.cpython-314.pyc",
+      "bytes": 8158,
+      "md5": "97f88d22607a"
+    },
+    {
+      "path": "scripts/__pycache__/stepE_legacy_branch_probe.cpython-314.pyc",
+      "bytes": 15792,
+      "md5": "689723108e73"
+    },
+    {
+      "path": "scripts/__pycache__/stepF_excluded_cells.cpython-314.pyc",
+      "bytes": 11878,
+      "md5": "e2ce876ff644"
+    },
+    {
+      "path": "scripts/__pycache__/stepG_windfair_endurance.cpython-314.pyc",
+      "bytes": 13996,
+      "md5": "ae43e5801777"
+    },
+    {
+      "path": "scripts/__pycache__/stepH_multisortie_probe.cpython-314.pyc",
+      "bytes": 8708,
+      "md5": "52b8db92400a"
+    },
+    {
+      "path": "scripts/__pycache__/stepI_dplan_rule.cpython-314.pyc",
+      "bytes": 13973,
+      "md5": "9cb483e5c9b0"
+    },
+    {
+      "path": "scripts/__pycache__/stepJ_kappa_load_probe.cpython-314.pyc",
+      "bytes": 9174,
+      "md5": "f37cbe2f632a"
+    },
+    {
+      "path": "scripts/__pycache__/stepK_allocator_trace.cpython-314.pyc",
+      "bytes": 12712,
+      "md5": "778b862682e3"
+    },
+    {
+      "path": "scripts/__pycache__/stepN_fair_fight.cpython-314.pyc",
+      "bytes": 16517,
+      "md5": "5cb6aceb12a0"
+    },
+    {
+      "path": "scripts/__pycache__/stepP_final_table.cpython-314.pyc",
+      "bytes": 14944,
+      "md5": "17ca24dd2283"
+    },
+    {
+      "path": "scripts/stepC_kpi_scan_control.py",
+      "bytes": 9211,
+      "md5": "ca8f1b7a25d2"
+    },
+    {
+      "path": "scripts/stepD_arm_diff.py",
+      "bytes": 4677,
+      "md5": "1632699219b8"
+    },
+    {
+      "path": "scripts/stepE_legacy_branch_probe.py",
+      "bytes": 9498,
+      "md5": "60f17675b278"
+    },
+    {
+      "path": "scripts/stepF_excluded_cells.py",
+      "bytes": 7248,
+      "md5": "946f08c6fe79"
+    },
+    {
+      "path": "scripts/stepG_windfair_endurance.py",
+      "bytes": 8968,
+      "md5": "3b53a0a7f769"
+    },
+    {
+      "path": "scripts/stepH_multisortie_probe.py",
+      "bytes": 5261,
+      "md5": "c9c4ee30607d"
+    },
+    {
+      "path": "scripts/stepI_dplan_rule.py",
+      "bytes": 8718,
+      "md5": "419419762606"
+    },
+    {
+      "path": "scripts/stepJ_kappa_load_probe.py",
+      "bytes": 5343,
+      "md5": "2168d0846d34"
+    },
+    {
+      "path": "scripts/stepK_allocator_trace.py",
+      "bytes": 6582,
+      "md5": "43f22dc8bfb0"
+    },
+    {
+      "path": "scripts/stepN_fair_fight.py",
+      "bytes": 9997,
+      "md5": "00f77231b559"
+    },
+    {
+      "path": "scripts/stepO_harvest_native.py",
+      "bytes": 6134,
+      "md5": "ad15880b171c"
+    },
+    {
+      "path": "scripts/stepP_final_table.py",
+      "bytes": 8440,
+      "md5": "929f95ec61b9"
+    }
+  ]
+}

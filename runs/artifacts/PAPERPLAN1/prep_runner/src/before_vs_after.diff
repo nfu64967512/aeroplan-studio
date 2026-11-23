@@ -1,0 +1,181 @@
+--- runs/artifacts/PAPERPLAN1/prep_runner/src/hv_sitl_run.py.before	2026-09-21 01:19:38.053283900 +0800
++++ scripts/hv_sitl_run.py	2026-09-21 01:20:25.866966200 +0800
+@@ -49,6 +49,20 @@
+ #: ⚠ 0.25（舊值）⇒ 5.00 s 模擬 ⇒ HERO 一格飛 95 m，而水平門檻是 100 m
+ #:   ⇒ 兩機可以從取樣縫隙穿過去，「違規 0 筆」與真的安全長得一樣。
+ _POLL_S = float(os.environ.get("HV_POLL_S", "0.05"))
++# ── SITL 風場（C2）──────────────────────────────────────────────────
++#   ⚠⚠⚠ 規劃層的風在 `Scenario.wind`（預設 5 m/s／270°），而 SITL 端到 2026-09-14
++#   為止**從來沒有設過 SIM_WIND_***（見 runs/artifacts/*/sitl_cmdlines.txt）⇒
++#   「含風規劃」是被「無風模擬」驗證的。這兩個量必須分開給、分開讀回。
++#   方向約定：SIM_WIND_DIR 與 hv_dccpp 的 `dir_from_deg` 同一個約定，都是氣象
++#   「來向」（ArduPilot SITL.cpp: "Direction simulated wind is coming from"）
++#   ⇒ 270 = 西風，吹向東。
++#   SIM_WIND_T=1（none）：風不隨高度衰減，與規劃的單一 0–3000 m AGL 風層一致；
++#   預設 0（square law）會讓 AGL < SIM_WIND_T_ALT(60 m) 的風乘上 sqrt(agl/60)。
++#   SIM_WIND_TURB 一律 0：湍流走 rand() ⇒ 會打掉 SITL 的決定性。
++SIM_WIND_SPD = float(os.environ.get("HV_SIM_WIND_SPD", "0"))
++SIM_WIND_DIR = float(os.environ.get("HV_SIM_WIND_DIR", "270"))
++SIM_WIND_TURB = float(os.environ.get("HV_SIM_WIND_TURB", "0"))
++SIM_WIND_T = float(os.environ.get("HV_SIM_WIND_T", "1"))
+ # ── SITL 起始埠 ──────────────────────────────────────────────────────
+ #   ⚠⚠⚠ ArduPlane 的 `--instance N` 是「所有埠都加 10·N」，起始 5760。
+ #   這台機器上另一個 session 會跑 WSL 的 SITL 群，`wslrelay.exe` 把
+@@ -299,6 +313,9 @@
+          "altitude_m": sc.coverage_altitude_m, "hfov_deg": sc.hfov_deg,
+          "vfov_deg": sc.vfov_deg, "overlap_rate": sc.overlap_rate,
+          "wind": list(sc.wind), "areas": sc.areas, "nfz": sc.nfz, "note": sc.note,
++         # ★ 規劃風（上一行）與**模擬風**是兩件事，產物上必須分得出來
++         "sim_wind": {"spd_mps": SIM_WIND_SPD, "dir_from_deg": SIM_WIND_DIR,
++                      "turb": SIM_WIND_TURB, "profile_type": SIM_WIND_T},
+          "sensor_kinds": kinds, "speedup": SPEEDUP,
+          # ⚠ 沒有這一欄的話，分散起降點的航次與共點航次在產物上**分不出來**
+          #   （唯一的痕跡是 sitl_cmdlines.txt 裡的 --home）。
+@@ -343,6 +360,24 @@
+     return (float(site.lat_deg), float(site.lon_deg))
+ 
+ 
++def _write_wind(i: int) -> Path:
++    """SITL 風場參數檔，排在 ``--defaults`` 最後（後蓋前）。
++
++    ⚠ 這一份是**模擬器**的風，跟規劃層的 `Scenario.wind` 是兩件事：前者決定飛機
++      真的遭遇什麼風，後者決定規劃器**以為**會遭遇什麼風。刻意不綁在一起，
++      因為「規劃 0 飛 5」與「規劃 5 飛 5」的對照才是論文要的那個證據。
++    """
++    p = _instance_dir(i) / "wind.parm"
++    p.write_text(
++        "# 由 scripts/hv_sitl_run.py 產生；SIM_WIND_DIR 是氣象「來向」（270 = 西風）\n"
++        f"SIM_WIND_SPD  {SIM_WIND_SPD:g}\n"
++        f"SIM_WIND_DIR  {SIM_WIND_DIR:g}\n"
++        f"SIM_WIND_TURB {SIM_WIND_TURB:g}\n"
++        f"SIM_WIND_T    {SIM_WIND_T:g}\n"
++        "SIM_WIND_DIR_Z 0\n", encoding="utf-8")
++    return p
++
++
+ def launch(sc: Scenario, hv) -> list[dict]:
+     """★ uav_id → sysid 用 `hv.id_map`（drone_id → uav_id）反查，不要靠排序 zip。"""
+     out = out_dir(sc)
+@@ -365,6 +400,7 @@
+             _write_enforced(i),
+             out / "plan" / f"{uav}.param",
+             _write_firmware_override(i),
++            _write_wind(i),          # ★ 最後蓋：SITL 風場（C2）
+         ]
+         missing = [str(d) for d in defaults if not d.exists()]
+         if missing:
+@@ -454,6 +490,38 @@
+             print("  ⚠ 有機體沒吃到速率設定 ⇒ 該機的間距量測仍是 5 s 解析度，"
+                   "低於數百公尺的結論不可信")
+ 
++        # ── 風場讀回（C2）─────────────────────────────────────────
++        #   ⚠⚠ 與 params_readback.csv **分開寫**：SIM_* 不屬於「匯出參數」那一組，
++        #   混進去會把論文的 34 × 3 = 102 變成 38 × 3，把 C4 的數字攪亂。
++        #   ⚠ 讀回 None ＝ 韌體沒有這個參數名（非 SITL build）⇒ 當成失敗，不可放行。
++        #   ⚠⚠⚠ MIN_GROUNDSPEED 也在這一組：它不是 SIM_ 參數，但只要 > 0，TECS 會為了
++        #   維持地速而在逆風腿**自己加空速** ⇒ 風的影響被飛控吃掉，整個對照作廢，
++        #   而且沒有任何徵狀。匯出檔沒有設它（韌體預設 0），所以這裡是讀回確認。
++        want_wind = {"SIM_WIND_SPD": SIM_WIND_SPD, "SIM_WIND_DIR": SIM_WIND_DIR,
++                     "SIM_WIND_TURB": SIM_WIND_TURB, "SIM_WIND_T": SIM_WIND_T,
++                     "MIN_GROUNDSPEED": 0.0}
++        wind_rows, wind_bad = [], []
++        for uav, lk in links.items():
++            for name, exp in want_wind.items():
++                got = lk.get_param(name, timeout_s=10.0)
++                ok = got is not None and abs(float(got) - exp) <= 0.01
++                wind_rows.append({"uav": uav, "param": name, "expected": exp,
++                                  "actual": got, "ok": bool(ok)})
++                if not ok:
++                    wind_bad.append(f"{uav}.{name} 期望 {exp} 實得 {got}")
++        (out / "wind_readback.json").write_text(json.dumps(
++            {"sim_wind": want_wind, "plan_wind": list(sc.wind), "rows": wind_rows,
++             "dir_convention": "氣象「來向」（270 = 西風，吹向東），與 hv_dccpp dir_from_deg 同約定"},
++            ensure_ascii=False, indent=1), encoding="utf-8")
++        n_ok = sum(r["ok"] for r in wind_rows)
++        print(f"\nSITL 風場讀回：{n_ok}/{len(wind_rows)} 相符"
++              f"（SIM_WIND_SPD={SIM_WIND_SPD:g} DIR={SIM_WIND_DIR:g}）"
++              f"；規劃假設風 {sc.wind}")
++        if wind_bad:
++            for b in wind_bad:
++                print("   ✗", b)
++            raise SystemExit("風場參數沒有生效，停止起飛（見 wind_readback.json）")
++
+         # ── 生成點讀回：飛機真的生在規劃說的那個起飛站嗎 ────────────
+         #   ⚠⚠⚠ 這是 vendored #8 之後必要的一道。規劃層在 spawn_spread_m > 0 時
+         #   會逐機生出 TO_<uav> 站；若 SITL 仍全部生在 HOME，任務照上傳、照飛，
+@@ -601,7 +669,8 @@
+             f = (d / "flight.csv").open("w", newline="", encoding="utf-8")
+             w = csv.writer(f)
+             w.writerow(["t_s", "lat", "lon", "rel_alt_m", "airspeed",
+-                        "groundspeed", "wp_seq", "mode", "armed"])
++                        "groundspeed", "wp_seq", "mode", "armed",
++                        "wind_spd_est", "wind_dir_from_est"])
+             files[uav], writers[uav] = f, w
+ 
+         budget_s = plan.makespan_s / SPEEDUP + 420.0
+@@ -661,7 +730,11 @@
+                     round(float(getattr(tel, "airspeed_mps", 0.0) or 0.0), 2),
+                     round(float(getattr(tel, "groundspeed_mps", 0.0) or 0.0), 2),
+                     getattr(tel, "mission_seq", None), getattr(tel, "mode", ""),
+-                    getattr(tel, "armed", None)])
++                    getattr(tel, "armed", None),
++                    # ★ 飛控自己的風估計（MAVLink WIND）—— 風真的有作用的獨立證據。
++                    #   跟「groundspeed − airspeed」互為對照：兩者都指向同一個 W 才算數。
++                    getattr(tel, "wind_speed_mps", None),
++                    getattr(tel, "wind_dir_from_deg", None)])
+                 if peak[uav] > 20.0 and alt < 2.0 and not getattr(tel, "armed", True):
+                     if uav not in done:
+                         done.add(uav)
+@@ -708,6 +781,52 @@
+         print(f"沒有這個情境：{key!r}。可用：{list(SCENARIOS)}")
+         return 1
+     sc = SCENARIOS[key]
++    # ★ 規劃風的覆寫：做「規劃 0 飛 5」這種不匹配格子用，不用新增情境。
++    if os.environ.get("HV_PLAN_WIND_SPD"):
++        import dataclasses
++        sc = dataclasses.replace(sc, wind=(float(os.environ["HV_PLAN_WIND_SPD"]),
++                                           float(os.environ.get("HV_PLAN_WIND_DIR", "270"))))
++        print(f"⚠ HV_PLAN_WIND_SPD：規劃假設風改為 {sc.wind}（SITL 風是另一個旋鈕）")
++    # ★ 規劃高度上限／航高的覆寫（C1／D2）：把天花板壓到 119.5 m 再飛，
++    #   量到的最高高度才會真的留在 120.000 m 以下，不用改情境表。
++    #
++    #   ⚠⚠⚠ 為什麼需要它：規劃器內部的最大 AGL **剛好** 120.000000 m，可是
++    #     `hv_dccpp/ardupilot.py:388-395` 的 `reduce_waypoints()` 把每段圓弧重新
++    #     離散成外接多邊形，新頂點的 z 是在弧兩端**線性內插**出來的；而等 AGL 面
++    #     在本地 ENU 是拋物面（z = h − d²/2R_earth），所以新頂點會落在該面之上
++    #     （匯出 +0.004…+0.075 m，加上追蹤誤差 +0.021…+0.127 m）⇒ 30/30 架次的
++    #     實飛最高點都超過 120.000 m（最大 120.18 m）。法規上限 400 ft = 121.92 m，
++    #     所以不違法，但「不超過 120 m」這句話在產物上是假的。
++    #   ⚠ 送審前**不修**那個內插缺陷（會動到每一份既有產物）⇒ 改成壓天花板。
++    #     代價實測幾乎為零：makespan +0.02 s、航程 +1 m、最小間距還略好
++    #     （runs/artifacts/PAPERPLAN1/c1_altitude/ablation_cap.json）。
++    #
++    #   兩個旋鈕刻意分開，與風的那兩個同一個道理：
++    #     HV_PLAN_CEIL_M  → 空域 AGL 上限 h_ceil（走 `waiver_max_agl_m` 這一支，
++    #                        見 hv_dccpp/context.py:418 `resolve_ceiling` 的優先序）。
++    #     HV_PLAN_ALT_M   → 目標航高 `coverage_altitude_m`。不給時自動壓到不超過
++    #                        新天花板（＝ ablation_cap.py 驗過的那個組合），
++    #                        因為轉接層本來就會 clamp，只是會多一條 warning。
++    #   ⚠ 兩個都不給 ⇒ **完全不動情境**，與今天逐位元相同（120.0 參考格就是這樣跑）。
++    #   ⚠ `waiver_max_agl_m` 這個名字在這裡是「h_ceil 旋鈕」而不是「真的有豁免」：
++    #     它唯一的另一個作用是 `decompose.py:401` / `preflight.py:537` 在高度帶
++    #     **不可行時**挑 `A_needs_waiver` 還是 `band_lt_min` 當理由字串。本情境
++    #     （min_fw 100、dh_band_min 15、119.5 − 100 = 19.5 ≥ 15）可行，不受影響。
++    #   ⚠ 產物上看得見：scenario.json 的 `waiver_max_agl_m` 與 `h_ceil_m` 會寫 119.5。
++    if os.environ.get("HV_PLAN_CEIL_M") or os.environ.get("HV_PLAN_ALT_M"):
++        import dataclasses
++        _ceil_s = os.environ.get("HV_PLAN_CEIL_M")
++        _alt_s = os.environ.get("HV_PLAN_ALT_M")
++        _ceil = sc.waiver_max_agl_m if _ceil_s is None else float(_ceil_s)
++        if _alt_s:
++            _alt = float(_alt_s)
++        else:
++            _alt = min(float(sc.coverage_altitude_m),
++                       math.inf if _ceil is None else float(_ceil))
++        sc = dataclasses.replace(sc, waiver_max_agl_m=_ceil, coverage_altitude_m=_alt)
++        print(f"⚠ HV_PLAN_CEIL_M／HV_PLAN_ALT_M：規劃天花板 {_ceil} m、"
++              f"目標航高 {_alt} m（情境原值 {SCENARIOS[key].waiver_max_agl_m} / "
++              f"{SCENARIOS[key].coverage_altitude_m} m）")
+     logging.basicConfig(level=logging.WARNING,
+                         format="%(levelname)s %(name)s: %(message)s")
+     if cmd == "plan":

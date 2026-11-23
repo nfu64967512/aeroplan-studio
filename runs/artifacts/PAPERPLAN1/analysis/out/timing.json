@@ -1,0 +1,773 @@
+{
+ "BEAMIDP1": {
+  "coverage_all_airborne": [
+   {
+    "area": "Z1",
+    "area_ha": 191.3,
+    "area_m2": 1912996.1,
+    "covered_m2": 1912996.1,
+    "ratio": 1.0
+   },
+   {
+    "area": "Z2",
+    "area_ha": 191.3,
+    "area_m2": 1912996.1,
+    "covered_m2": 1912996.1,
+    "ratio": 1.0
+   },
+   {
+    "area": "Z3",
+    "area_ha": 191.3,
+    "area_m2": 1912996.1,
+    "covered_m2": 1912996.1,
+    "ratio": 1.0
+   }
+  ],
+  "coverage_reporter": [
+   {
+    "area": "Z1",
+    "area_m2": 1920080.4,
+    "covered_m2": 1920080.4,
+    "ratio": 1.0
+   },
+   {
+    "area": "Z2",
+    "area_m2": 1920080.4,
+    "covered_m2": 1920080.4,
+    "ratio": 1.0
+   },
+   {
+    "area": "Z3",
+    "area_m2": 1920080.4,
+    "covered_m2": 1920080.4,
+    "ratio": 1.0
+   }
+  ],
+  "coverage_survey_band_only": [
+   {
+    "area": "Z1",
+    "area_ha": 191.3,
+    "area_m2": 1912996.1,
+    "covered_m2": 1912996.1,
+    "ratio": 1.0
+   },
+   {
+    "area": "Z2",
+    "area_ha": 191.3,
+    "area_m2": 1912996.1,
+    "covered_m2": 1912996.1,
+    "ratio": 1.0
+   },
+   {
+    "area": "Z3",
+    "area_ha": 191.3,
+    "area_m2": 1912996.1,
+    "covered_m2": 1912996.1,
+    "ratio": 1.0
+   }
+  ],
+  "fleet_zero_uav": "B3",
+  "flown_makespan_2m_s": 2272.343,
+  "flown_makespan_disarm_s": 2283.358,
+  "flown_total_km": 115.2522,
+  "makespan_err_2m_pct": -3.224,
+  "makespan_err_disarm_pct": -2.755,
+  "per_uav": {
+   "A1": {
+    "cls": "A",
+    "disarm_is_last_csv_row": false,
+    "dist_err_pct": 1.405,
+    "flown_km": 42.3285,
+    "flown_t_land_2m_s": 2123.757,
+    "flown_t_land_disarm_s": 2134.493,
+    "flown_t_release_s": 73.435,
+    "gps_offset_s": 1473967028.8934,
+    "gps_offset_spread_s": 0.12,
+    "land_err_2m_pct": -4.233,
+    "plan_energy_margin_wh": 440.85,
+    "plan_energy_used_wh": 459.15,
+    "plan_km": 41.7421,
+    "plan_n_items": 263,
+    "plan_t_land_s": 2217.637,
+    "plan_t_takeoff_s": 74.0,
+    "release_error_s": -0.565,
+    "t_first_airborne_boot_s": 156.505
+   },
+   "B2": {
+    "cls": "B",
+    "disarm_is_last_csv_row": true,
+    "dist_err_pct": 4.01,
+    "flown_km": 38.6619,
+    "flown_t_land_2m_s": 2272.343,
+    "flown_t_land_disarm_s": 2283.358,
+    "flown_t_release_s": 171.97,
+    "gps_offset_s": 1473967029.8884,
+    "gps_offset_spread_s": 0.14,
+    "land_err_2m_pct": -3.224,
+    "plan_energy_margin_wh": 88.69,
+    "plan_energy_used_wh": 165.31,
+    "plan_km": 37.1712,
+    "plan_n_items": 165,
+    "plan_t_land_s": 2348.045,
+    "plan_t_takeoff_s": 172.0,
+    "release_error_s": -0.03,
+    "t_first_airborne_boot_s": 254.138
+   },
+   "B3": {
+    "cls": "B",
+    "disarm_is_last_csv_row": false,
+    "dist_err_pct": 1.34,
+    "flown_km": 34.2618,
+    "flown_t_land_2m_s": 1870.792,
+    "flown_t_land_disarm_s": 1881.358,
+    "flown_t_release_s": 0.0,
+    "gps_offset_s": 1473967030.8884,
+    "gps_offset_spread_s": 0.0,
+    "land_err_2m_pct": -6.117,
+    "plan_energy_margin_wh": 100.08,
+    "plan_energy_used_wh": 153.92,
+    "plan_km": 33.8089,
+    "plan_n_items": 175,
+    "plan_t_land_s": 1992.688,
+    "plan_t_takeoff_s": 0.0,
+    "release_error_s": 0.0,
+    "t_first_airborne_boot_s": 81.125
+   }
+  },
+  "planned_makespan_matrix_s": null,
+  "planned_makespan_s": 2348.0447192734696,
+  "planned_total_km": 112.7222,
+  "release_schedule": {
+   "actual_release_wall_s": {
+    "A1": 14.9,
+    "B2": 34.5,
+    "B3": 0.0
+   },
+   "link_lost": [],
+   "mode_change_rejected": [],
+   "planned_t_takeoff_s": {
+    "A1": 74.0,
+    "B2": 172.0,
+    "B3": 0.0
+   },
+   "release_wall_s": {
+    "A1": 14.8,
+    "B2": 34.4,
+    "B3": 0.0
+   },
+   "speedup": 5.0
+  },
+  "swath_m_recomputed": 137.987,
+  "swath_m_reporter": 138.0,
+  "t0_gps_tow_s": 1473967109.57,
+  "total_dist_err_pct": 2.244
+ },
+ "HV4SITL15": {
+  "coverage_all_airborne": [
+   {
+    "area": "Z1",
+    "area_ha": 124.34,
+    "area_m2": 1243447.5,
+    "covered_m2": 1243447.5,
+    "ratio": 1.0
+   }
+  ],
+  "coverage_reporter": [
+   {
+    "area": "Z1",
+    "area_m2": 1248034.8,
+    "covered_m2": 1248034.8,
+    "ratio": 1.0
+   }
+  ],
+  "coverage_survey_band_only": [
+   {
+    "area": "Z1",
+    "area_ha": 124.34,
+    "area_m2": 1243447.5,
+    "covered_m2": 1243447.5,
+    "ratio": 1.0
+   }
+  ],
+  "fleet_zero_uav": "B2",
+  "flown_makespan_2m_s": 1255.868,
+  "flown_makespan_disarm_s": 1266.508,
+  "flown_total_km": 31.3622,
+  "makespan_err_2m_pct": -0.362,
+  "makespan_err_disarm_pct": 0.483,
+  "per_uav": {
+   "A1": {
+    "cls": "A",
+    "disarm_is_last_csv_row": true,
+    "dist_err_pct": 2.229,
+    "flown_km": 10.5225,
+    "flown_t_land_2m_s": 1255.868,
+    "flown_t_land_disarm_s": 1266.508,
+    "flown_t_release_s": 655.78,
+    "gps_offset_s": 1473384199.8784,
+    "gps_offset_spread_s": 0.1,
+    "land_err_2m_pct": -0.362,
+    "plan_energy_margin_wh": 704.76,
+    "plan_energy_used_wh": 195.24,
+    "plan_km": 10.293,
+    "plan_n_items": 82,
+    "plan_t_land_s": 1260.426,
+    "plan_t_takeoff_s": 656.0,
+    "release_error_s": -0.22,
+    "t_first_airborne_boot_s": 726.756
+   },
+   "B2": {
+    "cls": "B",
+    "disarm_is_last_csv_row": false,
+    "dist_err_pct": 2.493,
+    "flown_km": 8.1235,
+    "flown_t_land_2m_s": 523.161,
+    "flown_t_land_disarm_s": 534.513,
+    "flown_t_release_s": 0.0,
+    "gps_offset_s": 1473384200.8834,
+    "gps_offset_spread_s": 0.02,
+    "land_err_2m_pct": -2.003,
+    "plan_energy_margin_wh": 190.74,
+    "plan_energy_used_wh": 63.26,
+    "plan_km": 7.9259,
+    "plan_n_items": 53,
+    "plan_t_land_s": 533.856,
+    "plan_t_takeoff_s": 0.0,
+    "release_error_s": 0.0,
+    "t_first_airborne_boot_s": 69.985
+   },
+   "B3": {
+    "cls": "B",
+    "disarm_is_last_csv_row": false,
+    "dist_err_pct": 2.225,
+    "flown_km": 12.7162,
+    "flown_t_land_2m_s": 867.118,
+    "flown_t_land_disarm_s": 878.508,
+    "flown_t_release_s": 107.445,
+    "gps_offset_s": 1473384201.8784,
+    "gps_offset_spread_s": 0.04,
+    "land_err_2m_pct": -3.053,
+    "plan_energy_margin_wh": 174.92,
+    "plan_energy_used_wh": 79.08,
+    "plan_km": 12.4394,
+    "plan_n_items": 84,
+    "plan_t_land_s": 894.429,
+    "plan_t_takeoff_s": 106.0,
+    "release_error_s": 1.445,
+    "t_first_airborne_boot_s": 176.486
+   }
+  },
+  "planned_makespan_matrix_s": null,
+  "planned_makespan_s": 1260.4260664854269,
+  "planned_total_km": 30.6583,
+  "release_schedule": {
+   "actual_release_wall_s": {
+    "A1": 131.3,
+    "B2": 0.0,
+    "B3": 21.4
+   },
+   "link_lost": [],
+   "mode_change_rejected": [],
+   "planned_t_takeoff_s": {
+    "A1": 656.0,
+    "B2": 0.0,
+    "B3": 106.0
+   },
+   "release_wall_s": {
+    "A1": 131.2,
+    "B2": 0.0,
+    "B3": 21.2
+   },
+   "speedup": 5.0
+  },
+  "swath_m_recomputed": 138.564,
+  "swath_m_reporter": 138.6,
+  "t0_gps_tow_s": 1473384268.41,
+  "total_dist_err_pct": 2.296
+ },
+ "HV4SITL16": {
+  "coverage_all_airborne": [
+   {
+    "area": "Z1",
+    "area_ha": 124.34,
+    "area_m2": 1243447.5,
+    "covered_m2": 1243447.5,
+    "ratio": 1.0
+   }
+  ],
+  "coverage_reporter": null,
+  "coverage_survey_band_only": [
+   {
+    "area": "Z1",
+    "area_ha": 124.34,
+    "area_m2": 1243447.5,
+    "covered_m2": 1243447.5,
+    "ratio": 1.0
+   }
+  ],
+  "fleet_zero_uav": "B2",
+  "flown_makespan_2m_s": 1255.893,
+  "flown_makespan_disarm_s": 1267.123,
+  "flown_total_km": 31.3544,
+  "makespan_err_2m_pct": -0.36,
+  "makespan_err_disarm_pct": 0.531,
+  "per_uav": {
+   "A1": {
+    "cls": "A",
+    "disarm_is_last_csv_row": true,
+    "dist_err_pct": 2.194,
+    "flown_km": 10.5188,
+    "flown_t_land_2m_s": 1255.893,
+    "flown_t_land_disarm_s": 1267.123,
+    "flown_t_release_s": 655.885,
+    "gps_offset_s": 1473404698.8884,
+    "gps_offset_spread_s": 0.1,
+    "land_err_2m_pct": -0.36,
+    "plan_energy_margin_wh": 704.76,
+    "plan_energy_used_wh": 195.24,
+    "plan_km": 10.293,
+    "plan_n_items": 82,
+    "plan_t_land_s": 1260.426,
+    "plan_t_takeoff_s": 656.0,
+    "release_error_s": -0.115,
+    "t_first_airborne_boot_s": 731.273
+   },
+   "B2": {
+    "cls": "B",
+    "disarm_is_last_csv_row": false,
+    "dist_err_pct": 2.499,
+    "flown_km": 8.124,
+    "flown_t_land_2m_s": 523.025,
+    "flown_t_land_disarm_s": 533.123,
+    "flown_t_release_s": 0.0,
+    "gps_offset_s": 1473404699.8884,
+    "gps_offset_spread_s": 0.0,
+    "land_err_2m_pct": -2.029,
+    "plan_energy_margin_wh": 190.74,
+    "plan_energy_used_wh": 63.26,
+    "plan_km": 7.9259,
+    "plan_n_items": 53,
+    "plan_t_land_s": 533.856,
+    "plan_t_takeoff_s": 0.0,
+    "release_error_s": 0.0,
+    "t_first_airborne_boot_s": 74.327
+   },
+   "B3": {
+    "cls": "B",
+    "disarm_is_last_csv_row": false,
+    "dist_err_pct": 2.188,
+    "flown_km": 12.7116,
+    "flown_t_land_2m_s": 866.335,
+    "flown_t_land_disarm_s": 877.128,
+    "flown_t_release_s": 107.21,
+    "gps_offset_s": 1473404700.8934,
+    "gps_offset_spread_s": 0.06,
+    "land_err_2m_pct": -3.141,
+    "plan_energy_margin_wh": 174.92,
+    "plan_energy_used_wh": 79.08,
+    "plan_km": 12.4394,
+    "plan_n_items": 84,
+    "plan_t_land_s": 894.429,
+    "plan_t_takeoff_s": 106.0,
+    "release_error_s": 1.21,
+    "t_first_airborne_boot_s": 180.602
+   }
+  },
+  "planned_makespan_matrix_s": null,
+  "planned_makespan_s": 1260.4260664854269,
+  "planned_total_km": 30.6583,
+  "release_schedule": {
+   "actual_release_wall_s": {
+    "A1": 131.3,
+    "B2": 0.0,
+    "B3": 21.4
+   },
+   "link_lost": [],
+   "mode_change_rejected": [],
+   "planned_t_takeoff_s": {
+    "A1": 656.0,
+    "B2": 0.0,
+    "B3": 106.0
+   },
+   "release_wall_s": {
+    "A1": 131.2,
+    "B2": 0.0,
+    "B3": 21.2
+   },
+   "speedup": 5.0
+  },
+  "swath_m_recomputed": 138.564,
+  "swath_m_reporter": null,
+  "t0_gps_tow_s": 1473404771.805,
+  "total_dist_err_pct": 2.271
+ },
+ "HV4W00": {
+  "coverage_all_airborne": [
+   {
+    "area": "Z1",
+    "area_ha": 124.34,
+    "area_m2": 1243447.5,
+    "covered_m2": 1243447.5,
+    "ratio": 1.0
+   }
+  ],
+  "coverage_reporter": [
+   {
+    "area": "Z1",
+    "area_m2": 1248034.8,
+    "covered_m2": 1248034.8,
+    "ratio": 1.0
+   }
+  ],
+  "coverage_survey_band_only": [
+   {
+    "area": "Z1",
+    "area_ha": 124.34,
+    "area_m2": 1243447.5,
+    "covered_m2": 1243447.5,
+    "ratio": 1.0
+   }
+  ],
+  "fleet_zero_uav": "B2",
+  "flown_makespan_2m_s": 1207.881,
+  "flown_makespan_disarm_s": 1218.473,
+  "flown_total_km": 31.1375,
+  "makespan_err_2m_pct": 0.197,
+  "makespan_err_disarm_pct": 1.075,
+  "per_uav": {
+   "A1": {
+    "cls": "A",
+    "disarm_is_last_csv_row": true,
+    "dist_err_pct": 2.245,
+    "flown_km": 10.4593,
+    "flown_t_land_2m_s": 1207.881,
+    "flown_t_land_disarm_s": 1218.473,
+    "flown_t_release_s": 611.995,
+    "gps_offset_s": 1473966524.8784,
+    "gps_offset_spread_s": 0.0,
+    "land_err_2m_pct": 0.197,
+    "plan_energy_margin_wh": 706.65,
+    "plan_energy_used_wh": 193.35,
+    "plan_km": 10.2297,
+    "plan_n_items": 82,
+    "plan_t_land_s": 1205.51,
+    "plan_t_takeoff_s": 612.0,
+    "release_error_s": -0.005,
+    "t_first_airborne_boot_s": 688.976
+   },
+   "B2": {
+    "cls": "B",
+    "disarm_is_last_csv_row": false,
+    "dist_err_pct": 2.505,
+    "flown_km": 8.0636,
+    "flown_t_land_2m_s": 519.695,
+    "flown_t_land_disarm_s": 529.478,
+    "flown_t_release_s": 0.0,
+    "gps_offset_s": 1473966525.8834,
+    "gps_offset_spread_s": 0.06,
+    "land_err_2m_pct": -0.006,
+    "plan_energy_margin_wh": 191.62,
+    "plan_energy_used_wh": 62.38,
+    "plan_km": 7.8665,
+    "plan_n_items": 53,
+    "plan_t_land_s": 519.727,
+    "plan_t_takeoff_s": 0.0,
+    "release_error_s": 0.0,
+    "t_first_airborne_boot_s": 75.952
+   },
+   "B3": {
+    "cls": "B",
+    "disarm_is_last_csv_row": false,
+    "dist_err_pct": 2.221,
+    "flown_km": 12.6146,
+    "flown_t_land_2m_s": 855.158,
+    "flown_t_land_disarm_s": 865.478,
+    "flown_t_release_s": 100.68,
+    "gps_offset_s": 1473966526.8834,
+    "gps_offset_spread_s": 0.0,
+    "land_err_2m_pct": -0.016,
+    "plan_energy_margin_wh": 176.98,
+    "plan_energy_used_wh": 77.02,
+    "plan_km": 12.3406,
+    "plan_n_items": 84,
+    "plan_t_land_s": 855.298,
+    "plan_t_takeoff_s": 100.0,
+    "release_error_s": 0.68,
+    "t_first_airborne_boot_s": 175.55
+   }
+  },
+  "planned_makespan_matrix_s": 1205.51,
+  "planned_makespan_s": 1205.5101155418506,
+  "planned_total_km": 30.4368,
+  "release_schedule": {
+   "actual_release_wall_s": {
+    "A1": 122.5,
+    "B2": 0.0,
+    "B3": 20.1
+   },
+   "link_lost": [],
+   "mode_change_rejected": [],
+   "planned_t_takeoff_s": {
+    "A1": 612.0,
+    "B2": 0.0,
+    "B3": 100.0
+   },
+   "release_wall_s": {
+    "A1": 122.4,
+    "B2": 0.0,
+    "B3": 20.0
+   },
+   "speedup": 5.0
+  },
+  "swath_m_recomputed": 137.987,
+  "swath_m_reporter": 138.0,
+  "t0_gps_tow_s": 1473966599.445,
+  "total_dist_err_pct": 2.302
+ },
+ "HV4W05": {
+  "coverage_all_airborne": [
+   {
+    "area": "Z1",
+    "area_ha": 124.34,
+    "area_m2": 1243447.5,
+    "covered_m2": 1242932.4,
+    "ratio": 0.999586
+   }
+  ],
+  "coverage_reporter": [
+   {
+    "area": "Z1",
+    "area_m2": 1248034.8,
+    "covered_m2": 1247509.4,
+    "ratio": 0.9996
+   }
+  ],
+  "coverage_survey_band_only": [
+   {
+    "area": "Z1",
+    "area_ha": 124.34,
+    "area_m2": 1243447.5,
+    "covered_m2": 1242932.4,
+    "ratio": 0.999586
+   }
+  ],
+  "fleet_zero_uav": "B2",
+  "flown_makespan_2m_s": 1234.78,
+  "flown_makespan_disarm_s": 1245.638,
+  "flown_total_km": 31.6699,
+  "makespan_err_2m_pct": 2.428,
+  "makespan_err_disarm_pct": 3.329,
+  "per_uav": {
+   "A1": {
+    "cls": "A",
+    "disarm_is_last_csv_row": true,
+    "dist_err_pct": 3.869,
+    "flown_km": 10.6255,
+    "flown_t_land_2m_s": 1234.78,
+    "flown_t_land_disarm_s": 1245.638,
+    "flown_t_release_s": 612.01,
+    "gps_offset_s": 1473966196.8934,
+    "gps_offset_spread_s": 0.0,
+    "land_err_2m_pct": 2.428,
+    "plan_energy_margin_wh": 706.65,
+    "plan_energy_used_wh": 193.35,
+    "plan_km": 10.2297,
+    "plan_n_items": 82,
+    "plan_t_land_s": 1205.51,
+    "plan_t_takeoff_s": 612.0,
+    "release_error_s": 0.01,
+    "t_first_airborne_boot_s": 689.008
+   },
+   "B2": {
+    "cls": "B",
+    "disarm_is_last_csv_row": false,
+    "dist_err_pct": 4.674,
+    "flown_km": 8.2342,
+    "flown_t_land_2m_s": 556.516,
+    "flown_t_land_disarm_s": 566.638,
+    "flown_t_release_s": 0.0,
+    "gps_offset_s": 1473966197.8934,
+    "gps_offset_spread_s": 0.0,
+    "land_err_2m_pct": 7.078,
+    "plan_energy_margin_wh": 191.62,
+    "plan_energy_used_wh": 62.38,
+    "plan_km": 7.8665,
+    "plan_n_items": 53,
+    "plan_t_land_s": 519.727,
+    "plan_t_takeoff_s": 0.0,
+    "release_error_s": 0.0,
+    "t_first_airborne_boot_s": 76.081
+   },
+   "B3": {
+    "cls": "B",
+    "disarm_is_last_csv_row": false,
+    "dist_err_pct": 3.805,
+    "flown_km": 12.8102,
+    "flown_t_land_2m_s": 908.488,
+    "flown_t_land_disarm_s": 918.623,
+    "flown_t_release_s": 100.7,
+    "gps_offset_s": 1473966198.8784,
+    "gps_offset_spread_s": 0.1,
+    "land_err_2m_pct": 6.219,
+    "plan_energy_margin_wh": 176.98,
+    "plan_energy_used_wh": 77.02,
+    "plan_km": 12.3406,
+    "plan_n_items": 84,
+    "plan_t_land_s": 855.298,
+    "plan_t_takeoff_s": 100.0,
+    "release_error_s": 0.7,
+    "t_first_airborne_boot_s": 175.672
+   }
+  },
+  "planned_makespan_matrix_s": 1205.51,
+  "planned_makespan_s": 1205.5101155418506,
+  "planned_total_km": 30.4368,
+  "release_schedule": {
+   "actual_release_wall_s": {
+    "A1": 122.5,
+    "B2": 0.0,
+    "B3": 20.1
+   },
+   "link_lost": [],
+   "mode_change_rejected": [],
+   "planned_t_takeoff_s": {
+    "A1": 612.0,
+    "B2": 0.0,
+    "B3": 100.0
+   },
+   "release_wall_s": {
+    "A1": 122.4,
+    "B2": 0.0,
+    "B3": 20.0
+   },
+   "speedup": 5.0
+  },
+  "swath_m_recomputed": 137.987,
+  "swath_m_reporter": 138.0,
+  "t0_gps_tow_s": 1473966271.295,
+  "total_dist_err_pct": 4.051
+ },
+ "HV4W55": {
+  "coverage_all_airborne": [
+   {
+    "area": "Z1",
+    "area_ha": 124.34,
+    "area_m2": 1243447.5,
+    "covered_m2": 1243032.2,
+    "ratio": 0.999666
+   }
+  ],
+  "coverage_reporter": [
+   {
+    "area": "Z1",
+    "area_m2": 1248034.8,
+    "covered_m2": 1247608.7,
+    "ratio": 0.9997
+   }
+  ],
+  "coverage_survey_band_only": [
+   {
+    "area": "Z1",
+    "area_ha": 124.34,
+    "area_m2": 1243447.5,
+    "covered_m2": 1243032.2,
+    "ratio": 0.999666
+   }
+  ],
+  "fleet_zero_uav": "B2",
+  "flown_makespan_2m_s": 1281.906,
+  "flown_makespan_disarm_s": 1292.918,
+  "flown_total_km": 31.8884,
+  "makespan_err_2m_pct": 1.702,
+  "makespan_err_disarm_pct": 2.576,
+  "per_uav": {
+   "A1": {
+    "cls": "A",
+    "disarm_is_last_csv_row": true,
+    "dist_err_pct": 3.813,
+    "flown_km": 10.6861,
+    "flown_t_land_2m_s": 1281.906,
+    "flown_t_land_disarm_s": 1292.918,
+    "flown_t_release_s": 655.89,
+    "gps_offset_s": 1473965825.8934,
+    "gps_offset_spread_s": 0.0,
+    "land_err_2m_pct": 1.702,
+    "plan_energy_margin_wh": 704.79,
+    "plan_energy_used_wh": 195.21,
+    "plan_km": 10.2936,
+    "plan_n_items": 82,
+    "plan_t_land_s": 1260.454,
+    "plan_t_takeoff_s": 656.0,
+    "release_error_s": -0.11,
+    "t_first_airborne_boot_s": 732.623
+   },
+   "B2": {
+    "cls": "B",
+    "disarm_is_last_csv_row": false,
+    "dist_err_pct": 4.673,
+    "flown_km": 8.2969,
+    "flown_t_land_2m_s": 560.055,
+    "flown_t_land_disarm_s": 569.913,
+    "flown_t_release_s": 0.0,
+    "gps_offset_s": 1473965826.8884,
+    "gps_offset_spread_s": 0.02,
+    "land_err_2m_pct": 4.901,
+    "plan_energy_margin_wh": 190.75,
+    "plan_energy_used_wh": 63.25,
+    "plan_km": 7.9265,
+    "plan_n_items": 53,
+    "plan_t_land_s": 533.89,
+    "plan_t_takeoff_s": 0.0,
+    "release_error_s": 0.0,
+    "t_first_airborne_boot_s": 75.802
+   },
+   "B3": {
+    "cls": "B",
+    "disarm_is_last_csv_row": false,
+    "dist_err_pct": 3.737,
+    "flown_km": 12.9054,
+    "flown_t_land_2m_s": 920.213,
+    "flown_t_land_disarm_s": 929.913,
+    "flown_t_release_s": 107.225,
+    "gps_offset_s": 1473965827.8884,
+    "gps_offset_spread_s": 0.06,
+    "land_err_2m_pct": 2.876,
+    "plan_energy_margin_wh": 174.92,
+    "plan_energy_used_wh": 79.08,
+    "plan_km": 12.4406,
+    "plan_n_items": 84,
+    "plan_t_land_s": 894.491,
+    "plan_t_takeoff_s": 106.0,
+    "release_error_s": 1.225,
+    "t_first_airborne_boot_s": 181.859
+   }
+  },
+  "planned_makespan_matrix_s": 1260.45,
+  "planned_makespan_s": 1260.453960577981,
+  "planned_total_km": 30.6607,
+  "release_schedule": {
+   "actual_release_wall_s": {
+    "A1": 131.3,
+    "B2": 0.0,
+    "B3": 21.4
+   },
+   "link_lost": [],
+   "mode_change_rejected": [],
+   "planned_t_takeoff_s": {
+    "A1": 656.0,
+    "B2": 0.0,
+    "B3": 106.0
+   },
+   "release_wall_s": {
+    "A1": 131.2,
+    "B2": 0.0,
+    "B3": 21.2
+   },
+   "speedup": 5.0
+  },
+  "swath_m_recomputed": 137.987,
+  "swath_m_reporter": 138.0,
+  "t0_gps_tow_s": 1473965900.015,
+  "total_dist_err_pct": 4.004
+ }
+}

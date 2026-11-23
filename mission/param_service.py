@@ -74,8 +74,10 @@ class ParamService(QObject):
         # 避免因 AttributeError 阻擋連線流程。
         if sysid not in self._connected_sysids:
             if hasattr(link, "param_value"):
+                # SITLLink.param_value = (來源 sysid, name, value, type, index, count)。
+                # 一條 link 只對一架；登錄的 sysid 不一定等於 MAVLink 來源 sysid，所以不用 src 過濾
                 link.param_value.connect(
-                    lambda name, value, type_code, pidx, pcount, _sys=sysid:
+                    lambda _src, name, value, type_code, pidx, pcount, _sys=sysid:
                     self._on_param_value(_sys, name, value, type_code, pidx, pcount)
                 )
             else:

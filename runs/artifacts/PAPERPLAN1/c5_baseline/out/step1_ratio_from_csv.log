@@ -1,0 +1,24 @@
+provenance: {"head": "5e0295f5eb63e6597a787120d66526d3e4b17e7f", "dirty_working_tree": true, "md5": {"mission/swarm_coordinator.py": "961103cb1ffeb57606568aeb868e1515", "core/dccpp/dccpp_path_builder.py": "82463450b27e121956883ae9bb444f56"}}
+rows=48 cells=12
+
+scen n  DCCPP_km HARVEST_km ratio  pct   D_cov H_cov H_uncov H_valid  included
+------------------------------------------------------------------------------
+S1 2    104.25      59.06  0.567  -43.3%   1.0 0.5277       1    FAIL  no
+S1 4     55.12      58.92  1.069   +6.9%   1.0   1.0       0    pass  YES
+S1 8     32.25      36.79  1.141  +14.1%   1.0   1.0       0    pass  YES
+S1 16    21.47      25.25  1.176  +17.6%   1.0   1.0       0    pass  YES
+S2 4     62.63      63.20  1.009   +0.9%   1.0   1.0       0    pass  YES
+S2 8     34.93      40.58  1.162  +16.2%   1.0   1.0       0    pass  YES
+S3 4     32.36      36.35  1.123  +12.3%   1.0   1.0       0    pass  YES
+S3 8     24.15      28.88  1.196  +19.6%   1.0   1.0       0    pass  YES
+S4 4     44.79      51.21  1.143  +14.3%   1.0   1.0       0    pass  YES
+S4 8     26.45      32.50  1.229  +22.9%   1.0   1.0       0    pass  YES
+S5 8    105.99      67.01  0.632  -36.8%   1.0 0.617       4    FAIL  no
+S5 16    63.64      68.18  1.071   +7.1%   1.0   1.0       0    pass  YES
+
+included cells = 10
+min  = +0.91%   max = +22.87%
+mean = +13.19%
+=> paper claim "0.9%-22.9% longer over 10 scenarios": REPRODUCED
+
+wrote C:\Users\joy46\Documents\Projects\aeroplan-studio\runs\artifacts\PAPERPLAN1\c5_baseline\out\step1_ratio_from_csv.json

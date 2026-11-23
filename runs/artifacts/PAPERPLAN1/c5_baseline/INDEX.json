@@ -1,0 +1,198 @@
+{
+  "label": "c5_baseline",
+  "repo_head": "5e0295f5eb63e6597a787120d66526d3e4b17e7f (dirty; md5 of swarm_coordinator.py and dccpp_path_builder.py match the committed benchmark CSV provenance exactly)",
+  "python": "3.14.3, shapely 2.1.2, numpy 2.3.5, scipy 1.17.0",
+  "rule": "read-only on repo; no SITL/WSL/MAVProxy; pure-Python planner+analysis only",
+  "files": [
+    {
+      "path": "out/step0_reff.log",
+      "bytes": 1103,
+      "md5": "875e6b7ac8b3"
+    },
+    {
+      "path": "out/step1_ratio_from_csv.json",
+      "bytes": 4576,
+      "md5": "27ee7ba3a1b5"
+    },
+    {
+      "path": "out/step1_ratio_from_csv.log",
+      "bytes": 1585,
+      "md5": "51bf6171a937"
+    },
+    {
+      "path": "out/step2_dccpp.log",
+      "bytes": 2121,
+      "md5": "8abfaec46daa"
+    },
+    {
+      "path": "out/step2_harvest_S1n2.log",
+      "bytes": 511,
+      "md5": "42d20f829ed8"
+    },
+    {
+      "path": "out/step2_harvest_S2n4.log",
+      "bytes": 519,
+      "md5": "47afe282f18e"
+    },
+    {
+      "path": "out/step2_harvest_S4n8.log",
+      "bytes": 537,
+      "md5": "59c63189a94f"
+    },
+    {
+      "path": "out/step3_kpi_S1_n2_mix.json",
+      "bytes": 2298,
+      "md5": "8abd171c0849"
+    },
+    {
+      "path": "out/step3_kpi_S1_n2_mix.log",
+      "bytes": 2426,
+      "md5": "230090f06d40"
+    },
+    {
+      "path": "out/step3_kpi_S4_n8.json",
+      "bytes": 3846,
+      "md5": "8e0ba656b3d1"
+    },
+    {
+      "path": "out/step4_verifier_S4_n8.json",
+      "bytes": 1538,
+      "md5": "e7c1fac55561"
+    },
+    {
+      "path": "out/step4_verifier_S4_n8.log",
+      "bytes": 1667,
+      "md5": "ce58745284a4"
+    },
+    {
+      "path": "out/step5_kpi_scan.json",
+      "bytes": 91196,
+      "md5": "a8524d35c634"
+    },
+    {
+      "path": "out/step5_kpi_scan.log",
+      "bytes": 2121,
+      "md5": "2744e4a7c726"
+    },
+    {
+      "path": "out/step6_export_S1_n2.json",
+      "bytes": 1710,
+      "md5": "713374d7655f"
+    },
+    {
+      "path": "out/step6_export_S2_n4.json",
+      "bytes": 2907,
+      "md5": "1c45765d7eab"
+    },
+    {
+      "path": "out/step6_export_S4_n8.json",
+      "bytes": 5296,
+      "md5": "3987656242cf"
+    },
+    {
+      "path": "out/step7_kpi_table.json",
+      "bytes": 980,
+      "md5": "503cf2e13acb"
+    },
+    {
+      "path": "out/step7_kpi_table.log",
+      "bytes": 4617,
+      "md5": "0d320e031ed5"
+    },
+    {
+      "path": "out/step8_altitude_S4_n4.json",
+      "bytes": 1172,
+      "md5": "4d7723273b38"
+    },
+    {
+      "path": "out/step9_harvest_schedule_S4_n8.json",
+      "bytes": 2321,
+      "md5": "ff8baa6669ff"
+    },
+    {
+      "path": "out/tracks/DCCPP_mix_S1_n2.json",
+      "bytes": 3285,
+      "md5": "93da184b8c85"
+    },
+    {
+      "path": "out/tracks/DCCPP_S1_n2.json",
+      "bytes": 3281,
+      "md5": "9243a787af56"
+    },
+    {
+      "path": "out/tracks/DCCPP_S2_n4.json",
+      "bytes": 4686,
+      "md5": "83b37b4989b3"
+    },
+    {
+      "path": "out/tracks/DCCPP_S4_n8.json",
+      "bytes": 5084,
+      "md5": "cc30887c9b59"
+    },
+    {
+      "path": "out/tracks/HARVEST_S1_n2.json",
+      "bytes": 7029,
+      "md5": "f8f8c84630ee"
+    },
+    {
+      "path": "out/tracks/HARVEST_S2_n4.json",
+      "bytes": 16784,
+      "md5": "b974ec38c072"
+    },
+    {
+      "path": "out/tracks/HARVEST_S4_n8.json",
+      "bytes": 20663,
+      "md5": "9853f6020ffb"
+    },
+    {
+      "path": "scripts/step0_reff.py",
+      "bytes": 1804,
+      "md5": "ce5eaa88bc21"
+    },
+    {
+      "path": "scripts/step1_ratio_from_csv.py",
+      "bytes": 3250,
+      "md5": "b6d309085d66"
+    },
+    {
+      "path": "scripts/step2_rerun_cell.py",
+      "bytes": 1854,
+      "md5": "244804f7b623"
+    },
+    {
+      "path": "scripts/step3_kpi_audit.py",
+      "bytes": 10512,
+      "md5": "15fbc6dbdfc1"
+    },
+    {
+      "path": "scripts/step4_verify_the_verifier.py",
+      "bytes": 10390,
+      "md5": "23c3ccfd251f"
+    },
+    {
+      "path": "scripts/step5_kpi_scan.py",
+      "bytes": 9560,
+      "md5": "eee888481305"
+    },
+    {
+      "path": "scripts/step6_export_axis.py",
+      "bytes": 5608,
+      "md5": "f932b44e23a6"
+    },
+    {
+      "path": "scripts/step7_kpi_table.py",
+      "bytes": 4463,
+      "md5": "e4efb5e81ef4"
+    },
+    {
+      "path": "scripts/step8_altitude_axis.py",
+      "bytes": 4055,
+      "md5": "18cc9b845d93"
+    },
+    {
+      "path": "scripts/step9_harvest_schedule.py",
+      "bytes": 1999,
+      "md5": "5022e635ec16"
+    }
+  ]
+}

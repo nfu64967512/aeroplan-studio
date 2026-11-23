@@ -1,0 +1,30 @@
+# /etc/systemd/system/pi-capture.service —— 樣板：路徑、使用者、計畫張數依實機修改
+# 啟用：sudo systemctl daemon-reload && sudo systemctl enable --now pi-capture
+# 日誌：journalctl -u pi-capture -f
+[Unit]
+Description=AeroPlan camera module capture (aeroplan-pi-session/1)
+After=local-fs.target
+# 資料碟沒掛上就不啟動（否則會寫進 SD 卡根目錄）
+RequiresMountsFor=/mnt/nvme
+
+[Service]
+Type=simple
+User=pi
+SupplementaryGroups=gpio video spi dialout
+WorkingDirectory=/opt/aeroplan
+Environment=PYTHONPATH=/opt/aeroplan
+Environment=PYTHONUNBUFFERED=1
+RuntimeDirectory=pi_capture
+# 開機自檢（自己注入一個邊緣，只測相機→挑幀→寫檔）；前綴 "-"：失敗也照常擷取，
+# 但 run 讀到 ok=false 就不會拉高就緒腳。--planned-photos / --bytes-per-photo 依任務與台架實測修改。
+ExecStartPre=-/opt/aeroplan/venv/bin/python -m pi_capture selfcheck --config /etc/pi_capture/config.json --planned-photos 2000 --bytes-per-photo 9000000 --out /run/pi_capture/selfcheck.json
+ExecStart=/opt/aeroplan/venv/bin/python -m pi_capture run --config /etc/pi_capture/config.json --selfcheck-result /run/pi_capture/selfcheck.json
+# SIGTERM → 正常停止：寫最後一筆時鐘與 summary.json
+KillSignal=SIGTERM
+TimeoutStopSec=20
+# 異常結束就重啟；每次啟動都是新的會期目錄（地面端以飛控開機次數合併）
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

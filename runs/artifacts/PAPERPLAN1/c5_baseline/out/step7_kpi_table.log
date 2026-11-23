@@ -1,0 +1,57 @@
+================================================================================================
+KPI TABLE -- DCCPP baseline output, measured by HARVEST's own checkers
+D_use (km): {'A': 133.0, 'B': 79.0}   R_plan (m): {'A': 200.0, 'B': 120.0}   bench altitude: 140.0 m AGL   civil limit: 120.0 m
+================================================================================================
+    cell fleet | endur>D_use 4D conflicts pad conflicts  AGL>120m  unflyable/corners
+------------------------------------------------------------------------------------
+ S1/2     homo |           0            0             2         2               2/72
+ S1/2      mix |           1            0             1         2               2/72
+*S1/4     homo |           0            0            12         4               6/72
+*S1/4      mix |           0            0             8         4               5/72
+*S1/8     homo |           0            5            40         8              59/72
+*S1/8      mix |           0            6            54         8              49/72
+*S1/16    homo |           0           36           192        16              63/72
+*S1/16     mix |           0           41           181        16              59/72
+*S2/4     homo |           0            0             8         4               2/96
+*S2/4      mix |           0            2             8         4               2/96
+*S2/8     homo |           0            7            41         8              46/96
+*S2/8      mix |           0            8            56         8              39/96
+*S3/4     homo |           0            2             9         4              18/18
+*S3/4      mix |           0            1             7         4              18/18
+*S3/8     homo |           0           34            49         8              18/18
+*S3/8      mix |           0           24            49         8              18/18
+*S4/4     homo |           0            0             7         4              15/74
+*S4/4      mix |           0            0             9         4              12/74
+*S4/8     homo |           0            5            37         8              59/75
+*S4/8      mix |           0            5            37         8              56/75
+ S5/8     homo |           0            3            49         8              7/142
+ S5/8      mix |           4            6            38         8              4/142
+*S5/16    homo |           0           25           177        16            105/142
+*S5/16     mix |           0           27           181        16             87/142
+------------------------------------------------------------------------------------
+* = one of the 10 cells the paper's 0.9%-22.9% claim is computed over
+
+homo: 12 cells | endurance-over in 0 cells (0 aircraft) | 4-D conflicts in 8 cells (117 total) | pad conflicts in 12 cells (623 total) | AGL>120 in 12 cells (90 aircraft)
+mix: 12 cells | endurance-over in 2 cells (5 aircraft) | 4-D conflicts in 9 cells (120 total) | pad conflicts in 12 cells (629 total) | AGL>120 in 12 cells (90 aircraft)
+
+================================================================================================
+SANITY CHECK on the corner-fit axis (the one number I do NOT trust)
+================================================================================================
+A DCCPP path is a Dubins curve already DISCRETISED at step_size = 10 m
+(core/dccpp/dccpp_path_builder: DCCPPPathBuilder(step_size=10.0)).  On such a
+path each vertex is a sample of an arc that is ALREADY of radius R, not a corner
+needing a fly-by.  The corner-fit rule 'need = R*tan(delta/2) <= min(leg)/2'
+therefore sits exactly on its own threshold for arc samples:
+  R = 200.0 m, arc sample spacing = 10.0 m -> deflection = 2.865 deg
+  need = R*tan(delta/2) = 5.0016 m   vs   min(leg)/2 = 5.0000 m
+  ratio need/(leg/2) = 1.000313  <- within 0.0313% of the threshold
+
+=> the corner-fit count is a COIN FLIP on arc samples and must NOT go in the
+   paper. The trustworthy turn-radius instrument is the library's own
+   circumradius test, hv_dccpp.sim.check_kinematics ('curvature_below_R_eff'),
+   which on a 10 m-step arc of radius 200 m correctly returns R = 200 m.
+   step4 proved that test fires (synthetic 90-deg corner -> R=141.4 < 200)
+   and that on the real DCCPP S4/n=8 path it reports ZERO violations --
+   but examined only 5 waypoint triples out of 30 waypoints.
+
+wrote C:\Users\joy46\Documents\Projects\aeroplan-studio\runs\artifacts\PAPERPLAN1\c5_baseline\out\step7_kpi_table.json

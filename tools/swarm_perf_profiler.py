@@ -21,13 +21,17 @@
   python tools/swarm_perf_profiler.py --steps 1,3,6,9,12 --dwell 8
   python tools/swarm_perf_profiler.py --no-gui         # 不開地圖,只驗機制 + 量 CPU(無頭可跑)
 
-最佳化(optimized)在「執行時」套用,不改核心檔:
-  (1) Cesium `scene.requestRenderMode=true` + 每次 flush 後 requestRender() → 停掉 60fps 空轉
-  (2) 遙測→地圖以 ~12Hz QTimer 合併,每台只推最新幀(取代每筆 MAVLink 訊息各推一次)
+兩種模式(2026-10-17 起;核心碼已內建合幀、批次與自適應算圖,這支不再在執行時覆寫頁面設定):
+  baseline : 每筆遙測直接呼叫 DualMapWidget.update_uav_position(單架舊 API;頁面仍是新核心)。
+  optimized: 走 app 實際的路徑 —— 以 ui.main_window.TELEMETRY_FLUSH_HZ 合幀、每批用
+             MainWindow._uav_batch_item(含 pt/at 時間戳)組批次,一次 DualMapWidget.update_uav_positions。
+  ⚠ 以前的 optimized 會注入 `scene.requestRenderMode=true`;頁面現在有自己的自適應算圖(有遙測就連續算圖),
+    注入的值會被下一批蓋掉、量到的不是它宣稱的東西(審查 2026-10-17)⇒ 拿掉了。
 """
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 import sys
@@ -49,7 +53,7 @@ except ImportError:
     psutil = None
 
 from pymavlink import mavutil
-from PyQt6.QtCore import QCoreApplication, QObject, QTimer
+from PyQt6.QtCore import QCoreApplication, QObject, Qt, QTimer
 
 _MAV = mavutil.mavlink
 
@@ -83,6 +87,10 @@ def vehicle_plan(n_total: int):
 # ═══════════════════════════════════════════════════════════════════════════
 #  會飛的 MAVLink 樁(tcpin 伺服端,送移動中的遙測)
 # ═══════════════════════════════════════════════════════════════════════════
+
+# 樁機的 MAV_TYPE（--vehicle 改）：FIXED_WING ⇒ Barracuda（3 個 primitive，很輕）；VTOL_QUADROTOR ⇒ vtol.glb（CAD 匯出，最重）
+STUB_MAV_TYPE = 'MAV_TYPE_FIXED_WING'
+
 class MovingMavStub:
     def __init__(self, spec: dict, rate_hz: float):
         self.spec = spec
@@ -132,7 +140,7 @@ class MovingMavStub:
             except Exception:
                 pass
             try:
-                m.heartbeat_send(_MAV.MAV_TYPE_FIXED_WING,
+                m.heartbeat_send(getattr(_MAV, STUB_MAV_TYPE),
                                  _MAV.MAV_AUTOPILOT_ARDUPILOTMEGA,
                                  _MAV.MAV_MODE_FLAG_SAFETY_ARMED, 10, 4)
                 m.global_position_int_send(int(t * 1000) & 0xFFFFFFFF, lat_e7, lon_e7,
@@ -206,8 +214,6 @@ class ProcMonitor:
 #  遙測 → 地圖 推送(baseline 每幀直推 / optimized 12Hz 合併)
 # ═══════════════════════════════════════════════════════════════════════════
 class MapFeeder(QObject):
-    FLUSH_HZ = 12
-
     def __init__(self, dualmap, optimized: bool):
         super().__init__()
         self.map = dualmap
@@ -215,9 +221,14 @@ class MapFeeder(QObject):
         self._latest = {}                # sysid -> frame(optimized 用)
         self._timer = None
         if optimized:
+            # 與 app 同一套:合幀頻率與批次項目都直接取 ui.main_window 的(不在這裡另抄一份)
+            from ui.main_window import MainWindow, TELEMETRY_FLUSH_HZ
+            self._item = MainWindow._uav_batch_item
+            hz = TELEMETRY_FLUSH_HZ if TELEMETRY_FLUSH_HZ > 0 else 30.0
             self._timer = QTimer(self)
+            self._timer.setTimerType(Qt.TimerType.PreciseTimer)
             self._timer.timeout.connect(self._flush)
-            self._timer.start(int(1000 / self.FLUSH_HZ))
+            self._timer.start(int(1000 / hz))
 
     def on_telemetry(self, frame):
         if not getattr(frame, 'is_valid_gps', lambda: True)():
@@ -225,18 +236,18 @@ class MapFeeder(QObject):
         if self.optimized:
             self._latest[frame.sysid] = frame      # 只存最新,等 timer flush
         else:
-            self._push(frame)                       # baseline:每幀直推(現況行為)
+            self._push(frame)                       # baseline:每幀直推(單架舊 API)
 
     def _flush(self):
         if not self._latest:
             return
-        for frame in list(self._latest.values()):
-            self._push(frame)
+        frames = list(self._latest.values())
         self._latest.clear()
-        # optimized:資料推完後手動要求一次渲染(搭配 requestRenderMode=true)
-        page = _cesium_page(self.map)
-        if page is not None:
-            page.runJavaScript("if(window.__viewer)window.__viewer.scene.requestRender();")
+        if hasattr(self.map, 'update_uav_positions'):
+            self.map.update_uav_positions([self._item(f) for f in frames])
+        else:
+            for frame in frames:
+                self._push(frame)
 
     def _push(self, frame):
         if not hasattr(self.map, 'update_uav_position'):
@@ -275,9 +286,39 @@ def pump(app, seconds):
         time.sleep(0.003)
 
 
+_IN_VIEW_JS = r"""
+(function(){
+  const now = Cesium.JulianDate.now(), c = viewer.scene.canvas, models = new Set();
+  const toWin = Cesium.SceneTransforms.worldToWindowCoordinates || Cesium.SceneTransforms.wgs84ToWindowCoordinates;
+  let n = 0, inview = 0;
+  for (const k in uavEntities) {
+    const e = uavEntities[k]; n++;
+    const p = e.position && e.position.getValue(now);
+    if (p) { const w = toWin(viewer.scene, p);
+             if (w && w.x >= 0 && w.y >= 0 && w.x <= c.clientWidth && w.y <= c.clientHeight) inview++; }
+    if (e.model && e.model.uri) { const u = e.model.uri.getValue ? e.model.uri.getValue(now) : e.model.uri;
+                                  const s = String(u && (u.url || u)); models.add(s.split('/').pop()); }
+  }
+  return JSON.stringify({n: n, inview: inview, models: Array.from(models)});
+})()
+"""
+
+
+def _in_view(app, page) -> dict:
+    """畫面內幾架、實際用的模型檔（合併快取 merged-*.glb 或原檔）。"""
+    try:
+        raw = eval_js(app, page, _IN_VIEW_JS)
+        return json.loads(raw) if raw else {}
+    except Exception:                                               # noqa: BLE001
+        return {}
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  一次 ramp(指定 mode)
 # ═══════════════════════════════════════════════════════════════════════════
+AIRFRAME = ''          # --airframe（main 設定）：VTOL 畫哪個機體模型
+
+
 def run_ramp(app, mode, steps, dwell, rate, gui, settle, mon):
     from mission.fleet_registry import FleetRegistry
     from mission.sitl_link import SITLLink
@@ -319,14 +360,20 @@ def run_ramp(app, mode, steps, dwell, rate, gui, settle, mon):
             }
             'ok';
         """)
-        if optimized:
-            eval_js(app, page, "if(window.__viewer){window.__viewer.scene.requestRenderMode=true; window.__viewer.scene.maximumRenderTimeChange=Infinity;} 'ok';")
+        # VTOL 畫哪個機體模型由這裡明確決定（--airframe，預設 '' ＝ 通用 vtol.glb ＝ 歷來基準），不隨 settings.json
+        # 的 model3d 走（2026-10-23 審查：本機設了 hero ⇒ --vehicle vtol 會默默量成 hero.glb）
+        dualmap.set_uav_airframes({}, default=AIRFRAME)
+        # (以前 optimized 會在這裡注入 requestRenderMode=true;頁面現在自己做自適應算圖,不再覆寫)
         # 等 3D 安定窗口結束(DualMapWidget 切 3D 後會丟棄更新一段時間)
         t0 = time.monotonic()
         while getattr(dualmap, '_map3d_settling', False) and time.monotonic() - t0 < 8.0:
             pump(app, 0.2)
         feeder = MapFeeder(dualmap, optimized)
-        print(f"  [{mode}] Cesium 就緒,開始遞增。")
+        # 鏡頭對準第一群（2026-10-17 審查：以前鏡頭停在預設起始點，樁機全在 28 km 外、全被視錐剔除，
+        # 量到的 FPS 跟模型重量無關）。setViewPos：俯 40°、距離 1400 m ⇒ 300 m 半徑的繞圈整個在畫面裡。
+        clat, clon = GROUP_CENTERS[0]
+        eval_js(app, page, f"setViewPos({clat}, {clon}, 120, 1400); 'ok';")
+        print(f"  [{mode}] Cesium 就緒,鏡頭對準第一群,開始遞增。")
 
     reg = FleetRegistry.instance()
     stubs, links = [], []
@@ -361,11 +408,14 @@ def run_ramp(app, mode, steps, dwell, rate, gui, settle, mon):
         cpu, machine, rss = mon.read()
         fps = (fc1 - fc0) / wall if page else float('nan')
         groups = (target + GROUP_SIZE - 1) // GROUP_SIZE
+        seen = _in_view(app, page) if page else {}
         rows.append(dict(n=target, groups=groups, fps=fps, cpu=cpu,
-                         machine=machine, rss=rss))
+                         machine=machine, rss=rss, inview=seen.get('inview', ''),
+                         models='|'.join(seen.get('models', []))))
         fps_s = f"{fps:5.1f}" if page else "  n/a"
         print(f"  [{mode}] N={target:>2} ({groups}群) | FPS {fps_s} | "
-              f"CPU {cpu:6.1f}% (整機 {machine:4.1f}%) | RSS {rss:6.0f} MB")
+              f"CPU {cpu:6.1f}% (整機 {machine:4.1f}%) | RSS {rss:6.0f} MB | "
+              f"畫面內 {seen.get('inview', '?')} 架 | 模型 {seen.get('models', [])}")
 
     # 拆除
     for lk in links:
@@ -391,13 +441,23 @@ def main():
     ap.add_argument('--settle', type=float, default=3.0, help='加台後穩定秒數')
     ap.add_argument('--rate', type=float, default=10.0, help='每台遙測 Hz')
     ap.add_argument('--no-gui', action='store_true', help='不開地圖,只量 CPU(無頭驗證)')
+    ap.add_argument('--vehicle', choices=['plane', 'vtol', 'copter'], default='plane',
+                    help='樁機回報的機型（決定 3D 用哪個模型）')
+    ap.add_argument('--airframe', choices=['', 'hero', 'pioneer'], default='',
+                    help="--vehicle vtol 時 3D 畫哪個機體模型：''＝通用 vtol.glb（預設、歷來基準）／hero／pioneer")
+    ap.add_argument('--csv', default='', help='CSV 輸出路徑(預設 tools/swarm_perf_result.csv,那是被追蹤的檔)')
     args = ap.parse_args()
+    global AIRFRAME
+    AIRFRAME = args.airframe
 
     try:
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     except Exception:
         pass
 
+    global STUB_MAV_TYPE
+    STUB_MAV_TYPE = {'plane': 'MAV_TYPE_FIXED_WING', 'vtol': 'MAV_TYPE_VTOL_QUADROTOR',
+                     'copter': 'MAV_TYPE_QUADROTOR'}[args.vehicle]
     steps = [int(x) for x in args.steps.split(',') if x.strip()]
     gui = not args.no_gui
     modes = ['baseline', 'optimized'] if args.mode == 'both' else [args.mode]
@@ -408,6 +468,9 @@ def main():
         from PyQt6.QtCore import Qt
         from PyQt6.QtWidgets import QApplication
         QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
+        # 與 main.py 相同的 Qt 呈現設定(Windows 預設 swapInterval 0;AEROPLAN_QT_SWAP_INTERVAL=1 量舊行為)
+        from ui.render_setup import configure_qt_presentation
+        print(f"Qt swapInterval = {configure_qt_presentation()}(None = Qt 預設)")
         import PyQt6.QtWebEngineWidgets  # noqa: F401  先載入 WebEngine
         app = QApplication.instance() or QApplication(sys.argv)
     else:
@@ -458,14 +521,20 @@ def main():
                       f"{r['machine']:>6.1f} | {r['rss']:>7.0f}")
 
     # CSV
-    out_csv = os.path.join(_THIS, 'swarm_perf_result.csv')
+    out_csv = args.csv or os.path.join(_THIS, 'swarm_perf_result.csv')
     try:
         with open(out_csv, 'w', encoding='utf-8') as fh:
-            fh.write("mode,n_vehicles,groups,fps,cpu_sum_pct,machine_pct,rss_mb\n")
+            # 條件欄（2026-10-17 審查：以前 CSV 看不出量的是哪種設定）
+            from PyQt6.QtGui import QSurfaceFormat
+            swap = QSurfaceFormat.defaultFormat().swapInterval()
+            merge = os.environ.get('AEROPLAN_GLB_MERGE', '1')
+            fh.write("mode,n_vehicles,groups,fps,cpu_sum_pct,machine_pct,rss_mb,"
+                     "vehicle,airframe,swap_interval,glb_merge_env,in_view,models\n")
             for mode, rows in results.items():
                 for r in rows:
                     fh.write(f"{mode},{r['n']},{r['groups']},{r['fps']:.2f},"
-                             f"{r['cpu']:.2f},{r['machine']:.2f},{r['rss']:.1f}\n")
+                             f"{r['cpu']:.2f},{r['machine']:.2f},{r['rss']:.1f},"
+                             f"{args.vehicle},{args.airframe},{swap},{merge},{r.get('inview', '')},{r.get('models', '')}\n")
         print(f"\nCSV 已輸出: {out_csv}")
     except Exception as e:
         print(f"CSV 輸出失敗: {e}")

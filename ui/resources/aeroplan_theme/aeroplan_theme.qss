@@ -14,6 +14,14 @@ QWidget {
     selection-color: {{BG_PRIMARY}};
 }
 
+/* ⚠⚠ QWebEngineView 必須從上面那條通用 QWidget 規則裡豁免。
+   BG_PRIMARY 是 #000000，漆到 web view 上就會從網頁的透明層透上來，
+   2D 地圖整張看起來像蒙了一層黑。地圖端另外還把 page 與 body 底色釘白
+   （ui/widgets/map_widget.py），兩道一起才擋得住。 */
+QWebEngineView {
+    background: #ffffff;
+}
+
 QMainWindow, QDialog {
     background: {{BG_PRIMARY}};
 }

@@ -1,0 +1,14 @@
+⚠ HV_PLAN_WIND_SPD：規劃假設風改為 (0.0, 270.0)（SITL 風是另一個旋鈕）
+情境 gui_legal_120_1a2b（路徑 gui）：規劃 11.73s  makespan 1205.5s  status GO_WITH_WARNINGS
+validate passed=True conflicts=0 uncovered=0
+感測器 {'A': 'rgb', 'B': 'rgb'}   酬載需求 {'default': 'rgb'}
+  A1 A strips=3 wp=230 10.23km  t_off=612s t_land=1205s  E=193/707Wh
+  B2 B strips=2 wp=151 7.87km  t_off=0s t_land=520s  E=62/192Wh
+  B3 B strips=4 wp=223 12.34km  t_off=100s t_land=855s  E=77/177Wh
+匯出: {'A1': 82, 'B2': 53, 'B3': 84}
+
+--- STDERR ---
+WARNING mission.swarm_coordinator: fleet_area_split(1 → 3 塊；單一大區配混編機隊會產出空計畫，所以先切）
+WARNING mission.swarm_coordinator: HARVEST: min_fw_lowered(Pioneer PNP（構型 A）120 → 100 m)。表 1 的值是規劃值不是機體極限（使用方式欄：「任務前需依地形、感測器與法規調整」），但它會寫進飛控的 Q_RTL_ALT（匯出的 .param，每條路徑都生效）⇒ QRTL 進場高度跟著降；另外 FENCE_ALT_MIN 也綁著它，但只在走 mavlink_link.upload_plan 寫參數那條路時才會送出。
+WARNING mission.swarm_coordinator: HARVEST: dh_band_min_relaxed(15 m，預設 20)。這同時放寬了 GSD 可達性判準（h_max ≥ 最低作業高度 + 15）與相機預設目標高。
+WARNING mission.swarm_coordinator: HARVEST: recovery_auto_rejected({'A1': 'ALT1'}；validate 未通過（conflicts=2））

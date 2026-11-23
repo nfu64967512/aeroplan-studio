@@ -1,0 +1,71 @@
+{
+ "A1": {
+  "log": "sitl/vtol/i100/logs/00000014.BIN",
+  "n_pos": 7910,
+  "rate_hz": 6.27,
+  "max_rel_home_alt_m": 120.103,
+  "excess_m": 0.103,
+  "time_above_120_s": 147.3,
+  "log_span_s": 1261.4,
+  "msg_inventory": {
+   "ESC": 142787,
+   "ESCX": 139129,
+   "IMU": 126178,
+   "SIM2": 54560,
+   "NKF1": 17195,
+   "NKF2": 17137,
+   "NKF3": 17123,
+   "NKF4": 17108,
+   "NKQ": 17092,
+   "XKF4": 16789,
+   "XKF1": 16598,
+   "XKF2": 16481
+  }
+ },
+ "B2": {
+  "log": "sitl/vtol/i101/logs/00000014.BIN",
+  "n_pos": 3106,
+  "rate_hz": 5.66,
+  "max_rel_home_alt_m": 120.1291,
+  "excess_m": 0.1291,
+  "time_above_120_s": 56.8,
+  "log_span_s": 548.3,
+  "msg_inventory": {
+   "ESC": 52891,
+   "ESCX": 51370,
+   "IMU": 49112,
+   "SIM2": 21058,
+   "NKF1": 7392,
+   "NKF2": 7353,
+   "NKF3": 7333,
+   "NKF4": 7320,
+   "NKQ": 7302,
+   "XKF4": 7024,
+   "NKY0": 7008,
+   "NKY1": 6978
+  }
+ },
+ "B3": {
+  "log": "sitl/vtol/i102/logs/00000014.BIN",
+  "n_pos": 4973,
+  "rate_hz": 5.58,
+  "max_rel_home_alt_m": 120.1619,
+  "excess_m": 0.1619,
+  "time_above_120_s": 126.1,
+  "log_span_s": 891.2,
+  "msg_inventory": {
+   "ESC": 94279,
+   "ESCX": 92190,
+   "IMU": 83108,
+   "SIM2": 35627,
+   "NKF1": 11962,
+   "NKF2": 11933,
+   "NKF3": 11914,
+   "NKF4": 11891,
+   "NKQ": 11869,
+   "XKF4": 11376,
+   "XKF1": 11256,
+   "XKF2": 11152
+  }
+ }
+}

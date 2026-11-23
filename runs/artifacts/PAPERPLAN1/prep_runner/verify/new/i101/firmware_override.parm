@@ -1,0 +1,2 @@
+# ArduPlane 4.8.0-dev 相容性覆寫（見 scripts/hv_sitl_flight.py 的說明）
+Q_RTL_MODE 0

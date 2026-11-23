@@ -65,8 +65,9 @@ def run(args: argparse.Namespace) -> int:
         return 3
 
     conn_strs: List[str] = []
-    for inst, conn in results:
-        print(f"[DEMO] i{inst}  sys={inst + 1}  {conn}")
+    for inst, conn, actual in results:
+        shifted = "" if actual == inst else f"（port 佔用 ⇒ 實際 i{actual}）"
+        print(f"[DEMO] i{inst}  sys={inst + 1}  {conn}{shifted}")
         conn_strs.append(conn)
 
     if args.gui:

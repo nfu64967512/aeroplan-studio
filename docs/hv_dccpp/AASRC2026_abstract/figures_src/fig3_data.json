@@ -1,0 +1,511 @@
+{
+ "caveats": [
+  "SITL 內建 --model quadplane；單一平地矩形作業區；5 倍速；每條件 1 趟（HV4SITL15 為同規劃重飛）。",
+  "SITL 未設風而規劃假設 wind=[5.0, 270.0]（scenario.json）⇒ 時間類對照可能有東西向抵銷假象。",
+  "最小間距為約 1 Hz 遙測在 2 s 格點線性內插的上界；主結果僅高出門檻約 1 m，重飛（HV4SITL15）為 104.2 m。",
+  "B2–B3 為 HERO–HERO，依設計沒有垂直隔離通道（hv_dccpp/mission.py h_transit_offset_A_m 只作用於 A 類）。",
+  "實飛航程 = 遙測點逐段累加；時間軸已扣除時基偏移（逐機偏移差 ≤0.5 s，另有最多 6 s 取樣空洞）。",
+  "HV4SITL16 目錄未納管（git ??）；下列 sha256 供核對檔案未被改動。",
+  "作圖取捨：(b) 只畫各機空中段（第一筆 >2 m 的前一筆至上鎖觸地那一筆），地面等待段未畫；(c) 水平軸為對數軸，違規區實際自 0 m 起，框左緣只是軸下限；A1–B2 從未同時在空中故無散點。"
+ ],
+ "context_not_plotted": [
+  {
+   "label": "規劃最小水平間距（未畫於圖，供圖說/表對照）",
+   "raw": 105.46410835682013,
+   "source": {
+    "field": "min_sep_h_m",
+    "file": "runs/artifacts/HV4SITL16/validation.json"
+   },
+   "unit": "m",
+   "value": 105.46
+  },
+  {
+   "label": "航點最高高度（未畫於圖）",
+   "source": {
+    "field": "{uav}.waypoints 第 11 欄最大值（排除 lat=0 列）",
+    "file": "runs/artifacts/HV4SITL16/plan"
+   },
+   "unit": "m",
+   "value": {
+    "A1": 120.053,
+    "B2": 120.033,
+    "B3": 120.033
+   }
+  },
+  {
+   "label": "實飛觸地時刻（上鎖判準；未標於圖）",
+   "source": {
+    "algorithm": "runs/artifacts/HV4SITL15/hv_sitl_report.py:68-80 _touchdown_s",
+    "field": "{uav}/flight.csv",
+    "file": "runs/artifacts/HV4SITL16"
+   },
+   "unit": "s",
+   "value": {
+    "A1": 1268.0,
+    "B2": 533.0,
+    "B3": 876.0
+   }
+  },
+  {
+   "label": "實飛觸地時刻（<2 m 判準；未標於圖）",
+   "source": {
+    "algorithm": "同 _touchdown_s 但不看 armed",
+    "field": "{uav}/flight.csv",
+    "file": "runs/artifacts/HV4SITL16"
+   },
+   "unit": "s",
+   "value": {
+    "A1": 1257.0,
+    "B2": 523.0,
+    "B3": 866.0
+   }
+  },
+  {
+   "label": "航程合計 規劃→實飛（未畫於圖）",
+   "source": "同 legend 各機",
+   "unit": "km",
+   "value": {
+    "flown_km": 31.357,
+    "plan_km": 30.658
+   }
+  }
+ ],
+ "figure": {
+  "dpi": 300,
+  "height_cm": 6.2,
+  "png": "docs/hv_dccpp/AASRC2026_abstract/fig3_results.png",
+  "script": "docs/hv_dccpp/AASRC2026_abstract/figures_src/make_fig_results.py",
+  "svg": "docs/hv_dccpp/AASRC2026_abstract/fig3_results.svg",
+  "width_cm": 17.0
+ },
+ "inputs_sha256": {
+  "hv_dccpp/mission.py": "8fec2f2a6cb6079226adadd90ce9ac3cbefc15e3e796558330aaba60cb12c1ad",
+  "runs/artifacts/HV4SITL16/A1/flight.csv": "51e55a2dc5b7c2ef678aa5069819d468168379bad6f6d4cbf4fee8bbf152f2ba",
+  "runs/artifacts/HV4SITL16/B2/flight.csv": "dd55fcbbcfa08bc0b7a6c1c56ec057929a7af6276089d85cfc1bef9b20e8b199",
+  "runs/artifacts/HV4SITL16/B3/flight.csv": "5a87aa7674d3e44ec6a9cfb1bbc851257df0f2ffc07478a484276ab8ee93dd4a",
+  "runs/artifacts/HV4SITL16/plan/A1.waypoints": "5993f58becdf102b9c5277913c4fafe5181faddd800a3ab461c69f5a558d733c",
+  "runs/artifacts/HV4SITL16/plan/B2.waypoints": "fbc0736a62907a629e3a781ebe79668a2b897b3edd2f5bfa8b3cf9229fb4d2ea",
+  "runs/artifacts/HV4SITL16/plan/B3.waypoints": "835c164935a80e2de7fe4d58755e51ee7ffc0c0272fa4c6ce997e8b5fac06fd2",
+  "runs/artifacts/HV4SITL16/plan/mission_summary.json": "6c53c8909f3bdc175ea24702a243c0245ef77b2637cb1add8366648a495eb6ef",
+  "runs/artifacts/HV4SITL16/release_schedule.json": "7561447a01f2bff4d416f6aee3ec64bd3b1b1fb26e63fed42f741972170e4f48",
+  "runs/artifacts/HV4SITL16/scenario.json": "00e783c3f47c4c8e0134fdfa90320f0cd95999dde72ae16e64982dc67b6e2e1d",
+  "runs/artifacts/HV4SITL16/spawn_readback.json": "ab7ec9de2ecbe7b8c3a9fc108d1ebed27180cec17cfb8f9f78d6158a8d0026b8",
+  "runs/artifacts/HV4SITL16/validation.json": "5c20bf4a5056f3a50e91e9d98df950ed79a39370d2d17775a5202892aaa7c639"
+ },
+ "items": [
+  {
+   "label": "A1 規劃航程",
+   "panel": "legend",
+   "raw": 10.292996747769124,
+   "shown_as": "10.29",
+   "source": {
+    "algorithm": "÷1000",
+    "field": "uavs.A1.distance_m",
+    "file": "runs/artifacts/HV4SITL16/plan/mission_summary.json"
+   },
+   "unit": "km",
+   "value": 10.293
+  },
+  {
+   "label": "A1 實飛航程",
+   "panel": "legend",
+   "raw": 10.523163008980191,
+   "shown_as": "10.52",
+   "source": {
+    "algorithm": "runs/artifacts/HV4SITL15/hv_sitl_report.py:128-135 _flown_km",
+    "field": "lat, lon（全部列，lat 與 t_s 非空）",
+    "file": "runs/artifacts/HV4SITL16/A1/flight.csv"
+   },
+   "unit": "km",
+   "value": 10.523
+  },
+  {
+   "label": "A1 實飛最高相對高度",
+   "panel": "b",
+   "raw": 120.1,
+   "shown_as": "120.10",
+   "source": {
+    "field": "max(rel_alt_m)",
+    "file": "runs/artifacts/HV4SITL16/A1/flight.csv"
+   },
+   "unit": "m",
+   "value": 120.1
+  },
+  {
+   "label": "A1 規劃起飛時刻（空心△）",
+   "panel": "b",
+   "shown_as": "marker",
+   "source": {
+    "field": "uavs.A1.t_takeoff_s",
+    "file": "runs/artifacts/HV4SITL16/plan/mission_summary.json"
+   },
+   "unit": "s",
+   "value": 656.0
+  },
+  {
+   "label": "A1 規劃降落時刻（▼）",
+   "panel": "b",
+   "raw": 1260.4260664854269,
+   "shown_as": "marker",
+   "source": {
+    "field": "uavs.A1.t_land_s",
+    "file": "runs/artifacts/HV4SITL16/plan/mission_summary.json"
+   },
+   "unit": "s",
+   "value": 1260.43
+  },
+  {
+   "label": "A1 時基偏移（逐機）",
+   "panel": "b",
+   "raw": 72.53999999999996,
+   "shown_as": "not shown (用於 x 軸校正)",
+   "source": {
+    "algorithm": "runs/artifacts/HV4SITL15/hv_sitl_report.py:83-113 _clock_offset",
+    "field": "t_s of first mode==AUTO row − release_schedule.json:actual_release_wall_s[uav]×speedup",
+    "file": "runs/artifacts/HV4SITL16/A1/flight.csv"
+   },
+   "unit": "s",
+   "value": 72.54
+  },
+  {
+   "label": "B2 規劃航程",
+   "panel": "legend",
+   "raw": 7.925874972974128,
+   "shown_as": "7.93",
+   "source": {
+    "algorithm": "÷1000",
+    "field": "uavs.B2.distance_m",
+    "file": "runs/artifacts/HV4SITL16/plan/mission_summary.json"
+   },
+   "unit": "km",
+   "value": 7.926
+  },
+  {
+   "label": "B2 實飛航程",
+   "panel": "legend",
+   "raw": 8.125585708723916,
+   "shown_as": "8.13",
+   "source": {
+    "algorithm": "runs/artifacts/HV4SITL15/hv_sitl_report.py:128-135 _flown_km",
+    "field": "lat, lon（全部列，lat 與 t_s 非空）",
+    "file": "runs/artifacts/HV4SITL16/B2/flight.csv"
+   },
+   "unit": "km",
+   "value": 8.126
+  },
+  {
+   "label": "B2 實飛最高相對高度",
+   "panel": "b",
+   "raw": 120.12,
+   "shown_as": "120.12",
+   "source": {
+    "field": "max(rel_alt_m)",
+    "file": "runs/artifacts/HV4SITL16/B2/flight.csv"
+   },
+   "unit": "m",
+   "value": 120.12
+  },
+  {
+   "label": "B2 規劃起飛時刻（空心△）",
+   "panel": "b",
+   "shown_as": "marker",
+   "source": {
+    "field": "uavs.B2.t_takeoff_s",
+    "file": "runs/artifacts/HV4SITL16/plan/mission_summary.json"
+   },
+   "unit": "s",
+   "value": 0.0
+  },
+  {
+   "label": "B2 規劃降落時刻（▼）",
+   "panel": "b",
+   "raw": 533.8559867032768,
+   "shown_as": "marker",
+   "source": {
+    "field": "uavs.B2.t_land_s",
+    "file": "runs/artifacts/HV4SITL16/plan/mission_summary.json"
+   },
+   "unit": "s",
+   "value": 533.86
+  },
+  {
+   "label": "B2 時基偏移（逐機）",
+   "panel": "b",
+   "raw": 72.04,
+   "shown_as": "not shown (用於 x 軸校正)",
+   "source": {
+    "algorithm": "runs/artifacts/HV4SITL15/hv_sitl_report.py:83-113 _clock_offset",
+    "field": "t_s of first mode==AUTO row − release_schedule.json:actual_release_wall_s[uav]×speedup",
+    "file": "runs/artifacts/HV4SITL16/B2/flight.csv"
+   },
+   "unit": "s",
+   "value": 72.04
+  },
+  {
+   "label": "B3 規劃航程",
+   "panel": "legend",
+   "raw": 12.439449101156882,
+   "shown_as": "12.44",
+   "source": {
+    "algorithm": "÷1000",
+    "field": "uavs.B3.distance_m",
+    "file": "runs/artifacts/HV4SITL16/plan/mission_summary.json"
+   },
+   "unit": "km",
+   "value": 12.439
+  },
+  {
+   "label": "B3 實飛航程",
+   "panel": "legend",
+   "raw": 12.70864327659946,
+   "shown_as": "12.71",
+   "source": {
+    "algorithm": "runs/artifacts/HV4SITL15/hv_sitl_report.py:128-135 _flown_km",
+    "field": "lat, lon（全部列，lat 與 t_s 非空）",
+    "file": "runs/artifacts/HV4SITL16/B3/flight.csv"
+   },
+   "unit": "km",
+   "value": 12.709
+  },
+  {
+   "label": "B3 實飛最高相對高度",
+   "panel": "b",
+   "raw": 120.16,
+   "shown_as": "120.16",
+   "source": {
+    "field": "max(rel_alt_m)",
+    "file": "runs/artifacts/HV4SITL16/B3/flight.csv"
+   },
+   "unit": "m",
+   "value": 120.16
+  },
+  {
+   "label": "B3 規劃起飛時刻（空心△）",
+   "panel": "b",
+   "shown_as": "marker",
+   "source": {
+    "field": "uavs.B3.t_takeoff_s",
+    "file": "runs/artifacts/HV4SITL16/plan/mission_summary.json"
+   },
+   "unit": "s",
+   "value": 106.0
+  },
+  {
+   "label": "B3 規劃降落時刻（▼）",
+   "panel": "b",
+   "raw": 894.4285019158423,
+   "shown_as": "marker",
+   "source": {
+    "field": "uavs.B3.t_land_s",
+    "file": "runs/artifacts/HV4SITL16/plan/mission_summary.json"
+   },
+   "unit": "s",
+   "value": 894.43
+  },
+  {
+   "label": "B3 時基偏移（逐機）",
+   "panel": "b",
+   "raw": 72.03999999999999,
+   "shown_as": "not shown (用於 x 軸校正)",
+   "source": {
+    "algorithm": "runs/artifacts/HV4SITL15/hv_sitl_report.py:83-113 _clock_offset",
+    "field": "t_s of first mode==AUTO row − release_schedule.json:actual_release_wall_s[uav]×speedup",
+    "file": "runs/artifacts/HV4SITL16/B3/flight.csv"
+   },
+   "unit": "s",
+   "value": 72.04
+  },
+  {
+   "label": "時基偏移（中位數，已自所有實飛時刻扣除）",
+   "panel": "b",
+   "raw": 72.04,
+   "shown_as": "not shown (x 軸 = t_s − offset)",
+   "source": {
+    "algorithm": "runs/artifacts/HV4SITL15/hv_sitl_report.py:83-113 _clock_offset",
+    "field": "speedup, actual_release_wall_s",
+    "file": "runs/artifacts/HV4SITL16/release_schedule.json"
+   },
+   "unit": "s",
+   "value": 72.04
+  },
+  {
+   "label": "法規上限線 h_ceil",
+   "panel": "b",
+   "shown_as": "120",
+   "source": {
+    "field": "h_ceil_m（waiver_max_agl_m = null ⇒ 不豁免）",
+    "file": "runs/artifacts/HV4SITL16/scenario.json"
+   },
+   "unit": "m",
+   "value": 120.0
+  },
+  {
+   "label": "違規門檻 水平 d_sep_m",
+   "panel": "c",
+   "shown_as": "違規區矩形寬",
+   "source": {
+    "field": "PlannerConfig.d_sep_m",
+    "file": "hv_dccpp/mission.py",
+    "line": 1089
+   },
+   "unit": "m",
+   "value": 100.0
+  },
+  {
+   "label": "違規門檻 垂直 dh_sep_m",
+   "panel": "c",
+   "shown_as": "違規區矩形高",
+   "source": {
+    "field": "PlannerConfig.dh_sep_m",
+    "file": "hv_dccpp/mission.py",
+    "line": 1087
+   },
+   "unit": "m",
+   "value": 50.0
+  },
+  {
+   "label": "實飛最小水平間距",
+   "panel": "c",
+   "raw": 101.0395111601032,
+   "shown_as": "101.0",
+   "source": {
+    "algorithm": "runs/artifacts/HV4SITL15/hv_sitl_report.py:179-262 _min_separation（2 s 格點線性內插、兩機皆 >2 m AGL）",
+    "field": "{A1,B2,B3}/flight.csv t_s, lat, lon, rel_alt_m",
+    "file": "runs/artifacts/HV4SITL16"
+   },
+   "unit": "m",
+   "value": 101.0
+  },
+  {
+   "label": "最小點的垂直間距",
+   "panel": "c",
+   "raw": 28.99999999999997,
+   "shown_as": "29.0",
+   "source": {
+    "algorithm": "runs/artifacts/HV4SITL15/hv_sitl_report.py:179-262",
+    "field": "同上",
+    "file": "runs/artifacts/HV4SITL16"
+   },
+   "unit": "m",
+   "value": 29.0
+  },
+  {
+   "label": "最小點機對",
+   "panel": "c",
+   "shown_as": "B2–B3",
+   "source": {
+    "algorithm": "runs/artifacts/HV4SITL15/hv_sitl_report.py:179-262",
+    "field": "同上",
+    "file": "runs/artifacts/HV4SITL16"
+   },
+   "unit": null,
+   "value": "B2-B3"
+  },
+  {
+   "label": "最小點時刻（任務時間）",
+   "panel": "c",
+   "raw": 440.0,
+   "shown_as": "not shown",
+   "source": {
+    "algorithm": "runs/artifacts/HV4SITL15/hv_sitl_report.py:179-262",
+    "field": "同上",
+    "file": "runs/artifacts/HV4SITL16"
+   },
+   "unit": "s",
+   "value": 440.0
+  },
+  {
+   "label": "違規樣本數",
+   "panel": "c",
+   "shown_as": "0",
+   "source": {
+    "algorithm": "runs/artifacts/HV4SITL15/hv_sitl_report.py:179-262",
+    "field": "同上",
+    "file": "runs/artifacts/HV4SITL16"
+   },
+   "unit": "samples",
+   "value": 0
+  },
+  {
+   "label": "兩機皆在空中的樣本數（所有機對合計）",
+   "panel": "c",
+   "shown_as": "310",
+   "source": {
+    "algorithm": "runs/artifacts/HV4SITL15/hv_sitl_report.py:179-262",
+    "field": "同上",
+    "file": "runs/artifacts/HV4SITL16"
+   },
+   "unit": "samples",
+   "value": 310
+  },
+  {
+   "label": "機對 A1-B2",
+   "panel": "c",
+   "shown_as": "無散點：兩機從未同時在空中（>2 m AGL）",
+   "source": {
+    "algorithm": "runs/artifacts/HV4SITL15/hv_sitl_report.py:179-262",
+    "field": "同上",
+    "file": "runs/artifacts/HV4SITL16"
+   },
+   "unit": "m / samples",
+   "value": {
+    "d_v_at_min_m": null,
+    "min_h_m": null,
+    "n_samples": 0,
+    "n_violations": 0
+   }
+  },
+  {
+   "label": "機對 A1-B3",
+   "panel": "c",
+   "shown_as": "散點",
+   "source": {
+    "algorithm": "runs/artifacts/HV4SITL15/hv_sitl_report.py:179-262",
+    "field": "同上",
+    "file": "runs/artifacts/HV4SITL16"
+   },
+   "unit": "m / samples",
+   "value": {
+    "d_v_at_min_m": 80.0,
+    "min_h_m": 262.7,
+    "n_samples": 103,
+    "n_violations": 0
+   }
+  },
+  {
+   "label": "機對 B2-B3",
+   "panel": "c",
+   "shown_as": "散點",
+   "source": {
+    "algorithm": "runs/artifacts/HV4SITL15/hv_sitl_report.py:179-262",
+    "field": "同上",
+    "file": "runs/artifacts/HV4SITL16"
+   },
+   "unit": "m / samples",
+   "value": {
+    "d_v_at_min_m": 29.0,
+    "min_h_m": 101.0,
+    "n_samples": 207,
+    "n_violations": 0
+   }
+  }
+ ],
+ "projection": {
+  "formula": "x=(lon−lon_H)·111412·cos(lat0), y=(lat−lat_H)·111132",
+  "lat0": 23.946400676672784,
+  "lat_H": 23.95,
+  "lon_H": 120.9,
+  "source": [
+   {
+    "field": "home.lat_deg, home.lon_deg",
+    "file": "runs/artifacts/HV4SITL16/plan/mission_summary.json"
+   },
+   {
+    "field": "areas[0].polygon[0][0]",
+    "file": "runs/artifacts/HV4SITL16/scenario.json"
+   },
+   "runs/artifacts/HV4SITL15/hv_sitl_report.py:153-157"
+  ]
+ },
+ "run": "runs/artifacts/HV4SITL16"
+}

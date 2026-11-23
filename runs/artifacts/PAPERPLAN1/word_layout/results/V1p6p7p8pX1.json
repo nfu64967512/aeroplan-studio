@@ -1,0 +1,186 @@
+{
+ "pages": 6,
+ "used_cm_per_page": [
+  20.51,
+  24.46,
+  25.23,
+  25.46,
+  25.31,
+  2.68
+ ],
+ "content_cm": 123.65,
+ "pages_equiv": 4.811,
+ "last_page_lines": 4,
+ "last_line_top_cm": 4.17,
+ "last_page_used_cm": 2.62,
+ "body_height_cm": 25.7,
+ "last_page_fill_pct": 10.2,
+ "n_paragraphs": 155,
+ "n_paragraphs_snap_to_grid_on": 0,
+ "n_table_row_end_marks_reported_on": 15,
+ "where": [
+  [
+   "一、前言",
+   1,
+   13.3
+  ],
+  [
+   "二、研究方法",
+   1,
+   21.0
+  ],
+  [
+   "2.1 系統架構",
+   1,
+   21.5
+  ],
+  [
+   "[圖檔]",
+   2,
+   2.8
+  ],
+  [
+   "圖1 HARVEST 系",
+   2,
+   8.2
+  ],
+  [
+   "2.2 規劃流程",
+   2,
+   8.7
+  ],
+  [
+   "2.3 核心公式",
+   2,
+   10.7
+  ],
+  [
+   "三、SITL 驗證與成果",
+   3,
+   6.3
+  ],
+  [
+   "3.1 實驗設置",
+   3,
+   6.9
+  ],
+  [
+   "3.2 規劃與 SITL",
+   3,
+   11.4
+  ],
+  [
+   "表1 規劃與 SITL ",
+   3,
+   15.0
+  ],
+  [
+   "3.3 規劃天花板與風場",
+   3,
+   22.2
+  ],
+  [
+   "表2 規劃天花板與風場之",
+   4,
+   4.3
+  ],
+  [
+   "[圖檔]",
+   4,
+   12.9
+  ],
+  [
+   "圖2 高度合規與 SIT",
+   4,
+   19.3
+  ],
+  [
+   "3.4 起降走廊判準對照",
+   4,
+   20.9
+  ],
+  [
+   "3.5 跳帶排序之觸發情",
+   4,
+   22.9
+  ],
+  [
+   "四、結論與限制",
+   4,
+   24.9
+  ],
+  [
+   "參考文獻",
+   5,
+   11.4
+  ]
+ ],
+ "figures": [
+  {
+   "file": "fig1_architecture_compact.png",
+   "width_cm": 16.992,
+   "height_cm": 5.325,
+   "scale_pct": [
+    100.0,
+    100.0
+   ]
+  },
+  {
+   "file": "fig5_compliance.png",
+   "width_cm": 16.992,
+   "height_cm": 6.392,
+   "scale_pct": [
+    100.0,
+    100.0
+   ]
+  }
+ ],
+ "tables": [
+  {
+   "tnum": "1",
+   "col_cm": [
+    6.51,
+    4.01,
+    6.49
+   ]
+  },
+  {
+   "tnum": "2",
+   "col_cm": [
+    2.11,
+    1.36,
+    3.0,
+    1.63,
+    2.87,
+    1.63,
+    4.39
+   ]
+  }
+ ],
+ "n_omath": 6,
+ "build_s": 4.4,
+ "layout": {
+  "indent": false,
+  "spacing": false,
+  "compress_punct": false,
+  "table_split": false
+ },
+ "caveats_missing": [],
+ "caveats_checked": 61,
+ "name": "V1+6+7+8+X1",
+ "cuts": [
+  1,
+  2,
+  3,
+  4,
+  5,
+  6,
+  7,
+  8
+ ],
+ "candidates": [
+  "X1"
+ ],
+ "docx": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\PAPERPLAN1\\word_layout\\variants\\V1p6p7p8pX1.docx",
+ "pdf": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\PAPERPLAN1\\word_layout\\variants\\V1p6p7p8pX1.pdf"
+}

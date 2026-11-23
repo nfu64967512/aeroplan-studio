@@ -1,0 +1,152 @@
+{
+ "HV4W55R": {
+  "per_uav": {
+   "A1": {
+    "n_items_total": 82,
+    "n_rel_alt_items": 81,
+    "n_other_frame_items": 1,
+    "max_rel_alt_m": 120.0526,
+    "n_above_120": 38,
+    "max_excess_m": 0.0526
+   },
+   "B2": {
+    "n_items_total": 53,
+    "n_rel_alt_items": 52,
+    "n_other_frame_items": 1,
+    "max_rel_alt_m": 120.0331,
+    "n_above_120": 13,
+    "max_excess_m": 0.0331
+   },
+   "B3": {
+    "n_items_total": 84,
+    "n_rel_alt_items": 83,
+    "n_other_frame_items": 1,
+    "max_rel_alt_m": 120.0331,
+    "n_above_120": 37,
+    "max_excess_m": 0.0331
+   }
+  },
+  "fleet_max_exported_rel_alt_m": 120.0526,
+  "fleet_items_above_120": 88
+ },
+ "HV4W55": {
+  "per_uav": {
+   "A1": {
+    "n_items_total": 82,
+    "n_rel_alt_items": 81,
+    "n_other_frame_items": 1,
+    "max_rel_alt_m": 119.5526,
+    "n_above_120": 0,
+    "max_excess_m": 0.0
+   },
+   "B2": {
+    "n_items_total": 53,
+    "n_rel_alt_items": 52,
+    "n_other_frame_items": 1,
+    "max_rel_alt_m": 119.5332,
+    "n_above_120": 0,
+    "max_excess_m": 0.0
+   },
+   "B3": {
+    "n_items_total": 84,
+    "n_rel_alt_items": 83,
+    "n_other_frame_items": 1,
+    "max_rel_alt_m": 119.5331,
+    "n_above_120": 0,
+    "max_excess_m": 0.0
+   }
+  },
+  "fleet_max_exported_rel_alt_m": 119.5526,
+  "fleet_items_above_120": 0
+ },
+ "HV4W55S": {
+  "per_uav": {
+   "A1": {
+    "n_items_total": 83,
+    "n_rel_alt_items": 82,
+    "n_other_frame_items": 1,
+    "max_rel_alt_m": 119.5526,
+    "n_above_120": 0,
+    "max_excess_m": 0.0
+   },
+   "B2": {
+    "n_items_total": 53,
+    "n_rel_alt_items": 52,
+    "n_other_frame_items": 1,
+    "max_rel_alt_m": 119.5332,
+    "n_above_120": 0,
+    "max_excess_m": 0.0
+   },
+   "B3": {
+    "n_items_total": 77,
+    "n_rel_alt_items": 76,
+    "n_other_frame_items": 1,
+    "max_rel_alt_m": 119.5331,
+    "n_above_120": 0,
+    "max_excess_m": 0.0
+   }
+  },
+  "fleet_max_exported_rel_alt_m": 119.5526,
+  "fleet_items_above_120": 0
+ },
+ "HV4W05": {
+  "per_uav": {
+   "A1": {
+    "n_items_total": 82,
+    "n_rel_alt_items": 81,
+    "n_other_frame_items": 1,
+    "max_rel_alt_m": 119.5521,
+    "n_above_120": 0,
+    "max_excess_m": 0.0
+   },
+   "B2": {
+    "n_items_total": 53,
+    "n_rel_alt_items": 52,
+    "n_other_frame_items": 1,
+    "max_rel_alt_m": 119.5329,
+    "n_above_120": 0,
+    "max_excess_m": 0.0
+   },
+   "B3": {
+    "n_items_total": 84,
+    "n_rel_alt_items": 83,
+    "n_other_frame_items": 1,
+    "max_rel_alt_m": 119.5328,
+    "n_above_120": 0,
+    "max_excess_m": 0.0
+   }
+  },
+  "fleet_max_exported_rel_alt_m": 119.5521,
+  "fleet_items_above_120": 0
+ },
+ "HV4W00": {
+  "per_uav": {
+   "A1": {
+    "n_items_total": 82,
+    "n_rel_alt_items": 81,
+    "n_other_frame_items": 1,
+    "max_rel_alt_m": 119.5521,
+    "n_above_120": 0,
+    "max_excess_m": 0.0
+   },
+   "B2": {
+    "n_items_total": 53,
+    "n_rel_alt_items": 52,
+    "n_other_frame_items": 1,
+    "max_rel_alt_m": 119.5329,
+    "n_above_120": 0,
+    "max_excess_m": 0.0
+   },
+   "B3": {
+    "n_items_total": 84,
+    "n_rel_alt_items": 83,
+    "n_other_frame_items": 1,
+    "max_rel_alt_m": 119.5328,
+    "n_above_120": 0,
+    "max_excess_m": 0.0
+   }
+  },
+  "fleet_max_exported_rel_alt_m": 119.5521,
+  "fleet_items_above_120": 0
+ }
+}

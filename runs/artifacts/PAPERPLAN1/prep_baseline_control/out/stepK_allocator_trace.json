@@ -1,0 +1,341 @@
+{
+  "S1_n2": {
+    "scenario": "S1",
+    "n": 2,
+    "sec": 2.2,
+    "coverage": 0.5277,
+    "count_calls": [
+      {
+        "by_cell": {
+          "Z2_1": [
+            "A",
+            2
+          ],
+          "Z3_1": [
+            "A",
+            0
+          ]
+        },
+        "partial": {},
+        "partial_ids": {},
+        "infeasible": {},
+        "J": {
+          "Z2_1": 0.5,
+          "Z3_1": 0.5
+        }
+      }
+    ],
+    "alloc_calls": [
+      {
+        "uncoverable": [
+          [
+            "Z3_1",
+            "no_feasible_insertion"
+          ]
+        ],
+        "n_leftover": 0,
+        "leftover_sample": [],
+        "lambda_by_cell": {
+          "Z2_1": [
+            "A",
+            2
+          ]
+        },
+        "plans": {
+          "A1": 1,
+          "A2": 1
+        },
+        "residual_k": {}
+      }
+    ],
+    "strips_flown_per_uav": {
+      "A1": 9,
+      "A2": 9
+    },
+    "strips_total": 36,
+    "plan_uncovered": [
+      [
+        "Z3_1",
+        "no_feasible_insertion"
+      ]
+    ],
+    "strips_by_cell": {
+      "Z2_1": {
+        "total": 18,
+        "flown": 0
+      },
+      "Z3_1": {
+        "total": 18,
+        "flown": 0
+      }
+    }
+  },
+  "S1_n4": {
+    "scenario": "S1",
+    "n": 4,
+    "sec": 34.8,
+    "coverage": 1.0,
+    "count_calls": [
+      {
+        "by_cell": {
+          "Z2_1": [
+            "A",
+            1
+          ],
+          "Z3_1": [
+            "A",
+            1
+          ],
+          "Z4_1": [
+            "A",
+            1
+          ],
+          "Z5_1": [
+            "A",
+            1
+          ]
+        },
+        "partial": {},
+        "partial_ids": {},
+        "infeasible": {},
+        "J": {
+          "Z2_1": 0.251,
+          "Z3_1": 0.249,
+          "Z4_1": 0.249,
+          "Z5_1": 0.251
+        }
+      }
+    ],
+    "alloc_calls": [
+      {
+        "uncoverable": [],
+        "n_leftover": 0,
+        "leftover_sample": [],
+        "lambda_by_cell": {
+          "Z2_1": [
+            "A",
+            1
+          ],
+          "Z3_1": [
+            "A",
+            1
+          ],
+          "Z4_1": [
+            "A",
+            1
+          ],
+          "Z5_1": [
+            "A",
+            1
+          ]
+        },
+        "plans": {
+          "A1": 1,
+          "A2": 1,
+          "A3": 1,
+          "A4": 1
+        },
+        "residual_k": {}
+      }
+    ],
+    "strips_flown_per_uav": {
+      "A1": 9,
+      "A2": 9,
+      "A3": 9,
+      "A4": 9
+    },
+    "strips_total": 36,
+    "plan_uncovered": [],
+    "strips_by_cell": {
+      "Z2_1": {
+        "total": 9,
+        "flown": 0
+      },
+      "Z3_1": {
+        "total": 9,
+        "flown": 0
+      },
+      "Z4_1": {
+        "total": 9,
+        "flown": 0
+      },
+      "Z5_1": {
+        "total": 9,
+        "flown": 0
+      }
+    }
+  },
+  "S5_n8": {
+    "scenario": "S5",
+    "n": 8,
+    "sec": 50.0,
+    "coverage": 0.617,
+    "count_calls": [
+      {
+        "by_cell": {
+          "Z2_1": [
+            "A",
+            2
+          ],
+          "Z3_1": [
+            "A",
+            2
+          ],
+          "Z4_1": [
+            "A",
+            0
+          ],
+          "Z5_1": [
+            "A",
+            0
+          ],
+          "Z6_1": [
+            "A",
+            0
+          ],
+          "Z7_1": [
+            "A",
+            0
+          ],
+          "Z8_1": [
+            "A",
+            2
+          ],
+          "Z9_1": [
+            "A",
+            2
+          ]
+        },
+        "partial": {},
+        "partial_ids": {},
+        "infeasible": {},
+        "J": {
+          "Z2_1": 0.127,
+          "Z3_1": 0.125,
+          "Z4_1": 0.124,
+          "Z5_1": 0.124,
+          "Z6_1": 0.124,
+          "Z7_1": 0.124,
+          "Z8_1": 0.125,
+          "Z9_1": 0.127
+        }
+      }
+    ],
+    "alloc_calls": [
+      {
+        "uncoverable": [
+          [
+            "Z4_1",
+            "no_feasible_insertion"
+          ],
+          [
+            "Z7_1",
+            "no_feasible_insertion"
+          ],
+          [
+            "Z5_1",
+            "no_feasible_insertion"
+          ],
+          [
+            "Z6_1",
+            "no_feasible_insertion"
+          ]
+        ],
+        "n_leftover": 0,
+        "leftover_sample": [],
+        "lambda_by_cell": {
+          "Z2_1": [
+            "A",
+            2
+          ],
+          "Z3_1": [
+            "A",
+            2
+          ],
+          "Z8_1": [
+            "A",
+            2
+          ],
+          "Z9_1": [
+            "A",
+            2
+          ]
+        },
+        "plans": {
+          "A1": 1,
+          "A2": 1,
+          "A3": 1,
+          "A4": 1,
+          "A5": 1,
+          "A6": 1,
+          "A7": 1,
+          "A8": 1
+        },
+        "residual_k": {}
+      }
+    ],
+    "strips_flown_per_uav": {
+      "A1": 5,
+      "A2": 4,
+      "A3": 5,
+      "A4": 4,
+      "A5": 5,
+      "A6": 4,
+      "A7": 5,
+      "A8": 4
+    },
+    "strips_total": 72,
+    "plan_uncovered": [
+      [
+        "Z4_1",
+        "no_feasible_insertion"
+      ],
+      [
+        "Z7_1",
+        "no_feasible_insertion"
+      ],
+      [
+        "Z5_1",
+        "no_feasible_insertion"
+      ],
+      [
+        "Z6_1",
+        "no_feasible_insertion"
+      ]
+    ],
+    "strips_by_cell": {
+      "Z2_1": {
+        "total": 9,
+        "flown": 0
+      },
+      "Z3_1": {
+        "total": 9,
+        "flown": 0
+      },
+      "Z4_1": {
+        "total": 9,
+        "flown": 0
+      },
+      "Z5_1": {
+        "total": 9,
+        "flown": 0
+      },
+      "Z6_1": {
+        "total": 9,
+        "flown": 0
+      },
+      "Z7_1": {
+        "total": 9,
+        "flown": 0
+      },
+      "Z8_1": {
+        "total": 9,
+        "flown": 0
+      },
+      "Z9_1": {
+        "total": 9,
+        "flown": 0
+      }
+    }
+  }
+}

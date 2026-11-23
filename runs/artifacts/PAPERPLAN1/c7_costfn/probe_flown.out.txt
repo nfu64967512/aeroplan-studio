@@ -1,0 +1,40 @@
+== airspeed vs groundspeed flown, runs/artifacts/HV4SITL16/<ac>/flight.csv ==
+   cruise sample filter: armed, mode AUTO, rel_alt >= 90 m, airspeed >= 12 m/s
+
+  -- A1 : 457 cruise samples, t 792.0..1238.0 s --
+     airspeed    mean 21.3319  sd 0.7038  min 14.95 max 21.74   (commanded AIRSPEED_CRUISE = 21.5)
+     groundspeed mean 21.7603  sd 0.7754  min 14.11 max 22.16
+     Vg - Va     mean +0.4284  sd 0.1064  |max| 0.8400   -> zero-wind signature
+     groundspeed on EAST tracks  n=194 mean 21.9456
+     groundspeed on WEST tracks  n=161 mean 21.4929
+     east-west groundspeed difference = 0.4526 m/s
+     a real 5 m/s west wind would have made that difference 10.0 m/s (26.5 vs 16.5)
+
+  -- B2 : 376 cruise samples, t 146.0..514.0 s --
+     airspeed    mean 18.8516  sd 0.5789  min 13.53 max 19.28   (commanded AIRSPEED_CRUISE = 19.0)
+     groundspeed mean 19.2259  sd 0.6329  min 12.76 max 19.63
+     Vg - Va     mean +0.3743  sd 0.0955  |max| 0.7700   -> zero-wind signature
+     groundspeed on EAST tracks  n=169 mean 19.3857
+     groundspeed on WEST tracks  n=149 mean 19.0162
+     east-west groundspeed difference = 0.3694 m/s
+     a real 5 m/s west wind would have made that difference 10.0 m/s (24.0 vs 14.0)
+
+  -- B3 : 617 cruise samples, t 252.0..857.0 s --
+     airspeed    mean 18.9072  sd 0.5014  min 12.27 max 19.27   (commanded AIRSPEED_CRUISE = 19.0)
+     groundspeed mean 19.2946  sd 0.5533  min 11.57 max 19.68
+     Vg - Va     mean +0.3874  sd 0.0739  |max| 0.7000   -> zero-wind signature
+     groundspeed on EAST tracks  n=272 mean 19.3960
+     groundspeed on WEST tracks  n=250 mean 19.1695
+     east-west groundspeed difference = 0.2265 m/s
+     a real 5 m/s west wind would have made that difference 10.0 m/s (24.0 vs 14.0)
+
+== makespan arithmetic (paper Table 2 vs the planner wind budget) ==
+   paper Table 2: planned makespan 1260.4 s, SITL 1268.0 s  -> gap +7.6 s (+0.60%)
+   A1 planned t_takeoff 656.0 s, t_land 1260.4 s -> A1 sortie 604.4 s (release_schedule.json)
+   probe_legs.py: A1 cruise-leg time 506.24 s at 5 m/s W wind vs 481.00 s calm -> wind budget 25.24 s
+   => the wind term the planner charged A1 (25.2 s) is 3.3x the plan-vs-SITL makespan gap (7.6 s)
+   => the reported agreement is NOT evidence that the wind cost model is right; it is
+      consistent with a +25 s wind budget cancelling a similar amount of un-modelled
+      SITL-side cost (transition, climb/descent rate, waypoint capture, pad queueing).
+      [this attribution is an ESTIMATE: only the two summed quantities are measured]
+

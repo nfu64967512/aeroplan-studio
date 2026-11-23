@@ -1,0 +1,74 @@
+{
+ "trial": "BEAMIDP1",
+ "lognum": 18,
+ "source": "dataflash POS + GPS ToW",
+ "rule": {
+  "d_sep_h_m": 100.0,
+  "dh_sep_v_m": 50.0,
+  "airborne_agl_m": 2.0,
+  "violation": "horizontal < 100 AND vertical < 50"
+ },
+ "per_uav": {
+  "A1": {
+   "log": "00000018.BIN",
+   "n_pos": 12668,
+   "median_dt_s": 0.16,
+   "p95_dt_s": 0.32,
+   "max_dt_s": 1.04,
+   "gps_offset_s": 1473967028.8934,
+   "gps_offset_spread_s": 0.12,
+   "n_gps": 2878,
+   "t_span_s": 2150.0
+  },
+  "B2": {
+   "log": "00000018.BIN",
+   "n_pos": 12703,
+   "median_dt_s": 0.16,
+   "p95_dt_s": 0.32,
+   "max_dt_s": 1.04,
+   "gps_offset_s": 1473967029.8884,
+   "gps_offset_spread_s": 0.14,
+   "n_gps": 1916,
+   "t_span_s": 2277.5
+  },
+  "B3": {
+   "log": "00000018.BIN",
+   "n_pos": 11209,
+   "median_dt_s": 0.16,
+   "p95_dt_s": 0.32,
+   "max_dt_s": 1.2,
+   "gps_offset_s": 1473967030.8884,
+   "gps_offset_spread_s": 0.0,
+   "n_gps": 2243,
+   "t_span_s": 1895.8
+  }
+ },
+ "pairs": {
+  "A1-B2": {
+   "min_h_m": 181.39,
+   "d_v_at_min_m": 0.041,
+   "t_gps_s": 1473968021.72,
+   "n_airborne_samples": 22329,
+   "n_violations": 0
+  },
+  "A1-B3": {
+   "min_h_m": 986.028,
+   "d_v_at_min_m": 90.675,
+   "t_gps_s": 1473967185.44,
+   "n_airborne_samples": 21378,
+   "n_violations": 0
+  },
+  "B2-B3": {
+   "min_h_m": 905.988,
+   "d_v_at_min_m": 0.03,
+   "t_gps_s": 1473967858.12,
+   "n_airborne_samples": 19528,
+   "n_violations": 0
+  }
+ },
+ "min_h_m": 181.39,
+ "pair": "A1-B2",
+ "d_v_at_min_m": 0.041,
+ "n_violations": 0,
+ "caveat": "evaluated at every native POS sample of both aircraft (no 2 s coarsening); residual error is only the between-sample chord at ~6 Hz"
+}

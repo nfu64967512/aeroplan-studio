@@ -35,6 +35,7 @@ class ParameterPanel(QWidget):
     # 信號定義
     parameters_changed = pyqtSignal(dict)  # 參數變更信號
     corner_added = pyqtSignal(float, float)  # 新增邊界點信號
+    corner_count_changed = pyqtSignal(int)   # 角點數變更（供其他分頁同步顯示）
     clear_corners_requested = pyqtSignal()  # 清除邊界點信號
     remove_last_corner_requested = pyqtSignal()  # 刪除最後一點信號
     open_click_map_requested = pyqtSignal()  # 打開點擊地圖視窗
@@ -88,6 +89,9 @@ class ParameterPanel(QWidget):
     strike_open_vtol_mission_planner_requested = pyqtSignal()  # 開啟 VTOL 全任務生命週期規劃器（戰術對話框）
     fence_export_requested = pyqtSignal()  # 匯出電子圍籬（每個 Tab 都有按鈕，共用一個 signal）
     strike_target_coord_changed = pyqtSignal(float, float)  # 目標 lat/lon 手動輸入 → 同步 3D marker
+    # ── WSL ROS2 STOT 全流程（run_west.sh）—— 與上面 AeroPlan 自有路徑平行的第二條 ──
+    stot_ros2_run_requested = pyqtSignal()                # ▶ 以此點執行 ROS2 STOT 打擊
+    stot_ros2_abort_requested = pyqtSignal()              # ABORT 整趟航次
     tab_changed = pyqtSignal(str)                           # 分頁切換（傳分頁標題）— 供 main_window 調整地圖點擊路由
 
     def __init__(self, parent=None):
@@ -186,6 +190,9 @@ class ParameterPanel(QWidget):
 
         # ── Tab 2: DCCPP ──────────────────────────────────────────────
         dccpp_group = self.create_dccpp_panel()
+        # 註：HARVEST（異構雙構型 VTOL）的入口在「VTOL 偵察」分頁的
+        #     「規劃演算法」下拉，不放在這裡 —— 同一個旗標有兩個入口只會讓人
+        #     搞不清楚自己按下去的是哪一套。見 ui/widgets/vtol_recon_panel.py。
         dccpp_scroll = self._make_resizable_tab(
             [dccpp_group, self._create_fence_export_group()]
         )
@@ -202,11 +209,20 @@ class ParameterPanel(QWidget):
         self._tabs.addTab(tactical_scroll, "戰術模組")
 
         # ── Tab 5: 蜂群打擊 ──────────────────────────────────────────
+        # 2026-10-17 使用者定調：攻擊這一系先從 UI 拿掉。分頁內容照建（signal／widget 屬性名都在），
+        # 但只有 config/features.STRIKE_ENABLED 時才 addTab；否則藏起來、不佔分頁。
+        from config import features as _features
         strike_group = self._create_strike_command_panel()
         strike_scroll = self._make_resizable_tab(
             [strike_group, self._create_fence_export_group()]
         )
-        self._tabs.addTab(strike_scroll, "蜂群打擊")
+        self._strike_scroll = strike_scroll
+        if _features.strike_enabled():
+            self._strike_tab_index = self._tabs.addTab(strike_scroll, "蜂群打擊")
+        else:
+            self._strike_tab_index = -1
+            strike_scroll.setParent(self)
+            strike_scroll.hide()
 
         # 分頁切換 → 通知 main_window 調整地圖點擊路由
         self._tabs.currentChanged.connect(self._on_tab_changed)
@@ -1067,6 +1083,9 @@ class ParameterPanel(QWidget):
             'role', 'friendly' if count >= 3 else 'hostile'
         )
         self.corner_count_label.style().polish(self.corner_count_label)
+        # 廣播給其他分頁（例如 VTOL 偵察頁的「偵察區域」狀態），
+        # 免得它們只能在切分頁時才補上，或各自去 hook 每個變更點。
+        self.corner_count_changed.emit(int(count))
 
     def set_circle_center_display(self, lat: float, lon: float, radius_m: float = 0.0):
         """更新圓心座標顯示（拖曳時同時帶入半徑）— 設定後切到 friendly 角色"""
@@ -1592,10 +1611,10 @@ class ParameterPanel(QWidget):
         # AutoLand 為高風險動作，保留 ORANGE 強調 — 屬「特殊狀態指示」。
         self.fw_autoland_check.setStyleSheet(
             f"QCheckBox {{ font-weight: bold; color: {T.ORANGE};"
-            "  font-size: 12px; padding: 4px 0px; }}"
+            "  font-size: 12px; padding: 4px 0px; }"
             "QCheckBox::indicator { width: 18px; height: 18px; }"
             f"QCheckBox::indicator:checked {{ background-color: {T.ORANGE};"
-            "  border: 2px solid #BF360C; }}"
+            "  border: 2px solid #BF360C; }"
         )
         self.fw_autoland_check.setToolTip(
             "【開啟】匯出時跳過五邊電路，在最後任務點後直接插入\n"
@@ -1914,10 +1933,13 @@ class ParameterPanel(QWidget):
         參數:
             params: 參數字典
         """
+        applied: list = []
+        dropped: list = []
         for key, value in params.items():
             if key in self.parameters:
+                applied.append(key)
                 self.parameters[key] = value
-                
+
                 # 更新 UI
                 if key == 'altitude':
                     self.altitude_spin.setValue(value)
@@ -1946,8 +1968,22 @@ class ParameterPanel(QWidget):
                     self.lock_heading_check.setChecked(bool(value))
                 elif key == 'heading_angle':
                     self.heading_slider.setValue(int(value))
+            else:
+                dropped.append(key)
 
-        logger.info("參數已設置")
+        # ⚠️ 舊版對不認得的 key 直接跳過，然後照樣印「參數已設置」——
+        # 呼叫端拼錯 key 會拿到一個靜默的 no-op 加一行成功訊息，
+        # 之後 get_parameters().get(那個 key) 回 None 看起來像「有這個參數但沒值」。
+        # 例：scripts/_full_flow_capture.py 送 "overlap"（正確是 get_dccpp_params()
+        # 的 'overlap_rate'），整趟流程照樣報成功。
+        if dropped:
+            logger.warning(
+                f"參數已設置（{len(applied)} 項）；下列 key 不在本面板的參數表、"
+                f"已略過：{', '.join(sorted(dropped))}。請改用正確的 key，"
+                f"或檢查是否應改呼叫 get_dccpp_params() 那一組。"
+            )
+        else:
+            logger.info(f"參數已設置（{len(applied)} 項）")
     
     # ══════════════════════════════════════════════════════════════════
     #  DCCPP 最佳化規劃面板（論文 MDTSP + IDP + GDA）
@@ -2652,6 +2688,14 @@ class ParameterPanel(QWidget):
         self._heatmap_grid_spin.setToolTip("網格行列數（越大越精細，但消耗越多）")
         layout.addRow("網格解析度:", self._heatmap_grid_spin)
 
+        # ⚠ 「解析度 20」看不出格子有多大。格子邊長由**區域跨距 ÷ 行列數**決定，
+        #   而區域是使用者在地圖上畫的 —— 面板自己算不出來，得由 MainWindow 回填。
+        #   沒有這個回饋時，使用者只能從畫面上的方塊大小猜，猜不準就會覺得
+        #   「解析度調了沒用」。
+        self._heatmap_cell_label = QLabel("尚未初始化")
+        self._heatmap_cell_label.setWordWrap(True)
+        layout.addRow("格子邊長:", self._heatmap_cell_label)
+
         # 初始化 / 重置 / 清除按鈕列
         btn_row = QHBoxLayout()
 
@@ -2676,6 +2720,17 @@ class ParameterPanel(QWidget):
         layout.addRow(btn_row)
 
         return group
+
+    def set_heatmap_cell_info(self, text: str, ok: bool = True) -> None:
+        """由 MainWindow 回填「這個解析度換算成幾公尺的格子」。
+
+        ⚠ 格子比感測器掃描寬度還大時，熱力圖在物理上就表達不出感測器真正
+        掃過的範圍（覆蓋判定是看格子**中心點**落不落在足跡內），
+        畫面會變成一大格一大格地翻 —— 那不是渲染問題，是取樣不足。
+        """
+        self._heatmap_cell_label.setText(text)
+        self._heatmap_cell_label.setStyleSheet(
+            "color:#2e7d32;" if ok else "color:#e65100;")
 
     def _on_sar_heatmap_init(self):
         """SAR 熱力圖初始化：發送參數"""
@@ -3325,6 +3380,83 @@ class ParameterPanel(QWidget):
         sal.addLayout(action_row)
 
         layout.addWidget(sa)
+
+        # ════════════════════════════════════════════════════════════
+        # ⑦  WSL ROS2 STOT 全流程 —— 刻意獨立成一區，不併進上面的 Actions
+        #
+        # 上面那一區（EXECUTE / 匯出 / 上傳 SITL）是 AeroPlan 自有的 MAVLink
+        # 上傳路徑；這一區走的是 WSL 上的 ROS2 管線（run_west.sh → stot_repeat.sh
+        # → stot_trial.sh → tot_node）。兩條是**平行的實作**，同時跑會搶控制權。
+        # 放同一區又都叫「執行」，使用者遲早會按錯 —— 所以用 NEUTRAL 青色 +
+        # 標題掛 (WSL) 做視覺隔離。
+        # ════════════════════════════════════════════════════════════
+        s7 = _section("⑦  ROS2 STOT 全流程 (WSL)", TC.NEUTRAL)
+        s7l = QVBoxLayout(s7)
+        s7l.setSpacing(6); s7l.setContentsMargins(8, 14, 8, 8)
+
+        s7_hint = QLabel(
+            "用 ⓿ 區鎖定的紅心，在 WSL 上跑完整條 ROS2 管線：\n"
+            "彈射起飛 → 爬升 → 編隊巡航 → ALIGN 扇形 → PERCH 環 → DIVE 同步命中。\n"
+            "⚠️ 會先拆掉再重建 WSL 的 6 架 SITL（約 155 秒），期間 AeroPlan 連線會斷。\n"
+            "⚠️ 航次進行中請勿重新連線嵌入式蜂群 —— 會搶走階段 2 要用的 6760 分流。"
+        )
+        s7_hint.setWordWrap(True)
+        s7_hint.setStyleSheet(
+            f"QLabel{{color:{TC.FG_MUTED};font-size:11px;"
+            f"font-family:{TF.css_condensed()};}}"
+        )
+        s7l.addWidget(s7_hint)
+
+        # 目標高度基準。run_west.sh:185 為「台灣海峽海面」把 TARGET_AMSL 釘死成
+        # 0.0，註解明講陸地目標要改回 nan（=查地形資料庫）。點到陸地卻沿用海面
+        # 基準的話，誤差會直接等於當地地形高度，而且**不會有任何錯誤訊息**。
+        self._stot_sea_target_chk = QCheckBox("紅心在海面（TARGET_AMSL=0.0）")
+        self._stot_sea_target_chk.setChecked(True)
+        self._stot_sea_target_chk.setStyleSheet(
+            f"QCheckBox{{color:{TC.FG_PRIMARY};font-family:{TF.css_condensed()};}}"
+        )
+        self._stot_sea_target_chk.setToolTip(
+            "勾選 = 目標在海面，高度基準釘死 0 m AMSL（已驗證的基準組態）。\n"
+            "取消 = 陸地目標，改送 .nan 讓 tot_node 去查地形資料庫。\n"
+            "⚠️ 點到陸地卻用海面基準，末端誤差會等於當地地形高度，且完全靜默。"
+        )
+        s7l.addWidget(self._stot_sea_target_chk)
+
+        self._stot_run_btn = _btn(
+            "▶  以此點執行 ROS2 STOT 打擊", TC.BG_PRIMARY, TC.NEUTRAL, height=40
+        )
+        self._stot_run_btn.setToolTip(
+            "以 ⓿ 區的紅心座標啟動 WSL 上的 run_west.sh：\n"
+            "  TGT_LAT / TGT_LON / APPROACH_FROM / TARGET_AMSL / PREFIX / TRIALS=1\n"
+            "按下後會先做前置檢查（SITL、ROS2 層、上一趟殘留、幾何距離、航次代號），\n"
+            "任何一項不過都會擋下並說明原因與處置。\n"
+            "單趟典型 25–30 分鐘，最壞約 65 分鐘。"
+        )
+        self._stot_run_btn.clicked.connect(self.stot_ros2_run_requested.emit)
+        s7l.addWidget(self._stot_run_btn)
+
+        self._stot_abort_btn = _btn("ABORT 航次", TC.BG_PRIMARY, TC.HOSTILE, height=32)
+        self._stot_abort_btn.setEnabled(False)
+        self._stot_abort_btn.setToolTip(
+            "停掉整趟：先殺 tot_node 的行程群組（它是 setsid nohup，殺上游殺不到），\n"
+            "再收 ROS2 層，最後把殘留計數讀回來驗證。\n"
+            "不會動 arduplane / mavproxy —— 留著 SITL 讓你可以立刻重連。"
+        )
+        self._stot_abort_btn.clicked.connect(self.stot_ros2_abort_requested.emit)
+        s7l.addWidget(self._stot_abort_btn)
+
+        # 相位顯示的落點。內容由 StotRos2ControllerMixin._stot_set_status() 寫入，
+        # 同一段文字同時進 statusBar 與 logger —— 三處一致才好對帳。
+        self._stot_status_label = QLabel("待命 — 請先在 ⓿ 區鎖定紅心座標")
+        self._stot_status_label.setWordWrap(True)
+        self._stot_status_label.setStyleSheet(
+            f"QLabel{{color:{TC.NEUTRAL};background:{TC.BG_SUNKEN};"
+            f"border:1px solid {TC.BORDER_DEFAULT};padding:6px;"
+            f"font-family:{TF.css_mono()};font-size:11px;}}"
+        )
+        s7l.addWidget(self._stot_status_label)
+
+        layout.addWidget(s7)
 
         return group
 

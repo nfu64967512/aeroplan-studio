@@ -160,6 +160,11 @@ class DroneDetailPanel(QWidget):
 
     # 對外通知（呼叫端可選擇做提示音、log 等）
     command_sent = pyqtSignal(str, str)   # callsign, action
+    # 「↥」鈕：請 main_window 對這個 callsign 執行 Write WPs（見
+    # main_window._on_detail_panel_write_wp）。刻意不在這裡直接碰
+    # SITLLink.upload_mission_items —— 這個面板不知道「已載入的航點檔」是
+    # 哪一份，也不該自己再做一次確認對話框；守衛邏輯只能有一份。
+    write_wp_requested = pyqtSignal(str)  # callsign
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -294,7 +299,9 @@ class DroneDetailPanel(QWidget):
         self._btn_pause = make_button("‖", variant=ButtonVariant.OUTLINE, size=ButtonSize.SM, tooltip="Pause/Continue")
         self._btn_home = make_button("⌂", variant=ButtonVariant.OUTLINE, size=ButtonSize.SM, tooltip="Return to Launch")
         self._btn_alt = make_button("↑10", variant=ButtonVariant.OUTLINE, size=ButtonSize.SM, tooltip="Change altitude")
-        self._btn_upload = make_button("↥", variant=ButtonVariant.OUTLINE, size=ButtonSize.SM, tooltip="Upload mission")
+        self._btn_upload = make_button(
+            "↥", variant=ButtonVariant.OUTLINE, size=ButtonSize.SM,
+            tooltip="寫入航點檔（Write WPs）：會先跳出確認對話框，需明確按「是」才會送出")
         self._btn_download = make_button("↧", variant=ButtonVariant.OUTLINE, size=ButtonSize.SM, tooltip="Download mission")
         self._btn_cancel = make_button("✕", variant=ButtonVariant.OUTLINE, size=ButtonSize.SM, tooltip="Cancel current command")
         for b in (self._btn_pause, self._btn_home, self._btn_alt,
@@ -304,6 +311,7 @@ class DroneDetailPanel(QWidget):
         self._btn_pause.clicked.connect(self._on_pause)
         self._btn_home.clicked.connect(self._on_rtl)
         self._btn_alt.clicked.connect(self._on_change_alt)
+        self._btn_upload.clicked.connect(self._on_upload_wp)
         self._btn_cancel.clicked.connect(self._on_loiter)
 
         # Follow Me
@@ -785,6 +793,18 @@ class DroneDetailPanel(QWidget):
             return
         link.set_mode("LOITER")
         self.command_sent.emit(self._callsign or "", "LOITER")
+
+    def _on_upload_wp(self) -> None:
+        """「↥」鈕：請 main_window 對本機執行 Write WPs（見 write_wp_requested）。
+
+        ⚠️ 只檢查有沒有選定機、不檢查連線——「尚未連線」與「沒有已載入的
+        航點檔」這兩種拒絕理由，統一由 main_window.on_sitl_write_wp 的守衛
+        判斷並用同一套訊息呈現，這裡重複判斷只會讓兩邊訊息對不上。
+        """
+        if self._callsign is None:
+            return
+        self.write_wp_requested.emit(self._callsign)
+        self.command_sent.emit(self._callsign or "", "WRITE_WPS_REQUESTED")
 
     def _on_change_alt(self) -> None:
         link = self._link()

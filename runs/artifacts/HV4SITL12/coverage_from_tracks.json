@@ -1,0 +1,30 @@
+{
+ "swath_m": 138.6,
+ "areas": [
+  {
+   "area": "Z1",
+   "area_m2": 312006.5,
+   "covered_m2": 312006.5,
+   "ratio": 1.0
+  },
+  {
+   "area": "Z2",
+   "area_m2": 312006.5,
+   "covered_m2": 298293.4,
+   "ratio": 0.956
+  },
+  {
+   "area": "Z3",
+   "area_m2": 312006.5,
+   "covered_m2": 312006.5,
+   "ratio": 1.0
+  },
+  {
+   "area": "Z4",
+   "area_m2": 312006.5,
+   "covered_m2": 312006.5,
+   "ratio": 1.0
+  }
+ ],
+ "caveat": "航跡緩衝法；flight.csv 沒有 sensor_on，轉場段也被算進去 ⇒ 這是上界"
+}

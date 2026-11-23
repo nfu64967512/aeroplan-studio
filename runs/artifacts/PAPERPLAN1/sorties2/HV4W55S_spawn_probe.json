@@ -1,0 +1,141 @@
+{
+ "trial": "HV4W55S",
+ "log": 19,
+ "per_uav": {
+  "A1": {
+   "log": "sitl/vtol/i100/logs/00000019.BIN",
+   "parked_window_s": 213.4,
+   "t_first_above_2m_s": 338.1,
+   "truth_SIM": {
+    "kind": "simulator truth (SIM.Lat/Lng)",
+    "n": 1424,
+    "first_d_north_m": 3.756,
+    "first_d_east_m": 3.563,
+    "last_d_north_m": 3.856,
+    "last_d_east_m": 3.909,
+    "max_offset_m": 5.529,
+    "max_d_north_m": 3.99,
+    "max_d_east_m": 3.828,
+    "bearing_at_max_deg": 43.81
+   },
+   "estimate_POS": {
+    "kind": "EKF estimate (POS.Lat/Lng)",
+    "n": 1427,
+    "first_d_north_m": 3.756,
+    "first_d_east_m": 3.563,
+    "last_d_north_m": 3.845,
+    "last_d_east_m": 3.899,
+    "max_offset_m": 5.52,
+    "max_d_north_m": 3.967,
+    "max_d_east_m": 3.838,
+    "bearing_at_max_deg": 44.05
+   },
+   "imu0_parked_median": {
+    "n": 11983,
+    "AccX_mps2": -0.001,
+    "AccY_mps2": -0.001,
+    "AccZ_mps2": -9.8175,
+    "horizontal_mag_mps2": 0.0014,
+    "horizontal_bearing_deg": 225.34,
+    "note": "body frame; yaw is ~0 so +X is north and +Y is east"
+   },
+   "att_parked": {
+    "yaw_deg_median": 162.247,
+    "yaw_deg_min": 127.123,
+    "yaw_deg_max": 174.461,
+    "roll_deg_median": 0.008,
+    "pitch_deg_median": -0.009
+   }
+  },
+  "B2": {
+   "log": "sitl/vtol/i101/logs/00000019.BIN",
+   "parked_window_s": 445.0,
+   "t_first_above_2m_s": 569.4,
+   "truth_SIM": {
+    "kind": "simulator truth (SIM.Lat/Lng)",
+    "n": 2960,
+    "first_d_north_m": 3.756,
+    "first_d_east_m": 3.564,
+    "last_d_north_m": 3.89,
+    "last_d_east_m": 3.798,
+    "max_offset_m": 5.565,
+    "max_d_north_m": 4.067,
+    "max_d_east_m": 3.798,
+    "bearing_at_max_deg": 43.04
+   },
+   "estimate_POS": {
+    "kind": "EKF estimate (POS.Lat/Lng)",
+    "n": 2966,
+    "first_d_north_m": 3.756,
+    "first_d_east_m": 3.553,
+    "last_d_north_m": 3.901,
+    "last_d_east_m": 3.798,
+    "max_offset_m": 5.565,
+    "max_d_north_m": 4.067,
+    "max_d_east_m": 3.798,
+    "bearing_at_max_deg": 43.04
+   },
+   "imu0_parked_median": {
+    "n": 24773,
+    "AccX_mps2": -0.001,
+    "AccY_mps2": -0.001,
+    "AccZ_mps2": -9.8175,
+    "horizontal_mag_mps2": 0.0014,
+    "horizontal_bearing_deg": 224.6,
+    "note": "body frame; yaw is ~0 so +X is north and +Y is east"
+   },
+   "att_parked": {
+    "yaw_deg_median": 174.633,
+    "yaw_deg_min": 126.913,
+    "yaw_deg_max": 179.455,
+    "roll_deg_median": 0.009,
+    "pitch_deg_median": -0.009
+   }
+  },
+  "B3": {
+   "log": "sitl/vtol/i102/logs/00000019.BIN",
+   "parked_window_s": 3.1,
+   "t_first_above_2m_s": 127.1,
+   "truth_SIM": {
+    "kind": "simulator truth (SIM.Lat/Lng)",
+    "n": 30,
+    "first_d_north_m": 3.756,
+    "first_d_east_m": 3.554,
+    "last_d_north_m": 4.367,
+    "last_d_east_m": 4.542,
+    "max_offset_m": 6.301,
+    "max_d_north_m": 4.367,
+    "max_d_east_m": 4.542,
+    "bearing_at_max_deg": 46.12
+   },
+   "estimate_POS": {
+    "kind": "EKF estimate (POS.Lat/Lng)",
+    "n": 30,
+    "first_d_north_m": 3.756,
+    "first_d_east_m": 3.544,
+    "last_d_north_m": 4.356,
+    "last_d_east_m": 4.501,
+    "max_offset_m": 6.264,
+    "max_d_north_m": 4.356,
+    "max_d_east_m": 4.501,
+    "bearing_at_max_deg": 45.94
+   },
+   "imu0_parked_median": {
+    "n": 270,
+    "AccX_mps2": -0.0005,
+    "AccY_mps2": -0.001,
+    "AccZ_mps2": -9.818,
+    "horizontal_mag_mps2": 0.0011,
+    "horizontal_bearing_deg": 243.39,
+    "note": "body frame; yaw is ~0 so +X is north and +Y is east"
+   },
+   "att_parked": {
+    "yaw_deg_median": 127.122,
+    "yaw_deg_min": 126.716,
+    "yaw_deg_max": 130.706,
+    "roll_deg_median": 0.011,
+    "pitch_deg_median": -0.011
+   }
+  }
+ }
+}

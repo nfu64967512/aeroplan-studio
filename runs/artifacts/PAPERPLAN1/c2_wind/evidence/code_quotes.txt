@@ -1,0 +1,175 @@
+C2 WIND — verbatim code / artifact quotes (read-only survey, 2026-09-21)
+repo C:/Users/joy46/Documents/Projects/aeroplan-studio, branch quad_swarm
+
+=====================================================================
+1. WHERE THE PLANNER'S 5 m/s WEST WIND IS CONFIGURED
+=====================================================================
+scripts/hv_sitl_scenarios.py:66
+    wind: tuple[float, float] = (5.0, 270.0)
+  -> Scenario dataclass default.  EVERY scenario in SCENARIOS uses the
+     default; none overrides `wind`.
+
+scripts/hv_sitl_run.py:202   (path="gui", the AeroPlan GUI pipeline)
+    c.hv_wind = sc.wind
+scripts/hv_sitl_run.py:242   (path="direct")
+    wind=sc.wind, c2_range_km=25.0, terrain_clearance_m=36.0,
+scripts/hv_sitl_flight.py:100 (the HV4SITL1/2 baseline script, hard-coded)
+    wind=(5.0, 270.0), c2_range_km=25.0, terrain_clearance_m=36.0,
+
+hv_dccpp/integration/aeroplan_adapter.py:960-963
+    speed, dir_from = (float(wind[0]), float(wind[1]))
+    winds = (WindLayer(0.0, 3000.0, speed, dir_from, gust_mps=speed * 1.3, z_ref="agl"),)
+    obs = WeatherObs(mean_wind_mps=speed, gust_mps=speed * 1.3, wind_dir_from_deg=dir_from,
+                     visibility_m=10000.0, precip_mmh=0.0, temp_c=float(weather_temp_c))
+  -> ONE uniform layer 0-3000 m AGL, and gust is HARD-WIRED to 1.3 x speed.
+     The 1.3 factor is what makes W=7 and W=8 a preflight NO_GO (see 5 below).
+
+hv_dccpp/wind.py:15-18 (module docstring, the direction convention)
+    * ``dir_from_deg`` is the meteorological "from" direction beta; the wind
+      vector (blowing towards) is  w = -W(sin beta, cos beta).
+hv_dccpp/wind.py:57-63
+    def wind_vector(speed_mps, dir_from_deg) -> np.ndarray:
+        """... e.g. from 270 deg (west wind) -> (+W, 0) blowing east;
+               from 0 deg (north wind) -> (0, -W) blowing south."""
+
+=====================================================================
+2. SITL SIDE: SIM_WIND_* IS NEVER SET  (this is the C2 defect)
+=====================================================================
+scripts/hv_sitl_run.py:361-368  — the whole --defaults chain
+        defaults = [
+            SITL_DIR / "default_params" / "plane.parm",
+            SITL_DIR / "default_params" / "vtol_default.parm",
+            _write_identity(i, sysid),
+            _write_enforced(i),
+            out / "plan" / f"{uav}.param",
+            _write_firmware_override(i),
+        ]
+  -> No wind file.  grep of the four generated .parm writers
+     (_write_identity / _write_enforced / _write_firmware_override,
+      scripts/hv_sitl_flight.py:160-199) shows no SIM_WIND_* line.
+  -> `grep -n SIM_ sitl/default_params/plane.parm` and
+     `... vtol_default.parm` both return NOTHING, so the firmware defaults
+     apply: SIM_WIND_SPD = 0, SIM_WIND_DIR = 180.
+
+runs/artifacts/HV4SITL16/sitl_cmdlines.txt (the command line actually run)
+    [A1] ...\ArduPlane.exe --model quadplane --home 23.949999999968718,120.89990170530359,100.0,0
+         --speedup 5.0 --instance 100 --sysid 1 --defaults <plane.parm>,<vtol_default.parm>,
+         <i100/identity.parm>,<i100/vtol_enforced.parm>,<HV4SITL16/plan/A1.param>,
+         <i100/firmware_override.parm>
+  -> no SIM_WIND anywhere on the command line or in any file on it.
+
+repo-wide grep for SIM_WIND outside .claude/worktrees and dist/:
+  only hits are documentation ("can inject wind: SIM_WIND_SPD...") and
+  AIRFRAME_PARAMS artifacts that explicitly set SIM_WIND_SPD 0 /
+  SIM_WIND_TURB 0.  No HV4SITL* sortie ever set it.
+
+=====================================================================
+3. ARDUPILOT'S SIM_WIND CONVENTION (fetched from ArduPilot master)
+=====================================================================
+libraries/SITL/SITL.cpp, parameter table:
+    // @Param: WIND_SPD   @DisplayName: Simulated Wind speed   @Units: m/s   default 0
+    // @Param: WIND_DIR   @DisplayName: Direction simulated wind is coming from
+    //                    @Description: Allows you to set wind direction (true deg) in sim
+    //                    @Units: deg   default 180
+    // @Param: WIND_TURB  @DisplayName: Simulated Wind variation   @Units: m/s  default 0
+    // @Param: WIND_DIR_Z 0 = pure horizontal wind, 90 = pure updraft   default 0
+    // @Param: WIND_T     @Values: 0:square law, 1:none, 2:linear-see WIND_T_COEF
+    //                    default 0 (square law)
+    // @Param: WIND_T_ALT Altitude at which wind reaches full strength, decaying
+    //                    from full strength as altitude lowers to ground level  default 60 m
+    // @Param: WIND_TC    wind variation time constant  default 5 s
+libraries/SITL/SIM_Aircraft.cpp, Aircraft::update_wind():
+    wind_ef = Vector3f(cosf(radians(input.wind.direction))*cosf(radians(input.wind.dir_z)),
+                       sinf(radians(input.wind.direction))*cosf(radians(input.wind.dir_z)),
+                       sinf(radians(input.wind.dir_z))) * input.wind.speed;
+    ...
+    if (wind_turb > 0 && !on_ground()) { ...rand_normal()... }   // turbulence is RNG-driven
+    // the AHRS wants wind with opposite sense
+    wind_ef = -wind_ef;
+    ...
+    velocity_air_ef = velocity_ef - wind_ef;
+
+=> SIM_WIND_DIR uses the SAME convention as hv_dccpp's dir_from_deg
+   (meteorological FROM).  SIM_WIND_DIR = 270 == the planner's (5.0, 270.0).
+   STILL VERIFY EMPIRICALLY on the first sortie (see RUNBOOK step 0):
+   eastbound legs must gain ground speed, westbound must lose it.
+
+=====================================================================
+4. WHAT THE AIRCRAFT IS COMMANDED — airspeed, not ground speed
+=====================================================================
+hv_dccpp/ardupilot.py:653
+    items.append(_item(0, MAV_CMD_DO_CHANGE_SPEED, MAV_FRAME_GLOBAL_RELATIVE_ALT,
+                       (0.0, float(p.v_air), -1.0, 0.0)))
+  -> param1 = 0 == airspeed type.  Good: the vehicle holds AIRSPEED and lets
+     ground speed vary, which is exactly what the planner's wind triangle
+     assumes.  (param1 = 1 would have set a ground-speed target.)
+
+runs/artifacts/HV4SITL16/plan/A1.param — 32 exported parameters; the
+wind-relevant ones:
+    AIRSPEED_CRUISE,21.5   AIRSPEED_MIN,18   AIRSPEED_MAX,35
+    RTL_RADIUS,200         WP_LOITER_RAD,200      (both = R_eff, wind-inflated)
+    WP_RADIUS,14
+  MIN_GROUNDSPEED is NOT exported and is NOT set in any default file
+  => firmware default 0 => TECS will not add airspeed to hold ground speed.
+  ⚠ If it were > 0 the whole wind comparison would silently die; the patch
+    therefore reads it back.
+
+=====================================================================
+5. R_eff AND THE GUST CEILING (why 8 m/s cannot be planned)
+=====================================================================
+hv_dccpp/platform.py:296-299
+    def r_eff(self, wind_speed_mps: float) -> float:
+        """R_eff(W) = max{R_plan, R_theo (1+W/Va)^2} ..."""
+        w = max(0.0, float(wind_speed_mps))
+        return max(self.turn_radius_planning_m,
+                   self.turn_radius_theoretical_m * (1.0 + w / self.cruise_airspeed_mps) ** 2)
+hv_dccpp/platform.py:302-304
+    def w_star(self) -> float:
+        """wind the built-in R_plan margin absorbs: W* = Va(sqrt(R_plan/R_theo) - 1)
+           (A 5.17, B 5.03 m/s)"""
+PLATFORM_PIONEER (platform.py:430-456): Va 21.5, R_theo 130, R_plan 200,
+    crosswind_site_max_mps=(6.0, 8.0), gust_site_max_mps=(8.0, 10.0)
+PLATFORM_HERO    (platform.py:459-486): Va 19.0, R_theo  75, R_plan 120,
+    crosswind_site_max_mps=(5.0, 6.0), gust_site_max_mps=(8.0, 10.0)
+  => measured (evidence/r_eff_and_gust_limits.json):
+     R_eff is EXACTLY R_plan for W <= 5 (A 200.0 / B 120.0);
+     it only starts to grow at W ~ 5.2 (A) / 5.1 (B):
+       W=6 -> A 212.68 / B 129.85 ; W=8 -> A 244.74 / B 151.45
+  => gust = 1.3 W vs gust_site_max 8.0 gives a hard planning ceiling
+     W <= 6.154 m/s.  Confirmed: W=7 and W=8 are preflight NO_GO
+     ("gust_exceeds(H: 9.1 > 8.0 m/s)" / "10.4 > 8.0").
+
+=====================================================================
+6. TELEMETRY ALREADY CARRIES THE FLIGHT CONTROLLER'S WIND ESTIMATE
+=====================================================================
+hv_dccpp/mavlink_link.py:1325
+    _TELEMETRY_TYPES = ("GLOBAL_POSITION_INT", "VFR_HUD", "SYS_STATUS",
+                        "BATTERY_STATUS", "WIND", "EXTENDED_SYS_STATE", ...)
+hv_dccpp/mavlink_link.py:1735, 1773-1774
+        wind = self._latest.get("WIND")
+        ...
+            wind_speed_mps=float(wind.speed) if wind is not None else None,
+            wind_dir_from_deg=float(wind.direction) % 360.0 if wind is not None else None,
+  -> read_telemetry() already returns the EKF wind estimate; flight.csv just
+     never wrote it (scripts/hv_sitl_run.py:603-604 header, 657-665 row).  Two extra
+     columns give an independent "the wind really acted" witness.
+
+=====================================================================
+7. SORTIE MECHANICS (for the cost estimate)
+=====================================================================
+scripts/hv_sitl_run.py:46   SPEEDUP = float(os.environ.get("HV_SPEEDUP", "5"))
+scripts/hv_sitl_run.py:60   BASE_PORT = int(os.environ.get("HV_BASE_PORT", "6760"))
+                            (instance 100+, deliberately away from the WSL 5760 block)
+scripts/hv_sitl_run.py:607  budget_s = plan.makespan_s / SPEEDUP + 420.0
+binary: sitl/ArduPlane.exe (Windows/cygwin build in-repo, ArduPlane 4.8.0-dev)
+one OS process per aircraft, run CONCURRENTLY; 3 aircraft for HV4SITL15/16.
+instance dirs sitl/vtol/i100..i102 ; each writes a dataflash log
+    sitl/vtol/i100/logs/000000NN.BIN   (35.7 MB for HV4SITL16's A1)
+measured wall clock, HV4SITL16 (mtimes):
+    plan/A1.param        2026-09-14 15:04:40.68
+    params_readback.csv  2026-09-14 15:04:57.98
+    mission_upload.json  2026-09-14 15:04:58.63
+    release_schedule.json/flight.csv  2026-09-14 15:09:12.43
+  => ~4 min 32 s from export to end of flight; planning itself measured at
+     14-16 s (evidence/planner_wind_sweep.json "plan_wall_s").
+     Call it ~5 min per 3-aircraft sortie at makespan 1260 s / speedup 5.

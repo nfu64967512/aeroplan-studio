@@ -1,0 +1,288 @@
+"""AASRC 2026 加長型摘要 圖3（檔名 fig5_compliance）：高度合規與 SITL 飛行間距。
+
+    python docs/hv_dccpp/AASRC2026_abstract/figures_src/make_fig5_compliance.py
+
+輸出
+    docs/hv_dccpp/AASRC2026_abstract/fig5_compliance.png   (17 cm 寬, 300 dpi)
+    docs/hv_dccpp/AASRC2026_abstract/fig5_compliance.svg
+    docs/hv_dccpp/AASRC2026_abstract/figures_src/fig5_data.json
+
+v3（2026-09-21，word_layout）
+  * 數據改讀 runs/artifacts/PAPERPLAN1/update_paper/out/NUMBERS.json（論文數字唯一來源）；
+    每機匯出最高高度 NUMBERS.json 只有機隊值，改讀其明細檔 metrics.json
+    （程式內斷言：metrics 之機隊最大值 == NUMBERS 之 exported_max_rel_m，每機飛行最高亦逐機相等）。
+  * (a) 加入單變因對照 HV4W55R（120.0 m）對 HV4W55（119.5 m，同風場），
+    並列八趟；HV4SITL15／16 標為 120.0 m 天花板、模擬未設風之歷史對照。
+  * 「實飛」一律改「SITL 飛行」（機體物理為 SITL 內建模型）。
+  * 圖內最小字級 8 pt（17 cm 原寸插入），舊版 6.6–7.0 pt 之字全部放大。
+  * 修改前之圖檔與腳本備份於 runs/artifacts/PAPERPLAN1/word_layout/figures/before/。
+
+原則同 make_fig_results.py／make_fig4_wind.py：決定性輸出（json sort_keys、SVG 無日期、
+固定 hashsalt）。**不動 fig3_results 的任何檔案。**
+"""
+from __future__ import annotations
+
+import hashlib
+from decimal import ROUND_HALF_UP, Decimal
+import json
+import sys
+from pathlib import Path
+
+sys.dont_write_bytecode = True
+
+import matplotlib  # noqa: E402
+
+matplotlib.use("Agg")
+from matplotlib import font_manager as fm  # noqa: E402
+import matplotlib.patches as mpatches  # noqa: E402
+import matplotlib.pyplot as plt  # noqa: E402
+import matplotlib.text  # noqa: E402
+from matplotlib.lines import Line2D  # noqa: E402
+
+HERE = Path(__file__).resolve().parent
+OUT_DIR = HERE.parent
+ROOT = HERE.parents[3]
+UPD = ROOT / "runs" / "artifacts" / "PAPERPLAN1" / "update_paper" / "out"
+NUMBERS_P = UPD / "NUMBERS.json"
+METRICS_P = UPD / "metrics.json"
+CM = 1 / 2.54
+MIN_PT = 8.0
+
+KAIU = Path("C:/Windows/Fonts/kaiu.ttf")
+TIMES = Path("C:/Windows/Fonts/times.ttf")
+for f in (KAIU, TIMES):
+    fm.fontManager.addfont(str(f))
+matplotlib.rcParams.update({
+    "font.family": [fm.FontProperties(fname=str(TIMES)).get_name(),
+                    fm.FontProperties(fname=str(KAIU)).get_name()],
+    "font.size": 8.0, "axes.titlesize": 9.0, "axes.labelsize": 8.5,
+    "xtick.labelsize": 8.0, "ytick.labelsize": 8.0, "legend.fontsize": 8.0,
+    "axes.unicode_minus": True, "axes.linewidth": 0.6,
+    "xtick.major.width": 0.6, "ytick.major.width": 0.6,
+    "xtick.major.size": 2.5, "ytick.major.size": 2.5,
+    "xtick.direction": "in", "ytick.direction": "in",
+    "svg.fonttype": "path", "svg.hashsalt": "fig5_compliance", "pdf.fonttype": 42,
+})
+
+
+def rel(p: Path) -> str:
+    return p.resolve().relative_to(ROOT).as_posix()
+
+
+def fmt(x: float, nd: int) -> str:
+    """四捨五入（half-up，對 JSON 之十進位字串），與正文表格一致；
+    float 格式化會把 330.135 印成 330.13，而表3 為 330.14。"""
+    q = Decimal(1).scaleb(-nd)
+    return str(Decimal(repr(x)).quantize(q, rounding=ROUND_HALF_UP))
+
+
+def jload(p: Path):
+    return json.loads(p.read_text(encoding="utf-8"))
+
+
+N = jload(NUMBERS_P)
+M = jload(METRICS_P)
+T = N["trials"]
+K1 = N["corrections"]["K1_separation_note_e"]["per_trial"]
+
+UAVS = ("A1", "B2", "B3")
+MK = {"A1": "o", "B2": "s", "B3": "^"}
+DX = {"A1": -0.22, "B2": 0.0, "B3": 0.22}
+C_OK, C_BAD, C_PLAN, C_GREY = "#1b4965", "#bc4b51", "#9db4c0", "0.40"
+
+# ---- 一致性斷言：圖上每個數字都必須與 NUMBERS.json 相同 ----
+for tr, v in T.items():
+    a = v["altitude"]
+    mu = M[tr]["altitude"]["per_uav"]
+    assert max(mu[u]["exported_max_rel_m"] for u in UAVS) == a["exported_max_rel_m"], tr
+    for u in UAVS:
+        assert mu[u]["flown_max_rel_m"] == a["flown_max_agl_per_uav"][u], (tr, u)
+    s = v["separation"]
+    assert K1[tr]["exact_ellipsoid_m"] == s["flown_exact_m"], tr
+
+# (a) 的排列：單變因對照一組、119.5 m 其餘各趟一組、歷史對照一組
+GROUPS = [("單變因對照\n（同風場）", ["HV4W55R", "HV4W55"]),
+          ("天花板 119.5 m 之其餘架次", ["HV4W05", "HV4W00", "HV4W55S", "BEAMIDP1"]),
+          ("歷史對照\n（未設風）", ["HV4SITL15", "HV4SITL16"])]
+GAP = 0.45
+XA, ORDER_A = [], []
+x = 0.0
+for gi, (_, trs) in enumerate(GROUPS):
+    for tr in trs:
+        XA.append(x)
+        ORDER_A.append(tr)
+        x += 1.0
+    x += GAP
+
+FIG_H_CM = 6.4
+fig = plt.figure(figsize=(17.0 * CM, FIG_H_CM * CM))
+gs = fig.add_gridspec(1, 2, width_ratios=[1.32, 1.0], wspace=0.18, left=0.080,
+                      right=0.992, top=0.915, bottom=0.215)
+
+# ------------------------------------------------------------- (a) 高度 --
+ax = fig.add_subplot(gs[0, 0])
+ax.axhline(120.0, color=C_BAD, lw=0.9, zorder=1)
+data_a = []
+for xi, tr in zip(XA, ORDER_A):
+    v = T[tr]
+    a = v["altitude"]
+    ceil = v["ceiling_m"]
+    ax.plot([xi - 0.36, xi + 0.36], [ceil, ceil], color="0.50", lw=0.8, ls=(0, (4, 2)),
+            zorder=1)
+    for u in UAVS:
+        y = a["flown_max_agl_per_uav"][u]
+        ye = M[tr]["altitude"]["per_uav"][u]["exported_max_rel_m"]
+        c = C_BAD if y > 120.0 else C_OK
+        xx = xi + DX[u]
+        ax.plot(xx, ye, "_", ms=6.5, color=C_GREY, mew=1.1, zorder=2)
+        ax.plot([xx, xx], [ye, y], color="0.72", lw=0.6, zorder=1)
+        ax.plot(xx, y, MK[u], ms=3.8, mfc=c, mec=c, zorder=3)
+        data_a.append({"trial": tr, "uav": u, "ceiling_m": ceil,
+                       "max_exported_rel_alt_m": ye,
+                       "max_flown_rel_alt_m": y,
+                       "time_above_120_s_uav": a["t_above_120_per_uav"][u]})
+    t_tot = a["t_above_120_s"]
+    lab = fmt(t_tot, 2) if t_tot > 0 else "0"
+    ax.text(xi, 119.375, lab, ha="center", va="bottom", fontsize=MIN_PT,
+            color=(C_BAD if t_tot > 0 else C_OK))
+    data_a.append({"trial": tr, "fleet_time_above_120_s": t_tot,
+                   "fleet_exported_n_above_120": a["exported_n_above_120"],
+                   "label_printed": lab})
+# 群組標籤與分隔線
+xi0 = 0
+for gi, (name, trs) in enumerate(GROUPS):
+    xs = XA[xi0:xi0 + len(trs)]
+    ax.text((xs[0] + xs[-1]) / 2, 120.405, name, ha="center", va="top", fontsize=MIN_PT,
+            color="0.25", linespacing=1.05)
+    if gi > 0:
+        ax.axvline(xs[0] - 0.5 - GAP / 2, color="0.80", lw=0.6, zorder=0)
+    xi0 += len(trs)
+ax.set_xticks(XA)
+ax.set_xticklabels(ORDER_A, rotation=28, ha="right", rotation_mode="anchor")
+ax.set_xlim(XA[0] - 0.55, XA[-1] + 0.55)
+ax.set_ylim(119.36, 120.42)
+ax.set_yticks([119.4, 119.6, 119.8, 120.0, 120.2, 120.4])
+ax.set_ylabel("最高相對高度 (m AGL)")
+ax.set_title("(a) 最高相對高度；底列數字＝機隊累計高於 120 m 之秒數", loc="left", pad=3)
+mid = XA[2:6]
+ax.text((mid[0] + mid[-1]) / 2, 120.012, "120 m 作業上限", ha="center", va="bottom",
+        fontsize=MIN_PT, color=C_BAD)
+ax.text((mid[0] + mid[-1]) / 2, 120.19, "每趟三點：○□△＝A1／B2／B3", ha="center",
+        va="center", fontsize=MIN_PT, color="0.25")
+# 圖例放在 119.72–119.98 m 的空白帶（全寬無資料點；八趟飛行最高 ≤ 119.70 或 ≥ 120.10）
+ax.legend(handles=[
+    Line2D([], [], marker="_", ls="", color=C_GREY, ms=6.5, mew=1.1, label="匯出航點最高"),
+    Line2D([], [], ls=(0, (4, 2)), color="0.50", lw=0.8, label="規劃天花板"),
+    Line2D([], [], marker="o", ls="", mfc=C_OK, mec=C_OK, ms=3.8, label="SITL 飛行 ≤ 120 m"),
+    Line2D([], [], marker="o", ls="", mfc=C_BAD, mec=C_BAD, ms=3.8, label="SITL 飛行 > 120 m"),
+], loc="center", bbox_to_anchor=(0.5, (119.855 - 119.36) / (120.42 - 119.36)), ncol=2,
+    frameon=False, handletextpad=0.35, borderpad=0.1, labelspacing=0.25, handlelength=1.3,
+    columnspacing=1.0, borderaxespad=0.0)
+
+# ------------------------------------------------------------- (b) 間距 --
+ax2 = fig.add_subplot(gs[0, 1])
+ORDER_B = ["HV4W55R", "HV4W55", "HV4W05", "HV4W00", "HV4SITL15", "HV4SITL16"]
+YB_TOP = 110.6
+OFF_AXIS = ["HV4W55S", "BEAMIDP1"]
+ax2.axhline(100.0, color=C_BAD, lw=0.9, zorder=1)
+ax2.axhspan(98.4, 100.0, color=C_BAD, alpha=0.07, lw=0, zorder=0)
+data_b = []
+for i, tr in enumerate(ORDER_B):
+    s = T[tr]["separation"]
+    pl = s["planned_m"]
+    ex = s["flown_exact_m"]
+    fl = K1[tr]["flat_repo_frame_m"]
+    ax2.bar(i, pl - 100.0, 0.56, bottom=100.0, color=C_PLAN, ec="none", zorder=1)
+    ax2.plot(i, fl, "x", ms=4.4, color="0.35", mew=0.9, zorder=3)
+    ax2.plot(i, ex, "o", ms=4.4, mfc=C_OK, mec=C_OK, zorder=4)
+    ax2.text(i, 101.45, fmt(ex, 3), ha="center", va="bottom", rotation=90,
+             fontsize=MIN_PT, color=C_OK)
+    data_b.append({"trial": tr, "planned_min_sep_h_m_2s_grid": pl,
+                   "flown_min_sep_h_m_exact_ellipsoid": ex,
+                   "flown_min_sep_h_m_flat_repo_frame": fl,
+                   "binding_pair": s["binding_pair"], "d_v_at_min_h_m": s["vert_at_min_m"],
+                   "n_violations": s["n_violations"]})
+for tr in OFF_AXIS:
+    s = T[tr]["separation"]
+    data_b.append({"trial": tr, "planned_min_sep_h_m_2s_grid": s["planned_m"],
+                   "flown_min_sep_h_m_exact_ellipsoid": s["flown_exact_m"],
+                   "flown_min_sep_h_m_flat_repo_frame": K1[tr]["flat_repo_frame_m"],
+                   "binding_pair": s["binding_pair"], "n_violations": s["n_violations"],
+                   "not_plotted": "off the axis range; stated in the panel annotation"})
+off_txt = "軸外（規劃→SITL 飛行）\n" + "\n".join(
+    f"{tr} {fmt(T[tr]['separation']['planned_m'], 2)}→"
+    f"{fmt(T[tr]['separation']['flown_exact_m'], 2)} m"
+    for tr in OFF_AXIS)
+ax2.text(len(ORDER_B) - 0.55, YB_TOP - 0.25, off_txt, ha="right", va="top", fontsize=MIN_PT,
+         color="0.25", linespacing=1.1)
+ax2.text(-0.40, 99.85, "100 m 門檻（八趟違規皆 0）", ha="left", va="top", fontsize=MIN_PT,
+         color=C_BAD)
+ax2.set_xticks(range(len(ORDER_B)))
+ax2.set_xticklabels(ORDER_B, rotation=28, ha="right", rotation_mode="anchor")
+ax2.set_xlim(-0.5, len(ORDER_B) - 0.5)
+ax2.set_ylim(98.4, YB_TOP)
+ax2.set_yticks([100, 102, 104, 106, 108, 110])
+ax2.set_ylabel("最小水平間距 (m)")
+ax2.set_title("(b) 規劃與 SITL 飛行之最小水平間距", loc="left", pad=3)
+# 圖例用語與圖說一致：規劃值（2 s 網格上界）、SITL 飛行值（WGS84 連續時間最小值）、× 既有平面近似值
+ax2.legend(handles=[
+    mpatches.Patch(fc=C_PLAN, ec="none", label="規劃值（上界）"),
+    Line2D([], [], marker="o", ls="", mfc=C_OK, mec=C_OK, ms=4.4, label="SITL 飛行值"),
+    Line2D([], [], marker="x", ls="", color="0.35", ms=4.4, mew=0.9, label="平面近似值"),
+], loc="upper left", bbox_to_anchor=(0.0, 1.0), ncol=1, frameon=False,
+    handletextpad=0.35, borderpad=0.25, labelspacing=0.15, handlelength=1.2,
+    borderaxespad=0.1)
+
+# ---- 字級檢查：畫布上每段文字 ≥ 8 pt ----
+fig.canvas.draw()
+small = [(t.get_text(), t.get_fontsize()) for t in fig.findobj(matplotlib.text.Text)
+         if t.get_text().strip() and t.get_fontsize() < MIN_PT - 1e-9]
+assert not small, small
+# ---- 不得出現「實飛」 ----
+alltxt = [t.get_text() for t in fig.findobj(matplotlib.text.Text)]
+assert not any("實飛" in t for t in alltxt), [t for t in alltxt if "實飛" in t]
+# ---- 文字不得超出畫布 ----
+r = fig.canvas.get_renderer()
+W_px, H_px = fig.bbox.width, fig.bbox.height
+out = []
+for t in fig.findobj(matplotlib.text.Text):
+    if not t.get_text().strip() or not t.get_visible():
+        continue
+    bb = t.get_window_extent(renderer=r)
+    if bb.x0 < -0.5 or bb.y0 < -0.5 or bb.x1 > W_px + 0.5 or bb.y1 > H_px + 0.5:
+        out.append(t.get_text())
+assert not out, out
+
+PNG = OUT_DIR / "fig5_compliance.png"
+SVG = OUT_DIR / "fig5_compliance.svg"
+fig.savefig(PNG, dpi=300, metadata={"Software": None})
+fig.savefig(SVG, metadata={"Date": None, "Creator": None})
+
+srcs = {rel(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in (NUMBERS_P, METRICS_P)}
+(HERE / "fig5_data.json").write_text(json.dumps({
+    "figure": {"png": rel(PNG), "svg": rel(SVG), "width_cm": 17.0,
+               "height_cm": FIG_H_CM, "dpi": 300, "min_font_pt": MIN_PT,
+               "printed_as": "圖3"},
+    "panel_a_altitude": data_a,
+    "panel_b_separation": data_b,
+    "definitions": {
+        "altitude": N["conventions"]["altitude"],
+        "separation_frame": N["conventions"]["separation_frame"],
+        "flat_repo_frame": ("NUMBERS.json corrections.K1_separation_note_e.per_trial."
+                            "*.flat_repo_frame_m: the existing flat 111132 m/deg reporter frame "
+                            "on native samples"),
+        "planned": "NUMBERS.json trials.*.separation.planned_m (planner 2 s grid, upper bound)",
+        "exported_per_uav": "metrics.json *.altitude.per_uav.*.exported_max_rel_m "
+                            "(fleet max asserted equal to NUMBERS exported_max_rel_m)",
+    },
+    "caveats": [
+        "HV4W55R 與 HV4W55 只差規劃天花板（同風場、同匯出項數、參數檔逐位元相同）："
+        "NUMBERS.json ceiling_control。",
+        "HV4SITL15／16 為 120.0 m 天花板、模擬未設風之歷史對照，與 119.5 m 各趟差兩個變因。",
+        "121.92 m（400 ft）法規上限落在圖 (a) 縱軸之外。",
+        "規劃間距為 2 s 網格上界，與 SITL 飛行值不是同一種量測。",
+        "每格 1 趟；SITL 為決定性模擬。",
+    ],
+    "sources": srcs,
+}, indent=1, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+print("wrote", rel(PNG), rel(SVG), rel(HERE / "fig5_data.json"))

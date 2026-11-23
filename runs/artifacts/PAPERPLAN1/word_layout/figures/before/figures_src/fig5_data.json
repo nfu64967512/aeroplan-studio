@@ -1,0 +1,461 @@
+{
+ "caveats": [
+  "121.92 m（400 ft）法規上限落在圖 (a) 的縱軸範圍之外：六趟的最小餘裕為 1.76 m，全部合規。",
+  "規劃間距本身也是 2 s 時間格上的上界（hv_dccpp/sim.py:1007-1034、mission.py:1092 dt_4d_s = 2.0），所以圖 (b) 的灰柱與圓點不是同一種量測；grid_cost_of_the_2s_planner_grid 給出同一條航跡上 2 s 格會高估多少。",
+  "每格 1 趟；SITL 為決定性模擬，沒有重複量測的散布。",
+  "A1–B2 在 gui_legal 四趟中從未同時在空中，故約束機對恆為 B2–B3。"
+ ],
+ "definitions": {
+  "ecef_vs_repo": "hv_sitl_report.py and binsep.py use a flat 111132 m/deg of latitude; the planner's mission geometry uses the exact WGS84 GeoFrame, in which the same encounter is 0.34 m closer",
+  "flown_max_rel_alt": "dataflash POS.RelHomeAlt, ~6 Hz, whole log",
+  "flown_min_sep": "both tracks resampled onto the union of their native POS times, then the exact minimum of the piecewise-linear relative position per interval; violation = horizontal < 100 m AND vertical < 50 m with both above 2 m AGL",
+  "time_above": "linear interpolation of the level crossings, not sample counting"
+ },
+ "figure": {
+  "dpi": 300,
+  "height_cm": 6.2,
+  "png": "docs/hv_dccpp/AASRC2026_abstract/fig5_compliance.png",
+  "svg": "docs/hv_dccpp/AASRC2026_abstract/fig5_compliance.svg",
+  "width_cm": 17.0
+ },
+ "grid_cost_of_the_2s_planner_grid": {
+  "BEAMIDP1": {
+   "binding_pair": "A1-B2",
+   "by_grid": {
+    "0.2s": {
+     "overstates_by_m": 0.0157,
+     "sample_wise_min_h_m": 180.7892
+    },
+    "0.5s": {
+     "overstates_by_m": 0.27,
+     "sample_wise_min_h_m": 181.0435
+    },
+    "1s": {
+     "overstates_by_m": 0.3083,
+     "sample_wise_min_h_m": 181.0818
+    },
+    "2s": {
+     "overstates_by_m": 2.4809,
+     "sample_wise_min_h_m": 183.2544
+    },
+    "5s": {
+     "overstates_by_m": 11.8732,
+     "sample_wise_min_h_m": 192.6467
+    }
+   },
+   "exact_min_h_m": 180.7735,
+   "note": "what a fixed time grid costs on these very tracks; the planner's own min_sep_h_m uses a 2 s grid"
+  },
+  "HV4SITL15": {
+   "binding_pair": "B2-B3",
+   "by_grid": {
+    "0.2s": {
+     "overstates_by_m": 0.0477,
+     "sample_wise_min_h_m": 100.7372
+    },
+    "0.5s": {
+     "overstates_by_m": 0.2213,
+     "sample_wise_min_h_m": 100.9108
+    },
+    "1s": {
+     "overstates_by_m": 0.6274,
+     "sample_wise_min_h_m": 101.3169
+    },
+    "2s": {
+     "overstates_by_m": 0.6274,
+     "sample_wise_min_h_m": 101.3169
+    },
+    "5s": {
+     "overstates_by_m": 0.6274,
+     "sample_wise_min_h_m": 101.3169
+    }
+   },
+   "exact_min_h_m": 100.6895,
+   "note": "what a fixed time grid costs on these very tracks; the planner's own min_sep_h_m uses a 2 s grid"
+  },
+  "HV4SITL16": {
+   "binding_pair": "B2-B3",
+   "by_grid": {
+    "0.2s": {
+     "overstates_by_m": 0.0206,
+     "sample_wise_min_h_m": 100.706
+    },
+    "0.5s": {
+     "overstates_by_m": 0.1418,
+     "sample_wise_min_h_m": 100.8272
+    },
+    "1s": {
+     "overstates_by_m": 0.1418,
+     "sample_wise_min_h_m": 100.8272
+    },
+    "2s": {
+     "overstates_by_m": 0.1418,
+     "sample_wise_min_h_m": 100.8272
+    },
+    "5s": {
+     "overstates_by_m": 0.1418,
+     "sample_wise_min_h_m": 100.8272
+    }
+   },
+   "exact_min_h_m": 100.6854,
+   "note": "what a fixed time grid costs on these very tracks; the planner's own min_sep_h_m uses a 2 s grid"
+  },
+  "HV4W00": {
+   "binding_pair": "B2-B3",
+   "by_grid": {
+    "0.2s": {
+     "overstates_by_m": 0.0403,
+     "sample_wise_min_h_m": 100.4753
+    },
+    "0.5s": {
+     "overstates_by_m": 0.0925,
+     "sample_wise_min_h_m": 100.5275
+    },
+    "1s": {
+     "overstates_by_m": 0.0925,
+     "sample_wise_min_h_m": 100.5275
+    },
+    "2s": {
+     "overstates_by_m": 0.0925,
+     "sample_wise_min_h_m": 100.5275
+    },
+    "5s": {
+     "overstates_by_m": 4.7175,
+     "sample_wise_min_h_m": 105.1525
+    }
+   },
+   "exact_min_h_m": 100.435,
+   "note": "what a fixed time grid costs on these very tracks; the planner's own min_sep_h_m uses a 2 s grid"
+  },
+  "HV4W05": {
+   "binding_pair": "B2-B3",
+   "by_grid": {
+    "0.2s": {
+     "overstates_by_m": 0.0137,
+     "sample_wise_min_h_m": 100.3046
+    },
+    "0.5s": {
+     "overstates_by_m": 0.0137,
+     "sample_wise_min_h_m": 100.3046
+    },
+    "1s": {
+     "overstates_by_m": 0.0137,
+     "sample_wise_min_h_m": 100.3046
+    },
+    "2s": {
+     "overstates_by_m": 0.0137,
+     "sample_wise_min_h_m": 100.3046
+    },
+    "5s": {
+     "overstates_by_m": 23.6566,
+     "sample_wise_min_h_m": 123.9475
+    }
+   },
+   "exact_min_h_m": 100.2909,
+   "note": "what a fixed time grid costs on these very tracks; the planner's own min_sep_h_m uses a 2 s grid"
+  },
+  "HV4W55": {
+   "binding_pair": "B2-B3",
+   "by_grid": {
+    "0.2s": {
+     "overstates_by_m": 0.0019,
+     "sample_wise_min_h_m": 100.4275
+    },
+    "0.5s": {
+     "overstates_by_m": 0.3166,
+     "sample_wise_min_h_m": 100.7422
+    },
+    "1s": {
+     "overstates_by_m": 0.3166,
+     "sample_wise_min_h_m": 100.7422
+    },
+    "2s": {
+     "overstates_by_m": 4.1855,
+     "sample_wise_min_h_m": 104.6111
+    },
+    "5s": {
+     "overstates_by_m": 0.3166,
+     "sample_wise_min_h_m": 100.7422
+    }
+   },
+   "exact_min_h_m": 100.4256,
+   "note": "what a fixed time grid costs on these very tracks; the planner's own min_sep_h_m uses a 2 s grid"
+  }
+ },
+ "panel_a_altitude": [
+  {
+   "ceiling_m": 120.0,
+   "margin_to_120_000_m": -0.115,
+   "margin_to_121_92_m": 1.805,
+   "max_exported_rel_alt_m": 120.0526,
+   "max_flown_rel_alt_m": 120.115,
+   "n_exported_items_above_120": 38,
+   "time_above_120_000_s": 147.527,
+   "trial": "HV4SITL15",
+   "uav": "A1"
+  },
+  {
+   "ceiling_m": 120.0,
+   "margin_to_120_000_m": -0.1456,
+   "margin_to_121_92_m": 1.7744,
+   "max_exported_rel_alt_m": 120.0331,
+   "max_flown_rel_alt_m": 120.1456,
+   "n_exported_items_above_120": 13,
+   "time_above_120_000_s": 57.622,
+   "trial": "HV4SITL15",
+   "uav": "B2"
+  },
+  {
+   "ceiling_m": 120.0,
+   "margin_to_120_000_m": -0.1522,
+   "margin_to_121_92_m": 1.7678,
+   "max_exported_rel_alt_m": 120.0331,
+   "max_flown_rel_alt_m": 120.1522,
+   "n_exported_items_above_120": 37,
+   "time_above_120_000_s": 120.643,
+   "trial": "HV4SITL15",
+   "uav": "B3"
+  },
+  {
+   "ceiling_m": 120.0,
+   "margin_to_120_000_m": -0.103,
+   "margin_to_121_92_m": 1.817,
+   "max_exported_rel_alt_m": 120.0526,
+   "max_flown_rel_alt_m": 120.103,
+   "n_exported_items_above_120": 38,
+   "time_above_120_000_s": 147.267,
+   "trial": "HV4SITL16",
+   "uav": "A1"
+  },
+  {
+   "ceiling_m": 120.0,
+   "margin_to_120_000_m": -0.1291,
+   "margin_to_121_92_m": 1.7909,
+   "max_exported_rel_alt_m": 120.0331,
+   "max_flown_rel_alt_m": 120.1291,
+   "n_exported_items_above_120": 13,
+   "time_above_120_000_s": 56.763,
+   "trial": "HV4SITL16",
+   "uav": "B2"
+  },
+  {
+   "ceiling_m": 120.0,
+   "margin_to_120_000_m": -0.1619,
+   "margin_to_121_92_m": 1.7581,
+   "max_exported_rel_alt_m": 120.0331,
+   "max_flown_rel_alt_m": 120.1619,
+   "n_exported_items_above_120": 37,
+   "time_above_120_000_s": 126.105,
+   "trial": "HV4SITL16",
+   "uav": "B3"
+  },
+  {
+   "ceiling_m": 119.5,
+   "margin_to_120_000_m": 0.3779,
+   "margin_to_121_92_m": 2.2979,
+   "max_exported_rel_alt_m": 119.5526,
+   "max_flown_rel_alt_m": 119.6221,
+   "n_exported_items_above_120": 0,
+   "time_above_120_000_s": 0.0,
+   "trial": "HV4W55",
+   "uav": "A1"
+  },
+  {
+   "ceiling_m": 119.5,
+   "margin_to_120_000_m": 0.3644,
+   "margin_to_121_92_m": 2.2844,
+   "max_exported_rel_alt_m": 119.5332,
+   "max_flown_rel_alt_m": 119.6356,
+   "n_exported_items_above_120": 0,
+   "time_above_120_000_s": 0.0,
+   "trial": "HV4W55",
+   "uav": "B2"
+  },
+  {
+   "ceiling_m": 119.5,
+   "margin_to_120_000_m": 0.3248,
+   "margin_to_121_92_m": 2.2448,
+   "max_exported_rel_alt_m": 119.5331,
+   "max_flown_rel_alt_m": 119.6752,
+   "n_exported_items_above_120": 0,
+   "time_above_120_000_s": 0.0,
+   "trial": "HV4W55",
+   "uav": "B3"
+  },
+  {
+   "ceiling_m": 119.5,
+   "margin_to_120_000_m": 0.3971,
+   "margin_to_121_92_m": 2.3171,
+   "max_exported_rel_alt_m": 119.5521,
+   "max_flown_rel_alt_m": 119.6029,
+   "n_exported_items_above_120": 0,
+   "time_above_120_000_s": 0.0,
+   "trial": "HV4W05",
+   "uav": "A1"
+  },
+  {
+   "ceiling_m": 119.5,
+   "margin_to_120_000_m": 0.3393,
+   "margin_to_121_92_m": 2.2593,
+   "max_exported_rel_alt_m": 119.5329,
+   "max_flown_rel_alt_m": 119.6607,
+   "n_exported_items_above_120": 0,
+   "time_above_120_000_s": 0.0,
+   "trial": "HV4W05",
+   "uav": "B2"
+  },
+  {
+   "ceiling_m": 119.5,
+   "margin_to_120_000_m": 0.3515,
+   "margin_to_121_92_m": 2.2715,
+   "max_exported_rel_alt_m": 119.5328,
+   "max_flown_rel_alt_m": 119.6485,
+   "n_exported_items_above_120": 0,
+   "time_above_120_000_s": 0.0,
+   "trial": "HV4W05",
+   "uav": "B3"
+  },
+  {
+   "ceiling_m": 119.5,
+   "margin_to_120_000_m": 0.4028,
+   "margin_to_121_92_m": 2.3228,
+   "max_exported_rel_alt_m": 119.5521,
+   "max_flown_rel_alt_m": 119.5972,
+   "n_exported_items_above_120": 0,
+   "time_above_120_000_s": 0.0,
+   "trial": "HV4W00",
+   "uav": "A1"
+  },
+  {
+   "ceiling_m": 119.5,
+   "margin_to_120_000_m": 0.3693,
+   "margin_to_121_92_m": 2.2893,
+   "max_exported_rel_alt_m": 119.5329,
+   "max_flown_rel_alt_m": 119.6307,
+   "n_exported_items_above_120": 0,
+   "time_above_120_000_s": 0.0,
+   "trial": "HV4W00",
+   "uav": "B2"
+  },
+  {
+   "ceiling_m": 119.5,
+   "margin_to_120_000_m": 0.3373,
+   "margin_to_121_92_m": 2.2573,
+   "max_exported_rel_alt_m": 119.5328,
+   "max_flown_rel_alt_m": 119.6627,
+   "n_exported_items_above_120": 0,
+   "time_above_120_000_s": 0.0,
+   "trial": "HV4W00",
+   "uav": "B3"
+  },
+  {
+   "ceiling_m": 119.5,
+   "margin_to_120_000_m": 0.3031,
+   "margin_to_121_92_m": 2.2231,
+   "max_exported_rel_alt_m": 119.6703,
+   "max_flown_rel_alt_m": 119.6969,
+   "n_exported_items_above_120": 0,
+   "time_above_120_000_s": 0.0,
+   "trial": "BEAMIDP1",
+   "uav": "A1"
+  },
+  {
+   "ceiling_m": 119.5,
+   "margin_to_120_000_m": 0.3389,
+   "margin_to_121_92_m": 2.2589,
+   "max_exported_rel_alt_m": 119.5136,
+   "max_flown_rel_alt_m": 119.6611,
+   "n_exported_items_above_120": 0,
+   "time_above_120_000_s": 0.0,
+   "trial": "BEAMIDP1",
+   "uav": "B2"
+  },
+  {
+   "ceiling_m": 119.5,
+   "margin_to_120_000_m": 0.3063,
+   "margin_to_121_92_m": 2.2263,
+   "max_exported_rel_alt_m": 119.554,
+   "max_flown_rel_alt_m": 119.6937,
+   "n_exported_items_above_120": 0,
+   "time_above_120_000_s": 0.0,
+   "trial": "BEAMIDP1",
+   "uav": "B3"
+  }
+ ],
+ "panel_b_separation": [
+  {
+   "binding_pair": "B2-B3",
+   "d_v_at_min_h_m": 28.7569,
+   "flown_min_sep_h_m_ecef": 100.6895,
+   "flown_min_sep_h_m_repo_frame": 101.0299,
+   "n_violations": 0,
+   "planned_min_sep_h_m": 105.46410835682013,
+   "planned_source": "runs/artifacts/HV4SITL15/validation.json (2 s grid, hv_dccpp/sim.py:1007-1034 + mission.py:1092)",
+   "reporter_min_h_m": 104.2,
+   "trial": "HV4SITL15"
+  },
+  {
+   "binding_pair": "B2-B3",
+   "d_v_at_min_h_m": 28.8111,
+   "flown_min_sep_h_m_ecef": 100.6854,
+   "flown_min_sep_h_m_repo_frame": 101.0258,
+   "n_violations": 0,
+   "planned_min_sep_h_m": 105.46410835682013,
+   "planned_source": "runs/artifacts/HV4SITL16/validation.json (2 s grid, hv_dccpp/sim.py:1007-1034 + mission.py:1092)",
+   "reporter_min_h_m": null,
+   "trial": "HV4SITL16"
+  },
+  {
+   "binding_pair": "B2-B3",
+   "d_v_at_min_h_m": 28.3942,
+   "flown_min_sep_h_m_ecef": 100.4256,
+   "flown_min_sep_h_m_repo_frame": 100.7652,
+   "n_violations": 0,
+   "planned_min_sep_h_m": 105.69924202560053,
+   "planned_source": "runs/artifacts/HV4W55/validation.json (2 s grid, hv_dccpp/sim.py:1007-1034 + mission.py:1092)",
+   "reporter_min_h_m": 103.8,
+   "trial": "HV4W55"
+  },
+  {
+   "binding_pair": "B2-B3",
+   "d_v_at_min_h_m": 28.6509,
+   "flown_min_sep_h_m_ecef": 100.2909,
+   "flown_min_sep_h_m_repo_frame": 100.63,
+   "n_violations": 0,
+   "planned_min_sep_h_m": 104.63742703097031,
+   "planned_source": "runs/artifacts/HV4W05/validation.json (2 s grid, hv_dccpp/sim.py:1007-1034 + mission.py:1092)",
+   "reporter_min_h_m": 100.8,
+   "trial": "HV4W05"
+  },
+  {
+   "binding_pair": "B2-B3",
+   "d_v_at_min_h_m": 28.6801,
+   "flown_min_sep_h_m_ecef": 100.435,
+   "flown_min_sep_h_m_repo_frame": 100.7746,
+   "n_violations": 0,
+   "planned_min_sep_h_m": 104.63742703097031,
+   "planned_source": "runs/artifacts/HV4W00/validation.json (2 s grid, hv_dccpp/sim.py:1007-1034 + mission.py:1092)",
+   "reporter_min_h_m": 102.2,
+   "trial": "HV4W00"
+  },
+  {
+   "binding_pair": "A1-B2",
+   "flown_min_sep_h_m_ecef": 180.7735,
+   "flown_min_sep_h_m_repo_frame": 181.383,
+   "n_violations": 0,
+   "not_plotted": "off the axis range; stated in the panel annotation",
+   "planned_min_sep_h_m": 180.5612423172731,
+   "planned_source": "runs/artifacts/BEAMIDP1/validation.json (2 s grid, hv_dccpp/sim.py:1007-1034 + mission.py:1092)",
+   "reporter_min_h_m": 182.7,
+   "trial": "BEAMIDP1"
+  }
+ ],
+ "sources": {
+  "runs/artifacts/PAPERPLAN1/analysis/out/altitude.json": "5e1f671c97543fef7c1367d3f064463ce82b9a7a5c26aa773addd04ddbd23bc0",
+  "runs/artifacts/PAPERPLAN1/analysis/out/derived.json": "07241ba2e6253478cb34f772d72fd071c5fdf071d4a5a6102e53eb097d1c9dfc",
+  "runs/artifacts/PAPERPLAN1/analysis/out/separation.json": "de6a0c43587c89aaeb49df1db4689b81672e77b912994e7bad8255e702c78d10",
+  "runs/artifacts/PAPERPLAN1/analysis/out/timing.json": "49619ba8f7ea0b93163fe8b6aadf1bed7639096ea44961383e0206a1f0c5c133",
+  "runs/artifacts/PAPERPLAN1/analysis/out/uav_kinematics.json": "15e8d6f7ae09673547b9eeffcdaac0192a3c3e4054885ecf1314297868b12eee",
+  "runs/artifacts/PAPERPLAN1/analysis/out/verify.json": "8833895ae2c58a974e41921d85a69b58157f86dd6210d1bf482d19cd6c410826"
+ }
+}

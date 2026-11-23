@@ -1,0 +1,172 @@
+<?xml version="1.0" ?>
+<!--
+  taoyuan_runway.sdf — 桃園起飛場景,對齊 SITL 的原點。
+
+  ⚠️ 原點必須與 swarm_sitl_up.sh 產生的 swarm_state.env 一致,否則 Gazebo 的
+     地理座標與飛控的 HOME 對不上,所有 lat/lon 相關的驗收(命中誤差、海面
+     TARGET_AMSL=0)全部失去意義。目前值:
+
+         SWARM_LOC="25.0777,121.2325,32,52"    # lat, lon, 海拔 m, 航向 deg
+
+  ⚠️ `<spherical_coordinates>` 的 heading_deg 保持 0。它旋轉的是**世界座標框**,
+     不是飛機航向;跑道與機體的朝向要用各自 <pose> 的 yaw 表示。
+     (模板 zephyr_runway.sdf 也是這樣:heading_deg 0,跑道 yaw 363、機體 yaw 180。)
+
+  ⚠️ 機體那一段是**佔位**,沿用 zephyr_with_ardupilot 的相對姿態。
+     實際要飛的機體尚未定案(通用 -jet 氣動 vs Barracuda 500 CAD 幾何),
+     定案後只需要換 <include> 的 uri 與 pose。
+-->
+<sdf version="1.9">
+  <world name="taoyuan_runway">
+    <physics name="1ms" type="ignore">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>-1.0</real_time_factor>
+    </physics>
+
+    <plugin filename="gz-sim-physics-system"
+      name="gz::sim::systems::Physics">
+    </plugin>
+    <plugin filename="gz-sim-user-commands-system"
+      name="gz::sim::systems::UserCommands">
+    </plugin>
+    <plugin filename="gz-sim-scene-broadcaster-system"
+      name="gz::sim::systems::SceneBroadcaster">
+    </plugin>
+    <plugin filename="gz-sim-imu-system"
+      name="gz::sim::systems::Imu">
+    </plugin>
+    <plugin filename="gz-sim-navsat-system"
+      name="gz::sim::systems::NavSat">
+    </plugin>
+
+    <scene>
+      <ambient>1.0 1.0 1.0</ambient>
+      <background>0.8 0.8 0.8</background>
+      <sky></sky>
+    </scene>
+
+    <!-- 桃園機場。海拔 32 m 與 SITL HOME 相同 —— 記憶 agl-datum-false-kill:
+         兩個高度基準不同步時,觸水終結會誤殺巡航中的飛機。 -->
+    <spherical_coordinates>
+      <latitude_deg>25.0777</latitude_deg>
+      <longitude_deg>121.2325</longitude_deg>
+      <elevation>32</elevation>
+      <heading_deg>0</heading_deg>
+      <surface_model>EARTH_WGS84</surface_model>
+    </spherical_coordinates>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.8 0.8 0.8 1</specular>
+      <attenuation>
+        <range>1000</range>
+        <constant>0.9</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <!-- 原點三軸(紅=X/東 綠=Y/北 藍=Z/上),用來目視確認朝向。 -->
+    <model name="axes">
+      <static>1</static>
+      <link name="link">
+        <visual name="r">
+          <cast_shadows>0</cast_shadows>
+          <pose>5 0 0.1 0 0 0</pose>
+          <geometry><box><size>10 0.01 0.01</size></box></geometry>
+          <material>
+            <ambient>1 0 0 0.8</ambient>
+            <diffuse>1 0 0 0.8</diffuse>
+            <emissive>1 0 0 0.8</emissive>
+          </material>
+        </visual>
+        <visual name="g">
+          <cast_shadows>0</cast_shadows>
+          <pose>0 5 0.1 0 0 0</pose>
+          <geometry><box><size>0.01 10 0.01</size></box></geometry>
+          <material>
+            <ambient>0 1 0 0.8</ambient>
+            <diffuse>0 1 0 0.8</diffuse>
+            <emissive>0 1 0 0.8</emissive>
+          </material>
+        </visual>
+        <visual name="b">
+          <cast_shadows>0</cast_shadows>
+          <pose>0 0 5.1 0 0 0</pose>
+          <geometry><box><size>0.01 0.01 10</size></box></geometry>
+          <material>
+            <ambient>0 0 1 0.8</ambient>
+            <diffuse>0 0 1 0.8</diffuse>
+            <emissive>0 0 1 0.8</emissive>
+          </material>
+        </visual>
+        <sensor name="navsat_sensor" type="navsat">
+          <always_on>1</always_on>
+          <update_rate>1</update_rate>
+        </sensor>
+      </link>
+    </model>
+
+    <!-- ⚠️⚠️ **地面一定要有。** 模板 zephyr_runway.sdf **只有跑道盤、沒有地面**,
+         所以跑道一旦沒蓋住機體起點,飛機就直接掉下去 —— 而且 Gazebo 不會報錯。
+         實測 2026-08-11:我把跑道 yaw 從 363 改成 38 卻忘了轉位移,跑道盤轉開、
+         原點下面變成空的,遙測抓到 roll=3.141 / pitch=1.544(翻覆且機頭朝天)。
+         本任務要飛 60 km,本來就需要地面,順便讓這類錯誤不再靜默。 -->
+    <!-- ⚠️ 不要用 `<include><uri>model://ground_plane</uri>` —— 那個模型**本機沒有**,
+         gz 預設是去 Fuel 線上抓,離線環境會直接 Error Code 14 讓整個世界起不來
+         (實測 2026-08-11)。這裡內嵌,自給自足。
+         尺寸 200 km:本任務要飛 60 km,地面不能只有跑道那一塊。
+    ⚠️ **未解的基準問題**:這塊地面在世界 z=0,而世界原點海拔是 32 m
+       ⇒ Gazebo 裡的「海平面」其實是 32 m AMSL。而紅心釘死 0 m AMSL
+       (記憶 sea-level-target-datum)。做打擊驗收前必須處理這 32 m 落差,
+       否則會重演「殘餘高度恆定」那一類的地形落差 bug。鏈路驗證階段不受影響。 -->
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane><normal>0 0 1</normal><size>200000 200000</size></plane>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <plane><normal>0 0 1</normal><size>200000 200000</size></plane>
+          </geometry>
+          <material>
+            <ambient>0.30 0.42 0.30 1</ambient>
+            <diffuse>0.30 0.42 0.30 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- 跑道。
+         yaw:ENU 的 yaw 從 +X(東)逆時針量,羅盤航向 H 對應 yaw = 90 − H;
+             H=52(SWARM_LOC 的第四個值)⇒ yaw = 38。
+         位置:模板是 (−29, 545) 配 yaw 363。**旋轉跑道時位移必須一起轉**,
+             否則跑道會從機體底下滑開。Δ = 38 − 363 = −325° ≡ +35°:
+                 x' = −29·cos35 − 545·sin35 = −336
+                 y' = −29·sin35 + 545·cos35 = +430
+         ⚠️ yaw 的推導仍**未經目視確認**;但「機體有沒有平穩坐在跑道上」現在
+            由 SIMSTATE 的 roll/pitch 直接驗(見 scratchpad 的 chain2.py 判據),
+            比目視可靠。 -->
+    <include>
+      <uri>model://runway</uri>
+      <pose degrees="true">-336 430 0 0 0 38</pose>
+    </include>
+
+    <!-- 佔位機體(見檔頭說明)。
+         ⚠️ roll −90 是 zephyr 模型自己的座標慣例,**不要動**;
+            要改航向只動 yaw(SDF 的 pose 是 R = Rz(yaw)·Ry(pitch)·Rx(roll),
+            yaw 最後才繞世界 Z 軸轉,所以單改 yaw 就是純改航向)。 -->
+    <include>
+      <uri>model://zephyr_with_ardupilot</uri>
+      <pose degrees="true">0 0 0.422 -90 0 -145</pose>
+    </include>
+
+  </world>
+</sdf>

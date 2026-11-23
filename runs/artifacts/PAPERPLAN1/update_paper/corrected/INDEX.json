@@ -1,0 +1,98 @@
+{
+ "authority": "update_paper/TABLES_ZH.md and update_paper/PAPER_TEXT_ZH.md are the final text; the entries below say what changed and why",
+ "entries": [
+  {
+   "correction_copy": "runs/artifacts/PAPERPLAN1/update_paper/corrected/paper_text__TABLES_ZH.CORRECTION.json",
+   "k_ids": [
+    "K1",
+    "K2",
+    "K3",
+    "K4",
+    "K5",
+    "K9"
+   ],
+   "original": "runs/artifacts/PAPERPLAN1/paper_text/TABLES_ZH.md",
+   "sha256": "c37ba4fc82921e231e8266faec7fe43f3b87f060ae7af6b9b6efd34e08369988",
+   "summary": "表 2b 表註 (e) 與 (b)、表 2 參數列、表 X 之 BEAMIDP1 腳註、表 Z 標題與圖說首段"
+  },
+  {
+   "correction_copy": "runs/artifacts/PAPERPLAN1/update_paper/corrected/paper_text__PAPER_TEXT_ZH.CORRECTION.json",
+   "k_ids": [
+    "K2",
+    "K6",
+    "K7"
+   ],
+   "original": "runs/artifacts/PAPERPLAN1/paper_text/PAPER_TEXT_ZH.md",
+   "sha256": "6a73a5015e2675e2475ff7f9870e82db440d67aa1c79ce1f525c4492098b7c48",
+   "summary": "C4-b/C4-e/C4-f 的 91/96、:51 與 :74 的 +0.02 s、C2-f 的附錄 B :276 區間"
+  },
+  {
+   "correction_copy": "runs/artifacts/PAPERPLAN1/update_paper/corrected/paper_text__README.CORRECTION.json",
+   "k_ids": [
+    "K2",
+    "K5",
+    "K6"
+   ],
+   "original": "runs/artifacts/PAPERPLAN1/paper_text/README.md",
+   "sha256": "b18a53769092a0b8354df322956103904b271ec890017bc27d26d8474e06dbc3",
+   "summary": "一.1 的 +0.02 s、一.5 未揭露 BEAMIDP1 的無風模擬、一.7 的 91/96"
+  },
+  {
+   "correction_copy": "runs/artifacts/PAPERPLAN1/update_paper/corrected/paper_text__out_NUMBERS.CORRECTION.json",
+   "k_ids": [
+    "K2"
+   ],
+   "original": "runs/artifacts/PAPERPLAN1/paper_text/out/NUMBERS.json",
+   "sha256": "6e55f5c97f7279637daf171fbe8672167ba96eac56872aafabff56ea0c32e696",
+   "summary": "upload_and_params.*.strict_* 欄位之措辭"
+  },
+  {
+   "correction_copy": "runs/artifacts/PAPERPLAN1/update_paper/corrected/prep_text__C1_C2_placeholders.CORRECTION.json",
+   "k_ids": [
+    "K6"
+   ],
+   "original": "runs/artifacts/PAPERPLAN1/prep_text/C1_C2_placeholders.md",
+   "sha256": "0e393deef7e66c15c7d9af5b9556409bab0ef80acba7addc14f984077163c5d7",
+   "summary": ":20 與 :33 的 makespan +0.02 s"
+  },
+  {
+   "correction_copy": "runs/artifacts/PAPERPLAN1/update_paper/corrected/prep_text__C4_params.CORRECTION.json",
+   "k_ids": [
+    "K2"
+   ],
+   "original": "runs/artifacts/PAPERPLAN1/prep_text/C4_params.md",
+   "sha256": "c1d8b23c98758d516f430ae1b8ff68894f3ab1f2ca410de23cadac65b05b7af9",
+   "summary": "91/96 的「嚴格比對」措辭"
+  },
+  {
+   "correction_copy": "runs/artifacts/PAPERPLAN1/update_paper/corrected/prep_text__Table2_skeleton.CORRECTION.json",
+   "k_ids": [
+    "K2"
+   ],
+   "original": "runs/artifacts/PAPERPLAN1/prep_text/Table2_skeleton.md",
+   "sha256": "3a773fd8a2610aebe8fdce50683529a42bd168ac761252259633d505e28ad962",
+   "summary": "表 2 骨架中的 91/96"
+  },
+  {
+   "correction_copy": "runs/artifacts/PAPERPLAN1/update_paper/corrected/sorties__sortie_results.CORRECTION.json",
+   "k_ids": [
+    "K3",
+    "K4"
+   ],
+   "original": "runs/artifacts/PAPERPLAN1/sorties/sortie_results.json",
+   "sha256": "227c6db214c02efce99d95feb0641596595fe254fa21c7535619bae21d6008c6",
+   "summary": "status_reason 與 spawn_diagnosis 的順風說法與「逐位元重現」"
+  },
+  {
+   "correction_copy": "runs/artifacts/PAPERPLAN1/update_paper/corrected/workflow__sortie_workflow_result.CORRECTION.json",
+   "k_ids": [
+    "K8"
+   ],
+   "original": "runs/artifacts/PAPERPLAN1/sortie_workflow_result.json",
+   "sha256": "747ebcfb2f0464ff9a09bc128ddb4bbdaa04c4d3cd4a7f0156a72ce9fe2ba9d0",
+   "summary": "ana/fly 敘述中的「dataflash 沒有電池遙測」"
+  }
+ ],
+ "label": "update_paper",
+ "rule": "originals are never modified; each entry is a corrected COPY plus a pointer card written beside the original"
+}

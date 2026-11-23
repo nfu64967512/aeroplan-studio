@@ -1,0 +1,97 @@
+fleet_area_split(1 → 3 塊；單一大區配混編機隊會產出空計畫，所以先切）
+HARVEST: min_fw_lowered(Pioneer PNP（構型 A）120 → 100 m)。表 1 的值是規劃值不是機體極限（使用方式欄：「任務前需依地形、感測器與法規調整」），但它會寫進飛控的 Q_RTL_ALT（匯出的 .param，每條路徑都生效）⇒ QRTL 進場高度跟著降；另外 FENCE_ALT_MIN 也綁著它，但只在走 mavlink_link.upload_plan 寫參數那條路時才會送出。
+HARVEST: dh_band_min_relaxed(15 m，預設 20)。這同時放寬了 GSD 可達性判準（h_max ≥ 最低作業高度 + 15）與相機預設目標高。
+HARVEST: recovery_auto_rejected({'A1': 'ALT1'}；最小水平間距變差（105.7 → 86.0 m））
+{
+ "tag": "paper_cell_1560x800",
+ "plan_s": 11.7,
+ "status": "GO_WITH_WARNINGS",
+ "makespan_s": 1260.45,
+ "validate_passed": true,
+ "conflicts": 0,
+ "uncovered": 0,
+ "min_sep_h_m": 105.699,
+ "total_distance_m": 30660.6,
+ "wall_clock_min_at_speedup_5": 4.2,
+ "per_uav": {
+  "A1": {
+   "cls": "A",
+   "strips": 3,
+   "distance_km": 10.294,
+   "energy_used_wh": 195.2,
+   "energy_margin_wh": 704.8,
+   "t_takeoff_s": 656.0,
+   "t_land_s": 1260.5
+  },
+  "B2": {
+   "cls": "B",
+   "strips": 2,
+   "distance_km": 7.926,
+   "energy_used_wh": 63.3,
+   "energy_margin_wh": 190.7,
+   "t_takeoff_s": 0.0,
+   "t_land_s": 533.9
+  },
+  "B3": {
+   "cls": "B",
+   "strips": 4,
+   "distance_km": 12.441,
+   "energy_used_wh": 79.1,
+   "energy_margin_wh": 174.9,
+   "t_takeoff_s": 106.0,
+   "t_land_s": 894.5
+  }
+ },
+ "cells": [],
+ "n_cells_interlacing": 0,
+ "n_cells": 0
+}
+fleet_area_split(1 → 3 塊；單一大區配混編機隊會產出空計畫，所以先切）
+HARVEST: min_fw_lowered(Pioneer PNP（構型 A）120 → 100 m)。表 1 的值是規劃值不是機體極限（使用方式欄：「任務前需依地形、感測器與法規調整」），但它會寫進飛控的 Q_RTL_ALT（匯出的 .param，每條路徑都生效）⇒ QRTL 進場高度跟著降；另外 FENCE_ALT_MIN 也綁著它，但只在走 mavlink_link.upload_plan 寫參數那條路時才會送出。
+HARVEST: dh_band_min_relaxed(15 m，預設 20)。這同時放寬了 GSD 可達性判準（h_max ≥ 最低作業高度 + 15）與相機預設目標高。
+HARVEST: recovery_auto_applied({'A1': 'ALT1'}；makespan 3229.9 → 3013.9 s、最小間距 137.4 → 136.5 m)
+{
+ "tag": "interlaced_3000x3000",
+ "plan_s": 16.3,
+ "status": "GO_WITH_WARNINGS",
+ "makespan_s": 3013.88,
+ "validate_passed": true,
+ "conflicts": 0,
+ "uncovered": 0,
+ "min_sep_h_m": 136.464,
+ "total_distance_m": 142354.8,
+ "wall_clock_min_at_speedup_5": 10.0,
+ "per_uav": {
+  "A1": {
+   "cls": "A",
+   "strips": 11,
+   "distance_km": 53.353,
+   "energy_used_wh": 548.0,
+   "energy_margin_wh": 352.0,
+   "t_takeoff_s": 302.0,
+   "t_land_s": 2963.8
+  },
+  "B2": {
+   "cls": "B",
+   "strips": 11,
+   "distance_km": 44.364,
+   "energy_used_wh": 186.5,
+   "energy_margin_wh": 67.5,
+   "t_takeoff_s": 0.0,
+   "t_land_s": 2516.9
+  },
+  "B3": {
+   "cls": "B",
+   "strips": 11,
+   "distance_km": 44.638,
+   "energy_used_wh": 187.4,
+   "energy_margin_wh": 66.6,
+   "t_takeoff_s": 482.0,
+   "t_land_s": 3013.9
+  }
+ },
+ "cells": [],
+ "n_cells_interlacing": 0,
+ "n_cells": 0
+}
+wrote C:\Users\joy46\Documents\Projects\aeroplan-studio\runs\artifacts\PAPERPLAN1\prep_runner\beamidp_sortie.json

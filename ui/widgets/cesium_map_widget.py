@@ -11,7 +11,12 @@ Cesium 3D 地圖組件
 - 與 2D MapWidget 相同的 pyqt:// URL bridge
 """
 
+import csv
 import json
+import math
+import os
+import re
+from pathlib import Path
 from typing import List, Tuple, Optional
 
 from PyQt6.QtWidgets import QVBoxLayout
@@ -30,6 +35,231 @@ logger = get_logger()
 # MIL-STD-1472H 5.8.5 允許多目標識別色板；統一從中央 palette 取得
 _REGION_COLORS = list(TC.REGION_PALETTE)
 _DRONE_COLORS  = list(TC.UAV_PALETTE)
+
+# HARVEST 兩個構型各自的色系（暖 = Pioneer + LiDAR、冷 = HERO + 相機）。
+# ⚠ 同構規劃（既有 DCCPP）不會用到這裡 —— 那時 uav_class 是 None，
+#   維持原本「1 架 UAV = 1 色」的行為，畫面不變。
+_CLASS_COLORS = {
+    'A': ['#ff6b35', '#ff9f1c', '#e8590c', '#ffc078', '#c92a2a',
+          '#f76707', '#ffa94d', '#d9480f'],      # Pioneer PNP：暖色
+    'B': ['#1c7ed6', '#22b8cf', '#1864ab', '#66d9e8', '#4c6ef5',
+          '#0ca678', '#74c0fc', '#087f5b'],      # HERO PNP：冷色
+}
+
+
+def swarm_drone_colors(drones) -> dict:
+    """``[(drone_id, uav_class), ...]``（依顯示順序）→ ``{drone_id: '#rrggbb'}``。
+
+    3D 圖例層（display_swarm_raw）與 VTOL 虛線條帶層（drawVTOLSwarmPaths）**必須共用這一份**：
+    兩層各自取色時，同一架機在兩層顏色不同（2026-10-07：Pioneer 圖例橘、條帶卻是藍；
+    HERO D2 的條帶是圖例裡根本沒有的綠色）⇒ 照圖例讀會把別台的條帶當成 Pioneer 在飛。
+
+    HARVEST（有 uav_class）：同構型同色系、色系內依出現順序取深淺；
+    同構規劃（uav_class 為 None）：維持「1 架 = 1 色」= _DRONE_COLORS[(id-1) % n]。
+    """
+    drones = list(drones)
+    cls_seq: dict = {}
+    for did, cls in drones:
+        if cls:
+            cls_seq.setdefault(cls, []).append(did)
+    out = {}
+    for did, cls in drones:
+        if cls in _CLASS_COLORS:
+            fam = _CLASS_COLORS[cls]
+            out[did] = fam[cls_seq[cls].index(did) % len(fam)]
+        else:
+            out[did] = _DRONE_COLORS[(int(did) - 1) % len(_DRONE_COLORS)]
+    return out
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  航測成果圖層（正射瓦片、照片位姿）的共用工具 —— 2D MapWidget 也用這幾個
+# ══════════════════════════════════════════════════════════════════════
+# 位姿依來源上色；main.html 的 _PHOTO_POSE_COLORS 是同一份（測試鎖兩邊相等）
+PHOTO_POSE_SOURCE_COLORS = {'fc_interp': '#FFB300', 'ppk': '#00E676', 'sfm': '#29B6F6'}
+PHOTO_POSE_OTHER_COLOR = '#FFFFFF'
+# runJavaScript 內嵌 JSON 的上限；更多點要讓頁面自己讀檔（load_photo_poses_file）
+PHOTO_POSES_INLINE_MAX = 5000
+# GCP／檢核點佈設（survey.gcp_plan）的點圖層：依類型上色；main.html 的 _SURVEY_POINT_COLORS 是同一份（測試鎖兩邊相等）
+SURVEY_POINT_COLORS = {'GCP': '#FF3D00', 'CHK': '#2979FF'}
+SURVEY_POINT_OTHER_COLOR = '#FFFFFF'
+SURVEY_POINTS_MAX = 500           # 一層最多幾點（Entity 寫法；佈設通常只有數十點）
+_TILE_EXTS = ('png', 'jpg', 'jpeg', 'webp')
+_URL_PREFIXES = ('http://', 'https://', 'file://')
+_HEX_COLOR = re.compile(r'^#[0-9A-Fa-f]{6}$')
+
+
+def local_path_to_file_url(path) -> str:
+    """本機路徑 → ``file:///`` URL；已經是 http(s):// 或 file:// 的字串原樣回傳。
+
+    磁碟機代號、空白、中文、``#``、``%`` 全部百分比編碼（``C:\\a b\\地圖`` →
+    ``file:///C:/a%20b/%E5%9C%B0%E5%9C%96``）。⚠ 不能自己拼 ``'file:///' + path``：
+    ``#`` 會被當成錨點、``%`` 會被當成跳脫字元，瓦片就靜默讀不到。
+    """
+    s = str(path)
+    if s.lower().startswith(_URL_PREFIXES):
+        return s
+    return Path(os.path.abspath(s)).as_uri()
+
+
+def _tile_corner_lonlat(x: int, y_xyz: int, z: int) -> Tuple[float, float]:
+    """Web Mercator 瓦片左上角（XYZ 編號）→ (lon, lat) 度。"""
+    n = 2 ** z
+    lon = x / n * 360.0 - 180.0
+    lat = math.degrees(math.atan(math.sinh(math.pi * (1.0 - 2.0 * y_xyz / n))))
+    return lon, lat
+
+
+def check_bounds(bounds) -> Tuple[float, float, float, float]:
+    """(西, 南, 東, 北) 度；不合理就丟 ValueError（不默默修正）。"""
+    try:
+        w, s, e, n = (float(v) for v in bounds)
+    except (TypeError, ValueError):
+        raise ValueError(f'bounds 要是 (西, 南, 東, 北) 四個數字，收到 {bounds!r}')
+    if not (-180.0 <= w < e <= 180.0 and -90.0 <= s < n <= 90.0):
+        raise ValueError(f'bounds 不合理（要 -180≤西<東≤180、-90≤南<北≤90）：{bounds!r}')
+    return w, s, e, n
+
+
+def inspect_tile_dir(path, scheme: str) -> dict:
+    """看本機瓦片資料夾：層級、副檔名、範圍。
+
+    回傳 ``{'min_level', 'max_level', 'ext', 'bounds': (西, 南, 東, 北), 'has_tilemapresource'}``。
+
+    * 層級 = 名稱是整數的子資料夾（gdal2tiles 也會放 tilemapresource.xml、*.html，略過）。
+    * 範圍取 ``max(最低層, 最高層-4)`` 那一層的瓦片聯集：最細那層檔案太多（ODM 在 3 cm GSD
+      會切到 z23，4 km² 就二十幾萬張）。上層瓦片聯集一定包住全部資料，只是邊界最多外擴一張瓦片。
+    * ``scheme='tms'``：y 由南往北數（gdal2tiles／ODM 預設）；``'xyz'``：由北往南。
+    """
+    if scheme not in ('tms', 'xyz'):
+        raise ValueError(f"scheme 只能是 'tms' 或 'xyz'，收到 {scheme!r}")
+    root = Path(path)
+    if not root.is_dir():
+        raise FileNotFoundError(f'瓦片資料夾不存在：{root}')
+    levels = sorted(int(e.name) for e in os.scandir(root) if e.is_dir() and e.name.isdigit())
+    if not levels:
+        raise ValueError(f'{root} 底下沒有數字層級資料夾（{{z}}/{{x}}/{{y}}.png），不是瓦片資料夾')
+    zb = max(levels[0], levels[-1] - 4)
+    xs, ys, ext = [], [], None
+    for ex in os.scandir(root / str(zb)):
+        if not (ex.is_dir() and ex.name.isdigit()):
+            continue
+        for ey in os.scandir(ex.path):
+            stem, dot, suf = ey.name.rpartition('.')
+            if not dot or not stem.isdigit() or suf.lower() not in _TILE_EXTS:
+                continue
+            ext = ext or suf
+            xs.append(int(ex.name))
+            ys.append(int(stem))
+    if not xs:
+        raise ValueError(f'{root / str(zb)} 底下沒有瓦片檔（{"/".join(_TILE_EXTS)}）')
+    n = 2 ** zb
+    if scheme == 'tms':
+        y_top, y_bot = n - 1 - max(ys), n - 1 - min(ys)      # 換成 XYZ 編號（由北往南）
+    else:
+        y_top, y_bot = min(ys), max(ys)
+    west, north = _tile_corner_lonlat(min(xs), y_top, zb)
+    east, south = _tile_corner_lonlat(max(xs) + 1, y_bot + 1, zb)
+    return {'min_level': levels[0], 'max_level': levels[-1], 'ext': ext,
+            'bounds': (west, south, east, north),
+            'has_tilemapresource': (root / 'tilemapresource.xml').is_file()}
+
+
+def _opt_float(v) -> Optional[float]:
+    """空字串 / None / NaN / 非數字 → None（缺值），其餘轉 float。"""
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
+def photo_pose_rows_to_compact(rows) -> Tuple[list, dict]:
+    """photos.csv（F2）的列（dict）→ ``[[lat, lon, h_ell_m, yaw_deg, source, image_id], ...]`` 與統計。
+
+    只取 lat_deg, lon_deg, h_ell_m, yaw_deg, source, image_id。yaw 是自**真北順時針**的機頭／
+    相機航向（不是航跡角 cog_deg）。經緯度缺或超出範圍的列不畫，但一定計數回報；
+    沒有航向的列以圓點畫（不當成朝北）；沒有高度的列放在橢球面 0 m。
+    """
+    out, skipped_ids, unknown_src = [], [], {}
+    no_heading = no_height = 0
+    rows = list(rows)
+    for i, r in enumerate(rows):
+        lat, lon = _opt_float(r.get('lat_deg')), _opt_float(r.get('lon_deg'))
+        img = '' if r.get('image_id') is None else str(r.get('image_id'))
+        if lat is None or lon is None or not (-90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0):
+            skipped_ids.append(img or f'第 {i + 1} 列')
+            continue
+        h, yaw = _opt_float(r.get('h_ell_m')), _opt_float(r.get('yaw_deg'))
+        no_height += h is None
+        no_heading += yaw is None
+        src = (r.get('source') or '').strip()
+        if src not in PHOTO_POSE_SOURCE_COLORS:
+            unknown_src[src] = unknown_src.get(src, 0) + 1
+        out.append([lat, lon, h, yaw, src, img])
+    stats = {'rows': len(rows), 'drawn': len(out), 'skipped': len(skipped_ids),
+             'skipped_ids': skipped_ids[:10], 'no_heading': no_heading,
+             'no_height': no_height, 'unknown_source': unknown_src}
+    return out, stats
+
+
+def log_photo_pose_stats(layer_id: str, stats: dict, where: str) -> None:
+    """把位姿轉換的缺漏大聲記下來（不准靜默少畫或把缺值畫成正北）。"""
+    if stats['skipped']:
+        logger.warning(f'[PhotoPoses/{where}] {layer_id}：{stats["skipped"]} 列經緯度缺值或超出範圍、'
+                       f'未畫（例：{", ".join(stats["skipped_ids"])}）')
+    if stats['no_heading']:
+        logger.warning(f'[PhotoPoses/{where}] {layer_id}：{stats["no_heading"]} 點沒有 yaw_deg，'
+                       f'以圓點顯示（不是朝北）')
+    if stats['no_height']:
+        logger.warning(f'[PhotoPoses/{where}] {layer_id}：{stats["no_height"]} 點沒有 h_ell_m，放在橢球面 0 m')
+    if stats['unknown_source']:
+        logger.warning(f'[PhotoPoses/{where}] {layer_id}：不認得的 source {stats["unknown_source"]}，'
+                       f'以 {PHOTO_POSE_OTHER_COLOR} 顯示（認得的：{", ".join(PHOTO_POSE_SOURCE_COLORS)}）')
+
+
+def check_color(color) -> Optional[str]:
+    """None = 依來源上色；否則必須是 '#RRGGBB'。"""
+    if color is None:
+        return None
+    if not isinstance(color, str) or not _HEX_COLOR.match(color):
+        raise ValueError(f"color 要是 '#RRGGBB'（或 None = 依來源上色），收到 {color!r}")
+    return color
+
+
+def check_layer_id(layer_id) -> str:
+    if not isinstance(layer_id, str) or not layer_id.strip():
+        raise ValueError(f'圖層代號要是非空字串，收到 {layer_id!r}')
+    return layer_id
+
+
+def survey_points_to_compact(points) -> Tuple[list, dict]:
+    """GCP／檢核點 [{id, type, lat, lon, label?}] → [[lat, lon, type, label], ...] 與統計。
+
+    經緯度不是有限數字或超出範圍的點**略過並計數**（不放到 (0, 0)）；超過 SURVEY_POINTS_MAX 直接丟錯。
+    """
+    pts = list(points or [])
+    if len(pts) > SURVEY_POINTS_MAX:
+        raise ValueError(f'{len(pts)} 點超過點圖層上限 {SURVEY_POINTS_MAX}（這是 GCP／檢核點用的小圖層）')
+    out, skipped = [], 0
+    for p in pts:
+        try:
+            lat, lon = float(p['lat']), float(p['lon'])
+        except (KeyError, TypeError, ValueError):
+            skipped += 1
+            continue
+        if not (math.isfinite(lat) and math.isfinite(lon) and abs(lat) <= 90.0 and abs(lon) <= 180.0):
+            skipped += 1
+            continue
+        typ = str(p.get('type') or '')
+        label = str(p.get('label') or p.get('id') or '')
+        out.append([lat, lon, typ, label])
+    counts = {}
+    for _la, _lo, t, _lb in out:
+        counts[t] = counts.get(t, 0) + 1
+    return out, {'rows': len(pts), 'drawn': len(out), 'skipped': skipped, 'by_type': counts}
 
 
 
@@ -53,6 +283,11 @@ def _load_cesium_html() -> str:
         )
 
 _CESIUM_HTML = _load_cesium_html()
+
+
+# ── Cesium ion access token ──────────────────────────────────────────
+#   解析邏輯在 utils.cesium_ion（規劃核心也要用，不能 import UI）；這裡 re-export 保持舊匯入路徑可用。
+from utils.cesium_ion import _ION_TOKEN_OK, resolve_cesium_ion_token  # noqa: E402,F401
 
 
 
@@ -122,6 +357,25 @@ class CesiumPage(QWebEnginePage):
 #  CesiumMapWidget
 # ══════════════════════════════════════════════════════════════════════
 class CesiumMapWidget(MapWidgetBase):
+    # ── VTOL GLB 模型校正常數 ────────────────────────────────────
+    # 綁定 ui/resources/vtol.glb 這一個檔的匯出慣例（單位/朝向），
+    # 換模型檔必須一起重校 —— 同 Barracuda 的教訓：靜默換檔只會畫出
+    # 一架姿態錯誤的飛機。scale 依該檔單位設定（公尺=1.0、公分=0.01）。
+    # vtol.glb = P25-ID.glb（2026-08-25 使用者確認：900 STEP 那顆渲染出來
+    # 是六軸旋翼機，不是 VTOL；全機唯一有翼的候選是 P25-ID）。
+    # 校正沿用 P25-ID 當年在固定翼通道的慣例（main.html 註解）：
+    # 單位公分 ⇒ scale 0.01；模型躺著且上下顛倒 ⇒ pitch +90 / roll 180；
+    # 機鼻朝 +X(東) ⇒ heading -90。歪了就目視調這四個值。
+    VTOL_MODEL_SCALE = 0.01
+    VTOL_HEADING_OFFSET = -90
+    VTOL_PITCH_OFFSET = 90
+    VTOL_ROLL_OFFSET = 180
+    # 機體專用模型（ui/resources/<名稱>.glb）的校正是 main.html 的頁面常數（_HERO_*／_PIONEER_*：0/0/0、scale 1），
+    # 綁定 tools/glb_kit.py 的匯出慣例；這裡只決定「哪幾架畫哪個機體」（main.html _uavAirframeOf）。
+    AIRFRAMES = ('', 'hero', 'pioneer')
+    AIRFRAME_MODELS = {'hero': ('hero.glb', '_HERO_MODEL_URI', 'build_hero_glb.py'),
+                       'pioneer': ('pioneer.glb', '_PIONEER_MODEL_URI', 'build_pioneer_glb.py')}
+
     """3D 地圖組件，介面與 MapWidget 相容"""
 
     # (1-1) 5 個交集 signal（corner_added/corner_moved/circle_defined/
@@ -130,8 +384,21 @@ class CesiumMapWidget(MapWidgetBase):
     strike_target_added = pyqtSignal(float, float)  # 打擊目標標記
     guided_goto_requested = pyqtSignal(float, float)  # 右鍵 GUIDED 飛到此點（lat, lon）
 
-    # ── Cesium Ion Token（可在設定中覆寫）────────────────────────────
-    CESIUM_TOKEN: str = ''   # 留空 = 無地形 Token，衛星影像仍正常
+    # ── Cesium ion Token ─────────────────────────────────────────────
+    #   ⚠ 不要把 token 寫在這裡（會進 git）。放 config/settings.json 的 map.cesium_ion_token，
+    #   或環境變數 CESIUM_ION_TOKEN；這個類別屬性只留給程式碼／測試覆寫，優先序最高。
+    #   留空 = 不帶 token，衛星影像（Google 圖磚）仍正常。
+    CESIUM_TOKEN: str = ''
+
+    # ── 3D 算圖節流（Cesium requestRenderMode）────────────────────────
+    #   2026-10-17 量測（tools/swarm_perf_profiler.py，6 架 × 25 Hz）：連續算圖讓 CPU 150%、FPS ~22。
+    #   RENDER_MAX_DT > 0  ⇒ main.html 以 requestRenderMode:true 建 viewer、maximumRenderTimeChange = 這個秒數
+    #                        （閒置時 Cesium 自己兜底的最大「模擬時間」間隔；0.05 = 閒置最多 20 fps。⚠ 這個 app 的
+    #                        Cesium 時鐘預設不走，畫面更新主要靠遙測批次／繪圖函式結尾的 _requestRender()）。
+    #   RENDER_MAX_DT == 0 ⇒ 關掉節流：requestRenderMode:false、maximumRenderTimeChange 0（舊行為、盡可能 60 fps）。
+    #   環境變數 AEROPLAN_CESIUM_RENDER_DT（秒）覆寫；不是有限的非負數 ⇒ 記 warning、用類別預設（不靜默吃掉）。
+    RENDER_MAX_DT: float = 0.05
+    RENDER_DT_ENV: str = 'AEROPLAN_CESIUM_RENDER_DT'
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -157,6 +424,29 @@ class CesiumMapWidget(MapWidgetBase):
         # Geofence — 強制飛安：每次顯示路徑時自動建立並渲染
         self._geofence = None
         self._strike_marking: bool = False       # 打擊目標標記模式
+        # ── TOT 扇形閘門（紅心）疊圖開關 ──────────────────────────────
+        # ⚠️ 這兩個原本寫成 getattr(self, '_tot_gate_auto', True) 而該屬性
+        #    **從未被指派**，等於一個關不掉的開關。改成真的欄位。
+        #   * 右鍵「飛到此點」不該畫紅心 —— 那是 STOT 的東西，而 STOT 入口
+        #     已於 2026-09-02 關閉（main_window.ENABLE_STOT_RCLICK_STRIKE）。
+        #     兩個要一起關，否則選單沒了、疊圖還在。
+        #   * 蜂群打擊分頁的「標記目標」模式是使用者明確進入的流程，維持原樣。
+        self._tot_gate_on_rclick: bool = False   # 右鍵 → 不畫
+        self._tot_gate_auto: bool = True         # 標記目標模式 → 照畫
+        self._tot_approach: float = 180.0
+        # 航測成果圖層：圖層代號 → 實際生效的設定（給上層查、也給 log）
+        self._ortho_layers: dict = {}
+        self._photo_pose_layers: dict = {}
+        # GCP／檢核點佈設的點圖層（survey.gcp_plan）：圖層代號 → 統計
+        self._survey_point_layers: dict = {}
+        # 風場圖層：_load_cesium 把這幾個套回頁面（重載也不丟）；即時更新走 _js
+        self._wind_field: Optional[dict] = None
+        self._wind_arrows: dict = {}
+        self._wind_options: dict = {}
+        self._wind_profile: Optional[dict] = None     # 分層風場（wind_layer.check_wind_profile 的結果）
+        # 預計成果圖層（高精地圖規劃預測）：_load_cesium 把它們套回頁面（重載也不丟）；即時更新走 _js
+        self._hdmap_previews: dict = {}
+        self._hdmap_hidden: set = set()
 
         self._cesium_html_file = None
 
@@ -190,6 +480,10 @@ class CesiumMapWidget(MapWidgetBase):
 
         self._page = CesiumPage(self.web_view, self)
         self.web_view.setPage(self._page)
+        # 預計成果：頁面載入期間才 set／clear 的圖層會丟失 ⇒ 載入完成時以 Python 端狀態補送一次
+        self._page.loadFinished.connect(self._hdmap_resync_after_load)
+        # 分層風場同理（載入期間才 set／clear／換顯示層的會丟失）
+        self._page.loadFinished.connect(self._wind_profile_resync_after_load)
 
         ws = self._page.settings()
         ws.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
@@ -200,7 +494,147 @@ class CesiumMapWidget(MapWidgetBase):
 
         layout.addWidget(self.web_view)
 
-    def _load_cesium(self):
+    def _resolve_token(self) -> str:
+        """Cesium ion token（見 :func:`resolve_cesium_ion_token`）。log 只記來源與長度，**絕不記 token 本身**。"""
+        import os
+        try:
+            from config.settings import get_settings
+            from_settings = getattr(get_settings().map, 'cesium_ion_token', '') or ''
+        except Exception:
+            from_settings = ''
+        token, source = resolve_cesium_ion_token(self.CESIUM_TOKEN, os.environ.get('CESIUM_ION_TOKEN'),
+                                                 from_settings)
+        if source.startswith('invalid'):
+            logger.warning(f'[Cesium] ion token 格式不合（{source}；只允許英數與 . _ -）⇒ 已忽略，3D 圖不帶 token')
+        elif token:
+            logger.info(f'[Cesium] ion token 已設定（來源：{source}，長度 {len(token)}）')
+        else:
+            logger.info('[Cesium] 未設定 ion token（衛星影像照常；沒有 ion 資源）')
+        return token
+
+    @classmethod
+    def _clean_airframe(cls, value, where: str) -> str:
+        """機體模型名稱 → AIRFRAMES 之一；不認得 ⇒ 記 warning、當成 ''（通用 VTOL），不靜默吃掉。"""
+        if value is None:
+            logger.warning(f'[Cesium] {where} 的機體模型是 null ⇒ 畫通用 VTOL')
+            return ''
+        a = str(value).strip().lower()
+        if a not in cls.AIRFRAMES:
+            logger.warning(f'[Cesium] {where} 的機體模型 {value!r} 不認得（可用 {cls.AIRFRAMES}）⇒ 畫通用 VTOL')
+            return ''
+        return a
+
+    def _airframe_settings(self) -> tuple:
+        """設定檔的 (model3d.vtol_model, {sysid: model3d.uav_airframes[sysid]})；讀不到設定（測試、探針）⇒ ('', {})。"""
+        try:
+            from config.settings import get_settings
+            m = getattr(get_settings(), 'model3d', None)
+            if m is None:
+                return '', {}
+            dflt, per = getattr(m, 'vtol_model', ''), getattr(m, 'uav_airframes', None) or {}
+        except Exception:
+            return '', {}
+        if not isinstance(per, dict):
+            logger.warning(f'[Cesium] model3d.uav_airframes 應為 {{sysid: 機體}}，得 {type(per).__name__} ⇒ 忽略')
+            per = {}
+        out = {}
+        for k, v in per.items():
+            if v is None:                                   # 和執行期一樣：null ＝ 沒指定、用預設（但要說）
+                logger.warning(f'[Cesium] model3d.uav_airframes[{k!r}] 是 null ⇒ 視為未指定、用預設')
+                continue
+            try:
+                out[int(k)] = self._clean_airframe(v, f'model3d.uav_airframes[{k!r}]')
+            except (TypeError, ValueError):
+                logger.warning(f'[Cesium] model3d.uav_airframes 的鍵 {k!r} 不是 sysid ⇒ 略過')
+        return self._clean_airframe(dflt, 'model3d.vtol_model'), out
+
+    def _airframe_models_js(self, uris: dict) -> str:
+        """範本佔位（main.html 機體模型那一行）換成：各機體模型 URI（uris {'hero': uri, 'pioneer': uri}，沒有的給 ''）、
+        預設機體、逐架指定。優先序：執行期 set_uav_airframes（頁面重載後由這裡套回去）＞ 設定檔 uav_airframes ＞ vtol_model。"""
+        dflt, per = self._airframe_settings()
+        if self.__dict__.get('_uav_airframe_default') is not None:
+            dflt = self.__dict__['_uav_airframe_default']
+        per.update(self.__dict__.get('_uav_airframes') or {})
+        uris = {name: str(uris.get(name) or '') for name in self.AIRFRAME_MODELS}
+        self.__dict__['_airframe_uris'] = uris              # set_uav_airframes 用：這份頁面有哪些機體模型
+        self._warn_missing_airframe_models({dflt, *per.values()})
+        logger.info(f'[Cesium] 機體模型: { {k: (v or "未找到") for k, v in uris.items()} }；'
+                    f'VTOL 機體預設 {dflt or "通用"}、逐架 {per}')
+        return (''.join(f'{self.AIRFRAME_MODELS[name][1]} = {json.dumps(uri)}; ' for name, uri in uris.items())
+                + '_UAV_AIRFRAME_DEFAULT = ' + json.dumps(dflt)
+                + '; Object.assign(_UAV_AIRFRAME, ' + json.dumps({str(k): per[k] for k in sorted(per)}) + ');')
+
+    def _warn_missing_airframe_models(self, requested) -> None:
+        """指定了某個機體、但這份頁面沒有它的 GLB ⇒ 只會畫通用 VTOL：說出來（還沒建頁面的裸實例不知道 ⇒ 不報）。"""
+        uris = self.__dict__.get('_airframe_uris')
+        if uris is None:
+            return
+        for name in sorted(a for a in requested if a in self.AIRFRAME_MODELS and not uris.get(a)):
+            glb, _, tool = self.AIRFRAME_MODELS[name]
+            logger.warning(f'[Cesium] 指定了 {name} 模型但沒有 ui/resources/{glb} ⇒ 畫通用 VTOL'
+                           f'（建模：python -I tools/{tool} fetch && python -I tools/{tool} build）')
+
+    def set_uav_airframes(self, mapping: Optional[dict] = None, default: Optional[str] = None) -> dict:
+        """執行期指定 3D 圖上每架畫哪個機體模型（只換外觀）。
+
+        mapping ``{sysid: 'hero'|'pioneer'|''}``（值 None ⇒ 取消執行期指定、回到設定檔的那一架或預設）；
+        default 給了就換預設。記在 widget 上（頁面重載時 _airframe_models_js 套回去）並送 ``setUavAirframes(...)``，
+        下一筆遙測進來那一架就換模型。回傳生效的執行期逐架指定。"""
+        per = dict(self.__dict__.get('_uav_airframes') or {})
+        from_settings = None
+        send = {}
+        for k, v in (mapping or {}).items():
+            try:
+                sid = int(k)
+            except (TypeError, ValueError):
+                logger.warning(f'[Cesium] set_uav_airframes：{k!r} 不是 sysid ⇒ 略過')
+                continue
+            if v is None:
+                per.pop(sid, None)
+                if from_settings is None:
+                    from_settings = self._airframe_settings()[1]
+                send[str(sid)] = from_settings.get(sid)          # 設定檔也沒有 ⇒ null ⇒ 頁面刪掉、用預設
+            else:
+                per[sid] = send[str(sid)] = self._clean_airframe(v, f'sysid {sid}')
+        self.__dict__['_uav_airframes'] = per
+        args = json.dumps(send)
+        if default is not None:
+            self.__dict__['_uav_airframe_default'] = self._clean_airframe(default, '預設')
+            args += ', ' + json.dumps(self.__dict__['_uav_airframe_default'])
+        self._warn_missing_airframe_models({*send.values(), self.__dict__.get('_uav_airframe_default')}
+                                           if default is not None else set(send.values()))
+        self._js(f'setUavAirframes({args})')
+        return per
+
+    def _resolve_render_max_dt(self) -> float:
+        """requestRenderMode 的 maximumRenderTimeChange（秒）：環境變數 RENDER_DT_ENV 優先，否則類別屬性 RENDER_MAX_DT。
+        環境變數不是有限的非負數 ⇒ 記 warning、退回類別屬性（不靜默吃掉壞值）。"""
+        raw = os.environ.get(self.RENDER_DT_ENV)
+        if raw is None or not raw.strip():
+            return float(self.RENDER_MAX_DT)
+        try:
+            dt = float(raw)
+            if not math.isfinite(dt) or dt < 0:
+                raise ValueError(raw)
+        except ValueError:
+            logger.warning(f'[Cesium] {self.RENDER_DT_ENV}={raw!r} 不是有限的非負秒數 ⇒ 忽略，'
+                           f'用 RENDER_MAX_DT={self.RENDER_MAX_DT}')
+            return float(self.RENDER_MAX_DT)
+        return dt
+
+    def _render_mode_placeholders(self) -> dict:
+        """main.html 兩個算圖佔位字的實際值（純函式，測試直接呼叫）：
+        dt > 0 ⇒ ``requestRenderMode: true`` ＋ ``maximumRenderTimeChange = dt``；dt == 0 ⇒ 連續算圖（false／0）。"""
+        dt = self._resolve_render_max_dt()
+        if dt <= 0:
+            return {'__REQUEST_RENDER_MODE__': 'false', '__RENDER_MAX_DT__': '0'}
+        return {'__REQUEST_RENDER_MODE__': 'true', '__RENDER_MAX_DT__': repr(float(dt))}
+
+    def _cesium_template_values(self) -> dict:
+        """main.html 每個佔位字 → 實際值（dict 的順序就是置換順序）。
+
+        會讀設定（預設座標、ion token）並檢查本機資源檔（Cesium、GLB、wind_flow.js）在不在；
+        **不寫檔、不碰 QWebEngine**。"""
         from pathlib import Path
 
         # 讀取 2D 地圖預設座標保持一致
@@ -210,7 +644,7 @@ class CesiumMapWidget(MapWidgetBase):
             init_lat = s.map.default_lat
             init_lon = s.map.default_lon
         except Exception:
-            init_lat, init_lon = 23.702732, 120.419333
+            init_lat, init_lon = 25.0777, 121.2325   # 桃園國際機場 RCTP（fallback）
         init_height = 2000.0
 
         # ── 本地 / CDN 路徑解析 ──
@@ -229,23 +663,98 @@ class CesiumMapWidget(MapWidgetBase):
             logger.info('[Cesium] 使用 CDN 線上資源')
 
         # ── GLB 3D 模型路徑 ──
-        plane_glb = project_root / 'ui' / 'resources' / 'P25-ID.glb'
-        plane_model_uri = plane_glb.as_uri() if plane_glb.exists() else ''
-        logger.info(f'[Cesium] 固定翼 GLB 模型: {plane_model_uri or "未找到，使用 fallback"}')
+        # 固定翼 = Barracuda 500，由 Fusion 直接匯出（Barracuda500/export_glb.py）。
+        # 刻意不自動退回 P25-ID.glb：兩者的單位與朝向慣例不同，main.html 裡的 scale 與
+        # _PLANE_*_OFFSET 是綁定 Barracuda 的，靜默換檔只會畫出一架姿態錯誤的飛機。
+        # 找不到檔案時 plane_model_uri 留空，Cesium 端自動退回 2D 圖示。
+        # 多 primitive 的 CAD 匯出檔（vtol.glb 1192 個、copter.glb 383 個）先合併成每種外觀一個 draw call
+        # （幾何/材質不變，快取在 data/cache/models/，原檔沒變就不重做；AEROPLAN_GLB_MERGE=0 關掉）——
+        # 不合併時 6 架 VTOL 每幀 ~7000 次 draw，JS 33 ms ⇒ 最多 28 FPS（見 ui/widgets/glb_merge.py）。
+        from ui.widgets.glb_merge import optimized_model_path
+        model_cache = project_root / 'data' / 'cache' / 'models'
+
+        def _model_uri(p):
+            return optimized_model_path(p, model_cache).as_uri() if p.exists() else ''
+
+        plane_glb = project_root / 'ui' / 'resources' / 'barracuda500.glb'
+        plane_model_uri = _model_uri(plane_glb)
+        logger.info(f'[Cesium] 固定翼 GLB 模型: {plane_model_uri or "未找到，退回 2D 圖示"}')
 
         copter_glb = project_root / 'ui' / 'resources' / 'copter.glb'
-        copter_model_uri = copter_glb.as_uri() if copter_glb.exists() else ''
+        copter_model_uri = _model_uri(copter_glb)
         logger.info(f'[Cesium] 多旋翼 GLB 模型: {copter_model_uri or "未找到，使用 fallback"}')
 
-        html = (_CESIUM_HTML
-                .replace('__CESIUM_JS__',   cesium_js)
-                .replace('__CESIUM_CSS__',  cesium_css)
-                .replace('__CESIUM_TOKEN__', self.CESIUM_TOKEN)
-                .replace('__INIT_LAT__',    str(init_lat))
-                .replace('__INIT_LON__',    str(init_lon))
-                .replace('__INIT_HEIGHT__', str(init_height))
-                .replace('__PLANE_MODEL_URI__', plane_model_uri)
-                .replace('__COPTER_MODEL_URI__', copter_model_uri))
+        # VTOL (4+1 QuadPlane) 專屬模型。沒有這個檔時 VTOL 沿用固定翼模型
+        # （舊行為），所以缺檔不是錯誤，只記 log。
+        vtol_glb = project_root / 'ui' / 'resources' / 'vtol.glb'
+        vtol_model_uri = _model_uri(vtol_glb)
+        logger.info(f'[Cesium] VTOL GLB 模型: {vtol_model_uri or "未找到，VTOL 沿用固定翼模型"}')
+
+        # 機體專用模型（Hero、Pioneer）：哪幾架畫哪個看設定＋執行期指定（見 _airframe_models_js）；
+        # primitive 只有 5 個 ⇒ 合併快取直接回原檔
+        airframe_models_js = self._airframe_models_js(
+            {name: _model_uri(project_root / 'ui' / 'resources' / glb) for name, (glb, *_) in self.AIRFRAME_MODELS.items()})
+
+        ion_token = self._resolve_token()
+
+        # 風場圖層：引擎 <script>（缺檔 ⇒ 換成註解、記 error，其餘照常）＋ 膠水 ＋ 把 Python 端狀態套回去
+        from ui.widgets import wind_layer as wl
+        try:
+            wind_script = f'<script src="{wl.wind_flow_js_uri()}"></script>'
+        except FileNotFoundError as e:
+            logger.error(f'[Wind/3D] {e}')
+            wind_script = '<!-- wind_flow.js 缺檔：風場圖層停用 -->'
+        wind_restore = wl.restore_js(self.__dict__.get('_wind_field'),
+                                     list((self.__dict__.get('_wind_arrows') or {}).values()),
+                                     self.__dict__.get('_wind_options'),
+                                     self.__dict__.get('_wind_profile'))
+        self.__dict__['_wind_profile_html_version'] = self.__dict__.get('_wind_profile_version', 0)   # 這份頁面帶的版本
+
+        # 預計成果圖層：膠水（頁面函式永遠在）＋ Python 端記住的圖層（重載後自己套回去）
+        from ui.widgets import hdmap_preview_layer as hl
+        hdmap_glue = hl.glue_js('cesium') + '\n' + hl.restore_js(self.__dict__.get('_hdmap_previews') or {},
+                                                                self.__dict__.get('_hdmap_hidden') or ())
+        self.__dict__['_hdmap_html_version'] = self.__dict__.get('_hdmap_version', 0)   # 這份頁面帶的狀態版本
+
+        # 依需求算圖（見 RENDER_MAX_DT 的說明）
+        rr = self._render_mode_placeholders()
+        logger.info(f'[Cesium] 算圖模式：requestRenderMode={rr["__REQUEST_RENDER_MODE__"]}，'
+                    f'maximumRenderTimeChange={rr["__RENDER_MAX_DT__"]} s')
+
+        # 風場三個先換（它們插進來的 JS 不含其他佔位字；順序與舊的 .replace 鏈相同）
+        return {
+            '__WIND_FLOW_SCRIPT__': wind_script,
+            '/*__WIND_GLUE__*/': wl.glue_js('cesium'),
+            '/*__WIND_RESTORE__*/': wind_restore,
+            '__CESIUM_JS__': cesium_js,
+            '__CESIUM_CSS__': cesium_css,
+            '__CESIUM_TOKEN__': ion_token,
+            '__INIT_LAT__': str(init_lat),
+            '__INIT_LON__': str(init_lon),
+            '__INIT_HEIGHT__': str(init_height),
+            '__PLANE_MODEL_URI__': plane_model_uri,
+            '__COPTER_MODEL_URI__': copter_model_uri,
+            '__VTOL_MODEL_URI__': vtol_model_uri,
+            '__VTOL_MODEL_SCALE__': str(self.VTOL_MODEL_SCALE),
+            '__VTOL_HEADING_OFFSET__': str(self.VTOL_HEADING_OFFSET),
+            '__VTOL_PITCH_OFFSET__': str(self.VTOL_PITCH_OFFSET),
+            '__VTOL_ROLL_OFFSET__': str(self.VTOL_ROLL_OFFSET),
+            '/*__AIRFRAME_MODELS__*/': airframe_models_js,
+            '__REQUEST_RENDER_MODE__': rr['__REQUEST_RENDER_MODE__'],
+            '__RENDER_MAX_DT__': rr['__RENDER_MAX_DT__'],
+            # 預計成果放**最後**換：它帶著資料（標籤、影像），排在後面就不會被別的佔位字置換誤觸
+            '/*__HDMAP_GLUE__*/': hdmap_glue,
+        }
+
+    def _fill_cesium_template(self, html: str, values: Optional[dict] = None) -> str:
+        """把範本裡的佔位字全部換掉：純字串處理（不寫檔、不碰 QWebEngine），_load_cesium 與測試共用。
+        ``values`` 省略 ⇒ ``self._cesium_template_values()``（依 dict 順序置換）。"""
+        for key, value in (self._cesium_template_values() if values is None else values).items():
+            html = html.replace(key, value)
+        return html
+
+    def _load_cesium(self):
+        html = self._fill_cesium_template(_CESIUM_HTML)
 
         # 將 HTML 寫入 data/tmp_maps/cesium_NNNN.html (每次覆蓋舊檔)
         # 所有 Cesium 資源 (JS/CSS/GLB) 皆為絕對 file:// URI，因此 HTML
@@ -317,6 +826,132 @@ class CesiumMapWidget(MapWidgetBase):
         self._js('clearGeofence()')
 
     # ─────────────────────────────────────────────────────────────────
+    # TOT 扇形閘門（蜂群同時抵達；與 sar_swarm/tot_node 同幾何）
+    # ─────────────────────────────────────────────────────────────────
+    def set_tot_gate(self, target_lat: float, target_lon: float,
+                     target_alt: float = 130.0, r_fan: float = 4000.0,
+                     half_angle: float = 25.0, approach_from: float = 180.0,
+                     n: int = 6) -> None:
+        """在地圖上畫目標前的扇形閘門 + N 個 slot + 切線(含 STOT 紅心靶)。
+        slot 幾何與 tot_node 完全一致（以 T 為圓心、r_fan、approach±half）。
+        預設值對齊噴射尺度(plane-jet 為標準機體:R=4km ±25°、巡航層 130m);
+        泡棉尺度請自行傳 r_fan=2000, half_angle=30, target_alt=90。"""
+        import math
+        EARTH = 111320.0
+        slots = []
+        for k in range(n):
+            off = -half_angle + (2 * half_angle) * k / (n - 1)
+            brg = math.radians((approach_from + off) % 360.0)
+            slots.append({
+                'id': k,
+                'lat': target_lat + r_fan * math.cos(brg) / EARTH,
+                'lon': target_lon + r_fan * math.sin(brg)
+                       / (EARTH * math.cos(math.radians(target_lat))),
+            })
+        payload = {
+            'target': {'lat': target_lat, 'lon': target_lon, 'alt': target_alt},
+            'r_fan': r_fan, 'half_angle': half_angle,
+            'approach_from': approach_from, 'slots': slots,
+        }
+        self._js(f'setTotGate({json.dumps(json.dumps(payload))})')
+        # 記住紅心位置並清空命中記錄 → check_bullseye_hit 才知道要炸在哪
+        self._tot_target = (target_lat, target_lon)
+        self._hit_done = set()
+
+    def clear_tot_gate(self) -> None:
+        self._js('clearTotGate()')
+        self._tot_target = None
+        self._hit_done = set()
+
+    # ── 命中爆炸動畫 ────────────────────────────────────────────────
+    def explode_at(self, lat: float, lon: float, alt: float = 0.0,
+                   label: str = 'HIT') -> None:
+        """在指定點放一發爆炸動畫(火球 + 地面震波環 + 命中標籤)。"""
+        self._js(f'explodeAt({float(lat)}, {float(lon)}, {float(alt)}, '
+                 f'{json.dumps(str(label))})')
+
+    def clear_explosions(self) -> None:
+        self._js('clearExplosions()')
+
+    # ── 投放彈體：即時下落 + 落地特效 ──────────────────────────────────
+    def drop_store(self, traj, label: str = '') -> None:
+        """在 3D 地圖上即時播放一發投放彈體的下落與落地。
+
+        traj 可以是 mission.ballistics.Trajectory，或它的 as_dict() 結果。
+        軌跡是 Python 端算好的（mission/ballistics.py），這裡只負責播放 ——
+        算錯和畫錯因此不會混在一起，落點與飛行時間可以離線單元測試。
+        """
+        d = traj.as_dict() if hasattr(traj, 'as_dict') else traj
+        self._js(f'dropStore({json.dumps(json.dumps(d))}, '
+                 f'{json.dumps(str(label))})')
+
+    def set_view_position(self, lat: float, lon: float,
+                          alt: float = 0.0, range_m: float = 800.0) -> None:
+        """立即把相機擺到指定位置（不做補間）。
+
+        程式化截圖時要用這一支而不是 fly_to_position：flyTo 的補間由
+        scene.tweens 在算圖迴圈裡推進，視窗被遮蔽時 rAF 被節流，補間永遠飛不到。
+        """
+        self._js(f'setViewPos({float(lat)},{float(lon)},'
+                 f'{float(alt)},{float(range_m)})')
+
+    def capture_png(self, path, callback=None) -> None:
+        """把目前的 3D 畫面存成 PNG（非同步）。
+
+        直接向 Cesium 的 canvas 要圖，不是螢幕擷取 —— QWebEngine 在視窗沒有
+        真正前景時會把算圖節流，螢幕擷取會拿到一模一樣的舊畫面
+        （實測連拍四張 md5 完全相同）。這條路不受視窗可見性影響。
+
+        callback(ok: bool, detail: str) 在寫檔完成後被呼叫。
+        """
+        import base64
+
+        def _done(data_url):
+            ok, detail = False, ''
+            try:
+                if not data_url:
+                    detail = 'JS 沒有回傳（頁面還沒載入完？）'
+                elif str(data_url).startswith('ERR:'):
+                    detail = str(data_url)
+                else:
+                    _head, b64 = str(data_url).split(',', 1)
+                    with open(path, 'wb') as f:
+                        f.write(base64.b64decode(b64))
+                    ok, detail = True, str(path)
+            except Exception as e:
+                detail = str(e)
+            if callback:
+                callback(ok, detail)
+
+        self._page.runJavaScript('grabCanvas()', _done)
+
+    def clear_stores(self) -> None:
+        """清掉還在空中的彈體與煙柱（換場景/重置時用）。"""
+        self._js('if (typeof clearStores === "function") clearStores();')
+
+    def check_bullseye_hit(self, sysid: int, lat: float, lon: float,
+                           alt: float = 0.0, radius: float = 60.0) -> bool:
+        """UAV 位置更新時呼叫:靠近已標記的紅心就自動放爆炸(每機只放一次)。
+
+        radius 用「已命中判定半徑」而非 0,因為 GPS/更新率下不可能剛好取樣在
+        正中心;實測 tot_node 的命中最近距是 6-17m,60m 門檻可穩定觸發一次。"""
+        tgt = getattr(self, '_tot_target', None)
+        if not tgt:
+            return False
+        if sysid in getattr(self, '_hit_done', set()):
+            return False
+        EARTH = 111320.0
+        dy = (lat - tgt[0]) * EARTH
+        dx = (lon - tgt[1]) * EARTH * math.cos(math.radians(tgt[0]))
+        if math.hypot(dx, dy) > radius:
+            return False
+        if not hasattr(self, '_hit_done'):
+            self._hit_done = set()
+        self._hit_done.add(sysid)
+        self.explode_at(lat, lon, alt, f'UAV{sysid} 命中')
+        return True
+
+    # ─────────────────────────────────────────────────────────────────
     # 地形跟隨（Terrain Following at constant AGL）
     # ─────────────────────────────────────────────────────────────────
     def set_dem_manager(self, dem_manager):
@@ -351,13 +986,37 @@ class CesiumMapWidget(MapWidgetBase):
     def on_map_clicked(self, lat: float, lon: float):
         if self._strike_marking:
             self.strike_target_added.emit(lat, lon)
+            # 標記蜂群打擊/TOT 目標時,順手畫出目標前的扇形閘門 + 6 slot + 切線
+            # (與 sar_swarm/tot_node 同幾何;純疊圖,不影響既有打擊規劃)。
+            if self._tot_gate_auto:
+                try:
+                    self.set_tot_gate(lat, lon, approach_from=self._tot_approach)
+                except Exception:
+                    pass
             return
         # 在 3D 地圖上即時畫出角點（與 2D MapWidget 行為一致，避免點擊後看不到標記）
         self.add_corner(lat, lon)
         self.corner_added.emit(lat, lon)
 
     def on_map_rclick(self, lat: float, lon: float):
-        """3D 地圖右鍵 → GUIDED 飛到此點（Mission Planner 風格，由上層跳高度框）"""
+        """3D 地圖右鍵 → GUIDED 飛到此點（Mission Planner 風格，由上層跳高度框）。
+
+        ⚠️ 2026-09-02：右鍵**不再**畫 TOT 扇形閘門（紅心）。那是 STOT 的疊圖，
+           而 STOT 右鍵入口已關閉；只關選單、疊圖照畫，看起來就像沒關。
+           要開回來把 _tot_gate_on_rclick 設 True 即可（幾何程式碼零改動）。
+        """
+        if self._tot_gate_on_rclick:
+            try:
+                self.set_tot_gate(lat, lon, approach_from=self._tot_approach)
+            except Exception:
+                pass
+        else:
+            # 關閉時順手清掉上一次留下的疊圖，否則畫面上還有紅心，
+            # 看起來像沒關掉。
+            try:
+                self._js('clearTotGate();')
+            except Exception:
+                pass
         self.guided_goto_requested.emit(lat, lon)
 
     def on_circle_draw_complete(self, lat: float, lon: float, radius: float):
@@ -615,10 +1274,16 @@ class CesiumMapWidget(MapWidgetBase):
         self._circle_radius_m = radius_m
         self._js(f'setCircleOverlay({center_lat},{center_lon},{radius_m},{json.dumps(color)})')
 
+    # 直接在頁面上刪 entity 的行內腳本：結尾要自己要求算圖（main.html 閒置時是 requestRenderMode，
+    # entity 增刪不會讓 Cesium 自己算圖 ⇒ 不要求的話被刪的東西會一直留在畫面上，直到使用者動相機）
+    _JS_RENDER = "if(typeof _requestRender==='function')_requestRender();"
+    _JS_CLEAR_CIRCLE = 'if(circleEntity){viewer.entities.remove(circleEntity);circleEntity=null;}' + _JS_RENDER
+    _JS_CLEAR_HOME = 'if(homeEntity){viewer.entities.remove(homeEntity);homeEntity=null;}' + _JS_RENDER
+
     def clear_circle_overlay(self):
         self._circle_center   = None
         self._circle_radius_m = 0.0
-        self._js('if(circleEntity){viewer.entities.remove(circleEntity);circleEntity=null;}')
+        self._js(self._JS_CLEAR_CIRCLE)
 
     def set_home_point_overlay(self, lat: float, lon: float):
         self._home_point = (lat, lon)
@@ -626,7 +1291,7 @@ class CesiumMapWidget(MapWidgetBase):
 
     def clear_home_point_overlay(self):
         self._home_point = None
-        self._js('if(homeEntity){viewer.entities.remove(homeEntity);homeEntity=null;}')
+        self._js(self._JS_CLEAR_HOME)
 
     def display_swarm_coverage(self, swarm_mission, coverage_paths=None):
         """群飛路徑顯示（3D 版）"""
@@ -678,30 +1343,42 @@ class CesiumMapWidget(MapWidgetBase):
                     f'{json.dumps(color)},{width},{json.dumps(label)},false)'
                 )
 
+            # 同一構型的飛機用**同一個色系**：異構機隊在畫面上一眼就分得出
+            # 哪幾條是 Pioneer、哪幾條是 HERO（兩者轉彎半徑 200/120 m、
+            # 作業高度下限 120/100 m 差很多，混色看只會看到一堆線）。
+            # 色系內再依序取深淺，同構型的不同飛機仍分得開。
+            # ⚠ 取色統一走 swarm_drone_colors：VTOL 虛線條帶層也用同一份，兩層才不會互相矛盾
+            _colors = swarm_drone_colors(
+                ((_d or {}).get('drone_id', 1), (_d or {}).get('uav_class'))
+                for _d in drones)
+
             for drone_info in drones:
                 drone_id = drone_info.get('drone_id', 1)
-                # 整架 UAV 統一用一種色 — 由 drone_id 決定 (UAV 1 = palette[0], etc.)
-                color = _DRONE_COLORS[(drone_id - 1) % len(_DRONE_COLORS)]
+                platform = drone_info.get('platform') or ''
+                color = _colors[drone_id]
+
+                # 標籤帶構型：滑過線就知道這條是哪一台、哪一種機
+                tag = f'D{drone_id}' + (f' {platform}' if platform else '')
 
                 # TAKEOFF — 較粗（起飛段視覺強調）
                 for seg in drone_info.get('takeoff_paths', []) or []:
-                    _add(seg, color, 9, f'D{drone_id} 起飛', 30.0)
+                    _add(seg, color, 9, f'{tag} 起飛', 30.0)
 
                 # ENTRY — 較細（dead-heading 段）
                 for seg in drone_info.get('entry_paths', []) or []:
-                    _add(seg, color, 5, f'D{drone_id} 進入')
+                    _add(seg, color, 5, f'{tag} 進入')
 
                 # OPERATION — 主寬（偵蒐主體）
                 for seg in drone_info.get('operation_paths', []) or []:
-                    _add(seg, color, 8, f'D{drone_id} 作業')
+                    _add(seg, color, 8, f'{tag} 作業')
 
                 # TRANSFER — 較細（U-turn dead-heading）
                 for seg in drone_info.get('transfer_paths', []) or []:
-                    _add(seg, color, 5, f'D{drone_id} 轉移')
+                    _add(seg, color, 5, f'{tag} 轉移')
 
                 # LANDING — 中等寬（降落段收束）
                 for seg in drone_info.get('landing_paths', []) or []:
-                    _add(seg, color, 7, f'D{drone_id} 降落', 40.0)
+                    _add(seg, color, 7, f'{tag} 降落', 40.0)
 
             self._js('flyToScene()')
         except Exception as e:
@@ -723,6 +1400,19 @@ class CesiumMapWidget(MapWidgetBase):
         if len(self.corners) < 100:
             self.corners.append((lat, lon))
             self._refresh_corners()
+
+    def remove_last_corner(self):
+        """刪除最後一個邊界點並重繪 3D 標記。回傳被刪的 (lat, lon) 或 None。
+
+        ⚠ 舊版沒有這個方法：main_window 的刪除流程只 pop 了 2D 的 corners、
+        只重繪 2D，3D 這邊的 ``corners`` 與 Cesium 標記完全沒動 ⇒ 切到 3D
+        還看得到那顆被刪掉的點，而且兩邊索引從此對不上（再刪一次就刪錯點）。
+        """
+        if not self.corners:
+            return None
+        removed = self.corners.pop()
+        self._refresh_corners()
+        return removed
 
     def move_corner(self, index: int, lat: float, lon: float):
         if 0 <= index < len(self.corners):
@@ -753,6 +1443,19 @@ class CesiumMapWidget(MapWidgetBase):
         self._js('if (typeof clearAllTerminalDives === "function") clearAllTerminalDives();')
 
     def clear_all(self):
+        """清掉 3D 圖上所有**規劃疊圖**。
+
+        ⚠️ 舊版只清 corners / paths / NFZ / circle / home / DEM / 打擊，
+        而 Cesium 這邊實際上有十幾組互相獨立的 entity 陣列。沒被列進來的
+        那幾組（`geofenceEntities` 黃色電子圍籬、`_vtolEntities` VTOL 起降
+        黃線 + 巡航虛線、`_missionEntities` 飛控讀回的航線、TOT 扇形閘門、
+        爆炸特效、漏掃格心）**沒有任何 Python 端會去清**，只能等下一次
+        重畫自己蓋掉自己 ⇒ 使用者按「清除全部」，圖上還是一片東西。
+
+        不動的東西：即時 UAV 與它衍生的碰撞預警連線（另有「清除 UAV」）、
+        使用者在「管理 Fence」建立的圍籬區（那是飛安設定，有自己的管理介面，
+        不該被一顆泛用清除鈕靜靜刪掉）。
+        """
         self.corners.clear()
         self.paths.clear()
         self.path_colors.clear()
@@ -764,13 +1467,30 @@ class CesiumMapWidget(MapWidgetBase):
         self._nfz_zones.clear()
         self._swarm_data      = None
         self._fw_result       = None
+        self._geofence        = None
         self._js('clearCorners(); clearPaths(); clearNFZ();')
-        self._js('if(circleEntity){viewer.entities.remove(circleEntity);circleEntity=null;}')
-        self._js('if(homeEntity){viewer.entities.remove(homeEntity);homeEntity=null;}')
+        self._js(self._JS_CLEAR_CIRCLE)
+        self._js(self._JS_CLEAR_HOME)
         self._js('clearDemOverlay()')
+        # 電子圍籬（黃色矩形 + 高度帶）
+        self._js('if (typeof clearGeofence === "function") clearGeofence();')
+        # VTOL 三段軌跡（垂直黃線 / 巡航虛線 / 轉場箭頭）
+        self._js('if (typeof vtolClearAll === "function") vtolClearAll();')
+        # 從飛控讀回來的 AUTO 航線疊圖
+        self._js('if (typeof clearMissionOverlay === "function") clearMissionOverlay();')
+        # 戰術疊圖 / TOT 扇形閘門 / 爆炸特效 / 漏掃格心
+        self._js('if (typeof clearTacticalOverlay === "function") clearTacticalOverlay();')
+        self._js('if (typeof clearTotGate === "function") clearTotGate();')
+        self._js('if (typeof clearExplosions === "function") clearExplosions();')
+        self._js('if (typeof clearCoverageGaps === "function") clearCoverageGaps();')
         # 末端打擊 / 俯衝視覺化
         self._js('if (typeof strikeClearAll === "function") strikeClearAll();')
         self._js('if (typeof clearAllTerminalDives === "function") clearAllTerminalDives();')
+        # 預計成果（高精地圖規劃預測）：由規劃推出來的疊圖，規劃都清了就不可以單獨留著
+        self.__dict__.setdefault('_hdmap_previews', {}).clear()
+        self.__dict__.setdefault('_hdmap_hidden', set()).clear()
+        self._hdmap_bump()
+        self._js('if (typeof clearHdmapPreview === "function") clearHdmapPreview(null);')
 
     # ─────────────────────────────────────────────────────────────────
     # DEM 地形視覺化
@@ -912,19 +1632,111 @@ class CesiumMapWidget(MapWidgetBase):
     # ─────────────────────────────────────────────────────────────────
     # SITL 接口（公開方法，供外部 MAVLink 執行緒呼叫）
     # ─────────────────────────────────────────────────────────────────
+    # 批次每筆的鍵（與 ui/main_window._uav_batch_item、DualMapWidget.update_uav_positions 一致）。可選鍵：
+    #   'crs'：航跡（度；Python 由 vel_n/vel_e 算）—— 有且是有限數字才送。模型機鼻一律用 hdg（飛控 ATTITUDE yaw）：
+    #          crs 只顯示在狀態列，JS 端明確 setUavNoseFollowsTrack(true)（顯示輔助、不是姿態）才拿來過渡機鼻；
+    #   'pt'／'at'：這一幀位置（GLOBAL_POSITION_INT，鏈路收到的牆鐘時刻）／姿態（ATTITUDE，飛控 time_boot_ms 換到
+    #   牆鐘的取樣時刻；沒有才是收到時刻）的 epoch ms —— JS 端拿來當取樣時間（同一個 pt 重送不加樣本）；
+    #   有、是有限正數才送（整數）；
+    #   'atts'：上一批之後、比 'at' 舊的姿態樣本 [[ms, roll, pitch, 機頭], …]（時間由舊到新；2026-10-22：50 Hz 姿態、
+    #   30 Hz 合幀，只送最新一筆會丟掉約四成）。每一筆四個都是有限數字、ms > 0 才送；一筆都沒有就不帶這個鍵。
+    UAV_BATCH_KEYS = ('sysid', 'lat', 'lon', 'alt', 'hdg', 'spd', 'mode', 'armed', 'vt', 'pitch', 'roll')
+    UAV_BATCH_OPTIONAL_KEYS = ('crs', 'pt', 'at', 'atts')
+    #: 一筆批次項目最多帶幾筆舊姿態（主視窗那邊也限 64；超過只留最新的）
+    UAV_BATCH_MAX_ATTS = 64
+
+    @classmethod
+    def _att_samples_or_none(cls, v) -> Optional[list]:
+        """批次的 atts：每筆 [ms, roll, pitch, 機頭]（ms 四捨五入成整數、角度 2 位小數）；壞的那一筆略過；
+        全部壞或不是串列 ⇒ None。只留最新的 UAV_BATCH_MAX_ATTS 筆。"""
+        if not isinstance(v, (list, tuple)):
+            return None
+        out = []
+        for s in v[-cls.UAV_BATCH_MAX_ATTS:]:
+            try:
+                if isinstance(s, (str, bytes)) or len(s) != 4 or any(isinstance(x, bool) for x in s):
+                    continue
+                ms, r, p, y = (float(x) for x in s)
+            except (TypeError, ValueError):
+                continue
+            if not (math.isfinite(ms) and ms > 0 and math.isfinite(r) and math.isfinite(p) and math.isfinite(y)):
+                continue
+            out.append([int(round(ms)), round(r, 2), round(p, 2), round(y, 2)])
+        return out or None
+
+    @staticmethod
+    def _epoch_ms_or_none(v) -> Optional[int]:
+        """批次的 pt／at：有限、> 0 的數字 ⇒ 四捨五入成整數 ms；其他（缺、None、bool、字串、NaN、≤0）⇒ None。"""
+        if v is None or isinstance(v, bool):
+            return None
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return None
+        return int(round(f)) if math.isfinite(f) and f > 0 else None
+
+    def update_uav_positions(self, batch: list[dict]) -> None:
+        """一次更新多架 UAV：**一個** runJavaScript 呼叫 ``updateUAVPositions([...])``。
+
+        JS 端每架 ``_updateUAVOne``（新的時間戳才加取樣，兩筆遙測之間插值）、碰撞檢查（O(N²)）整批只做一次、
+        最後只要求一次算圖。``batch`` 每筆 ``{'sysid','lat','lon','alt','hdg','spd','mode','armed','vt','pitch','roll'}``
+        （UAV_BATCH_KEYS；缺的用 0／''／False）＋ 可選 ``'crs'``、``'pt'``、``'at'``、``'atts'``（UAV_BATCH_OPTIONAL_KEYS）。
+        lat/lon 取 7 位小數（≈1 cm）、其餘 2 位，縮小 IPC 酬載；
+        缺 lat/lon 或轉不成數字的那筆略過並記 debug（不讓一筆壞資料拖掉整批）。
+        ⚠ 2026-10-17 量測：以前 6 架 × 25 Hz 每架各送一次 updateUAVPosition ⇒ 150 次 JS 呼叫、150 次碰撞檢查／秒。
+        """
+        items = []
+        for it in batch or []:
+            try:
+                item = {
+                    'lat': round(float(it['lat']), 7), 'lon': round(float(it['lon']), 7),
+                    'alt': round(float(it.get('alt') or 0.0), 2),
+                    'hdg': round(float(it.get('hdg') or 0.0), 2),
+                    'spd': round(float(it.get('spd') or 0.0), 2),
+                    'sysid': int(it.get('sysid') or 1),
+                    'mode': str(it.get('mode') or ''), 'armed': bool(it.get('armed')),
+                    'vt': str(it.get('vt') or ''),
+                    'pitch': round(float(it.get('pitch') or 0.0), 2),
+                    'roll': round(float(it.get('roll') or 0.0), 2),
+                }
+            except (KeyError, TypeError, ValueError, AttributeError) as e:
+                logger.debug(f'[Cesium] update_uav_positions 略過一筆無效資料 {it!r}: {e}')
+                continue
+            crs = it.get('crs')
+            if crs is not None:
+                try:
+                    crs = float(crs)
+                    if math.isfinite(crs):
+                        item['crs'] = round(crs, 2)
+                except (TypeError, ValueError):
+                    pass            # 不是數字 ⇒ 不送，JS 端退回 hdg
+            for key in ('pt', 'at'):    # 牆鐘 epoch ms（整數）：有、是有限正數才送；JS 端缺了就用 Date.now()
+                ms = self._epoch_ms_or_none(it.get(key))
+                if ms is not None:
+                    item[key] = ms
+            atts = self._att_samples_or_none(it.get('atts'))
+            if atts:
+                item['atts'] = atts
+            items.append(item)
+        if not items:
+            return
+        self._js('updateUAVPositions(' + json.dumps(items, separators=(',', ':')) + ')')
+        # 有標記紅心時,飛到靶心就自動放一發爆炸(每機一次)
+        for it in items:
+            try:
+                self.check_bullseye_hit(it['sysid'], it['lat'], it['lon'], it['alt'])
+            except Exception:
+                pass
+
     def update_uav_position(self, lat: float, lon: float, alt: float,
                              heading_deg: float = 0.0, speed_ms: float = 0.0,
                              sysid: int = 1, mode: str = '', armed: bool = False,
                              vehicle_type: str = '',
                              pitch_deg: float = 0.0, roll_deg: float = 0.0):
-        """更新 UAV 即時位置（多機支援，含姿態同步）"""
-        mode_js = json.dumps(mode or '')
-        vt_js = json.dumps(vehicle_type or '')
-        armed_js = 'true' if armed else 'false'
-        self._js(
-            f'updateUAVPosition({lat},{lon},{alt},{heading_deg},{speed_ms},'
-            f'{sysid},{mode_js},{armed_js},{vt_js},{pitch_deg},{roll_deg})'
-        )
+        """更新 UAV 即時位置（單架、舊 API）：包成一筆批次走 update_uav_positions（同一條 JS 路徑）。"""
+        self.update_uav_positions([{'sysid': sysid, 'lat': lat, 'lon': lon, 'alt': alt,
+                                    'hdg': heading_deg, 'spd': speed_ms, 'mode': mode, 'armed': armed,
+                                    'vt': vehicle_type, 'pitch': pitch_deg, 'roll': roll_deg}])
 
     def clear_uav(self, sysid: int = None):
         """清除 UAV 位置標記（不指定 sysid 則清全部）"""
@@ -952,10 +1764,11 @@ class CesiumMapWidget(MapWidgetBase):
                                   pitch_deg: float = None, smoothing: float = None):
         """
         調整跟隨相機參數。None 參數沿用現值。新值會在下一幀把鏡頭歸零回後方視角。
-        distance  ── 相機距飛機後方公尺（預設 80）
-        height    ── 相機高於飛機公尺（預設 20）
-        pitch_deg ── 相機首幀俯角（負值向下看，預設 -10）
-        smoothing ── 預留參數（lookAtTransform 模式下由 Cesium 內部平滑處理）
+        distance  ── 相機在飛機後方的水平距離公尺（預設 80）
+        height    ── 相機高於飛機公尺（預設 20）；只在俯角不是數字時用
+        pitch_deg ── 相機俯角（負值向下看，預設 -10）：高度 = distance × tan(|pitch_deg|)
+        smoothing ── 鏡頭偏航阻尼（0–0.95，預設 0.18）：時間常數 τ = 2 × smoothing 秒；
+                     0 = 剛性鎖機頭。17°/s 轉彎時鏡頭穩態落後 ≈ 17 × τ 度（0.95 ⇒ 約 32°）。
         """
         def _fmt(v):
             return 'null' if v is None else repr(float(v))
@@ -1248,6 +2061,487 @@ class CesiumMapWidget(MapWidgetBase):
     def vtol_clear_all(self):
         """清除所有 VTOL 軌跡視覺化"""
         self._js('vtolClearAll()')
+
+    # ── 飛控任務航線（讀回的那一份）────────────────────────────────
+    def display_fc_mission(self, path3d, loiters=None,
+                           color: str = None, label: str = None,
+                           home=None, *, sysid=None, kind=None):
+        """畫一份任務（讀回的、或從檔案匯入的）航線 + Home + 盤旋圈，**每個 (sysid, kind) 一層**。
+
+        Parameters
+        ----------
+        path3d : list[tuple[float, float, float]]
+            [(lat, lon, alt), ...]，由 `mission.mission_view.mission_to_path_3d`
+            產生。
+        loiters : list[dict] | None
+            `mission.mission_view.mission_loiters` 的輸出。
+        color / label : None ⇒ 依 sysid 取 `mission_view.sysid_color` / `fc_mission_label`。
+        home : `mission_view.mission_home` 的輸出（獨立 H 標記），可省。
+        sysid, kind : 決定 main.html `_missionLayers[...]` 的圖層鍵，規則與 2D **同一份**
+            （`mission_view.fc_layer_key`）：
+            * 都是 None ⇒ 舊語意：`clearMissionOverlay()` 清掉**全部**層後畫成單一疊圖
+              （layerId 傳 null，只進總表）。
+            * 只給 sysid ⇒ 'uav<n>'；都給 ⇒ 'uav<n>-<kind>'（如 'uav3-import' 匯入預覽，
+              不會跟同一架的讀回互相蓋掉）；只給 kind ⇒ '<kind>'（如 'loaded' 單檔載入）。
+              這三種都只換自己那一層（`clearMissionLayer`），其他層不動 ⇒ 多機可並存。
+
+        ⚠️ 這條路徑**不碰** `_tacticalEntities`，也不觸發任何圍籬重建。
+           對應的清除是 `clear_fc_mission(sysid, kind)`，不是 `clearTacticalOverlay()`。
+        """
+        import json as _json
+        from mission import mission_view as _mv
+        color = str(color) if color else _mv.sysid_color(sysid)
+        label = _mv.fc_mission_label(sysid, label)
+        key = None if (sysid is None and kind is None) else _mv.fc_layer_key(sysid, kind)
+        kj = _json.dumps(key)          # 'null' 或 '"uav3"' / '"uav3-import"' / '"loaded"'
+        if key is None:
+            self._js('clearMissionOverlay()')
+        else:
+            self._js(f'clearMissionLayer({kj})')
+        pts = [[float(p[0]), float(p[1]), float(p[2] if len(p) > 2 else 0.0)]
+               for p in (path3d or [])]
+        if pts:
+            self._js(f'addMissionRoute({_json.dumps(pts)},'
+                     f'{_json.dumps(color)},{_json.dumps(label)},{kj})')
+        if home:
+            self._js('addMissionHome(%r,%r,%r,%s,%s)' % (
+                float(home['lat']), float(home['lon']),
+                float(home.get('alt', 0.0)), kj,
+                _json.dumps(f'H{int(sysid)}' if sysid is not None else 'H')))
+        for lo in (loiters or []):
+            self._js(
+                'addMissionLoiter(%r,%r,%r,%r,%s,%s)' % (
+                    float(lo['lat']), float(lo['lon']),
+                    float(lo['radius_m']), float(lo.get('alt', 0.0)),
+                    _json.dumps(color), kj)
+            )
+
+    def clear_fc_mission(self, sysid=None, kind=None):
+        """清除任務航線疊加（規則與 2D 同一份：`mission_view.fc_layer_selector`）：
+
+        * 都是 None ⇒ `clearMissionOverlay()` 清**全部**層。
+        * 只給 sysid ⇒ `clearMissionLayerFamily('uav<n>')`：'uav<n>' 與 'uav<n>-*' 整架。
+        * 都給／只給 kind ⇒ `clearMissionLayer(key)` 恰好那一層。
+        """
+        import json as _json
+        from mission import mission_view as _mv
+        exact, prefix = _mv.fc_layer_selector(sysid, kind)
+        if exact is None:
+            self._js('clearMissionOverlay()')
+        elif prefix is not None:
+            self._js(f'clearMissionLayerFamily({_json.dumps(exact)})')
+        else:
+            self._js(f'clearMissionLayer({_json.dumps(exact)})')
+
+    def draw_coverage_gaps(self, missed_points: list):
+        """標出偵察覆蓋率驗算找出的漏掃格心。
+
+        Parameters
+        ----------
+        missed_points : list[tuple[float, float]]
+            [(lat, lon), ...]，來自 core.recon.CoverageReport.missed_points。
+        """
+        import json as _json
+        pts = [{'lat': float(la), 'lon': float(lo)} for la, lo in missed_points]
+        self._js(f'drawCoverageGaps({_json.dumps(pts)})')
+
+    def clear_coverage_gaps(self):
+        """清除漏掃格標示"""
+        self._js('clearCoverageGaps()')
+
+    # ─────────────────────────────────────────────────────────────────
+    # 航測成果：正射瓦片 + 照片位姿
+    #   ⚠ clear_all() 刻意不清這兩種：它們是成果不是規劃疊圖，有自己的移除方法
+    #     （remove_ortho_layer / clear_photo_poses / clear_survey_layers）。
+    # ─────────────────────────────────────────────────────────────────
+    def add_ortho_layer(self, layer_id: str, path_or_url, scheme: str = 'tms',
+                        bounds=None, alpha: float = 1.0) -> dict:
+        """疊一層正射瓦片（Cesium ImageryLayer，蓋在衛星底圖上）。
+
+        Parameters
+        ----------
+        layer_id : str
+            圖層代號；同代號再加一次 = 換掉舊的。
+        path_or_url : str | Path
+            本機瓦片根目錄（底下是 ``{z}/{x}/{y}.png``），或 http(s):// / file:// URL。
+        scheme : 'tms' | 'xyz'
+            ODM ``--tiles``（gdal2tiles，預設 mercator、沒有 --xyz）產出的是 **TMS**（y 由南往北）。
+            XYZ（y 由北往南）是 Google/OSM 慣例。**不猜**：給錯的話影像會南北錯位。
+        bounds : (西, 南, 東, 北) 度，可省
+            省略時：本機 TMS 有 tilemapresource.xml 就用它的範圍，否則由瓦片檔推（見 inspect_tile_dir）。
+        alpha : float
+            0–1。
+
+        Returns
+        -------
+        dict
+            實際生效的設定：url、scheme、bounds 與 bounds_source（user / tilemapresource.xml /
+            tiles_on_disk / none）、min_level、max_level、ext、alpha。
+        """
+        layer_id = check_layer_id(layer_id)
+        if scheme not in ('tms', 'xyz'):
+            raise ValueError(f"scheme 只能是 'tms'（ODM/gdal2tiles）或 'xyz'，收到 {scheme!r}")
+        alpha = float(alpha)
+        if not 0.0 <= alpha <= 1.0:
+            raise ValueError(f'alpha 要在 0–1，收到 {alpha}')
+        if bounds is not None:
+            bounds = check_bounds(bounds)
+        src = str(path_or_url)
+        info = {'id': layer_id, 'scheme': scheme, 'alpha': alpha, 'url': None,
+                'bounds': bounds, 'bounds_source': 'user' if bounds else None,
+                'min_level': None, 'max_level': None, 'ext': 'png'}
+        if src.lower().startswith(_URL_PREFIXES):
+            info['url'] = src
+            if bounds is None:
+                info['bounds_source'] = 'tilemapresource.xml' if scheme == 'tms' else 'none'
+                if scheme == 'xyz':
+                    logger.warning(f'[Ortho] {layer_id}：XYZ URL 沒給 bounds ⇒ Cesium 會對全球範圍要瓦片')
+        else:
+            tiles = inspect_tile_dir(src, scheme)
+            info.update(url=local_path_to_file_url(src), min_level=tiles['min_level'],
+                        max_level=tiles['max_level'], ext=tiles['ext'])
+            if bounds is None:
+                if scheme == 'tms' and tiles['has_tilemapresource']:
+                    info['bounds_source'] = 'tilemapresource.xml'
+                else:
+                    info['bounds'], info['bounds_source'] = tiles['bounds'], 'tiles_on_disk'
+            if scheme == 'tms' and not tiles['has_tilemapresource']:
+                logger.warning(f'[Ortho] {layer_id}：{src} 沒有 tilemapresource.xml（不是完整的 '
+                               f'gdal2tiles/ODM 輸出？）⇒ 範圍改由瓦片檔推得')
+            if scheme == 'xyz' and tiles['has_tilemapresource']:
+                logger.warning(f'[Ortho] {layer_id}：{src} 有 tilemapresource.xml（gdal2tiles/ODM 的 TMS 輸出）'
+                               f'卻指定 xyz ⇒ y 方向相反、影像會南北錯位；確定是 XYZ 才這樣用')
+        opts = {'scheme': scheme, 'alpha': alpha,
+                'rectangle': list(info['bounds']) if info['bounds'] else None,
+                'minimumLevel': info['min_level'], 'maximumLevel': info['max_level'],
+                'fileExtension': info['ext']}
+        self._ortho_layers[layer_id] = info
+        self._js(f'addOrthoLayer({json.dumps(layer_id)}, {json.dumps(info["url"])}, {json.dumps(opts)})')
+        logger.info(f'[Ortho] {layer_id}：{scheme} {info["url"]}｜範圍 {info["bounds"]}'
+                    f'（{info["bounds_source"]}）｜層級 {info["min_level"]}–{info["max_level"]}'
+                    f'｜.{info["ext"]}｜alpha {alpha}')
+        return dict(info)
+
+    def remove_ortho_layer(self, layer_id: str) -> bool:
+        """移除正射圖層；回傳這個代號原本是否存在。"""
+        existed = self._ortho_layers.pop(layer_id, None) is not None
+        self._js(f'removeOrthoLayer({json.dumps(layer_id)})')
+        return existed
+
+    def set_photo_poses(self, layer_id: str, rows, color: Optional[str] = None) -> dict:
+        """畫照片位姿（BillboardCollection，一張共用箭頭圖、rotation = −航向）。
+
+        Parameters
+        ----------
+        rows : iterable of dict
+            photos.csv（F2）的列；用到 lat_deg, lon_deg, h_ell_m, yaw_deg, source, image_id。
+            最多 PHOTO_POSES_INLINE_MAX 列（JSON 內嵌進 runJavaScript）；更多請用 load_photo_poses_file。
+        color : '#RRGGBB' | None
+            None = 依 source 上色（PHOTO_POSE_SOURCE_COLORS）；給顏色 = 整層單色。
+
+        Returns
+        -------
+        dict
+            photo_pose_rows_to_compact 的統計（drawn / skipped / no_heading / no_height / unknown_source）。
+        """
+        layer_id = check_layer_id(layer_id)
+        color = check_color(color)
+        rows = list(rows)
+        if len(rows) > PHOTO_POSES_INLINE_MAX:
+            raise ValueError(f'{len(rows)} 筆位姿超過內嵌上限 {PHOTO_POSES_INLINE_MAX}；'
+                             f'請寫成 photos.csv 再用 load_photo_poses_file()')
+        compact, stats = photo_pose_rows_to_compact(rows)
+        log_photo_pose_stats(layer_id, stats, '3D')
+        opts = {'color': color}
+        self._photo_pose_layers[layer_id] = {'id': layer_id, 'source': 'inline', 'color': color, **stats}
+        self._js(f'setPhotoPoses({json.dumps(layer_id)}, '
+                 f'{json.dumps({"rows": compact}, allow_nan=False)}, {json.dumps(opts)})')
+        logger.info(f'[PhotoPoses/3D] {layer_id}：{stats["drawn"]}/{stats["rows"]} 點')
+        return stats
+
+    def load_photo_poses_file(self, layer_id: str, path, color: Optional[str] = None) -> dict:
+        """大量位姿：讓 3D 頁面自己讀本機 photos.csv（F2）或 JSON（``{"rows": [...]}``）。
+
+        不經 runJavaScript 傳幾 MB 的字串；Python 端只先確認檔案在、CSV 表頭有經緯度欄，
+        實際畫了幾點由頁面 log（``[PhotoPoses]``）回報，也可用 query_survey_layers() 查。
+        """
+        layer_id = check_layer_id(layer_id)
+        color = check_color(color)
+        p = Path(path)
+        if not p.is_file():
+            raise FileNotFoundError(f'位姿檔不存在：{p}')
+        fmt = p.suffix.lower().lstrip('.')
+        if fmt not in ('csv', 'json'):
+            raise ValueError(f'位姿檔要是 .csv（photos.csv）或 .json，收到 {p.name}')
+        if fmt == 'csv':
+            with open(p, encoding='utf-8-sig', newline='') as fh:
+                header = [h.strip() for h in next(csv.reader(fh), [])]
+            missing = [c for c in ('lat_deg', 'lon_deg') if c not in header]
+            if missing:
+                raise ValueError(f'{p.name} 表頭缺 {missing}（photos.csv 格式見 F2）；表頭：{header}')
+        url = local_path_to_file_url(p)
+        info = {'id': layer_id, 'source': 'file', 'path': str(p), 'url': url, 'format': fmt, 'color': color}
+        self._photo_pose_layers[layer_id] = info
+        self._js(f'loadPhotoPosesUrl({json.dumps(layer_id)}, {json.dumps(url)}, '
+                 f'{json.dumps({"color": color})})')
+        logger.info(f'[PhotoPoses/3D] {layer_id}：由頁面讀檔 {url}')
+        return dict(info)
+
+    def clear_photo_poses(self, layer_id: str) -> bool:
+        """移除一層位姿；回傳這個代號原本是否存在。"""
+        existed = self._photo_pose_layers.pop(layer_id, None) is not None
+        self._js(f'clearPhotoPoses({json.dumps(layer_id)})')
+        return existed
+
+    def clear_survey_layers(self) -> None:
+        """移除所有正射與位姿圖層。"""
+        self._ortho_layers.clear()
+        self._photo_pose_layers.clear()
+        self._js('clearSurveyLayers()')
+
+    def query_survey_layers(self, callback) -> None:
+        """向頁面查目前的航測圖層（實際畫了幾點、瓦片錯誤數、載入狀態）。callback(dict)。"""
+        self._page.runJavaScript('surveyLayersInfo()', callback)
+
+    # ── GCP／檢核點佈設（survey.gcp_plan）：少量帶標籤的點，Entity 即可 ──────────
+    #   ⚠ clear_all() 與 clear_survey_layers() 都不碰它（它是佈設，不是規劃疊圖也不是成果）；
+    #     用 clear_survey_points 移除。
+    def set_survey_points(self, layer_id: str, points) -> dict:
+        """畫 GCP／檢核點（依類型上色、帶編號標籤，貼地）。同代號再畫一次 = 換掉舊的。
+
+        Parameters
+        ----------
+        points : iterable of dict
+            ``{'id', 'type': 'GCP'|'CHK', 'lat', 'lon', 'label'}``（survey.gcp_plan.map_points 的輸出）。
+
+        Returns
+        -------
+        dict  survey_points_to_compact 的統計（rows / drawn / skipped / by_type）。
+        """
+        layer_id = check_layer_id(layer_id)
+        compact, stats = survey_points_to_compact(points)
+        if stats['skipped']:
+            logger.warning(f'[SurveyPoints/3D] {layer_id}：{stats["skipped"]} 點經緯度無效，未畫')
+        self.__dict__.setdefault('_survey_point_layers', {})[layer_id] = dict(stats)
+        self._js(f'setSurveyPoints({json.dumps(layer_id)}, {json.dumps({"rows": compact}, allow_nan=False)})')
+        logger.info(f'[SurveyPoints/3D] {layer_id}：{stats["drawn"]}/{stats["rows"]} 點 {stats["by_type"]}')
+        return stats
+
+    def clear_survey_points(self, layer_id: str) -> bool:
+        """移除一層 GCP／檢核點；回傳這個代號原本是否存在。"""
+        existed = self.__dict__.setdefault('_survey_point_layers', {}).pop(layer_id, None) is not None
+        self._js(f'clearSurveyPoints({json.dumps(layer_id)})')
+        return existed
+
+    # ── 風場圖層（資料：core.wind_field；引擎：web_shared/wind_flow.js；膠水：ui.widgets.wind_layer）──
+    #   與 2D MapWidget 同名同義；狀態留在 Python（_load_cesium 重載時套回去）。clear_all() 不清它。
+    def set_wind_field(self, field) -> dict:
+        from ui.widgets import wind_layer as wl
+        f = wl.check_wind_field(field)
+        self._wind_field = f
+        self._js(wl.js_call('setWindField', f))
+        return {'cells': len(f['lats']) * len(f['lons']), 'label': f['label'], 'mode': f['mode']}
+
+    def clear_wind_field(self) -> bool:
+        existed = self.__dict__.get('_wind_field') is not None
+        self._wind_field = None
+        self._js('clearWindField()')
+        return existed
+
+    def set_wind_arrows(self, arrows) -> dict:
+        """每架一支風箭頭（飛控 WIND 估計）。整批取代：沒在這批裡的機就不畫。"""
+        from ui.widgets import wind_layer as wl
+        rows, stats = wl.wind_arrows_to_compact(arrows)
+        if stats['skipped']:
+            logger.warning(f'[Wind/3D] {stats["skipped"]} 架沒有位置或風值無效，未畫箭頭')
+        self._wind_arrows = {r[0]: r for r in rows}
+        self._js(wl.js_call('setWindArrows', rows))
+        return stats
+
+    def clear_wind_arrows(self) -> bool:
+        existed = bool(self.__dict__.get('_wind_arrows'))
+        self._wind_arrows = {}
+        self._js('clearWindArrows()')
+        return existed
+
+    def set_wind_options(self, **opts) -> dict:
+        from ui.widgets import wind_layer as wl
+        import math as _math
+        lim = opts.get('limitMps')
+        if lim is not None and not (isinstance(lim, (int, float)) and _math.isfinite(lim) and lim > 0):
+            raise ValueError(f'limitMps 要是正數：{lim!r}')
+        cur = dict(self.__dict__.get('_wind_options') or {})
+        cur.update(opts)
+        self._wind_options = cur
+        self._js(wl.js_call('setWindOptions', cur))
+        return dict(cur)
+
+    def query_wind(self, callback) -> None:
+        """向頁面查風場圖層狀態。callback(dict)。"""
+        self._page.runJavaScript('windInfo()', callback)
+
+    # ── 分層風場（10／80／120 m；檢查：wind_layer.check_wind_profile）──
+    #   每層一個引擎風場（id 'prof:<h>'）畫在自己的高度；粒子各層平分單一風場依可見面積的自動數（每層至少 80），
+    #   max(80, particles_total // 顯示層數) 是每層上限；height_2d_m 那層實線、其餘淡化。
+    #   圖例合成一個區塊；剖面點畫垂直柱＋柱頂標題＋每層順風箭頭與文字（Cesium entity）。設著時單一風場先藏、清掉後畫回來；
+    #   飛控即時風箭頭不受影響。與 2D MapWidget 同名同義；狀態留在 Python（_load_cesium 重載時套回去）。
+    def set_wind_profile(self, payload: dict) -> dict:
+        """畫分層風場；回傳實際生效的值（畫了哪幾層、每層粒子數…）。不合法 ⇒ ValueError，原本的不動。"""
+        from ui.widgets import wind_layer as wl
+        p = wl.check_wind_profile(payload)
+        if p['limit_mps'] is not None:
+            self.set_wind_options(limitMps=p['limit_mps'])        # 粒子、剖面柱與箭頭用同一個上色門檻
+        self._wind_profile = p
+        self.__dict__['_wind_profile_version'] = self.__dict__.get('_wind_profile_version', 0) + 1
+        self._js(wl.js_call('setWindProfile', p))
+        eff = wl.profile_summary(p, '3d')
+        if eff['layers_3d_ignored']:
+            logger.warning(f'[Wind/3D] 分層風場沒有這些層，略過：{eff["layers_3d_ignored"]}')
+        return eff
+
+    def clear_wind_profile(self) -> bool:
+        existed = self.__dict__.get('_wind_profile') is not None
+        self._wind_profile = None
+        self.__dict__['_wind_profile_version'] = self.__dict__.get('_wind_profile_version', 0) + 1
+        self._js('clearWindProfile()')
+        return existed
+
+    def set_wind_profile_view(self, *, height_2d_m: Optional[float] = None,
+                              layers_3d: Optional[list] = None) -> None:
+        """3D 顯示哪幾層（None ＝ 全部；不存在的層略過並記 warning、不內插）；height_2d_m（None ＝ 不變）在 3D 決定哪一層
+        畫實線、其餘層淡化（wind_layer.profile_emphasis_3d）。沒有分層風場時什麼都不做。
+
+        3D 顯示的層與實線那層都沒變（例如只換了 2D 要求的高度、或要求值落到同一層）⇒ 只更新 Python 狀態、**不送 JS**；
+        有變也只換樣式：頁面端同 id 再 setField，粒子不重生、剖面柱不重畫。"""
+        from ui.widgets import wind_layer as wl
+        p = self.__dict__.get('_wind_profile')
+        if p is None:
+            logger.debug('[Wind/3D] 沒有分層風場，顯示層切換略過')
+            return None
+        view = wl.resolve_profile_view(p, height_2d_m=height_2d_m, layers_3d=layers_3d)
+        before = (p.get('layers_3d'), wl.profile_emphasis_3d(p))
+        p.update(view)
+        self.__dict__['_wind_profile_version'] = self.__dict__.get('_wind_profile_version', 0) + 1
+        if (p.get('layers_3d'), wl.profile_emphasis_3d(p)) != before:
+            self._js(wl.js_call('setWindProfileView', view))
+        else:
+            logger.debug('[Wind/3D] 3D 顯示的層與實線層都沒變：只記狀態、不送頁面')
+        if view['layers_3d_ignored']:
+            logger.warning(f'[Wind/3D] 分層風場沒有這些層，略過：{view["layers_3d_ignored"]}')
+        return None
+
+    def _wind_profile_resync_after_load(self, ok: bool = True) -> bool:
+        """頁面載入完成：範本套回的分層風場是填值那一刻的；載入期間才 set／clear／換顯示層的會丟失 ⇒
+        版本不同就以 Python 端狀態重送一次（冪等）。回傳有沒有重送。"""
+        if not ok:
+            return False
+        ver = self.__dict__.get('_wind_profile_version', 0)
+        if ver == self.__dict__.get('_wind_profile_html_version', 0):
+            return False
+        from ui.widgets import wind_layer as wl
+        self.__dict__['_wind_profile_html_version'] = ver
+        self._js(wl.profile_resync_js(self.__dict__.get('_wind_profile')))
+        logger.info('[Wind/3D] 頁面載入期間分層風場有變動 ⇒ 載入完成後重送')
+        return True
+
+    # ── 預計成果圖層（高精地圖規劃預測；資料：survey.preview.HdmapPreview.to_js_payload；
+    #    膠水：ui.widgets.hdmap_preview_layer）──
+    #   與 2D MapWidget 同名同義；狀態留在 Python（_load_cesium 重載時由範本套回去）。
+    #   點陣圖是帶 _hdmapPreview 旗標的 ImageryLayer：圖層面板的「地圖」開關不會關掉它，「預計成果」勾選框才會。
+    #   ⚠ clear_all() 會清它（它是由規劃推出來的）。
+    def set_hdmap_preview(self, layer_id: str, payload: dict) -> dict:
+        """畫一層預計成果（同代號再畫一次 = 換掉）。回傳 ``{'ok': True, 計數…}``；
+        payload 不合法 ⇒ ``{'ok': False, 'error': 原因}``，同代號的舊圖層一併移除。"""
+        from ui.widgets import hdmap_preview_layer as hl
+        store = self.__dict__.setdefault('_hdmap_previews', {})
+        hidden = self.__dict__.setdefault('_hdmap_hidden', set())
+        try:
+            hl.check_layer_id(layer_id)               # None 不可以退回 payload['id']：代號由呼叫端決定
+            p = hl.check_payload(payload, layer_id)
+        except ValueError as e:
+            removed = False
+            if isinstance(layer_id, str) and layer_id.strip():
+                removed = store.pop(layer_id, None) is not None
+                hidden.discard(layer_id)
+                self._hdmap_bump()
+                self._js(hl.js_call('clearHdmapPreview', layer_id))
+            logger.error(f'[HdmapPreview/3D] {layer_id!r} 的資料不合法，沒畫'
+                         f'{"（已移除同代號的舊圖層）" if removed else ""}：{e}')
+            return {'ok': False, 'id': layer_id, 'error': str(e), 'removed_old': removed}
+        store[layer_id] = p
+        hidden.discard(layer_id)
+        self._hdmap_bump()
+        self._js(hl.js_call('setHdmapPreview', layer_id, p))
+        info = hl.summary(p)
+        logger.info(f'[HdmapPreview/3D] {layer_id}：點陣 {info["image_px"]}、範圍外框 {info["extent_rings"]}、'
+                    f'漏洞 {info["holes"]}、邊緣不足 {info["edge_short"]}、拍照點 {info["points"]}')
+        return {'ok': True, **info}
+
+    def clear_hdmap_preview(self, layer_id: Optional[str] = None) -> bool:
+        """移除一層（``None`` = 全部）；回傳原本有沒有東西。"""
+        from ui.widgets import hdmap_preview_layer as hl
+        store = self.__dict__.setdefault('_hdmap_previews', {})
+        hidden = self.__dict__.setdefault('_hdmap_hidden', set())
+        if layer_id is None:
+            existed = bool(store)
+            store.clear()
+            hidden.clear()
+        else:
+            existed = store.pop(layer_id, None) is not None
+            hidden.discard(layer_id)
+        self._hdmap_bump()
+        self._js(hl.js_call('clearHdmapPreview', layer_id))
+        return existed
+
+    def set_hdmap_preview_visible(self, layer_id: str, visible: bool) -> None:
+        """顯示／隱藏一層（資料留著；頁面重載後維持同一個狀態）。沒有這一層就只記 log。"""
+        from ui.widgets import hdmap_preview_layer as hl
+        store = self.__dict__.setdefault('_hdmap_previews', {})
+        hidden = self.__dict__.setdefault('_hdmap_hidden', set())
+        if layer_id not in store:
+            logger.debug(f'[HdmapPreview/3D] 沒有圖層 {layer_id!r}，顯示切換略過')
+            return
+        if visible:
+            hidden.discard(layer_id)
+        else:
+            hidden.add(layer_id)
+        self._hdmap_bump()
+        self._js(hl.js_call('setHdmapPreviewVisible', layer_id, bool(visible)))
+
+    def query_hdmap_preview(self, callback) -> None:
+        """向頁面查預計成果圖層（影像載入狀態、各幾個、顯示與否）。callback(dict)。"""
+        self._page.runJavaScript('hdmapPreviewInfo()', callback)
+
+    def _hdmap_bump(self) -> None:
+        self.__dict__['_hdmap_version'] = self.__dict__.get('_hdmap_version', 0) + 1
+
+    def _hdmap_resync_after_load(self, ok: bool = True) -> bool:
+        """頁面載入完成：範本裡的套回段是填值那一刻的狀態；載入期間才 set／clear／切換的會丟失 ⇒
+        版本不同就以 Python 端狀態整份重送（先全清再畫，冪等）。回傳有沒有重送。"""
+        if not ok:
+            return False
+        ver = self.__dict__.get('_hdmap_version', 0)
+        if ver == self.__dict__.get('_hdmap_html_version', 0):
+            return False
+        from ui.widgets import hdmap_preview_layer as hl
+        js = hl.js_call('clearHdmapPreview', None) + ';\n' + hl.restore_js(
+            self.__dict__.get('_hdmap_previews') or {}, self.__dict__.get('_hdmap_hidden') or ())
+        self.__dict__['_hdmap_html_version'] = ver
+        self._js(js)
+        logger.info(f'[HdmapPreview/3D] 頁面載入期間圖層有變動 ⇒ 載入完成後重送（{len(self.__dict__.get("_hdmap_previews") or {})} 層）')
+        return True
+
+    def render_coverage_heatmap(self, display_grid: dict):
+        """用 SAR 熱力圖呈現偵察覆蓋率分布（紅=漏掃，藍=已充分掃過）。
+
+        Parameters
+        ----------
+        display_grid : dict
+            core.recon.CoverageReport.to_display_grid() 的回傳值。
+            與 initSARHeatmap 共用同一組 entity，故 clear_sar_heatmap() 可清除。
+        """
+        import json as _json
+        self._js(f'renderCoverageHeatmap({_json.dumps(display_grid)})')
 
     def animate_radar_scan(self, radar_idx: int = 0, duration_ms: int = 2000):
         """播放雷達掃描動畫"""

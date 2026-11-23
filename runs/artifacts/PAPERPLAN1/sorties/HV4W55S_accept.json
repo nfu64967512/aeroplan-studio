@@ -1,0 +1,246 @@
+{
+ "trial": "HV4W55S",
+ "dir": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\HV4W55S",
+ "gates": {
+  "G1_params": {
+   "pass": false,
+   "reason": "params_readback.csv missing"
+  },
+  "G2_wind_readback": {
+   "n_rows": 15,
+   "n_ok": 15,
+   "expected_rows": 15,
+   "bad": [],
+   "mismatched": [],
+   "commanded": {
+    "SIM_WIND_SPD": 5.0,
+    "SIM_WIND_DIR": 180.0,
+    "SIM_WIND_TURB": 0.0,
+    "SIM_WIND_T": 1.0,
+    "MIN_GROUNDSPEED": 0.0
+   },
+   "plan_wind": [
+    5.0,
+    180.0
+   ],
+   "min_groundspeed_actuals": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "min_groundspeed_all_zero": true,
+   "rows": [
+    {
+     "uav": "A1",
+     "param": "SIM_WIND_SPD",
+     "expected": 5.0,
+     "actual": 5.0,
+     "ok": true
+    },
+    {
+     "uav": "A1",
+     "param": "SIM_WIND_DIR",
+     "expected": 180.0,
+     "actual": 180.0,
+     "ok": true
+    },
+    {
+     "uav": "A1",
+     "param": "SIM_WIND_TURB",
+     "expected": 0.0,
+     "actual": 0.0,
+     "ok": true
+    },
+    {
+     "uav": "A1",
+     "param": "SIM_WIND_T",
+     "expected": 1.0,
+     "actual": 1.0,
+     "ok": true
+    },
+    {
+     "uav": "A1",
+     "param": "MIN_GROUNDSPEED",
+     "expected": 0.0,
+     "actual": 0.0,
+     "ok": true
+    },
+    {
+     "uav": "B2",
+     "param": "SIM_WIND_SPD",
+     "expected": 5.0,
+     "actual": 5.0,
+     "ok": true
+    },
+    {
+     "uav": "B2",
+     "param": "SIM_WIND_DIR",
+     "expected": 180.0,
+     "actual": 180.0,
+     "ok": true
+    },
+    {
+     "uav": "B2",
+     "param": "SIM_WIND_TURB",
+     "expected": 0.0,
+     "actual": 0.0,
+     "ok": true
+    },
+    {
+     "uav": "B2",
+     "param": "SIM_WIND_T",
+     "expected": 1.0,
+     "actual": 1.0,
+     "ok": true
+    },
+    {
+     "uav": "B2",
+     "param": "MIN_GROUNDSPEED",
+     "expected": 0.0,
+     "actual": 0.0,
+     "ok": true
+    },
+    {
+     "uav": "B3",
+     "param": "SIM_WIND_SPD",
+     "expected": 5.0,
+     "actual": 5.0,
+     "ok": true
+    },
+    {
+     "uav": "B3",
+     "param": "SIM_WIND_DIR",
+     "expected": 180.0,
+     "actual": 180.0,
+     "ok": true
+    },
+    {
+     "uav": "B3",
+     "param": "SIM_WIND_TURB",
+     "expected": 0.0,
+     "actual": 0.0,
+     "ok": true
+    },
+    {
+     "uav": "B3",
+     "param": "SIM_WIND_T",
+     "expected": 1.0,
+     "actual": 1.0,
+     "ok": true
+    },
+    {
+     "uav": "B3",
+     "param": "MIN_GROUNDSPEED",
+     "expected": 0.0,
+     "actual": 0.0,
+     "ok": true
+    }
+   ],
+   "pass": true
+  },
+  "G3_spawn": {
+   "max_err_m": 5.12,
+   "n": 3,
+   "all_ok": false,
+   "pass": false
+  },
+  "G5_landed": {
+   "report_status": "GO_WITH_WARNINGS",
+   "report_errors": [],
+   "final_state": {},
+   "pass": false
+  },
+  "H3_rtl_radius": {
+   "values": {
+    "A1": 200.0,
+    "B2": 120.0,
+    "B3": 120.0
+   },
+   "pass": true
+  },
+  "H2_below_120": {
+   "max_over_fleet_m": null,
+   "per_uav": {},
+   "pass": false,
+   "note": "flight.csv is ~1 Hz; the dataflash figure in *_binalt.json is the authoritative one"
+  },
+  "G6_sampling": {
+   "per_uav": {},
+   "pass": true
+  },
+  "H1_planned_makespan": {
+   "expected_s": 966.22,
+   "actual_s": 966.2206642639601,
+   "delta_s": 0.0007,
+   "pass": true
+  }
+ },
+ "measured": {
+  "H1_exported_max_rel_alt_m": {
+   "A1": {
+    "n_rel_items": 82,
+    "max_rel_alt_m": 119.552622,
+    "n_items_above_120": 0
+   },
+   "B2": {
+    "n_rel_items": 52,
+    "max_rel_alt_m": 119.53317,
+    "n_items_above_120": 0
+   },
+   "B3": {
+    "n_rel_items": 76,
+    "max_rel_alt_m": 119.533132,
+    "n_items_above_120": 0
+   }
+  },
+  "H2_flown_max_rel_alt_m_flightcsv": {},
+  "wind_probe": {},
+  "planned": {
+   "makespan_s": 966.2206642639601,
+   "t_land_s": {
+    "A1": 940.4145095593694,
+    "B2": 966.2206642639601,
+    "B3": 746.2206642639601
+   },
+   "t_takeoff_s": {
+    "A1": 210.0,
+    "B2": 442.2122092176985,
+    "B3": 0.0
+   },
+   "distance_km": {
+    "A1": 13.6036,
+    "B2": 7.9225,
+    "B3": 11.985
+   },
+   "total_km": 33.5111,
+   "n_items": {
+    "A1": 83,
+    "B2": 53,
+    "B3": 77
+   },
+   "strips": {
+    "A1": 3,
+    "B2": 2,
+    "B3": 4
+   }
+  },
+  "scenario": {
+   "sim_wind": {
+    "spd_mps": 5.0,
+    "dir_from_deg": 180.0,
+    "turb": 0.0,
+    "profile_type": 1.0
+   },
+   "wind": [
+    5.0,
+    180.0
+   ],
+   "altitude_m": 119.5,
+   "h_ceil_m": 119.5,
+   "waiver_max_agl_m": 119.5,
+   "trial": null,
+   "key": "gui_legal_120_1a2b"
+  }
+ },
+ "all_gates_pass": false
+}

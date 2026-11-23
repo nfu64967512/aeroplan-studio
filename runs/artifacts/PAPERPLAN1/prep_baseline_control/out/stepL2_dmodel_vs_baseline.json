@@ -1,0 +1,105 @@
+{
+  "D_model_km": 97.726,
+  "D_use_km": 133.0,
+  "d_fixed_km": 15.089,
+  "rows": [
+    {
+      "cell": "S1/2",
+      "d_ceq": 109.923,
+      "d_plan": 125.012,
+      "r1_over": 2,
+      "r2_over": 0,
+      "n": 2
+    },
+    {
+      "cell": "S1/4",
+      "d_ceq": 58.099,
+      "d_plan": 73.188,
+      "r1_over": 0,
+      "r2_over": 0,
+      "n": 4
+    },
+    {
+      "cell": "S1/8",
+      "d_ceq": 34.006,
+      "d_plan": 49.095,
+      "r1_over": 0,
+      "r2_over": 0,
+      "n": 8
+    },
+    {
+      "cell": "S1/16",
+      "d_ceq": 22.63,
+      "d_plan": 37.719,
+      "r1_over": 0,
+      "r2_over": 0,
+      "n": 16
+    },
+    {
+      "cell": "S2/4",
+      "d_ceq": 64.77,
+      "d_plan": 79.859,
+      "r1_over": 0,
+      "r2_over": 0,
+      "n": 4
+    },
+    {
+      "cell": "S2/8",
+      "d_ceq": 36.183,
+      "d_plan": 51.272,
+      "r1_over": 0,
+      "r2_over": 0,
+      "n": 8
+    },
+    {
+      "cell": "S3/4",
+      "d_ceq": 34.199,
+      "d_plan": 49.288,
+      "r1_over": 0,
+      "r2_over": 0,
+      "n": 4
+    },
+    {
+      "cell": "S3/8",
+      "d_ceq": 25.527,
+      "d_plan": 40.616,
+      "r1_over": 0,
+      "r2_over": 0,
+      "n": 8
+    },
+    {
+      "cell": "S4/4",
+      "d_ceq": 47.192,
+      "d_plan": 62.281,
+      "r1_over": 0,
+      "r2_over": 0,
+      "n": 4
+    },
+    {
+      "cell": "S4/8",
+      "d_ceq": 27.862,
+      "d_plan": 42.951,
+      "r1_over": 0,
+      "r2_over": 0,
+      "n": 8
+    },
+    {
+      "cell": "S5/8",
+      "d_ceq": 111.825,
+      "d_plan": 126.914,
+      "r1_over": 8,
+      "r2_over": 0,
+      "n": 8
+    },
+    {
+      "cell": "S5/16",
+      "d_ceq": 67.12,
+      "d_plan": 82.209,
+      "r1_over": 0,
+      "r2_over": 0,
+      "n": 16
+    }
+  ],
+  "cells_over_R1": 2,
+  "cells_over_R2": 0
+}

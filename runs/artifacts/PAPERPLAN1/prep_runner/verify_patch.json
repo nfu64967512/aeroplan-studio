@@ -1,0 +1,235 @@
+{
+ "defaults_chain": {
+  "old": {
+   "A1": [
+    "plane.parm",
+    "vtol_default.parm",
+    "identity.parm",
+    "vtol_enforced.parm",
+    "A1.param",
+    "firmware_override.parm"
+   ],
+   "B2": [
+    "plane.parm",
+    "vtol_default.parm",
+    "identity.parm",
+    "vtol_enforced.parm",
+    "B2.param",
+    "firmware_override.parm"
+   ],
+   "B3": [
+    "plane.parm",
+    "vtol_default.parm",
+    "identity.parm",
+    "vtol_enforced.parm",
+    "B3.param",
+    "firmware_override.parm"
+   ]
+  },
+  "new": {
+   "A1": [
+    "plane.parm",
+    "vtol_default.parm",
+    "identity.parm",
+    "vtol_enforced.parm",
+    "A1.param",
+    "firmware_override.parm",
+    "wind.parm"
+   ],
+   "B2": [
+    "plane.parm",
+    "vtol_default.parm",
+    "identity.parm",
+    "vtol_enforced.parm",
+    "B2.param",
+    "firmware_override.parm",
+    "wind.parm"
+   ],
+   "B3": [
+    "plane.parm",
+    "vtol_default.parm",
+    "identity.parm",
+    "vtol_enforced.parm",
+    "B3.param",
+    "firmware_override.parm",
+    "wind.parm"
+   ]
+  },
+  "added": {
+   "A1": [
+    "wind.parm"
+   ],
+   "B2": [
+    "wind.parm"
+   ],
+   "B3": [
+    "wind.parm"
+   ]
+  },
+  "removed": {
+   "A1": [],
+   "B2": [],
+   "B3": []
+  },
+  "order_prefix_unchanged": true,
+  "home_unchanged": {
+   "A1": true,
+   "B2": true,
+   "B3": true
+  },
+  "archived_HV4SITL15": {
+   "A1": [
+    "plane.parm",
+    "vtol_default.parm",
+    "identity.parm",
+    "vtol_enforced.parm",
+    "A1.param",
+    "firmware_override.parm"
+   ],
+   "B2": [
+    "plane.parm",
+    "vtol_default.parm",
+    "identity.parm",
+    "vtol_enforced.parm",
+    "B2.param",
+    "firmware_override.parm"
+   ],
+   "B3": [
+    "plane.parm",
+    "vtol_default.parm",
+    "identity.parm",
+    "vtol_enforced.parm",
+    "B3.param",
+    "firmware_override.parm"
+   ]
+  },
+  "old_matches_archived": true,
+  "archived_home_matches": {
+   "A1": true,
+   "B2": true,
+   "B3": true
+  }
+ },
+ "sim_wind_on_chain": {
+  "old_A1": {},
+  "new_A1": {
+   "SIM_WIND_SPD": 0.0,
+   "SIM_WIND_DIR": 270.0,
+   "SIM_WIND_TURB": 0.0,
+   "SIM_WIND_T": 1.0,
+   "SIM_WIND_DIR_Z": 0.0
+  },
+  "firmware_defaults_for_reference": {
+   "source": "sitl/models/plane.parm (ArduPilot's own model default list)",
+   "SIM_WIND_SPD": 0.0,
+   "SIM_WIND_DIR": 180.0,
+   "SIM_WIND_T": 0.0,
+   "SIM_WIND_TURB": 0.0,
+   "SIM_WIND_DIR_Z": 0.0
+  }
+ },
+ "wind_parm_generated_with_no_env": {
+  "path": "C:\\Users\\joy46\\Documents\\Projects\\aeroplan-studio\\runs\\artifacts\\PAPERPLAN1\\prep_runner\\verify\\new\\i100\\wind.parm",
+  "exists": true,
+  "content": "# 由 scripts/hv_sitl_run.py 產生；SIM_WIND_DIR 是氣象「來向」（270 = 西風）\nSIM_WIND_SPD  0\nSIM_WIND_DIR  270\nSIM_WIND_TURB 0\nSIM_WIND_T    1\nSIM_WIND_DIR_Z 0\n"
+ },
+ "param_gate": {
+  "identical": true,
+  "n_params_per_uav": {
+   "A1": 34,
+   "B2": 34,
+   "B3": 34
+  },
+  "n_rows_total": 102,
+  "n_exported_in_file": {
+   "A1": 32,
+   "B2": 32,
+   "B3": 32
+  },
+  "diff": null,
+  "param_names": [
+   "AIRSPEED_CRUISE",
+   "AIRSPEED_MAX",
+   "AIRSPEED_MIN",
+   "AIRSPEED_STALL",
+   "ARMING_REQUIRE",
+   "BATT_FS_CRT_ACT",
+   "BATT_FS_LOW_ACT",
+   "CAM1_DURATION",
+   "CAM1_TYPE",
+   "FENCE_ACTION",
+   "FENCE_ALT_MAX",
+   "FENCE_ENABLE",
+   "FENCE_RET_RALLY",
+   "FENCE_TYPE",
+   "FS_LONG_ACTN",
+   "FS_LONG_TIMEOUT",
+   "Q_ASSIST_SPEED",
+   "Q_ENABLE",
+   "Q_LAND_FINAL_ALT",
+   "Q_RTL_ALT",
+   "Q_RTL_MODE",
+   "Q_TRANSITION_MS",
+   "ROLL_LIMIT_DEG",
+   "RTL_AUTOLAND",
+   "RTL_RADIUS",
+   "SCHED_LOOP_RATE",
+   "SERVO10_FUNCTION",
+   "TECS_CLMB_MAX",
+   "TECS_SINK_MAX",
+   "TECS_SINK_MIN",
+   "TERRAIN_ENABLE",
+   "TERRAIN_FOLLOW",
+   "WP_LOITER_RAD",
+   "WP_RADIUS"
+  ]
+ },
+ "flight_csv_header": {
+  "old": "w.writerow([\"t_s\", \"lat\", \"lon\", \"rel_alt_m\", \"airspeed\",\n                        \"groundspeed\", \"wp_seq\", \"mode\", \"armed\"])",
+  "new": "w.writerow([\"t_s\", \"lat\", \"lon\", \"rel_alt_m\", \"airspeed\",\n                        \"groundspeed\", \"wp_seq\", \"mode\", \"armed\",\n                        \"wind_spd_est\", \"wind_dir_from_est\"])"
+ },
+ "env_knobs_new": [
+  "HV_BASE_PORT",
+  "HV_INSTANCE_OFFSET",
+  "HV_PLAN_ALT_M",
+  "HV_PLAN_CEIL_M",
+  "HV_PLAN_WIND_DIR",
+  "HV_PLAN_WIND_SPD",
+  "HV_POLL_S",
+  "HV_RECOVERY_AUTO",
+  "HV_SIM_WIND_DIR",
+  "HV_SIM_WIND_SPD",
+  "HV_SIM_WIND_T",
+  "HV_SIM_WIND_TURB",
+  "HV_SPEEDUP",
+  "HV_TELEM_HZ",
+  "HV_TRIAL"
+ ],
+ "env_knobs_old": [
+  "HV_BASE_PORT",
+  "HV_INSTANCE_OFFSET",
+  "HV_POLL_S",
+  "HV_RECOVERY_AUTO",
+  "HV_SPEEDUP",
+  "HV_TELEM_HZ",
+  "HV_TRIAL"
+ ],
+ "VERDICT_no_env_behaviour_unchanged": true,
+ "no_env_replan_vs_archived_HV4SITL15": {
+  "how": "HV_TRIAL=<scratch> and NO other HV_* set; `python scripts/hv_sitl_run.py plan gui_legal_120_1a2b` re-run against the patched runner, then the 9 exported plan files compared by SHA-256 with the archived HV4SITL15 ones.",
+  "identical": true,
+  "n_files": 9,
+  "differing": [],
+  "sha256_archived": {
+   "A1.param": "ae5065c88cadb2b14261dd575969af6e511ea4f94da96c494ff9c09d96c8875f",
+   "A1.plan": "c49f807b289d2bfff037b912923e347dfa2cd3c93e8d8f0eecc4708033b7ee83",
+   "A1.waypoints": "5993f58becdf102b9c5277913c4fafe5181faddd800a3ab461c69f5a558d733c",
+   "B2.param": "810789970d32cf371fff180788e928c25f52f5af340ab265636e8c53d921eb80",
+   "B2.plan": "fcfd978996cd540ecd41ca6c0fd650fd1292f832db1b379f36f6ea98bee7e432",
+   "B2.waypoints": "fbc0736a62907a629e3a781ebe79668a2b897b3edd2f5bfa8b3cf9229fb4d2ea",
+   "B3.param": "810789970d32cf371fff180788e928c25f52f5af340ab265636e8c53d921eb80",
+   "B3.plan": "f8190f9f4816e3c51bd5081b74d3e2d73be81452d3c3351095209936277552e3",
+   "B3.waypoints": "835c164935a80e2de7fe4d58755e51ee7ffc0c0272fa4c6ce997e8b5fac06fd2"
+  }
+ }
+}
